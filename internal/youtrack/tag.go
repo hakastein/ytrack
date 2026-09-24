@@ -177,7 +177,7 @@ func (c *Client) tagCreated(ctx context.Context, spec *schemas, name string, sha
 		return nil, fault
 	}
 	body := written.body()
-	return c.writing(ctx, spec, tagSchema, asking(requested, written.checked()...), func(ctx context.Context, fields string) (*http.Response, error) {
+	return c.write(ctx, spec, tagSchema, asking(requested, written.checked()...), func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.createTag(ctx, body, fields)
 	}, written.confirmedBy, writtenNode(requested))
 }
@@ -444,7 +444,7 @@ func (c *Client) tagDeleted(ctx context.Context, spec *schemas, sought tagSought
 	if fault != nil {
 		return nil, fault
 	}
-	if fault := writingNothing(ctx, func(ctx context.Context) (*http.Response, error) {
+	if fault := writeEmpty(ctx, func(ctx context.Context) (*http.Response, error) {
 		return c.deleteTag(ctx, tag)
 	}); fault != nil {
 		return nil, found.about(fault)
@@ -518,7 +518,7 @@ func (c *Client) tagHung(ctx context.Context, spec *schemas, at owner, sought ta
 		return nil, fault
 	}
 	body := hung.body()
-	node, fault := c.writing(ctx, spec, tagSchema, resolvedTagFields(), func(ctx context.Context, fields string) (*http.Response, error) {
+	node, fault := c.write(ctx, spec, tagSchema, resolvedTagFields(), func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.addTag(ctx, hung.hangs.kind, hung.on, body, fields)
 	}, hung.confirmedBy, hung.printed(addedKey))
 	if fault != nil {
@@ -536,7 +536,7 @@ func (c *Client) tagTakenOff(ctx context.Context, spec *schemas, at owner, sough
 	if fault != nil {
 		return nil, fault
 	}
-	if fault := writingNothing(ctx, func(ctx context.Context) (*http.Response, error) {
+	if fault := writeEmpty(ctx, func(ctx context.Context) (*http.Response, error) {
 		return c.removeTag(ctx, off.hangs.kind, off.on, off.tag)
 	}); fault != nil {
 		return nil, off.about(notOnTheOwner(off.hangs.kind, fault))
@@ -586,7 +586,7 @@ func (c *Client) taggingOf(ctx context.Context, spec *schemas, at owner, sought 
 // and an owner that is not there is the server's own 404.
 func (c *Client) ownerToTag(ctx context.Context, spec *schemas, hangs tagged, at owner) (addressed, *diag.Fault) {
 	requested := []requestedField{{name: idReadableKey}}
-	a, fault := c.passing(ctx, spec, hangs.schema, requested, func(ctx context.Context, fields string) (*http.Response, error) {
+	a, fault := c.request(ctx, spec, hangs.schema, requested, func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getOwnerToTag(ctx, at, fields)
 	})
 	if fault != nil {
@@ -727,7 +727,7 @@ type shownTag struct {
 // resolves to nothing needs the whole catalogue to suggest from anyway.
 func (c *Client) tagNamed(ctx context.Context, spec *schemas, sought tagSought) (resolvedTag, *diag.Fault) {
 	requested := resolvedTagFields()
-	a, fault := c.passing(ctx, spec, "[]"+tagSchema, requested, func(ctx context.Context, fields string) (*http.Response, error) {
+	a, fault := c.request(ctx, spec, "[]"+tagSchema, requested, func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getTags(ctx, fields, whole)
 	})
 	if fault != nil {
@@ -949,7 +949,7 @@ type shownGroups struct {
 // does not exist on either instance, so this is the one listing of groups there is.
 func (c *Client) groupsShown(ctx context.Context, spec *schemas) (shownGroups, *diag.Fault) {
 	requested := []requestedField{{name: idKey}, {name: nameKey}}
-	a, fault := c.passing(ctx, spec, "[]"+groupSchema, requested, func(ctx context.Context, fields string) (*http.Response, error) {
+	a, fault := c.request(ctx, spec, "[]"+groupSchema, requested, func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getGroups(ctx, fields, everything)
 	})
 	if fault != nil {

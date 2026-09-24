@@ -51,7 +51,7 @@ func markupFields() []requestedField {
 // never printed over a query nothing was said about; ytrack reads no token of the query language itself.
 func (c *Client) markUp(ctx context.Context, spec *schemas, query string) ([]styleRange, *diag.Fault) {
 	body := searchBody(query)
-	answer, fault := c.passing(ctx, spec, suggestionsSchema, markupFields(), func(ctx context.Context, fields string) (*http.Response, error) {
+	answer, fault := c.request(ctx, spec, suggestionsSchema, markupFields(), func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.assistSearch(ctx, body, fields)
 	})
 	if fault != nil {

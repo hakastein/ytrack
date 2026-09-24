@@ -57,7 +57,7 @@ func ShowUser(login, expression string) (Call, *diag.Fault) {
 }
 
 func (c *Client) showUser(ctx context.Context, spec *schemas, login string, requested []requestedField) (*render.Node, *diag.Fault) {
-	users, fault := c.pass(ctx, spec, "User", requested, func(ctx context.Context, fields string) (*http.Response, error) {
+	users, fault := c.read(ctx, spec, "User", requested, func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getUser(ctx, login, fields)
 	})
 	if fault != nil {
@@ -88,7 +88,7 @@ func findByName(arg string) string {
 // CurrentUser is the call for the user the server takes the token for: login is a user's identity and fullName is for
 // a human, and no rights hide either of them from the user they belong to.
 func CurrentUser(ctx context.Context, c *Client) (*render.Node, *diag.Fault) {
-	users, fault := c.pass(ctx, loadSchemas(), "Me", []requestedField{{name: loginKey}, {name: "fullName"}}, func(ctx context.Context, fields string) (*http.Response, error) {
+	users, fault := c.read(ctx, loadSchemas(), "Me", []requestedField{{name: loginKey}, {name: "fullName"}}, func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getCurrentUser(ctx, fields)
 	})
 	if fault != nil {

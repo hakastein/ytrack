@@ -100,7 +100,7 @@ func (c *Client) workItemCreated(ctx context.Context, spec *schemas, id string, 
 	fillInDurations(spec, workItemSchema, asked)
 	issueBlocks(spec, composedWorkItem(), asked)
 	body := filed.body()
-	return c.writing(ctx, spec, workItemSchema, asked, func(ctx context.Context, fields string) (*http.Response, error) {
+	return c.write(ctx, spec, workItemSchema, asked, func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.createIssueWorkItem(ctx, at, body, fields)
 	}, filed.confirmedBy, writtenNode(requested))
 }
@@ -177,7 +177,7 @@ func (c *Client) workItemUpdated(ctx context.Context, spec *schemas, id string, 
 	fillInDurations(spec, workItemSchema, asked)
 	issueBlocks(spec, composedWorkItem(), asked)
 	body := changed.body()
-	return c.writing(ctx, spec, workItemSchema, asked, func(ctx context.Context, fields string) (*http.Response, error) {
+	return c.write(ctx, spec, workItemSchema, asked, func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.updateIssueWorkItem(ctx, issue, at, body, fields)
 	}, changed.confirmedBy, writtenNode(requested))
 }
@@ -214,7 +214,7 @@ func removedWorkItemFields() []requestedField {
 // itself, on the read as on the removal, so nothing here holds the work item against the issue.
 func (c *Client) workItemRemoved(ctx context.Context, spec *schemas, id string, at childID) (*render.Node, *diag.Fault) {
 	requested := removedWorkItemFields()
-	a, fault := c.passing(ctx, spec, workItemSchema, requested, func(ctx context.Context, fields string) (*http.Response, error) {
+	a, fault := c.request(ctx, spec, workItemSchema, requested, func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getIssueWorkItem(ctx, id, at, fields)
 	})
 	if fault != nil {
@@ -228,7 +228,7 @@ func (c *Client) workItemRemoved(ctx context.Context, spec *schemas, id string, 
 	if fault != nil {
 		return nil, fault
 	}
-	if fault := writingNothing(ctx, func(ctx context.Context) (*http.Response, error) {
+	if fault := writeEmpty(ctx, func(ctx context.Context) (*http.Response, error) {
 		return c.deleteIssueWorkItem(ctx, issue, known)
 	}); fault != nil {
 		return nil, fault
@@ -303,7 +303,7 @@ func workItemTypesFields(withAttributes bool) []requestedField {
 }
 
 func (c *Client) readWorkItemTypes(ctx context.Context, spec *schemas, id string, withAttributes bool) (addressed, projectWorkItemTypes, *diag.Fault) {
-	a, fault := c.passing(ctx, spec, issueSchema, workItemTypesFields(withAttributes), func(ctx context.Context, fields string) (*http.Response, error) {
+	a, fault := c.request(ctx, spec, issueSchema, workItemTypesFields(withAttributes), func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getIssue(ctx, id, fields, nil)
 	})
 	if fault != nil {

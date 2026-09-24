@@ -36,7 +36,7 @@ func linkTypeFields() []requestedField {
 // linkPhrases is the catalogue read from the instance, which is asked for only where a journal may print a
 // link: what it is read for is the untranslated phrase, and nothing else of the instance carries one.
 func (c *Client) linkPhrases(ctx context.Context, spec *schemas) (linkPhrases, *diag.Fault) {
-	a, fault := c.passing(ctx, spec, linkTypeCatalogue, linkTypeFields(), func(ctx context.Context, fields string) (*http.Response, error) {
+	a, fault := c.request(ctx, spec, linkTypeCatalogue, linkTypeFields(), func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getIssueLinkTypes(ctx, fields, linkTypesAtMost)
 	})
 	if fault != nil {

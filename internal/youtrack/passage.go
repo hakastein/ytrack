@@ -41,11 +41,11 @@ type answer struct {
 	address *url.URL
 }
 
-// pass is the only way a call reaches YouTrack, and nothing it answers becomes a node before it is judged
+// read is the only way a call reaches YouTrack, and nothing it answers becomes a node before it is judged
 // against the fields asked for and answerSchema, the schema of the specification the call answers with:
 // []Project for a list of Project. Each object of the answer becomes one node.
-func (c *Client) pass(ctx context.Context, spec *schemas, answerSchema string, requested []requestedField, call func(ctx context.Context, fields string) (*http.Response, error)) ([]*render.Node, *diag.Fault) {
-	answer, fault := c.passing(ctx, spec, answerSchema, requested, call)
+func (c *Client) read(ctx context.Context, spec *schemas, answerSchema string, requested []requestedField, call func(ctx context.Context, fields string) (*http.Response, error)) ([]*render.Node, *diag.Fault) {
+	answer, fault := c.request(ctx, spec, answerSchema, requested, call)
 	if fault != nil {
 		return nil, fault
 	}
@@ -59,23 +59,23 @@ type expressions struct {
 	printed []requestedField
 }
 
-// records is pass for the records of a list, and it settles that one record is one line of the document.
-func (c *Client) records(ctx context.Context, spec *schemas, answerSchema string, of expressions, call func(ctx context.Context, fields string) (*http.Response, error)) ([]*render.Node, *diag.Fault) {
-	answer, fault := c.passing(ctx, spec, answerSchema, of.sent, call)
+// readList is pass for the readList of a list, and it settles that one record is one line of the document.
+func (c *Client) readList(ctx context.Context, spec *schemas, answerSchema string, of expressions, call func(ctx context.Context, fields string) (*http.Response, error)) ([]*render.Node, *diag.Fault) {
+	answer, fault := c.request(ctx, spec, answerSchema, of.sent, call)
 	if fault != nil {
 		return nil, fault
 	}
 	return printing(answer, onOneLine).objectsAt(answer.schema, of.printed, answer.objects)
 }
 
-// writingNothing is pass for a write the server answers with nothing: a deletion comes back 200 with an empty
+// writeEmpty is pass for a write the server answers with nothing: a deletion comes back 200 with an empty
 // body and no content type, so there is no tree to judge and no name to hold it to. A 200 carrying anything at
 // all is the answer of something other than the endpoint asked for, a login page or a proxy among them.
 //
 // Which calls are writes is settled here, by the passage a command sends its call through, and never by the
 // method: issue list asks two of its questions with a POST and changes nothing.
-func writingNothing(ctx context.Context, call func(ctx context.Context) (*http.Response, error)) *diag.Fault {
-	response, fault := sending(ctx, call)
+func writeEmpty(ctx context.Context, call func(ctx context.Context) (*http.Response, error)) *diag.Fault {
+	response, fault := send(ctx, call)
 	if fault != nil {
 		return fault
 	}
@@ -94,7 +94,7 @@ func writingNothing(ctx context.Context, call func(ctx context.Context) (*http.R
 	return nil
 }
 
-// writing is pass for a write the server answers with the entity it wrote. The check of that answer and the
+// write is pass for a write the server answers with the entity it wrote. The check of that answer and the
 // document it becomes are both parameters rather than steps the caller runs afterwards: ADR-0005 puts them on
 // the way back from a write, and here there is no way back around them.
 //
@@ -104,8 +104,8 @@ func writingNothing(ctx context.Context, call func(ctx context.Context) (*http.R
 //
 // Every refusal from the status onwards is marked as following a write the server carried out, so the exit
 // code says the instance changed without the document being read.
-func (c *Client) writing(ctx context.Context, spec *schemas, answerSchema string, requested []requestedField, call func(ctx context.Context, fields string) (*http.Response, error), confirm func(answer) *diag.Fault, printed func(answer) (*render.Node, *diag.Fault)) (*render.Node, *diag.Fault) {
-	response, fault := sending(ctx, func(ctx context.Context) (*http.Response, error) {
+func (c *Client) write(ctx context.Context, spec *schemas, answerSchema string, requested []requestedField, call func(ctx context.Context, fields string) (*http.Response, error), confirm func(answer) *diag.Fault, printed func(answer) (*render.Node, *diag.Fault)) (*render.Node, *diag.Fault) {
+	response, fault := send(ctx, func(ctx context.Context) (*http.Response, error) {
 		return call(ctx, walk(requested))
 	})
 	if fault != nil {
@@ -137,12 +137,12 @@ func (c *Client) writing(ctx context.Context, spec *schemas, answerSchema string
 	return node, nil
 }
 
-// sending is where a write that never left is told from one that left with no answer coming back, and the
+// send is where a write that never left is told from one that left with no answer coming back, and the
 // border is whether the request went out whole rather than what the error says: net/http draws it in the same
 // place to decide whether a request may be sent again, by a nothingWrittenError it does not export, so from
 // outside it is visible only through httptrace. WroteRequest runs once the body and the final flush are
 // through, and a request cut short before that is one no server acts on: its Content-Length does not add up.
-func sending(ctx context.Context, call func(ctx context.Context) (*http.Response, error)) (*http.Response, *diag.Fault) {
+func send(ctx context.Context, call func(ctx context.Context) (*http.Response, error)) (*http.Response, *diag.Fault) {
 	// Written by the goroutine of the transport, which outlives a call that failed.
 	var left atomic.Bool
 	traced := httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
@@ -162,9 +162,9 @@ func sending(ctx context.Context, call func(ctx context.Context) (*http.Response
 	return nil, transportFailure(err)
 }
 
-// passing is pass for a command that needs the values of the answer as well: it asks for names of its own, and
+// request is pass for a command that needs the values of the answer as well: it asks for names of its own, and
 // what it prints is not one node per object.
-func (c *Client) passing(ctx context.Context, spec *schemas, answerSchema string, requested []requestedField, call func(ctx context.Context, fields string) (*http.Response, error)) (answer, *diag.Fault) {
+func (c *Client) request(ctx context.Context, spec *schemas, answerSchema string, requested []requestedField, call func(ctx context.Context, fields string) (*http.Response, error)) (answer, *diag.Fault) {
 	response, err := call(ctx, walk(requested))
 	if err != nil {
 		return answer{}, transportFailure(err)

@@ -73,7 +73,7 @@ func (c *Client) showField(ctx context.Context, spec *schemas, code, name string
 			return node, fault
 		}
 	}
-	metadata, fault := c.passing(ctx, spec, "Project", metadataFields(), func(ctx context.Context, fields string) (*http.Response, error) {
+	metadata, fault := c.request(ctx, spec, "Project", metadataFields(), func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getProject(ctx, code, fields)
 	})
 	if fault != nil {
@@ -163,7 +163,7 @@ func outdated(fault *diag.Fault) bool {
 func (c *Client) askForField(ctx context.Context, spec *schemas, code, id string, requested []requestedField) (answer, *diag.Fault) {
 	// The naming goes out beside what the caller asked for, and only what the caller asked for is printed.
 	asked := asking(requested, namingFields())
-	return c.passing(ctx, spec, "ProjectCustomField", asked, func(ctx context.Context, fields string) (*http.Response, error) {
+	return c.request(ctx, spec, "ProjectCustomField", asked, func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getProjectCustomField(ctx, code, id, fields)
 	})
 }
@@ -172,7 +172,7 @@ func (c *Client) askForField(ctx context.Context, spec *schemas, code, id string
 // is not the order of the project, so no page of it is a page of the list.
 func (c *Client) listFields(ctx context.Context, spec *schemas, code string, requested []requestedField) (*render.Node, *diag.Fault) {
 	asked := asking(requested, requestedField{name: ordinal})
-	answer, fault := c.passing(ctx, spec, "[]ProjectCustomField", asked, func(ctx context.Context, fields string) (*http.Response, error) {
+	answer, fault := c.request(ctx, spec, "[]ProjectCustomField", asked, func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getProjectCustomFields(ctx, code, fields, everything)
 	})
 	if fault != nil {

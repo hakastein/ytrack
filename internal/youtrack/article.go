@@ -77,7 +77,7 @@ func (c *Client) articleCreated(ctx context.Context, spec *schemas, parts writte
 		return nil, fault
 	}
 	body := filed.body()
-	return c.writing(ctx, spec, articleSchema, asking(requested, filed.checked()...), func(ctx context.Context, fields string) (*http.Response, error) {
+	return c.write(ctx, spec, articleSchema, asking(requested, filed.checked()...), func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.createArticle(ctx, body, fields)
 	}, filed.confirmedBy, writtenNode(requested))
 }
@@ -127,7 +127,7 @@ func articleToWriteFields() []requestedField {
 // what is the part of the call the readable id stands for, which is what a refusal over its form names: the
 // update itself where the article is the one being written, and the flag where it is the parent.
 func (c *Client) readArticleToWrite(ctx context.Context, spec *schemas, id, what string) (articleToWrite, *diag.Fault) {
-	a, fault := c.passing(ctx, spec, articleSchema, articleToWriteFields(), func(ctx context.Context, fields string) (*http.Response, error) {
+	a, fault := c.request(ctx, spec, articleSchema, articleToWriteFields(), func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getArticle(ctx, id, fields)
 	})
 	if fault != nil {
@@ -219,7 +219,7 @@ func (c *Client) articleUpdated(ctx context.Context, spec *schemas, id string, p
 		return nil, fault
 	}
 	body := written.changes()
-	return c.writing(ctx, spec, articleSchema, asking(requested, written.checked()...), func(ctx context.Context, fields string) (*http.Response, error) {
+	return c.write(ctx, spec, articleSchema, asking(requested, written.checked()...), func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.updateArticle(ctx, article.readable, body, fields)
 	}, written.confirmedBy, writtenNode(requested))
 }
@@ -285,7 +285,7 @@ func (c *Client) lineAbove(ctx context.Context, spec *schemas, id string) (artic
 	var line []ancestor
 	seen := map[string]bool{}
 	for at := id; ; {
-		a, fault := c.passing(ctx, spec, articleSchema, articleAboveFields(), func(ctx context.Context, fields string) (*http.Response, error) {
+		a, fault := c.request(ctx, spec, articleSchema, articleAboveFields(), func(ctx context.Context, fields string) (*http.Response, error) {
 			return c.getArticle(ctx, at, fields)
 		})
 		if fault != nil {
@@ -483,7 +483,7 @@ func articleFields(spec *schemas, expression *string, defaults, because string) 
 // them, so neither the tree below it nor the prose nor the comments cost a second request.
 func (c *Client) showArticle(ctx context.Context, spec *schemas, id string, requested []requestedField, comments Comments) (*render.Node, *diag.Fault) {
 	held := articleComments()
-	answer, fault := c.passing(ctx, spec, articleSchema, comments.merged(held, requested), func(ctx context.Context, fields string) (*http.Response, error) {
+	answer, fault := c.request(ctx, spec, articleSchema, comments.merged(held, requested), func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getArticle(ctx, id, fields)
 	})
 	if fault != nil {

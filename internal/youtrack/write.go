@@ -112,7 +112,7 @@ func (c *Client) issueCreated(ctx context.Context, spec *schemas, code string, p
 	asked := asking(requested, filed.checked()...)
 	issueBlocks(spec, composedIssue(), asked)
 	body := filed.body()
-	return c.writing(ctx, spec, issueSchema, asked, func(ctx context.Context, fields string) (*http.Response, error) {
+	return c.write(ctx, spec, issueSchema, asked, func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.createIssue(ctx, body, fields)
 	}, filed.confirmedBy, writtenNode(requested))
 }
@@ -136,7 +136,7 @@ func (c *Client) deletion(ctx context.Context, spec *schemas, kind ownerKind, sc
 	destroy func(ctx context.Context, at addressed) (*http.Response, error),
 ) (*render.Node, *diag.Fault) {
 	requested := []requestedField{{name: idReadableKey}}
-	answer, fault := c.passing(ctx, spec, schema, requested, read)
+	answer, fault := c.request(ctx, spec, schema, requested, read)
 	if fault != nil {
 		return nil, fault
 	}
@@ -144,7 +144,7 @@ func (c *Client) deletion(ctx context.Context, spec *schemas, kind ownerKind, sc
 	if fault != nil {
 		return nil, fault
 	}
-	if fault := writingNothing(ctx, func(ctx context.Context) (*http.Response, error) {
+	if fault := writeEmpty(ctx, func(ctx context.Context) (*http.Response, error) {
 		return destroy(ctx, readable)
 	}); fault != nil {
 		return nil, fault
@@ -177,7 +177,7 @@ func (c *Client) issueUpdated(ctx context.Context, spec *schemas, id string, par
 	asked := asking(requested, changed.checked()...)
 	issueBlocks(spec, composedIssue(), asked)
 	body := changed.changes()
-	return c.writing(ctx, spec, issueSchema, asked, func(ctx context.Context, fields string) (*http.Response, error) {
+	return c.write(ctx, spec, issueSchema, asked, func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.updateIssue(ctx, issue.readable, body, fields)
 	}, changed.confirmedBy, writtenNode(requested))
 }
@@ -1712,7 +1712,7 @@ func writeMetadataFields() []requestedField {
 }
 
 func (c *Client) projectToWrite(ctx context.Context, spec *schemas, code string) (projectMetadata, *diag.Fault) {
-	a, fault := c.passing(ctx, spec, projectSchema, writeMetadataFields(), func(ctx context.Context, fields string) (*http.Response, error) {
+	a, fault := c.request(ctx, spec, projectSchema, writeMetadataFields(), func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getProject(ctx, code, fields)
 	})
 	if fault != nil {
@@ -1747,7 +1747,7 @@ func issueToWriteFields() []requestedField {
 }
 
 func (c *Client) readIssueToWrite(ctx context.Context, spec *schemas, id string) (issueToWrite, *diag.Fault) {
-	a, fault := c.passing(ctx, spec, issueSchema, issueToWriteFields(), func(ctx context.Context, fields string) (*http.Response, error) {
+	a, fault := c.request(ctx, spec, issueSchema, issueToWriteFields(), func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getIssue(ctx, id, fields, nil)
 	})
 	if fault != nil {

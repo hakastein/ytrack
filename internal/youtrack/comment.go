@@ -193,7 +193,7 @@ func CreateComment(id, text string, expression *string) (Call, *diag.Fault) {
 func (c *Client) commentCreated(ctx context.Context, spec *schemas, at owner, written commentWritten, requested []requestedField) (*render.Node, *diag.Fault) {
 	held := commentsOf(at.kind)
 	body := written.body()
-	return c.writing(ctx, spec, held.comment, asking(requested, written.checked()...), func(ctx context.Context, fields string) (*http.Response, error) {
+	return c.write(ctx, spec, held.comment, asking(requested, written.checked()...), func(ctx context.Context, fields string) (*http.Response, error) {
 		return held.api.create(c, ctx, at, body, fields)
 	}, written.confirmedBy, writtenNode(requested))
 }
@@ -237,7 +237,7 @@ func (c *Client) commentUpdated(ctx context.Context, spec *schemas, at owner, wr
 		}
 	}
 	body := written.body()
-	return c.writing(ctx, spec, held.comment, asking(requested, written.checked()...), func(ctx context.Context, fields string) (*http.Response, error) {
+	return c.write(ctx, spec, held.comment, asking(requested, written.checked()...), func(ctx context.Context, fields string) (*http.Response, error) {
 		return held.api.rewrite(c, ctx, at, written.at, body, fields)
 	}, written.confirmedBy, writtenNode(requested))
 }
@@ -246,7 +246,7 @@ func (c *Client) commentUpdated(ctx context.Context, spec *schemas, at owner, wr
 // here and the write never goes out, and one that was taken back is refused with nothing written either. The
 // race — taken back between this read and the write — is what the check of the answer is for.
 func (c *Client) refuseACommentTakenBack(ctx context.Context, spec *schemas, held commented, at owner, comment childID) *diag.Fault {
-	a, fault := c.passing(ctx, spec, held.comment, []requestedField{{name: deletedKey}}, func(ctx context.Context, fields string) (*http.Response, error) {
+	a, fault := c.request(ctx, spec, held.comment, []requestedField{{name: deletedKey}}, func(ctx context.Context, fields string) (*http.Response, error) {
 		return held.api.takenBack(c, ctx, at, comment, fields)
 	})
 	if fault != nil {
@@ -292,7 +292,7 @@ func DeleteComment(id, comment string) (Call, *diag.Fault) {
 // destroyed. A comment its author took back is not read for either: removing it for good is what this is.
 func (c *Client) commentRemoved(ctx context.Context, at owner, comment childID) (*render.Node, *diag.Fault) {
 	held := commentsOf(at.kind)
-	if fault := writingNothing(ctx, func(ctx context.Context) (*http.Response, error) {
+	if fault := writeEmpty(ctx, func(ctx context.Context) (*http.Response, error) {
 		return held.api.remove(c, ctx, at, comment)
 	}); fault != nil {
 		return nil, fault

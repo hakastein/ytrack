@@ -41,7 +41,7 @@ type requestedField struct {
 	normalized bool
 	// Schemas that may stand at this name beside the ones the specification declares for it, each with its
 	// descendants. The family of the place is then the same whatever arrived, so a name is judged alike on a
-	// journal of links alone and on one holding everything (ADR-0011).
+	// journal of links alone and on one holding everything (ADR-0001).
 	standing []string
 }
 

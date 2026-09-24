@@ -167,7 +167,7 @@ func (c *Client) listLinks(ctx context.Context, spec *schemas, id string, reques
 			asked[i].children = askedOfLinkDocument(asked[i].children, partnerFields(requested))
 		}
 	}
-	answer, fault := c.passing(ctx, spec, issueSchema, asked, func(ctx context.Context, fields string) (*http.Response, error) {
+	answer, fault := c.request(ctx, spec, issueSchema, asked, func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getIssue(ctx, id, fields, nil)
 	})
 	if fault != nil {
@@ -442,7 +442,7 @@ func (c *Client) linkAdded(ctx context.Context, spec *schemas, id, phrase, partn
 	}
 	// Marshalling a struct of one string cannot fail.
 	body, _ := json.Marshal(linkedPartner{ID: w.partner.id})
-	node, fault := c.writing(ctx, spec, issueSchema, writtenLinkFields(partnerBlocks(spec, requested)),
+	node, fault := c.write(ctx, spec, issueSchema, writtenLinkFields(partnerBlocks(spec, requested)),
 		func(ctx context.Context, fields string) (*http.Response, error) {
 			return c.addLinkedIssue(ctx, w.source.readable, w.slot.id, body, fields)
 		}, w.confirmedBy, w.documenting(partnerFields(requested)))
@@ -460,7 +460,7 @@ func (c *Client) linkRemoved(ctx context.Context, spec *schemas, id, phrase, par
 	if fault != nil {
 		return nil, fault
 	}
-	if fault := writingNothing(ctx, func(ctx context.Context) (*http.Response, error) {
+	if fault := writeEmpty(ctx, func(ctx context.Context) (*http.Response, error) {
 		return c.removeLinkedIssue(ctx, w.source.readable, w.slot.id, w.partner.id)
 	}); fault != nil {
 		return nil, w.named(noSuchLink(fault))
@@ -552,7 +552,7 @@ func (c *Client) issueLinked(ctx context.Context, spec *schemas, id string) (lin
 }
 
 func (c *Client) readLinkedIssue(ctx context.Context, spec *schemas, id string, requested []requestedField) (linkedIssue, *diag.Fault) {
-	a, fault := c.passing(ctx, spec, issueSchema, requested, func(ctx context.Context, fields string) (*http.Response, error) {
+	a, fault := c.request(ctx, spec, issueSchema, requested, func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getIssue(ctx, id, fields, nil)
 	})
 	if fault != nil {

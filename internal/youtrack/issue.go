@@ -130,7 +130,7 @@ func (c *Client) issuesCounted(ctx context.Context, spec *schemas, query string)
 // A count of -1 is the counter saying it has started and has no number yet.
 func (c *Client) issuesFound(ctx context.Context, spec *schemas, query string) (count, *diag.Fault) {
 	body := searchBody(query)
-	answer, fault := c.passing(ctx, spec, countSchema, []requestedField{{name: countKey}}, func(ctx context.Context, fields string) (*http.Response, error) {
+	answer, fault := c.request(ctx, spec, countSchema, []requestedField{{name: countKey}}, func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.countIssues(ctx, body, fields)
 	})
 	if fault != nil {
@@ -337,7 +337,7 @@ func (c *Client) showIssue(ctx context.Context, spec *schemas, id string, reques
 		return nil, fault
 	}
 	held := issueComments()
-	answer, fault := c.passing(ctx, spec, issueSchema, comments.merged(held, asked), func(ctx context.Context, fields string) (*http.Response, error) {
+	answer, fault := c.request(ctx, spec, issueSchema, comments.merged(held, asked), func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getIssue(ctx, id, fields, named)
 	})
 	if fault != nil {

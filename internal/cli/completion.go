@@ -133,7 +133,7 @@ func complete(root *cobra.Command, stdout io.Writer, calledAs string, words []st
 			suggestions = append(flagsOf(cmd), joinedValues(cmd, completing)...)
 		case written.flagValue:
 			// The value of a flag, which is neither an argument nor a flag: only a closed set the binary holds
-			// itself is offered there (ADR-0011), and a file name is no value of any flag.
+			// itself is offered there (ADR-0009), and a file name is no value of any flag.
 			suggestions = closedSetOf(written.valueOf)
 		default:
 			suggestions = argumentsOf(cmd, written)

@@ -123,7 +123,7 @@ func (c *Client) selection(ctx context.Context, spec *schemas, plural, schema st
 func (c *Client) countedByIDs(spec *schemas, plural, schema string, requested, filledIn []requestedField, page Page, ask asker) list {
 	l := list{client: c, spec: spec, plural: plural, schema: schema, requested: requested, filledIn: filledIn, page: page, ask: ask}
 	l.counting = func(ctx context.Context) (count, *diag.Fault) {
-		ids, fault := c.pass(ctx, spec, schema, []requestedField{{name: idKey}}, func(ctx context.Context, fields string) (*http.Response, error) {
+		ids, fault := c.read(ctx, spec, schema, []requestedField{{name: idKey}}, func(ctx context.Context, fields string) (*http.Response, error) {
 			return ask(ctx, fields, whole)
 		})
 		if fault != nil {
@@ -139,7 +139,7 @@ func (c *Client) countedByIDs(spec *schemas, plural, schema string, requested, f
 // passed over and the records it holds are the whole of it, and only a page that fills the limit, or one that
 // holds nothing after records passed over, is counted at all.
 func (l list) selected(ctx context.Context) (*render.Node, *diag.Fault) {
-	page, fault := l.client.records(ctx, l.spec, l.schema, l.expressions(), func(ctx context.Context, fields string) (*http.Response, error) {
+	page, fault := l.client.readList(ctx, l.spec, l.schema, l.expressions(), func(ctx context.Context, fields string) (*http.Response, error) {
 		return l.ask(ctx, fields, l.page.window())
 	})
 	if fault != nil {

@@ -16,7 +16,7 @@ import (
 // change put there and took away. The issue itself is not asked for: the caller named it. A value under added
 // and removed is printed by the id and by whichever of the names its type has — idReadable of an issue, login
 // of a user, name of a value of a bundle, a tag or an attachment, urls of a commit — so the default names a
-// value of any type without the heavy text of a comment or a commit (ADR-0011).
+// value of any type without the heavy text of a comment or a commit (ADR-0001).
 const ActivityListFields = "timestamp,author(login),category,field," +
 	"added(id,idReadable,login,name,urls),removed(id,idReadable,login,name,urls)"
 
@@ -316,7 +316,7 @@ func (c *Client) listActivities(ctx context.Context, spec *schemas, id string, r
 	sent := asking(requested, own...)
 	pastThePage := page.window()
 	pastThePage.top++
-	answer, fault := c.passing(ctx, spec, "[]"+activitySchema, sent, func(ctx context.Context, fields string) (*http.Response, error) {
+	answer, fault := c.request(ctx, spec, "[]"+activitySchema, sent, func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getIssueActivities(ctx, id, strings.Join(categoryIDs(categories), ","), fields, pastThePage)
 	})
 	if fault != nil {
@@ -524,7 +524,7 @@ func (n nodes) changedField(value any) (*render.Node, *diag.Fault) {
 
 // values is the block added and removed print as, and it is always a list: the server sends null for a change
 // that put nothing there, a bare value where one was put and a list where several could be, and one reader of
-// the journal reads every record alike only if all three stand as a list (ADR-0011). held is what the subtype of
+// the journal reads every record alike only if all three stand as a list (ADR-0001). held is what the subtype of
 // the record declares there, so a moment, a duration and an entity are each written as they are anywhere else.
 func (n nodes) values(held element, field requestedField, value any) (*render.Node, *diag.Fault) {
 	var items []any

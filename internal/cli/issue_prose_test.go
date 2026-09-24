@@ -27,8 +27,8 @@ func (c proseCase) style() yaml.Style {
 	return yaml.LiteralStyle
 }
 
-// The twelve texts ADR-0003 measured, the ones the polygon wrote to the server and read back byte for byte,
-// and the traps of the emitter's own rules: the indentation indicator is wrong on any table
+// The twelve texts a literal block has to carry (ADR-0003), the ones the polygon wrote to the server and read
+// back byte for byte, and the traps of the emitter's own rules: the indentation indicator is wrong on any table
 // missing an empty line before an indented one, and the chomping indicator on any missing the ends.
 // Hostile runes stand as bytes, since a typed \uXXXX reaches a Go literal as the rune itself.
 func proseCases() []proseCase {

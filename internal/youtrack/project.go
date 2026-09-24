@@ -53,7 +53,7 @@ func ListProjects(expression string, page Page) (Call, *diag.Fault) {
 }
 
 func (c *Client) showProject(ctx context.Context, spec *schemas, code string, requested []requestedField) (*render.Node, *diag.Fault) {
-	projects, fault := c.pass(ctx, spec, "Project", requested, func(ctx context.Context, fields string) (*http.Response, error) {
+	projects, fault := c.read(ctx, spec, "Project", requested, func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getProject(ctx, code, fields)
 	})
 	if fault != nil {

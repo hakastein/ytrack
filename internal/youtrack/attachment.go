@@ -170,7 +170,7 @@ func CreateAttachment(id string, open Opening, expression *string) (Call, *diag.
 // file may go out before that 404 does.
 func (c *Client) attachmentCreated(ctx context.Context, spec *schemas, at owner, sent *upload, requested []requestedField) (*render.Node, *diag.Fault) {
 	body, contentType, confirmed := sent.form()
-	return c.writing(ctx, spec, attachmentsOf(at.kind).listing(), asking(requested, sent.checked()...), func(ctx context.Context, fields string) (*http.Response, error) {
+	return c.write(ctx, spec, attachmentsOf(at.kind).listing(), asking(requested, sent.checked()...), func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.createAttachment(ctx, at, contentType, body, fields)
 	}, confirmed, writtenNode(requested))
 }
@@ -213,7 +213,7 @@ func (c *Client) attachmentRemoved(ctx context.Context, spec *schemas, at owner,
 		{name: nameKey},
 		{name: hangs.owner, children: []requestedField{{name: idReadableKey}}},
 	}
-	found, fault := c.passing(ctx, spec, hangs.schema, requested, func(ctx context.Context, fields string) (*http.Response, error) {
+	found, fault := c.request(ctx, spec, hangs.schema, requested, func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getAttachment(ctx, at, file, fields)
 	})
 	if fault != nil {
@@ -223,7 +223,7 @@ func (c *Client) attachmentRemoved(ctx context.Context, spec *schemas, at owner,
 	if fault != nil {
 		return nil, fault
 	}
-	if fault := writingNothing(ctx, func(ctx context.Context) (*http.Response, error) {
+	if fault := writeEmpty(ctx, func(ctx context.Context) (*http.Response, error) {
 		return c.deleteAttachment(ctx, at.kind, theOwner, file)
 	}); fault != nil {
 		return nil, fault

@@ -917,7 +917,7 @@ func (n nodes) notOfTheShape(f issueCustomField) *diag.Fault {
 }
 
 // A period is printed out of the minutes it holds rather than out of the ISO duration the server writes
-// beside them: there a day is the working week of the instance, so P1D means eight hours (ADR-0002).
+// beside them: there a day is the working day of the instance, so P1D means eight hours (ADR-0002).
 func duration(minutes int64) string {
 	written := ""
 	if hours := minutes / 60; hours != 0 {
@@ -944,7 +944,7 @@ func catalogueFields() []requestedField {
 }
 
 func (c *Client) customFieldCatalogue(ctx context.Context, spec *schemas) (answer, []naming, *diag.Fault) {
-	a, fault := c.passing(ctx, spec, customFieldCatalogue, catalogueFields(), func(ctx context.Context, fields string) (*http.Response, error) {
+	a, fault := c.request(ctx, spec, customFieldCatalogue, catalogueFields(), func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getCustomFields(ctx, fields, everything)
 	})
 	if fault != nil {
