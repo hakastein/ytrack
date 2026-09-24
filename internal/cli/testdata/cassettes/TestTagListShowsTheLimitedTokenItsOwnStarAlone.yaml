@@ -1,0 +1,58 @@
+---
+version: 2
+interactions:
+    - id: 0
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            $top:
+                - "50"
+            fields:
+                - name,owner(login),readSharingSettings(permittedGroups(name),permittedUsers(login))
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/tags?fields=name%2Cowner%28login%29%2CreadSharingSettings%28permittedGroups%28name%29%2CpermittedUsers%28login%29%29&%24top=50
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '[{"owner":{"login":"dev.limited","$type":"User"},"readSharingSettings":{"permittedGroups":[],"permittedUsers":[],"$type":"WatchFolderSharingSettings"},"name":"Звезда","$type":"Tag"},{"owner":{"login":"dev.limited","$type":"User"},"readSharingSettings":{"permittedGroups":[],"permittedUsers":[],"$type":"WatchFolderSharingSettings"},"name":"ytrack contract TestTagCreateMakesANameAmbiguousForTheTokenItIsSharedWith","$type":"Tag"}]'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - dev.limited
+        status: 200 OK
+        code: 200
+        duration: 0s

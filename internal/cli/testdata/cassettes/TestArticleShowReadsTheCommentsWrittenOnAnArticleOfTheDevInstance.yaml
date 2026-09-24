@@ -1,0 +1,642 @@
+---
+version: 2
+interactions:
+    - id: 0
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 133
+        host: localhost:8091
+        body: '{"project":{"shortName":"DEV"},"summary":"ytrack contract TestArticleShowReadsTheCommentsWrittenOnAnArticleOfTheDevInstance article"}'
+        form:
+            fields:
+                - idReadable,summary,reporter(login),created,updated,tags(name),parentArticle(idReadable,summary),childArticles(idReadable,summary),content,project(shortName)
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            Content-Length:
+                - "133"
+            Content-Type:
+                - application/json
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles?fields=idReadable%2Csummary%2Creporter%28login%29%2Ccreated%2Cupdated%2Ctags%28name%29%2CparentArticle%28idReadable%2Csummary%29%2CchildArticles%28idReadable%2Csummary%29%2Ccontent%2Cproject%28shortName%29
+        method: POST
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"idReadable":"DEV-A-4","updated":1790233201149,"parentArticle":null,"childArticles":[],"created":1790233201149,"project":{"shortName":"DEV","$type":"Project"},"reporter":{"login":"admin","$type":"User"},"summary":"ytrack contract TestArticleShowReadsTheCommentsWrittenOnAnArticleOfTheDevInstance article","tags":[],"content":null,"$type":"Article"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 1
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 76
+        host: localhost:8091
+        body: "{\"text\":\"\\n первая   \\n---\\n~~~\\nсмайл \U0001F600\\nпоследняя\"}"
+        form:
+            fields:
+                - id,author(login),created,updated,text
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            Content-Length:
+                - "76"
+            Content-Type:
+                - application/json
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles/DEV-A-4/comments?fields=id%2Cauthor%28login%29%2Ccreated%2Cupdated%2Ctext
+        method: POST
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"author":{"login":"admin","$type":"User"},"updated":null,"created":1790233201303,"text":"\n первая   \n---\n~~~\nсмайл \uD83D\uDE00\nпоследняя","id":"8-1","$type":"ArticleComment"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 2
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 57
+        host: localhost:8091
+        body: '{"text":"первая\r\nвторая\u2028третья"}'
+        form:
+            fields:
+                - id,author(login),created,updated,text
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            Content-Length:
+                - "57"
+            Content-Type:
+                - application/json
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles/DEV-A-4/comments?fields=id%2Cauthor%28login%29%2Ccreated%2Cupdated%2Ctext
+        method: POST
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"author":{"login":"admin","$type":"User"},"updated":null,"created":1790233201457,"text":"первая\r\nвторая             третья","id":"8-4","$type":"ArticleComment"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 3
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 32
+        host: localhost:8091
+        body: '{"text":"ytrack contract short"}'
+        form:
+            fields:
+                - id,author(login),created,updated,text
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            Content-Length:
+                - "32"
+            Content-Type:
+                - application/json
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles/DEV-A-4/comments?fields=id%2Cauthor%28login%29%2Ccreated%2Cupdated%2Ctext
+        method: POST
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"author":{"login":"admin","$type":"User"},"updated":null,"created":1790233201612,"text":"ytrack contract short","id":"8-7","$type":"ArticleComment"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 4
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            fields:
+                - idReadable,comments(id,author(login),created,text)
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles/DEV-A-4?fields=idReadable%2Ccomments%28id%2Cauthor%28login%29%2Ccreated%2Ctext%29
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"idReadable":"DEV-A-4","comments":[{"author":{"login":"admin","$type":"User"},"created":1790233201303,"text":"\n первая   \n---\n~~~\nсмайл \uD83D\uDE00\nпоследняя","id":"8-1","$type":"ArticleComment"},{"author":{"login":"admin","$type":"User"},"created":1790233201457,"text":"первая\r\nвторая             третья","id":"8-4","$type":"ArticleComment"},{"author":{"login":"admin","$type":"User"},"created":1790233201612,"text":"ytrack contract short","id":"8-7","$type":"ArticleComment"}],"$type":"Article"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 5
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            fields:
+                - idReadable,comments(id,author(login),created,text)
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles/DEV-A-4?fields=idReadable%2Ccomments%28id%2Cauthor%28login%29%2Ccreated%2Ctext%29
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"idReadable":"DEV-A-4","comments":[{"author":{"login":"admin","$type":"User"},"created":1790233201303,"text":"\n первая   \n---\n~~~\nсмайл \uD83D\uDE00\nпоследняя","id":"8-1","$type":"ArticleComment"},{"author":{"login":"admin","$type":"User"},"created":1790233201457,"text":"первая\r\nвторая             третья","id":"8-4","$type":"ArticleComment"},{"author":{"login":"admin","$type":"User"},"created":1790233201612,"text":"ytrack contract short","id":"8-7","$type":"ArticleComment"}],"$type":"Article"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 6
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            fields:
+                - idReadable
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles/DEV-A-4?fields=idReadable
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"idReadable":"DEV-A-4","$type":"Article"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 7
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles/DEV-A-4/comments/8-4
+        method: DELETE
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        body: ""
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 8
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            fields:
+                - idReadable,comments(id,author(login),created,text)
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles/DEV-A-4?fields=idReadable%2Ccomments%28id%2Cauthor%28login%29%2Ccreated%2Ctext%29
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"idReadable":"DEV-A-4","comments":[{"author":{"login":"admin","$type":"User"},"created":1790233201303,"text":"\n первая   \n---\n~~~\nсмайл \uD83D\uDE00\nпоследняя","id":"8-1","$type":"ArticleComment"},{"author":{"login":"admin","$type":"User"},"created":1790233201612,"text":"ytrack contract short","id":"8-7","$type":"ArticleComment"}],"$type":"Article"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 9
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            fields:
+                - idReadable
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles/DEV-A-4?fields=idReadable
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"idReadable":"DEV-A-4","$type":"Article"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 10
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles/DEV-A-4
+        method: DELETE
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        body: ""
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 11
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            fields:
+                - idReadable,summary,reporter(login),created,updated,tags(name),parentArticle(idReadable,summary),childArticles(idReadable,summary),content
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles/DEV-A-4?fields=idReadable%2Csummary%2Creporter%28login%29%2Ccreated%2Cupdated%2Ctags%28name%29%2CparentArticle%28idReadable%2Csummary%29%2CchildArticles%28idReadable%2Csummary%29%2Ccontent
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 78
+        body: '{"error":"Not Found","error_description":"Can''t find article with id DEV-A-4"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Length:
+                - "78"
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 404 Not Found
+        code: 404
+        duration: 0s

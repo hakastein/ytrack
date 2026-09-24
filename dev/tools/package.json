@@ -1,0 +1,12 @@
+{
+  "name": "ytrack-dev-tools",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "playwright": "1.62.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.5.0",
+    "typescript": "7.0.2"
+  }
+}

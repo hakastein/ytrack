@@ -1,0 +1,62 @@
+---
+version: 2
+interactions:
+    - id: 0
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            $top:
+                - "100001"
+            categories:
+                - SummaryCategory
+            fields:
+                - timestamp,author(login),category(id),field(name,customField(name,fieldType(valueType))),added(id,idReadable,login,name,urls,minutes),removed(id,idReadable,login,name,urls,minutes)
+            reverse:
+                - "true"
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/issues/DEV-7/activities?categories=SummaryCategory&reverse=true&fields=timestamp%2Cauthor%28login%29%2Ccategory%28id%29%2Cfield%28name%2CcustomField%28name%2CfieldType%28valueType%29%29%29%2Cadded%28id%2CidReadable%2Clogin%2Cname%2Curls%2Cminutes%29%2Cremoved%28id%2CidReadable%2Clogin%2Cname%2Curls%2Cminutes%29&%24top=100001
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '[{"removed":"Задача с историей правок: заголовок до правки","added":"Задача с историей правок","author":{"login":"admin","$type":"User"},"field":{"name":"заголовок","$type":"PredefinedFilterField"},"timestamp":1790233169469,"category":{"id":"SummaryCategory","$type":"ActivityCategory"},"$type":"SimpleValueActivityItem"}]'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s

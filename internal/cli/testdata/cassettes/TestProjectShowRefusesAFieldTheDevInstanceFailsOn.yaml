@@ -1,0 +1,55 @@
+---
+version: 2
+interactions:
+    - id: 0
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            fields:
+                - startingNumber
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/admin/projects/DEV?fields=startingNumber
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 240
+        body: '{"error":"server_error","error_description":"Cannot invoke \"java.lang.Number.longValue()\" because the return value of \"jetbrains.gap.resource.metadata.Nullable.getValue(jetbrains.gap.resource.Entity, kotlin.reflect.KProperty)\" is null"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Length:
+                - "240"
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 500 Internal Server Error
+        code: 500
+        duration: 0s

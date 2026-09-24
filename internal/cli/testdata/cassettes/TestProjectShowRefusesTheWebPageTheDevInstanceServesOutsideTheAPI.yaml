@@ -1,0 +1,54 @@
+---
+version: 2
+interactions:
+    - id: 0
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            fields:
+                - shortName,name,plugins(timeTrackingSettings(enabled,workItemTypes(name)))
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/youtrack/api/admin/projects/DEV?fields=shortName%2Cname%2Cplugins%28timeTrackingSettings%28enabled%2CworkItemTypes%28name%29%29%29
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: "<!doctype html>\n<html>\n<head>\n    <meta charset=\"utf-8\">\n    <meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\">\n    <meta name=\"description\" content=\"\">\n    <meta name=\"viewport\" content=\"width=device-width\">\n    <meta name=\"apple-itunes-app\" content=\"app-id=1028024655\">\n    <!-- theme-color value should be synced with --navigation-background-color -->\n    <meta name=\"theme-color\" content=\"#18191b\">\n    <link rel=\"manifest\" href=\"manifest.json\">\n    <title></title>\n    \n    <base href=\"/\"/>\n    \n\n    <link rel=\"shortcut icon\" href=\"manager/favicon.ico?ec7189eae873dc35d92e2ee8330c22b8?ec7189eae873dc35d92e2ee8330c22b8\" type=\"image/x-icon\" sizes=\"16x16 32x32\"/>\n <link rel=\"icon\" href=\"manager/icon.svg?68d08c78771bd20bcc4b154b3ce9e10f?68d08c78771bd20bcc4b154b3ce9e10f\" type=\"image/svg+xml\"/>\n <link rel=\"apple-touch-icon\" sizes=\"180x180\" href=\"manager/apple-touch-icon.png?9e7dc0c36f153e07c9878397eca2a20e?9e7dc0c36f153e07c9878397eca2a20e\"/>\n <meta name=\"msapplication-TileColor\" content=\"#000000\"/>\n\n    \n        \n            <link rel=\"stylesheet\" href=\"manager/vendor.15d02a12.css\"/>\n        \n            <link rel=\"stylesheet\" href=\"manager/8441.e056ce12.css\"/>\n        \n            <link rel=\"stylesheet\" href=\"manager/7711.06ea61e5.css\"/>\n        \n            <link rel=\"stylesheet\" href=\"manager/1988.63f3b5ac.css\"/>\n        \n            <link rel=\"stylesheet\" href=\"manager/5117.e23e2964.css\"/>\n        \n            <link rel=\"stylesheet\" href=\"manager/8505.81bc4311.css\"/>\n        \n            <link rel=\"stylesheet\" href=\"manager/5907.d0934444.css\"/>\n        \n            <link rel=\"stylesheet\" href=\"manager/6972.c708d1c4.css\"/>\n        \n            <link rel=\"stylesheet\" href=\"manager/3797.c61943a2.css\"/>\n        \n            <link rel=\"stylesheet\" href=\"manager/8499.2a344a07.css\"/>\n        \n    \n</head>\n<body>\n\n<script>\n    {\n        // See common/components/theme/anti-flicker.ts\n        const background = localStorage.getItem('com.jetbrains.youtrack.bodyBackgroundColor');\n        document.body.style.setProperty('background', background);\n    }\n</script>\n\n<div class=\"manager\">\n\n    <div class=\"manager__menu\" data-test=\"navigation-bar\" data-navigation-click id=\"menu-react-root\"></div>\n\n    <div class=\"manager__app\">\n        <div id=\"banners-root\"></div>\n\n        <div id=\"recent-entities-portal\"></div>\n        <div id=\"react-root\"></div>\n        <div id=\"angular-root\"></div>\n        <div id=\"error-root\"></div>\n\n        <template id=\"angular-app-template\">\n            <div id=\"angular-app\" rg-shortcuts-app shortcuts-loop class=\"manager__angular-app\">\n                <div rg-page-title delimiter=\"{{' – '}}\" no-title=\"YouTrack\" hidden></div>\n\n                <div class=\"app\" ng-if=\"$root.isBootstrapped\">\n                    <div class=\"app__container\">\n                        <yt-top-bar data-test=\"header\" class=\"app__header\" show-banners=\"false\"></yt-top-bar>\n\n                        <div ng-if=\"$root.applicationError\" class=\"app__error\">\n                            <yt-error code=\"{{$root.applicationError.status}}\" guest=\"$root.applicationError.guest\"></yt-error>\n                        </div>\n\n                        <div ng-if=\"!$root.applicationError\" class=\"app__view-container\">\n                            <div class=\"app__view\" ng-view></div>\n                            <div id=\"simplified-root\"></div>\n                        </div>\n                    </div>\n                </div>\n                <div rg-dialog=\"\"></div>\n\n                <yt-page-loader></yt-page-loader>\n            </div>\n        </template>\n    </div>\n</div>\n\n<div data-test=\"ytLoader\" id=\"fast-loader\"></div>\n\n<script src=\"manager/fast-loader.e52abcef.js\"></script>\n\n    <script src=\"manager/vendor.85d7167c.js\"></script>\n\n<script src=\"manager/index.a59c94ab.js\"></script>\n\n</body>\n\n</html>\n"
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - text/html
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+        status: 200 OK
+        code: 200
+        duration: 0s

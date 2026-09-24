@@ -1,0 +1,56 @@
+---
+version: 2
+interactions:
+    - id: 0
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            fields:
+                - customFields(id,field(name,localizedName,fieldType(valueType,isMultiValue)))
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/admin/projects/DEMO?fields=customFields%28id%2Cfield%28name%2ClocalizedName%2CfieldType%28valueType%2CisMultiValue%29%29%29
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"customFields":[{"field":{"localizedName":"Приоритет","fieldType":{"valueType":"enum","isMultiValue":false,"$type":"FieldType"},"name":"Priority","$type":"CustomField"},"id":"180-0","$type":"EnumProjectCustomField"},{"field":{"localizedName":"Тип","fieldType":{"valueType":"enum","isMultiValue":false,"$type":"FieldType"},"name":"Type","$type":"CustomField"},"id":"180-1","$type":"EnumProjectCustomField"},{"field":{"localizedName":"Состояние","fieldType":{"valueType":"state","isMultiValue":false,"$type":"FieldType"},"name":"State","$type":"CustomField"},"id":"180-2","$type":"StateProjectCustomField"},{"field":{"localizedName":"Подсистема","fieldType":{"valueType":"ownedField","isMultiValue":false,"$type":"FieldType"},"name":"Subsystem","$type":"CustomField"},"id":"180-3","$type":"OwnedProjectCustomField"},{"field":{"localizedName":"Версии исправления","fieldType":{"valueType":"version","isMultiValue":true,"$type":"FieldType"},"name":"Fix versions","$type":"CustomField"},"id":"180-4","$type":"VersionProjectCustomField"},{"field":{"localizedName":"Затронутые версии","fieldType":{"valueType":"version","isMultiValue":true,"$type":"FieldType"},"name":"Affected versions","$type":"CustomField"},"id":"180-5","$type":"VersionProjectCustomField"},{"field":{"localizedName":"Исправлено в сборке","fieldType":{"valueType":"build","isMultiValue":false,"$type":"FieldType"},"name":"Fixed in build","$type":"CustomField"},"id":"180-6","$type":"BuildProjectCustomField"},{"field":{"localizedName":"Исполнитель","fieldType":{"valueType":"user","isMultiValue":false,"$type":"FieldType"},"name":"Assignee","$type":"CustomField"},"id":"181-0","$type":"UserProjectCustomField"},{"field":{"localizedName":null,"fieldType":{"valueType":"period","isMultiValue":false,"$type":"FieldType"},"name":"Оценка","$type":"CustomField"},"id":"187-0","$type":"PeriodProjectCustomField"},{"field":{"localizedName":null,"fieldType":{"valueType":"period","isMultiValue":false,"$type":"FieldType"},"name":"Затраченное время","$type":"CustomField"},"id":"187-1","$type":"PeriodProjectCustomField"}],"$type":"Project"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s

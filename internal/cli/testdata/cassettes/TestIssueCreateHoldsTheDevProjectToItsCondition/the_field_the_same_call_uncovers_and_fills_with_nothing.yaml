@@ -1,0 +1,56 @@
+---
+version: 2
+interactions:
+    - id: 0
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            fields:
+                - id,shortName,customFields(id,canBeEmpty,defaultValues(name),condition($type,showForNullValue,field(id),values(name)),field(name,localizedName,fieldType(valueType,isMultiValue)))
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/admin/projects/DEV?fields=id%2CshortName%2CcustomFields%28id%2CcanBeEmpty%2CdefaultValues%28name%29%2Ccondition%28%24type%2CshowForNullValue%2Cfield%28id%29%2Cvalues%28name%29%29%2Cfield%28name%2ClocalizedName%2CfieldType%28valueType%2CisMultiValue%29%29%29
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"shortName":"DEV","customFields":[{"defaultValues":[{"name":"Новая","$type":"StateBundleElement"}],"canBeEmpty":true,"condition":null,"field":{"localizedName":"Состояние","fieldType":{"valueType":"state","isMultiValue":false,"$type":"FieldType"},"name":"State","$type":"CustomField"},"id":"180-14","$type":"StateProjectCustomField"},{"defaultValues":[],"canBeEmpty":false,"condition":null,"field":{"localizedName":"Тип","fieldType":{"valueType":"enum","isMultiValue":false,"$type":"FieldType"},"name":"Type","$type":"CustomField"},"id":"180-15","$type":"EnumProjectCustomField"},{"defaultValues":[{"name":"Low","$type":"EnumBundleElement"}],"canBeEmpty":false,"condition":null,"field":{"localizedName":"Приоритет","fieldType":{"valueType":"enum","isMultiValue":false,"$type":"FieldType"},"name":"Priority","$type":"CustomField"},"id":"180-16","$type":"EnumProjectCustomField"},{"defaultValues":[],"canBeEmpty":false,"condition":null,"field":{"localizedName":null,"fieldType":{"valueType":"enum","isMultiValue":false,"$type":"FieldType"},"name":"Категория","$type":"CustomField"},"id":"180-17","$type":"EnumProjectCustomField"},{"defaultValues":[],"canBeEmpty":false,"condition":null,"field":{"localizedName":null,"fieldType":{"valueType":"enum","isMultiValue":true,"$type":"FieldType"},"name":"Клиент","$type":"CustomField"},"id":"180-18","$type":"EnumProjectCustomField"},{"defaultValues":[],"canBeEmpty":false,"condition":null,"field":{"localizedName":null,"fieldType":{"valueType":"enum","isMultiValue":true,"$type":"FieldType"},"name":"Модуль системы","$type":"CustomField"},"id":"180-19","$type":"EnumProjectCustomField"},{"defaultValues":[],"canBeEmpty":true,"condition":null,"field":{"localizedName":null,"fieldType":{"valueType":"enum","isMultiValue":true,"$type":"FieldType"},"name":"Система","$type":"CustomField"},"id":"180-20","$type":"EnumProjectCustomField"},{"defaultValues":[],"canBeEmpty":true,"condition":null,"field":{"localizedName":null,"fieldType":{"valueType":"state","isMultiValue":false,"$type":"FieldType"},"name":"Статус разработки","$type":"CustomField"},"id":"180-21","$type":"StateProjectCustomField"},{"defaultValues":[],"canBeEmpty":true,"condition":null,"field":{"localizedName":null,"fieldType":{"valueType":"state","isMultiValue":false,"$type":"FieldType"},"name":"Статус анализа","$type":"CustomField"},"id":"180-22","$type":"StateProjectCustomField"},{"defaultValues":[],"canBeEmpty":false,"condition":{"showForNullValue":false,"values":[{"name":"Отклонена","$type":"StateBundleElement"}],"field":{"id":"180-14","$type":"StateProjectCustomField"},"$type":"FieldBasedCondition"},"field":{"localizedName":null,"fieldType":{"valueType":"enum","isMultiValue":false,"$type":"FieldType"},"name":"Причина отклонения","$type":"CustomField"},"id":"180-23","$type":"EnumProjectCustomField"},{"defaultValues":[],"canBeEmpty":true,"condition":null,"field":{"localizedName":null,"fieldType":{"valueType":"version","isMultiValue":true,"$type":"FieldType"},"name":"Плановый спринт","$type":"CustomField"},"id":"180-24","$type":"VersionProjectCustomField"},{"defaultValues":[],"canBeEmpty":true,"condition":null,"field":{"localizedName":null,"fieldType":{"valueType":"version","isMultiValue":false,"$type":"FieldType"},"name":"Релиз","$type":"CustomField"},"id":"180-25","$type":"VersionProjectCustomField"},{"defaultValues":[],"canBeEmpty":true,"condition":null,"field":{"localizedName":"Подсистема","fieldType":{"valueType":"ownedField","isMultiValue":false,"$type":"FieldType"},"name":"Subsystem","$type":"CustomField"},"id":"180-26","$type":"OwnedProjectCustomField"},{"defaultValues":[],"canBeEmpty":true,"condition":null,"field":{"localizedName":null,"fieldType":{"valueType":"ownedField","isMultiValue":true,"$type":"FieldType"},"name":"Подсистемы","$type":"CustomField"},"id":"180-27","$type":"OwnedProjectCustomField"},{"defaultValues":[],"canBeEmpty":true,"condition":null,"field":{"localizedName":"Исправлено в сборке","fieldType":{"valueType":"build","isMultiValue":false,"$type":"FieldType"},"name":"Fixed in build","$type":"CustomField"},"id":"180-28","$type":"BuildProjectCustomField"},{"defaultValues":[],"canBeEmpty":true,"condition":null,"field":{"localizedName":null,"fieldType":{"valueType":"build","isMultiValue":true,"$type":"FieldType"},"name":"Сборки","$type":"CustomField"},"id":"180-29","$type":"BuildProjectCustomField"},{"defaultValues":[],"canBeEmpty":true,"condition":null,"field":{"localizedName":"Исполнитель","fieldType":{"valueType":"user","isMultiValue":false,"$type":"FieldType"},"name":"Assignee","$type":"CustomField"},"id":"181-2","$type":"UserProjectCustomField"},{"defaultValues":[],"canBeEmpty":true,"condition":null,"field":{"localizedName":null,"fieldType":{"valueType":"user","isMultiValue":true,"$type":"FieldType"},"name":"Соисполнители","$type":"CustomField"},"id":"181-3","$type":"UserProjectCustomField"},{"canBeEmpty":true,"condition":null,"field":{"localizedName":null,"fieldType":{"valueType":"period","isMultiValue":false,"$type":"FieldType"},"name":"Оценка","$type":"CustomField"},"id":"187-2","$type":"PeriodProjectCustomField"},{"canBeEmpty":true,"condition":null,"field":{"localizedName":null,"fieldType":{"valueType":"period","isMultiValue":false,"$type":"FieldType"},"name":"Затраченное время","$type":"CustomField"},"id":"187-3","$type":"PeriodProjectCustomField"},{"canBeEmpty":true,"condition":null,"field":{"localizedName":null,"fieldType":{"valueType":"text","isMultiValue":false,"$type":"FieldType"},"name":"Примечание","$type":"CustomField"},"id":"223-0","$type":"TextProjectCustomField"},{"defaultValues":[],"canBeEmpty":true,"condition":null,"field":{"localizedName":null,"fieldType":{"valueType":"group","isMultiValue":false,"$type":"FieldType"},"name":"Группа доступа","$type":"CustomField"},"id":"301-0","$type":"GroupProjectCustomField"},{"defaultValues":[],"canBeEmpty":true,"condition":null,"field":{"localizedName":null,"fieldType":{"valueType":"group","isMultiValue":true,"$type":"FieldType"},"name":"Группы доступа","$type":"CustomField"},"id":"301-1","$type":"GroupProjectCustomField"},{"canBeEmpty":true,"condition":null,"field":{"localizedName":null,"fieldType":{"valueType":"date","isMultiValue":false,"$type":"FieldType"},"name":"Плановая дата решения","$type":"CustomField"},"id":"554-0","$type":"SimpleProjectCustomField"},{"canBeEmpty":true,"condition":null,"field":{"localizedName":null,"fieldType":{"valueType":"date and time","isMultiValue":false,"$type":"FieldType"},"name":"Дата начала работы","$type":"CustomField"},"id":"554-1","$type":"SimpleProjectCustomField"},{"canBeEmpty":true,"condition":null,"field":{"localizedName":null,"fieldType":{"valueType":"integer","isMultiValue":false,"$type":"FieldType"},"name":"Порядок реализации","$type":"CustomField"},"id":"554-2","$type":"SimpleProjectCustomField"},{"canBeEmpty":true,"condition":null,"field":{"localizedName":null,"fieldType":{"valueType":"float","isMultiValue":false,"$type":"FieldType"},"name":"Коэффициент","$type":"CustomField"},"id":"554-3","$type":"SimpleProjectCustomField"},{"canBeEmpty":true,"condition":null,"field":{"localizedName":null,"fieldType":{"valueType":"string","isMultiValue":false,"$type":"FieldType"},"name":"Внешний номер","$type":"CustomField"},"id":"554-4","$type":"SimpleProjectCustomField"}],"id":"0-1","$type":"Project"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s

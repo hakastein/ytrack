@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    // Типы Playwright ссылаются на HTMLElement и Node, отсюда `dom` в lib
+    "target": "es2024",
+    "lib": ["es2024", "dom"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true
+  },
+  "include": ["src/**/*.ts"]
+}

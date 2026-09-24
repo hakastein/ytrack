@@ -1,0 +1,114 @@
+---
+version: 2
+interactions:
+    - id: 0
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            $top:
+                - "1000"
+            fields:
+                - sourceToTarget,targetToSource,localizedSourceToTarget,localizedTargetToSource
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/issueLinkTypes?fields=sourceToTarget%2CtargetToSource%2ClocalizedSourceToTarget%2ClocalizedTargetToSource&%24top=1000
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '[{"sourceToTarget":"relates to","targetToSource":"","localizedSourceToTarget":"связана с","localizedTargetToSource":"","$type":"IssueLinkType"},{"sourceToTarget":"is required for","targetToSource":"depends on","localizedSourceToTarget":"обязательна для","localizedTargetToSource":"зависит от","$type":"IssueLinkType"},{"sourceToTarget":"is duplicated by","targetToSource":"duplicates","localizedSourceToTarget":"дублирована","localizedTargetToSource":"дублирует","$type":"IssueLinkType"},{"sourceToTarget":"parent for","targetToSource":"subtask of","localizedSourceToTarget":"родитель для","localizedTargetToSource":"подзадача для","$type":"IssueLinkType"},{"sourceToTarget":"Скопирована в","targetToSource":"Копия","localizedSourceToTarget":null,"localizedTargetToSource":"","$type":"IssueLinkType"}]'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 1
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            $top:
+                - "51"
+            fields:
+                - timestamp,author(login),category(id),field(name,customField(name,fieldType(valueType))),added(id,idReadable,login,name,urls,minutes),removed(id,idReadable,login,name,urls,minutes)
+            reverse:
+                - "true"
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/issues/DEV-1/activities?%24top=51&fields=timestamp%2Cauthor%28login%29%2Ccategory%28id%29%2Cfield%28name%2CcustomField%28name%2CfieldType%28valueType%29%29%29%2Cadded%28id%2CidReadable%2Clogin%2Cname%2Curls%2Cminutes%29%2Cremoved%28id%2CidReadable%2Clogin%2Cname%2Curls%2Cminutes%29&reverse=true
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 101
+        body: '{"error":"Bad Request","error_description":"No requested categories specified as a filter parameter"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Length:
+                - "101"
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 400 Bad Request
+        code: 400
+        duration: 0s

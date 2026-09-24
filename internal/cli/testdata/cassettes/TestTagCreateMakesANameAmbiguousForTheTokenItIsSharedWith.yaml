@@ -1,0 +1,486 @@
+---
+version: 2
+interactions:
+    - id: 0
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 84
+        host: localhost:8091
+        body: '{"name":"ytrack contract TestTagCreateMakesANameAmbiguousForTheTokenItIsSharedWith"}'
+        form:
+            fields:
+                - name,owner(login),readSharingSettings(permittedGroups(name),permittedUsers(login)),updateSharingSettings(permittedGroups(name),permittedUsers(login)),tagSharingSettings(permittedGroups(name),permittedUsers(login))
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            Content-Length:
+                - "84"
+            Content-Type:
+                - application/json
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/tags?fields=name%2Cowner%28login%29%2CreadSharingSettings%28permittedGroups%28name%29%2CpermittedUsers%28login%29%29%2CupdateSharingSettings%28permittedGroups%28name%29%2CpermittedUsers%28login%29%29%2CtagSharingSettings%28permittedGroups%28name%29%2CpermittedUsers%28login%29%29
+        method: POST
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"tagSharingSettings":{"permittedGroups":[],"permittedUsers":[],"$type":"TagSharingSettings"},"owner":{"login":"dev.limited","$type":"User"},"readSharingSettings":{"permittedGroups":[],"permittedUsers":[],"$type":"WatchFolderSharingSettings"},"updateSharingSettings":{"permittedGroups":[],"permittedUsers":[],"$type":"WatchFolderSharingSettings"},"name":"ytrack contract TestTagCreateMakesANameAmbiguousForTheTokenItIsSharedWith","$type":"Tag"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - dev.limited
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 1
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            $top:
+                - "-1"
+            fields:
+                - id,name
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/groups?fields=id%2Cname&%24top=-1
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '[{"name":"Участники полигона","id":"4-0","$type":"NestedGroup"},{"name":"Демопроект Team","id":"5-0","$type":"ProjectTeam"},{"name":"DEVELOPMENT Team","id":"5-1","$type":"ProjectTeam"},{"name":"DOCS Team","id":"5-2","$type":"ProjectTeam"},{"name":"Зарегистрированные пользователи","id":"6-0","$type":"RegisteredUsersGroup"},{"name":"Все пользователи","id":"101-0","$type":"AllUsersGroup"}]'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 2
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 141
+        host: localhost:8091
+        body: '{"name":"ytrack contract TestTagCreateMakesANameAmbiguousForTheTokenItIsSharedWith","readSharingSettings":{"permittedGroups":[{"id":"6-0"}]}}'
+        form:
+            fields:
+                - name,owner(login),readSharingSettings(permittedGroups(name,id),permittedUsers(login)),updateSharingSettings(permittedGroups(name),permittedUsers(login)),tagSharingSettings(permittedGroups(name),permittedUsers(login))
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            Content-Length:
+                - "141"
+            Content-Type:
+                - application/json
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/tags?fields=name%2Cowner%28login%29%2CreadSharingSettings%28permittedGroups%28name%2Cid%29%2CpermittedUsers%28login%29%29%2CupdateSharingSettings%28permittedGroups%28name%29%2CpermittedUsers%28login%29%29%2CtagSharingSettings%28permittedGroups%28name%29%2CpermittedUsers%28login%29%29
+        method: POST
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"tagSharingSettings":{"permittedGroups":[],"permittedUsers":[],"$type":"TagSharingSettings"},"owner":{"login":"admin","$type":"User"},"readSharingSettings":{"permittedGroups":[{"name":"Зарегистрированные пользователи","id":"6-0","$type":"RegisteredUsersGroup"}],"permittedUsers":[],"$type":"WatchFolderSharingSettings"},"updateSharingSettings":{"permittedGroups":[],"permittedUsers":[],"$type":"WatchFolderSharingSettings"},"name":"ytrack contract TestTagCreateMakesANameAmbiguousForTheTokenItIsSharedWith","$type":"Tag"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 3
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            $top:
+                - "-1"
+            fields:
+                - id,name,owner(login)
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/tags?fields=id%2Cname%2Cowner%28login%29&%24top=-1
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '[{"owner":{"login":"dev.limited","$type":"User"},"name":"Звезда","id":"10-5","$type":"Tag"},{"owner":{"login":"dev.limited","$type":"User"},"name":"ytrack contract TestTagCreateMakesANameAmbiguousForTheTokenItIsSharedWith","id":"10-24","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagDeleteRefusesTheTokenAGroupMayOnlyChangeTheTagFor","id":"10-25","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagCreateSharesATagOfThePolygonWithAGroup","id":"10-26","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagCreateSharesWithSeveralGroupsWhereVisibleForNamesOne","id":"10-27","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagCreateMakesANameAmbiguousForTheTokenItIsSharedWith","id":"10-28","$type":"Tag"}]'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - dev.limited
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 4
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 84
+        host: localhost:8091
+        body: '{"name":"YTRACK CONTRACT TESTTAGCREATEMAKESANAMEAMBIGUOUSFORTHETOKENITISSHAREDWITH"}'
+        form:
+            fields:
+                - name,owner(login),readSharingSettings(permittedGroups(name),permittedUsers(login)),updateSharingSettings(permittedGroups(name),permittedUsers(login)),tagSharingSettings(permittedGroups(name),permittedUsers(login))
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            Content-Length:
+                - "84"
+            Content-Type:
+                - application/json
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/tags?fields=name%2Cowner%28login%29%2CreadSharingSettings%28permittedGroups%28name%29%2CpermittedUsers%28login%29%29%2CupdateSharingSettings%28permittedGroups%28name%29%2CpermittedUsers%28login%29%29%2CtagSharingSettings%28permittedGroups%28name%29%2CpermittedUsers%28login%29%29
+        method: POST
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 369
+        body: '{"error":"invalid_properties","error_description":"Property Tag.name is invalid","error_children":[{"error":"Tag.name-is-invalid","error_description":"Property Tag.name is invalid","error_developer_message":"Тег с таким именем уже существует: YTRACK CONTRACT TESTTAGCREATEMAKESANAMEAMBIGUOUSFORTHETOKENITISSHAREDWITH","error_field":"name"}]}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Length:
+                - "369"
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - dev.limited
+        status: 400 Bad Request
+        code: 400
+        duration: 0s
+    - id: 5
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            $top:
+                - "-1"
+            fields:
+                - id,name,owner(login)
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/tags?fields=id%2Cname%2Cowner%28login%29&%24top=-1
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '[{"owner":{"login":"admin","$type":"User"},"name":"эффективность","id":"10-0","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"совет","id":"10-1","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"Звезда","id":"10-2","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"история-полигона","id":"10-4","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagDeleteRefusesTheTokenAGroupMayOnlyChangeTheTagFor","id":"10-25","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagCreateMakesANameAmbiguousForTheTokenItIsSharedWith","id":"10-28","$type":"Tag"}]'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 6
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/tags/10-28
+        method: DELETE
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        body: ""
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 7
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            $top:
+                - "-1"
+            fields:
+                - id,name,owner(login)
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/tags?fields=id%2Cname%2Cowner%28login%29&%24top=-1
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '[{"owner":{"login":"dev.limited","$type":"User"},"name":"Звезда","id":"10-5","$type":"Tag"},{"owner":{"login":"dev.limited","$type":"User"},"name":"ytrack contract TestTagCreateMakesANameAmbiguousForTheTokenItIsSharedWith","id":"10-24","$type":"Tag"}]'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - dev.limited
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 8
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/tags/10-24
+        method: DELETE
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        body: ""
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - dev.limited
+        status: 200 OK
+        code: 200
+        duration: 0s

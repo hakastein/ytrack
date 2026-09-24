@@ -1,0 +1,60 @@
+---
+version: 2
+interactions:
+    - id: 0
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 121
+        host: localhost:8091
+        body: '{"project":{"shortName":"DEV"},"summary":"ytrack contract TestArticleCreateRefusesTheProjectTheLimitedUserMayNotWriteIn"}'
+        form:
+            fields:
+                - idReadable,summary,reporter(login),created,updated,tags(name),parentArticle(idReadable,summary),childArticles(idReadable,summary),content,project(shortName)
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            Content-Length:
+                - "121"
+            Content-Type:
+                - application/json
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles?fields=idReadable%2Csummary%2Creporter%28login%29%2Ccreated%2Cupdated%2Ctags%28name%29%2CparentArticle%28idReadable%2Csummary%29%2CchildArticles%28idReadable%2Csummary%29%2Ccontent%2Cproject%28shortName%29
+        method: POST
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 62
+        body: '{"error":"Forbidden","error_description":"HTTP 403 Forbidden"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Length:
+                - "62"
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - dev.limited
+        status: 403 Forbidden
+        code: 403
+        duration: 0s

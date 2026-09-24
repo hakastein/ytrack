@@ -1,0 +1,122 @@
+---
+version: 2
+interactions:
+    - id: 0
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 45
+        host: localhost:8091
+        body: "{\"query\":\"issue id: DEV-1 \U0001F600 привет\"}"
+        form:
+            fields:
+                - query,styleRanges(start,length,style)
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            Content-Length:
+                - "45"
+            Content-Type:
+                - application/json
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/search/assist?fields=query%2CstyleRanges%28start%2Clength%2Cstyle%29
+        method: POST
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"styleRanges":[{"start":0,"style":"field-name","length":8,"$type":"SearchStyleRange"},{"start":10,"style":"field-value","length":5,"$type":"SearchStyleRange"},{"start":16,"style":"text","length":2,"$type":"SearchStyleRange"},{"start":19,"style":"text","length":6,"$type":"SearchStyleRange"}],"query":"issue id: DEV-1 \uD83D\uDE00 привет","$type":"SearchSuggestions"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 1
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            $top:
+                - "50"
+            customFields:
+                - State
+                - Type
+            fields:
+                - idReadable,summary,customFields(name,value(name,login,minutes,text),projectCustomField(id,ordinal,field(fieldType(valueType,isMultiValue),localizedName))),created
+            query:
+                - "issue id: DEV-1 \U0001F600 привет"
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/issues?query=issue+id%3A+DEV-1+%F0%9F%98%80+%D0%BF%D1%80%D0%B8%D0%B2%D0%B5%D1%82&customFields=State&customFields=Type&fields=idReadable%2Csummary%2CcustomFields%28name%2Cvalue%28name%2Clogin%2Cminutes%2Ctext%29%2CprojectCustomField%28id%2Cordinal%2Cfield%28fieldType%28valueType%2CisMultiValue%29%2ClocalizedName%29%29%29%2Ccreated&%24top=50
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 2
+        body: '[]'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Length:
+                - "2"
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s

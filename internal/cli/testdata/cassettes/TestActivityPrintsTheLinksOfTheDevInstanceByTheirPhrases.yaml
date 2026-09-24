@@ -1,0 +1,117 @@
+---
+version: 2
+interactions:
+    - id: 0
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            $top:
+                - "1000"
+            fields:
+                - sourceToTarget,targetToSource,localizedSourceToTarget,localizedTargetToSource
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/issueLinkTypes?fields=sourceToTarget%2CtargetToSource%2ClocalizedSourceToTarget%2ClocalizedTargetToSource&%24top=1000
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '[{"sourceToTarget":"relates to","targetToSource":"","localizedSourceToTarget":"связана с","localizedTargetToSource":"","$type":"IssueLinkType"},{"sourceToTarget":"is required for","targetToSource":"depends on","localizedSourceToTarget":"обязательна для","localizedTargetToSource":"зависит от","$type":"IssueLinkType"},{"sourceToTarget":"is duplicated by","targetToSource":"duplicates","localizedSourceToTarget":"дублирована","localizedTargetToSource":"дублирует","$type":"IssueLinkType"},{"sourceToTarget":"parent for","targetToSource":"subtask of","localizedSourceToTarget":"родитель для","localizedTargetToSource":"подзадача для","$type":"IssueLinkType"},{"sourceToTarget":"Скопирована в","targetToSource":"Копия","localizedSourceToTarget":null,"localizedTargetToSource":"","$type":"IssueLinkType"}]'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 1
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            $top:
+                - "100001"
+            categories:
+                - LinksCategory
+            fields:
+                - field(name,customField(name,fieldType(valueType))),added(idReadable,minutes),removed(idReadable,minutes),timestamp,category(id)
+            reverse:
+                - "true"
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/issues/DEV-1/activities?categories=LinksCategory&reverse=true&fields=field%28name%2CcustomField%28name%2CfieldType%28valueType%29%29%29%2Cadded%28idReadable%2Cminutes%29%2Cremoved%28idReadable%2Cminutes%29%2Ctimestamp%2Ccategory%28id%29&%24top=100001
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '[{"removed":[],"added":[{"idReadable":"DEV-6","$type":"Issue"}],"field":{"name":"Скопирована в","$type":"LinkTypeFilterField"},"timestamp":1790233169082,"category":{"id":"LinksCategory","$type":"ActivityCategory"},"$type":"LinksActivityItem"},{"removed":[],"added":[{"idReadable":"DEV-5","$type":"Issue"}],"field":{"name":"Дублирована","$type":"LinkTypeFilterField"},"timestamp":1790233169002,"category":{"id":"LinksCategory","$type":"ActivityCategory"},"$type":"LinksActivityItem"},{"removed":[],"added":[{"idReadable":"DEV-4","$type":"Issue"}],"field":{"name":"Подзадача для","$type":"LinkTypeFilterField"},"timestamp":1790233168895,"category":{"id":"LinksCategory","$type":"ActivityCategory"},"$type":"LinksActivityItem"},{"removed":[],"added":[{"idReadable":"DEV-3","$type":"Issue"}],"field":{"name":"Зависит от","$type":"LinkTypeFilterField"},"timestamp":1790233168827,"category":{"id":"LinksCategory","$type":"ActivityCategory"},"$type":"LinksActivityItem"},{"removed":[],"added":[{"idReadable":"DEV-2","$type":"Issue"}],"field":{"name":"Связана с","$type":"LinkTypeFilterField"},"timestamp":1790233168753,"category":{"id":"LinksCategory","$type":"ActivityCategory"},"$type":"LinksActivityItem"}]'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s

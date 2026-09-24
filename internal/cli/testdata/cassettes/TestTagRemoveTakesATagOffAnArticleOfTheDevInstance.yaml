@@ -1,0 +1,900 @@
+---
+version: 2
+interactions:
+    - id: 0
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 77
+        host: localhost:8091
+        body: '{"name":"ytrack contract TestTagRemoveTakesATagOffAnArticleOfTheDevInstance"}'
+        form:
+            fields:
+                - name,owner(login),readSharingSettings(permittedGroups(name),permittedUsers(login)),updateSharingSettings(permittedGroups(name),permittedUsers(login)),tagSharingSettings(permittedGroups(name),permittedUsers(login))
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            Content-Length:
+                - "77"
+            Content-Type:
+                - application/json
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/tags?fields=name%2Cowner%28login%29%2CreadSharingSettings%28permittedGroups%28name%29%2CpermittedUsers%28login%29%29%2CupdateSharingSettings%28permittedGroups%28name%29%2CpermittedUsers%28login%29%29%2CtagSharingSettings%28permittedGroups%28name%29%2CpermittedUsers%28login%29%29
+        method: POST
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"tagSharingSettings":{"permittedGroups":[],"permittedUsers":[],"$type":"TagSharingSettings"},"owner":{"login":"admin","$type":"User"},"readSharingSettings":{"permittedGroups":[],"permittedUsers":[],"$type":"WatchFolderSharingSettings"},"updateSharingSettings":{"permittedGroups":[],"permittedUsers":[],"$type":"WatchFolderSharingSettings"},"name":"ytrack contract TestTagRemoveTakesATagOffAnArticleOfTheDevInstance","$type":"Tag"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 1
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 110
+        host: localhost:8091
+        body: '{"project":{"shortName":"DEV"},"summary":"ytrack contract TestTagRemoveTakesATagOffAnArticleOfTheDevInstance"}'
+        form:
+            fields:
+                - idReadable,summary,reporter(login),created,updated,tags(name),parentArticle(idReadable,summary),childArticles(idReadable,summary),content,project(shortName)
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            Content-Length:
+                - "110"
+            Content-Type:
+                - application/json
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles?fields=idReadable%2Csummary%2Creporter%28login%29%2Ccreated%2Cupdated%2Ctags%28name%29%2CparentArticle%28idReadable%2Csummary%29%2CchildArticles%28idReadable%2Csummary%29%2Ccontent%2Cproject%28shortName%29
+        method: POST
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"idReadable":"DEV-A-26","updated":1790233206934,"parentArticle":null,"childArticles":[],"created":1790233206934,"project":{"shortName":"DEV","$type":"Project"},"reporter":{"login":"admin","$type":"User"},"summary":"ytrack contract TestTagRemoveTakesATagOffAnArticleOfTheDevInstance","tags":[],"content":null,"$type":"Article"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 2
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            fields:
+                - idReadable
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles/DEV-A-26?fields=idReadable
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"idReadable":"DEV-A-26","$type":"Article"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 3
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            $top:
+                - "-1"
+            fields:
+                - id,name,owner(login)
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/tags?fields=id%2Cname%2Cowner%28login%29&%24top=-1
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '[{"owner":{"login":"admin","$type":"User"},"name":"эффективность","id":"10-0","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"совет","id":"10-1","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"Звезда","id":"10-2","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"история-полигона","id":"10-4","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagAddHangsATagOnAnIssueAndAnArticleOfTheDevInstance","id":"10-16","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagAddHangsTheTagAMemberOfThePolygonMayHang hangs","id":"10-18","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagAddHangsTheTagAMemberOfThePolygonMayHang shown","id":"10-19","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagRemoveTakesATagOffAnArticleOfTheDevInstance","id":"10-20","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagRemoveLeavesTheTagStandingOnTheDevInstance","id":"10-21","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagDeleteDestroysTheTagOfTheNamedOwnerOnTheDevInstance","id":"10-23","$type":"Tag"}]'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 4
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 14
+        host: localhost:8091
+        body: '{"id":"10-20"}'
+        form:
+            fields:
+                - id,name,owner(login)
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            Content-Length:
+                - "14"
+            Content-Type:
+                - application/json
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles/DEV-A-26/tags?fields=id%2Cname%2Cowner%28login%29
+        method: POST
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagRemoveTakesATagOffAnArticleOfTheDevInstance","id":"10-20","$type":"Tag"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 5
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            fields:
+                - idReadable
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles/DEV-A-26?fields=idReadable
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"idReadable":"DEV-A-26","$type":"Article"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 6
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            $top:
+                - "-1"
+            fields:
+                - id,name,owner(login)
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/tags?fields=id%2Cname%2Cowner%28login%29&%24top=-1
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '[{"owner":{"login":"admin","$type":"User"},"name":"эффективность","id":"10-0","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"совет","id":"10-1","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"Звезда","id":"10-2","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"история-полигона","id":"10-4","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagAddHangsATagOnAnIssueAndAnArticleOfTheDevInstance","id":"10-16","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagAddHangsTheTagAMemberOfThePolygonMayHang hangs","id":"10-18","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagAddHangsTheTagAMemberOfThePolygonMayHang shown","id":"10-19","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagRemoveTakesATagOffAnArticleOfTheDevInstance","id":"10-20","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagRemoveLeavesTheTagStandingOnTheDevInstance","id":"10-21","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagDeleteDestroysTheTagOfTheNamedOwnerOnTheDevInstance","id":"10-23","$type":"Tag"}]'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 7
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles/DEV-A-26/tags/10-20
+        method: DELETE
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        body: ""
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 8
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            fields:
+                - idReadable
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles/DEV-A-26?fields=idReadable
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"idReadable":"DEV-A-26","$type":"Article"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 9
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            $top:
+                - "-1"
+            fields:
+                - id,name,owner(login)
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/tags?fields=id%2Cname%2Cowner%28login%29&%24top=-1
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '[{"owner":{"login":"admin","$type":"User"},"name":"эффективность","id":"10-0","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"совет","id":"10-1","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"Звезда","id":"10-2","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"история-полигона","id":"10-4","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagAddHangsATagOnAnIssueAndAnArticleOfTheDevInstance","id":"10-16","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagAddHangsTheTagAMemberOfThePolygonMayHang hangs","id":"10-18","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagAddHangsTheTagAMemberOfThePolygonMayHang shown","id":"10-19","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagRemoveTakesATagOffAnArticleOfTheDevInstance","id":"10-20","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagRemoveLeavesTheTagStandingOnTheDevInstance","id":"10-21","$type":"Tag"}]'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 10
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles/DEV-A-26/tags/10-20
+        method: DELETE
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 74
+        body: '{"error":"Not Found","error_description":"Entity with id 10-20 not found"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Length:
+                - "74"
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 404 Not Found
+        code: 404
+        duration: 0s
+    - id: 11
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            $top:
+                - "50"
+            fields:
+                - name,owner(login),readSharingSettings(permittedGroups(name),permittedUsers(login))
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/tags?fields=name%2Cowner%28login%29%2CreadSharingSettings%28permittedGroups%28name%29%2CpermittedUsers%28login%29%29&%24top=50
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '[{"owner":{"login":"admin","$type":"User"},"readSharingSettings":{"permittedGroups":[],"permittedUsers":[],"$type":"WatchFolderSharingSettings"},"name":"эффективность","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"readSharingSettings":{"permittedGroups":[],"permittedUsers":[],"$type":"WatchFolderSharingSettings"},"name":"совет","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"readSharingSettings":{"permittedGroups":[],"permittedUsers":[],"$type":"WatchFolderSharingSettings"},"name":"Звезда","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"readSharingSettings":{"permittedGroups":[],"permittedUsers":[],"$type":"WatchFolderSharingSettings"},"name":"история-полигона","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"readSharingSettings":{"permittedGroups":[],"permittedUsers":[],"$type":"WatchFolderSharingSettings"},"name":"ytrack contract TestTagAddHangsATagOnAnIssueAndAnArticleOfTheDevInstance","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"readSharingSettings":{"permittedGroups":[{"name":"Участники полигона","$type":"NestedGroup"}],"permittedUsers":[],"$type":"WatchFolderSharingSettings"},"name":"ytrack contract TestTagAddHangsTheTagAMemberOfThePolygonMayHang hangs","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"readSharingSettings":{"permittedGroups":[],"permittedUsers":[],"$type":"WatchFolderSharingSettings"},"name":"ytrack contract TestTagRemoveTakesATagOffAnArticleOfTheDevInstance","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"readSharingSettings":{"permittedGroups":[],"permittedUsers":[],"$type":"WatchFolderSharingSettings"},"name":"ytrack contract TestTagRemoveLeavesTheTagStandingOnTheDevInstance","$type":"Tag"}]'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 12
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            fields:
+                - idReadable
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles/DEV-A-26?fields=idReadable
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"idReadable":"DEV-A-26","$type":"Article"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 13
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles/DEV-A-26
+        method: DELETE
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        body: ""
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 14
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            fields:
+                - idReadable,summary,reporter(login),created,updated,tags(name),parentArticle(idReadable,summary),childArticles(idReadable,summary),content
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/articles/DEV-A-26?fields=idReadable%2Csummary%2Creporter%28login%29%2Ccreated%2Cupdated%2Ctags%28name%29%2CparentArticle%28idReadable%2Csummary%29%2CchildArticles%28idReadable%2Csummary%29%2Ccontent
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 79
+        body: '{"error":"Not Found","error_description":"Can''t find article with id DEV-A-26"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Length:
+                - "79"
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 404 Not Found
+        code: 404
+        duration: 0s
+    - id: 15
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            $top:
+                - "-1"
+            fields:
+                - id,name,owner(login)
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/tags?fields=id%2Cname%2Cowner%28login%29&%24top=-1
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '[{"owner":{"login":"admin","$type":"User"},"name":"эффективность","id":"10-0","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"совет","id":"10-1","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"Звезда","id":"10-2","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"история-полигона","id":"10-4","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagAddHangsATagOnAnIssueAndAnArticleOfTheDevInstance","id":"10-16","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagRemoveTakesATagOffAnArticleOfTheDevInstance","id":"10-20","$type":"Tag"},{"owner":{"login":"admin","$type":"User"},"name":"ytrack contract TestTagRemoveLeavesTheTagStandingOnTheDevInstance","id":"10-21","$type":"Tag"}]'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 16
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/tags/10-20
+        method: DELETE
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        body: ""
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s

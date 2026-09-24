@@ -1,0 +1,114 @@
+---
+version: 2
+interactions:
+    - id: 0
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            $top:
+                - "-1"
+            fields:
+                - name,localizedName
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/admin/customFieldSettings/customFields?fields=name%2ClocalizedName&%24top=-1
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '[{"localizedName":"Приоритет","name":"Priority","$type":"CustomField"},{"localizedName":"Тип","name":"Type","$type":"CustomField"},{"localizedName":"Состояние","name":"State","$type":"CustomField"},{"localizedName":"Исполнитель","name":"Assignee","$type":"CustomField"},{"localizedName":"Подсистема","name":"Subsystem","$type":"CustomField"},{"localizedName":"Версии исправления","name":"Fix versions","$type":"CustomField"},{"localizedName":"Затронутые версии","name":"Affected versions","$type":"CustomField"},{"localizedName":"Исправлено в сборке","name":"Fixed in build","$type":"CustomField"},{"localizedName":"Срок","name":"Due Date","$type":"CustomField"},{"localizedName":null,"name":"Оценка","$type":"CustomField"},{"localizedName":null,"name":"Затраченное время","$type":"CustomField"},{"localizedName":null,"name":"Категория","$type":"CustomField"},{"localizedName":null,"name":"Клиент","$type":"CustomField"},{"localizedName":null,"name":"Модуль системы","$type":"CustomField"},{"localizedName":null,"name":"Система","$type":"CustomField"},{"localizedName":null,"name":"Статус разработки","$type":"CustomField"},{"localizedName":null,"name":"Статус анализа","$type":"CustomField"},{"localizedName":null,"name":"Причина отклонения","$type":"CustomField"},{"localizedName":null,"name":"Плановый спринт","$type":"CustomField"},{"localizedName":null,"name":"Релиз","$type":"CustomField"},{"localizedName":null,"name":"Подсистемы","$type":"CustomField"},{"localizedName":null,"name":"Сборки","$type":"CustomField"},{"localizedName":null,"name":"Соисполнители","$type":"CustomField"},{"localizedName":null,"name":"Группа доступа","$type":"CustomField"},{"localizedName":null,"name":"Группы доступа","$type":"CustomField"},{"localizedName":null,"name":"Плановая дата решения","$type":"CustomField"},{"localizedName":null,"name":"Дата начала работы","$type":"CustomField"},{"localizedName":null,"name":"Порядок реализации","$type":"CustomField"},{"localizedName":null,"name":"Коэффициент","$type":"CustomField"},{"localizedName":null,"name":"Внешний номер","$type":"CustomField"},{"localizedName":null,"name":"Примечание","$type":"CustomField"}]'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - dev.member
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 1
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            customFields:
+                - State
+                - Причина отклонения
+            fields:
+                - customFields(name,value(name,login,minutes,text),projectCustomField(id,ordinal,field(fieldType(valueType,isMultiValue))))
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/issues/DEV-2?fields=customFields%28name%2Cvalue%28name%2Clogin%2Cminutes%2Ctext%29%2CprojectCustomField%28id%2Cordinal%2Cfield%28fieldType%28valueType%2CisMultiValue%29%29%29%29&customFields=State&customFields=%D0%9F%D1%80%D0%B8%D1%87%D0%B8%D0%BD%D0%B0+%D0%BE%D1%82%D0%BA%D0%BB%D0%BE%D0%BD%D0%B5%D0%BD%D0%B8%D1%8F
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"customFields":[{"projectCustomField":{"ordinal":8,"field":{"fieldType":{"valueType":"state","isMultiValue":false,"$type":"FieldType"},"$type":"CustomField"},"id":"180-14","$type":"StateProjectCustomField"},"value":{"name":"Отклонена","$type":"StateBundleElement"},"name":"State","$type":"StateIssueCustomField"},{"projectCustomField":{"ordinal":9,"field":{"fieldType":{"valueType":"enum","isMultiValue":false,"$type":"FieldType"},"$type":"CustomField"},"id":"180-23","$type":"EnumProjectCustomField"},"value":null,"name":"Причина отклонения","$type":"SingleEnumIssueCustomField"}],"$type":"Issue"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - dev.member
+        status: 200 OK
+        code: 200
+        duration: 0s

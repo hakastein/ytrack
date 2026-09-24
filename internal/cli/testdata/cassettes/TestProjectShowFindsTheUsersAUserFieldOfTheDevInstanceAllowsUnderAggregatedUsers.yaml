@@ -1,0 +1,56 @@
+---
+version: 2
+interactions:
+    - id: 0
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            fields:
+                - customFields(field(name),bundle(values(name),aggregatedUsers(login)))
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/admin/projects/DEV?fields=customFields%28field%28name%29%2Cbundle%28values%28name%29%2CaggregatedUsers%28login%29%29%29
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"customFields":[{"bundle":{"values":[{"name":"In Progress","$type":"StateBundleElement"},{"name":"Done","$type":"StateBundleElement"},{"name":"Duplicate","$type":"StateBundleElement"},{"name":"Новая","$type":"StateBundleElement"},{"name":"Отклонена","$type":"StateBundleElement"},{"name":"Закрыта","$type":"StateBundleElement"},{"name":"Готова к работе","$type":"StateBundleElement"},{"name":"На проверке","$type":"StateBundleElement"},{"name":"На приёмке","$type":"StateBundleElement"},{"name":"Уточнение","$type":"StateBundleElement"},{"name":"Отложено","$type":"StateBundleElement"}],"$type":"StateBundle"},"field":{"name":"State","$type":"CustomField"},"$type":"StateProjectCustomField"},{"bundle":{"values":[{"name":"Bug","$type":"EnumBundleElement"},{"name":"Epic","$type":"EnumBundleElement"},{"name":"User Story","$type":"EnumBundleElement"},{"name":"Task","$type":"EnumBundleElement"},{"name":"Инцидент","$type":"EnumBundleElement"}],"$type":"EnumBundle"},"field":{"name":"Type","$type":"CustomField"},"$type":"EnumProjectCustomField"},{"bundle":{"values":[{"name":"Critical","$type":"EnumBundleElement"},{"name":"Blocked","$type":"EnumBundleElement"},{"name":"Medium","$type":"EnumBundleElement"},{"name":"Low","$type":"EnumBundleElement"}],"$type":"EnumBundle"},"field":{"name":"Priority","$type":"CustomField"},"$type":"EnumProjectCustomField"},{"bundle":{"values":[{"name":"Продукт","$type":"EnumBundleElement"},{"name":"Сопровождение","$type":"EnumBundleElement"},{"name":"Развитие технологий","$type":"EnumBundleElement"},{"name":"Global","$type":"EnumBundleElement"},{"name":"Внедрение","$type":"EnumBundleElement"},{"name":"Разработчики","$type":"EnumBundleElement"}],"$type":"EnumBundle"},"field":{"name":"Категория","$type":"CustomField"},"$type":"EnumProjectCustomField"},{"bundle":{"values":[{"name":"ACME","$type":"EnumBundleElement"},{"name":"АЛЬФА","$type":"EnumBundleElement"},{"name":"Бета-Девелопмент","$type":"EnumBundleElement"},{"name":"ГАММА","$type":"EnumBundleElement"},{"name":"ООО \"РОМАШКА\"","$type":"EnumBundleElement"},{"name":"NORTH WIND","$type":"EnumBundleElement"}],"$type":"EnumBundle"},"field":{"name":"Клиент","$type":"CustomField"},"$type":"EnumProjectCustomField"},{"bundle":{"values":[{"name":"Инфраструктура. DevOps","$type":"EnumBundleElement"},{"name":"Бэкенд. API","$type":"EnumBundleElement"},{"name":"Бэкенд. Очереди","$type":"EnumBundleElement"},{"name":"Фронтенд. Веб","$type":"EnumBundleElement"},{"name":"Фронтенд. Мобильный","$type":"EnumBundleElement"}],"$type":"EnumBundle"},"field":{"name":"Модуль системы","$type":"CustomField"},"$type":"EnumProjectCustomField"},{"bundle":{"values":[{"name":"Бэкенд","$type":"EnumBundleElement"},{"name":"Фронтенд","$type":"EnumBundleElement"},{"name":"Сайт","$type":"EnumBundleElement"},{"name":"Инфраструктура","$type":"EnumBundleElement"},{"name":"Платформа","$type":"EnumBundleElement"}],"$type":"EnumBundle"},"field":{"name":"Система","$type":"CustomField"},"$type":"EnumProjectCustomField"},{"bundle":{"values":[{"name":"Передано в разработку","$type":"StateBundleElement"},{"name":"В разработке","$type":"StateBundleElement"},{"name":"Ревью","$type":"StateBundleElement"},{"name":"Готово к слиянию","$type":"StateBundleElement"},{"name":"Тестирование ветки","$type":"StateBundleElement"},{"name":"Готова к выпуску","$type":"StateBundleElement"},{"name":"Приёмочные тесты","$type":"StateBundleElement"},{"name":"На уточнении","$type":"StateBundleElement"},{"name":"Готова","$type":"StateBundleElement"},{"name":"Отложена","$type":"StateBundleElement"},{"name":"Требуются доработки","$type":"StateBundleElement"},{"name":"Нужен реквеcт на выпуск","$type":"StateBundleElement"},{"name":"Выпущена","$type":"StateBundleElement"},{"name":"Нужен MR в релиз","$type":"StateBundleElement"},{"name":"Готова к релизу","$type":"StateBundleElement"},{"name":"Релизные тесты","$type":"StateBundleElement"},{"name":"Провалена","$type":"StateBundleElement"},{"name":"Deploy","$type":"StateBundleElement"}],"$type":"StateBundle"},"field":{"name":"Статус разработки","$type":"CustomField"},"$type":"StateProjectCustomField"},{"bundle":{"values":[{"name":"Подготовка решения","$type":"StateBundleElement"},{"name":"Подготовка ТЗ","$type":"StateBundleElement"},{"name":"Оценка решения","$type":"StateBundleElement"},{"name":"Решение согласовано","$type":"StateBundleElement"},{"name":"Готово к разработке","$type":"StateBundleElement"},{"name":"На рассмотрении","$type":"StateBundleElement"},{"name":"Готово к передаче","$type":"StateBundleElement"},{"name":"Отклонено","$type":"StateBundleElement"},{"name":"Реализовано","$type":"StateBundleElement"},{"name":"Бэклог спринта","$type":"StateBundleElement"}],"$type":"StateBundle"},"field":{"name":"Статус анализа","$type":"CustomField"},"$type":"StateProjectCustomField"},{"bundle":{"values":[{"name":"Дубль","$type":"EnumBundleElement"},{"name":"Не воспроизводится","$type":"EnumBundleElement"},{"name":"Не наш модуль","$type":"EnumBundleElement"},{"name":"Передумали","$type":"EnumBundleElement"}],"$type":"EnumBundle"},"field":{"name":"Причина отклонения","$type":"CustomField"},"$type":"EnumProjectCustomField"},{"bundle":{"values":[{"name":"SPR-78","$type":"VersionBundleElement"},{"name":"SPR-24","$type":"VersionBundleElement"},{"name":"SPR-51","$type":"VersionBundleElement"},{"name":"SPR-52","$type":"VersionBundleElement"},{"name":"SPR-92","$type":"VersionBundleElement"},{"name":"SPR-93","$type":"VersionBundleElement"}],"$type":"VersionBundle"},"field":{"name":"Плановый спринт","$type":"CustomField"},"$type":"VersionProjectCustomField"},{"bundle":{"values":[{"name":"2026.1","$type":"VersionBundleElement"},{"name":"2026.2","$type":"VersionBundleElement"}],"$type":"VersionBundle"},"field":{"name":"Релиз","$type":"CustomField"},"$type":"VersionProjectCustomField"},{"bundle":{"values":[{"name":"Ядро","$type":"OwnedBundleElement"},{"name":"Отчёты","$type":"OwnedBundleElement"},{"name":"Интеграции","$type":"OwnedBundleElement"}],"$type":"OwnedBundle"},"field":{"name":"Subsystem","$type":"CustomField"},"$type":"OwnedProjectCustomField"},{"bundle":{"values":[{"name":"Биллинг","$type":"OwnedBundleElement"},{"name":"Уведомления","$type":"OwnedBundleElement"}],"$type":"OwnedBundle"},"field":{"name":"Подсистемы","$type":"CustomField"},"$type":"OwnedProjectCustomField"},{"bundle":{"values":[{"name":"13757","$type":"BuildBundleElement"},{"name":"13874","$type":"BuildBundleElement"}],"$type":"BuildBundle"},"field":{"name":"Fixed in build","$type":"CustomField"},"$type":"BuildProjectCustomField"},{"bundle":{"values":[{"name":"2026.1.1","$type":"BuildBundleElement"},{"name":"2026.1.2","$type":"BuildBundleElement"}],"$type":"BuildBundle"},"field":{"name":"Сборки","$type":"CustomField"},"$type":"BuildProjectCustomField"},{"bundle":{"aggregatedUsers":[{"login":"admin","$type":"User"}],"values":[{"name":"DEVELOPMENT Team","$type":"ProjectTeam"}],"$type":"UserBundle"},"field":{"name":"Assignee","$type":"CustomField"},"$type":"UserProjectCustomField"},{"bundle":{"aggregatedUsers":[],"values":[],"$type":"UserBundle"},"field":{"name":"Соисполнители","$type":"CustomField"},"$type":"UserProjectCustomField"},{"field":{"name":"Оценка","$type":"CustomField"},"$type":"PeriodProjectCustomField"},{"field":{"name":"Затраченное время","$type":"CustomField"},"$type":"PeriodProjectCustomField"},{"field":{"name":"Примечание","$type":"CustomField"},"$type":"TextProjectCustomField"},{"field":{"name":"Группа доступа","$type":"CustomField"},"$type":"GroupProjectCustomField"},{"field":{"name":"Группы доступа","$type":"CustomField"},"$type":"GroupProjectCustomField"},{"field":{"name":"Плановая дата решения","$type":"CustomField"},"$type":"SimpleProjectCustomField"},{"field":{"name":"Дата начала работы","$type":"CustomField"},"$type":"SimpleProjectCustomField"},{"field":{"name":"Порядок реализации","$type":"CustomField"},"$type":"SimpleProjectCustomField"},{"field":{"name":"Коэффициент","$type":"CustomField"},"$type":"SimpleProjectCustomField"},{"field":{"name":"Внешний номер","$type":"CustomField"},"$type":"SimpleProjectCustomField"}],"$type":"Project"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s

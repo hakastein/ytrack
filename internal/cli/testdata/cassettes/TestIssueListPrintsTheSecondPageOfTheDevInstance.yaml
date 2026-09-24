@@ -1,0 +1,178 @@
+---
+version: 2
+interactions:
+    - id: 0
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 65
+        host: localhost:8091
+        body: '{"query":"issue id: DEV-1, DEV-2, DEV-3 sort by: {issue id} asc"}'
+        form:
+            fields:
+                - query,styleRanges(start,length,style)
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            Content-Length:
+                - "65"
+            Content-Type:
+                - application/json
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/search/assist?fields=query%2CstyleRanges%28start%2Clength%2Cstyle%29
+        method: POST
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"styleRanges":[{"start":0,"style":"field-name","length":8,"$type":"SearchStyleRange"},{"start":10,"style":"field-value","length":5,"$type":"SearchStyleRange"},{"start":17,"style":"field-value","length":5,"$type":"SearchStyleRange"},{"start":24,"style":"field-value","length":5,"$type":"SearchStyleRange"},{"start":30,"style":"field-name","length":7,"$type":"SearchStyleRange"},{"start":40,"style":"field-value","length":8,"$type":"SearchStyleRange"},{"start":50,"style":"field-name","length":3,"$type":"SearchStyleRange"}],"query":"issue id: DEV-1, DEV-2, DEV-3 sort by: {issue id} asc","$type":"SearchSuggestions"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 1
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 0
+        host: localhost:8091
+        form:
+            $skip:
+                - "1"
+            $top:
+                - "1"
+            fields:
+                - idReadable
+            query:
+                - 'issue id: DEV-1, DEV-2, DEV-3 sort by: {issue id} asc'
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/issues?query=issue+id%3A+DEV-1%2C+DEV-2%2C+DEV-3+sort+by%3A+%7Bissue+id%7D+asc&fields=idReadable&%24skip=1&%24top=1
+        method: GET
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '[{"idReadable":"DEV-2","$type":"Issue"}]'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s
+    - id: 2
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 65
+        host: localhost:8091
+        body: '{"query":"issue id: DEV-1, DEV-2, DEV-3 sort by: {issue id} asc"}'
+        form:
+            fields:
+                - count
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            Content-Length:
+                - "65"
+            Content-Type:
+                - application/json
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/issuesGetter/count?fields=count
+        method: POST
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: -1
+        uncompressed: true
+        body: '{"count":3,"$type":"IssueCountResponse"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            Vary:
+                - Accept-Encoding, User-Agent
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 200 OK
+        code: 200
+        duration: 0s

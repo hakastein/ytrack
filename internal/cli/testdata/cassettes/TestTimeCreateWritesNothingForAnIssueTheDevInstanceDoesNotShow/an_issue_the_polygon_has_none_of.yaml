@@ -1,0 +1,60 @@
+---
+version: 2
+interactions:
+    - id: 0
+      request:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 27
+        host: localhost:8091
+        body: '{"duration":{"minutes":60}}'
+        form:
+            fields:
+                - id,duration(minutes),type(name),attributes(id,name,value(id,name)),author(login),date,issue(idReadable,customFields(name,value(name,login,minutes,text),projectCustomField(id,ordinal,field(fieldType(valueType,isMultiValue))))),text
+        headers:
+            Accept:
+                - application/json
+            Connection:
+                - close
+            Content-Length:
+                - "27"
+            Content-Type:
+                - application/json
+            User-Agent:
+                - Go-http-client/1.1
+        url: http://localhost:8091/api/issues/DEV-99999/timeTracking/workItems?fields=id%2Cduration%28minutes%29%2Ctype%28name%29%2Cattributes%28id%2Cname%2Cvalue%28id%2Cname%29%29%2Cauthor%28login%29%2Cdate%2Cissue%28idReadable%2CcustomFields%28name%2Cvalue%28name%2Clogin%2Cminutes%2Ctext%29%2CprojectCustomField%28id%2Cordinal%2Cfield%28fieldType%28valueType%2CisMultiValue%29%29%29%29%29%2Ctext
+        method: POST
+      response:
+        proto: HTTP/1.1
+        proto_major: 1
+        proto_minor: 1
+        content_length: 78
+        body: '{"error":"Not Found","error_description":"Entity with id DEV-99999 not found"}'
+        headers:
+            Access-Control-Expose-Headers:
+                - Location
+                - X-Version
+            Cache-Control:
+                - no-cache, no-store, no-transform, must-revalidate
+            Content-Length:
+                - "78"
+            Content-Security-Policy:
+                - frame-ancestors 'self';
+            Content-Type:
+                - application/json;charset=utf-8
+            Referrer-Policy:
+                - same-origin
+            Server:
+                - YouTrack
+            X-Content-Type-Options:
+                - nosniff
+            X-Frame-Options:
+                - SAMEORIGIN
+            X-Xss-Protection:
+                - 1; mode=block
+            X-Youtrack-User:
+                - admin
+        status: 404 Not Found
+        code: 404
+        duration: 0s
