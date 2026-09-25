@@ -50,6 +50,7 @@ status: accepted, implemented
 
 - От сгенерированного клиента остаётся поверхность операций, но не тела
   ([ADR-0004](0004-the-generator-owns-the-operation-surface.md), [ADR-0006](0006-packages-and-the-entry-point.md)).
-- Компилятор не проверяет тела. Опечатку в имени поля ловят контрактные тесты против живого инстанса.
+- Компилятор не проверяет тела. Опечатку в имени поля видно только против инстанса: её ловят проверка записи и
+  проверка ответа ([ADR-0007](0007-missing-fields-are-checked-by-server-type.md)).
 - Своё правило чтения ([ADR-0007](0007-missing-fields-are-checked-by-server-type.md)) осталось только у `field`
   активности.
