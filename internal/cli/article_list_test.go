@@ -53,7 +53,7 @@ func TestArticleListSendsTheSearchAsWritten(t *testing.T) {
 
 	want := "total: 1\nreturned: 1\ntruncated: false\narticles:\n" + printedParentRow
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet}, server.Methods())
 	assert.Equal(t, []string{"/api/articles"}, server.Paths())
 	assert.Equal(t, []url.Values{{"fields": {articleListFields}, "$top": {"50"}, "query": {search}}}, server.Queries())
 }

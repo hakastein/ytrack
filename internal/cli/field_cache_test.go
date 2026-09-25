@@ -23,8 +23,8 @@ func typeOnlyProject(t *testing.T) *fake.Server {
 		fake.JSON(http.StatusOK, oneField("Type", "Kind", false)))
 }
 
-func atHome(u *fake.Server, home string) []string {
-	return append(u.Env(), "HOME="+home)
+func atHome(server *fake.Server, home string) []string {
+	return append(server.Env(), "HOME="+home)
 }
 
 func TestFieldShowTakesTheMetadataTheRunBeforeLeftOnDisk(t *testing.T) {
@@ -71,14 +71,19 @@ func TestFieldShowWritesTheCacheUnderTheYtrackDirectoryOfHome(t *testing.T) {
 	got := runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
 
 	require.Equal(t, outcome{stdout: printedEnumType}, got)
-	var files []string
+	assert.Equal(t, []string{filepath.Join(".ytrack", "cache")}, cacheRootsOfFilesUnder(t, home))
+}
+
+func cacheRootsOfFilesUnder(t *testing.T, home string) []string {
+	t.Helper()
+	var roots []string
 	require.NoError(t, filepath.WalkDir(home, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err
 		}
 		relative, err := filepath.Rel(home, path)
-		files = append(files, filepath.Dir(filepath.Dir(relative)))
+		roots = append(roots, filepath.Dir(filepath.Dir(relative)))
 		return err
 	}))
-	assert.Equal(t, []string{filepath.Join(".ytrack", "cache")}, files)
+	return roots
 }

@@ -39,13 +39,6 @@ func shownTags() http.HandlerFunc {
 	return fake.JSON(http.StatusOK, tagsOfTwoOwners())
 }
 
-func noTagging(t *testing.T) http.HandlerFunc {
-	t.Helper()
-	return func(_ http.ResponseWriter, r *http.Request) {
-		assert.Fail(t, "a tagging reached the server", "%s %s", r.Method, r.URL)
-	}
-}
-
 func TestTagAddRefusesAnEmptyName(t *testing.T) {
 	t.Parallel()
 	server := fake.ServeNothing(t)
@@ -65,12 +58,12 @@ func TestTagAddReadsTheOwnerThenResolvesTheNameThenWrites(t *testing.T) {
 
 	want := "idReadable: \"DEV-7\"\n" + "added:\n  name: \"Ready\"\n  owner:\n    login: \"first\"\n"
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []string{http.MethodGet, http.MethodGet, http.MethodPost}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet, http.MethodGet, http.MethodPost}, server.Methods())
 	assert.Equal(t, []string{
 		"/api/issues/dev-7?fields=" + taggedOwnerFields,
 		tagsCollection + "?fields=" + resolvedTagFields + "&$top=-1",
 		tagsOfOwnerPath("issues", "DEV-7") + "?fields=" + resolvedTagFields,
-	}, server.Targets())
+	}, server.Targets(t))
 	assert.Equal(t, []string{"", "", `{"id":"10-5"}`}, server.Bodies(),
 		"the server answers 400 to a body with the name")
 }
@@ -113,12 +106,12 @@ func TestTagAddRefusesWhatTheReadsBeforeTheWriteDoNotAllow(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := addingATag(t, fake.JSON(http.StatusOK, tc.owner), shownTags(), noTagging(t))
+			server := addingATag(t, fake.JSON(http.StatusOK, tc.owner), shownTags(), fake.Unexpected(t))
 
 			got := runWith(t, server.Env(), "tag", "add", "DEV-7", "--name", tc.written)
 
 			assert.Equal(t, tc.want(server.URL), requireFault(t, got))
-			assert.Equal(t, tc.methods, sentMethods(server))
+			assert.Equal(t, tc.methods, server.Methods())
 		})
 	}
 }

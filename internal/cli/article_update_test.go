@@ -48,7 +48,7 @@ func TestArticleUpdateWritesTheArticleTheReadFound(t *testing.T) {
 		"--fields", "idReadable,summary")
 
 	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-A-7\"\nsummary: \"Title\"\n"}, got)
-	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, server.Methods())
 	assert.Equal(t, []string{"/api/articles/DEV-A-7", "/api/articles/DEV-A-7"}, server.Paths())
 	assert.Equal(t, map[string]any{"content": hostileText}, server.LastJSON(t))
 }
@@ -76,7 +76,7 @@ func TestArticleUpdateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 func TestArticleUpdateRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 	t.Parallel()
 	const body = `{"$type":"Article","id":"177-7","idReadable":"..","project":{"$type":"Project","shortName":"DEV"}}`
-	server := updatingAnArticle(t, fake.JSON(http.StatusOK, body), noUpdate(t))
+	server := updatingAnArticle(t, fake.JSON(http.StatusOK, body), fake.Unexpected(t))
 
 	got := runWith(t, server.Env(), "article", "update", "DEV-A-7", "--summary", "x")
 
@@ -89,5 +89,5 @@ func TestArticleUpdateRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet}, server.Methods())
 }

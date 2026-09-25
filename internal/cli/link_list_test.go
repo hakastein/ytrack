@@ -40,7 +40,7 @@ func TestLinkListPrintsThePhrasesOfAnIssueInTheOrderReceived(t *testing.T) {
 		"  \"needs\":\n    - {idReadable: \"DEV-3\", summary: \"Third\"}\n" +
 		"  \"ties\":\n    - {idReadable: \"DEV-9\", summary: \"Ninth\"}\n" +
 		"    - {idReadable: \"DEV-2\", summary: \"Second\"}\n"}, got)
-	assert.Equal(t, []string{"/api/issues/DEV-1?fields=" + linkListFields(linkListTarget)}, server.Targets())
+	assert.Equal(t, []string{"/api/issues/DEV-1?fields=" + linkListFields(linkListTarget)}, server.Targets(t))
 }
 
 func TestLinkListRefusesACountBelowNone(t *testing.T) {

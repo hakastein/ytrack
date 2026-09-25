@@ -3,12 +3,10 @@ package cli_test
 import (
 	"net/http"
 	"net/url"
-	"slices"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"go.yaml.in/yaml/v3"
 
 	"github.com/hakastein/ytrack/internal/fake"
 )
@@ -64,16 +62,6 @@ func countHandler(count string) http.HandlerFunc {
 	return fake.JSON(http.StatusOK, `{"$type":"IssueCountResponse","count":`+count+`}`)
 }
 
-func sentTo(server *fake.Server, path string) int {
-	sent := 0
-	for _, p := range server.Paths() {
-		if p == path {
-			sent++
-		}
-	}
-	return sent
-}
-
 func TestIssueListTakesItsSearchFromTheQueryFlagAlone(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -122,12 +110,4 @@ func TestIssueListPrintsTheIssuesTheSearchFinds(t *testing.T) {
 		"fields":       {sentIssueListFields},
 		"$top":         {"3"},
 	}, server.Request(t, 1).URL.Query())
-}
-
-func recordKeys(record *yaml.Node) []string {
-	var keys []string
-	for pair := range slices.Chunk(record.Content, 2) {
-		keys = append(keys, pair[0].Value)
-	}
-	return keys
 }

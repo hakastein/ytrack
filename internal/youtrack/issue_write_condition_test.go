@@ -92,7 +92,7 @@ func TestCreateIssueNamesEveryRequiredFieldItLeavesEmpty(t *testing.T) {
 			want := diag.Fault{Code: diag.MissingRequired, Details: []render.Pair{
 				writtenMetadataRequest(server), writtenProjectDetail(), {Key: "missing", Value: texts(tc.missing...)},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 			assert.Equal(t, []string{writtenProjectPath}, server.Paths())
 		})
 	}
@@ -185,7 +185,7 @@ func TestCreateIssueRefusesAValueAConditionHides(t *testing.T) {
 
 			_, fault := callOn(t, server)(youtrack.CreateIssue("DEV", "First", nil, append(tc.filled, "Shown=First"), nil))
 
-			kept, invalid := issueWriteRefusal(t, fault)
+			kept, invalid := issueWriteFault(t, fault)
 			assert.Equal(t, diag.Fault{Code: diag.BadUsage, Details: []render.Pair{
 				writtenMetadataRequest(server), writtenProjectDetail(), {Key: "invalid"},
 			}}, kept)
@@ -288,6 +288,6 @@ func TestUpdateIssueRefusesToEmptyAFieldTheProjectRequires(t *testing.T) {
 	want := diag.Fault{Code: diag.MissingRequired, Details: []render.Pair{
 		writtenReadRequest(server), writtenProjectDetail(), {Key: "missing", Value: texts("First", "Second")},
 	}}
-	assert.Equal(t, want, refusal(t, fault))
+	assert.Equal(t, want, faultOf(t, fault))
 	assert.Equal(t, []string{writtenIssuePath}, server.Paths())
 }

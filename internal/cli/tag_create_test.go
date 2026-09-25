@@ -53,7 +53,7 @@ func TestTagCreatePrintsTheTagTheServerMade(t *testing.T) {
 		"updateSharingSettings:\n  permittedGroups: []\n  permittedUsers: []\n" +
 		"tagSharingSettings:\n  permittedGroups: []\n  permittedUsers: []\n"
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []string{"/api/tags?fields=" + createdTagFields}, server.Targets())
+	assert.Equal(t, []string{"/api/tags?fields=" + createdTagFields}, server.Targets(t))
 	assert.Equal(t, []string{`{"name":"[bug] fix login"}`}, server.Bodies())
 }
 

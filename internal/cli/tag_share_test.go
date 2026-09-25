@@ -1,7 +1,6 @@
 package cli_test
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -78,13 +77,6 @@ func sharingATag(t *testing.T, catalogue string, creation http.HandlerFunc) *fak
 	})
 }
 
-func sentBody(t *testing.T, u *fake.Server) map[string]any {
-	t.Helper()
-	var body map[string]any
-	require.NoError(t, json.Unmarshal([]byte(u.Last(t).Body), &body))
-	return body
-}
-
 func TestTagCreateWritesTheGroupOfEachFlagToItsSet(t *testing.T) {
 	t.Parallel()
 	server := sharingATag(t, groupsOfTheInstance(), fake.JSON(http.StatusOK, sharedTagOf("Early",
@@ -96,19 +88,19 @@ func TestTagCreateWritesTheGroupOfEachFlagToItsSet(t *testing.T) {
 		"--visible-for", "First", "--updateable-by", "Second", "--taggable-by", "Third")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, server.Methods())
 	assert.Equal(t, []string{"/api/groups", "/api/tags"}, server.Paths())
 	assert.Equal(t, map[string]any{
 		"name":                  "Early",
 		"readSharingSettings":   map[string]any{"permittedGroups": []any{map[string]any{"id": "6-1"}}},
 		"updateSharingSettings": map[string]any{"permittedGroups": []any{map[string]any{"id": "6-2"}}},
 		"tagSharingSettings":    map[string]any{"permittedGroups": []any{map[string]any{"id": "6-3"}}},
-	}, sentBody(t, server))
+	}, server.LastJSON(t))
 }
 
 func TestTagCreateRefusesEveryGroupItCannotResolveAtOnce(t *testing.T) {
 	t.Parallel()
-	server := sharingATag(t, groupsOfTheInstance(), noCreation(t))
+	server := sharingATag(t, groupsOfTheInstance(), fake.Unexpected(t))
 
 	got := runWith(t, server.Env(), "tag", "create", "--name", "Early",
 		"--visible-for", "Nobody", "--updateable-by", "None")
@@ -124,13 +116,13 @@ func TestTagCreateRefusesEveryGroupItCannotResolveAtOnce(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet}, server.Methods())
 }
 
 func TestTagCreateRefusesAGroupIDItCannotShareTheTagBy(t *testing.T) {
 	t.Parallel()
 	catalogue := "[" + catalogueGroup("..", "First", "UserGroup") + "]"
-	server := sharingATag(t, catalogue, noCreation(t))
+	server := sharingATag(t, catalogue, fake.Unexpected(t))
 
 	got := runWith(t, server.Env(), "tag", "create", "--name", "Early", "--visible-for", "First")
 
@@ -143,6 +135,6 @@ func TestTagCreateRefusesAGroupIDItCannotShareTheTagBy(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(server),
+	assert.Equal(t, []string{http.MethodGet}, server.Methods(),
 		"the server answers a malformed id with 400 that does not say where the id came from")
 }

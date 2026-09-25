@@ -64,17 +64,6 @@ func TestAttachmentCreateRefusesAPathThatIsNoRegularFile(t *testing.T) {
 			name: "a file nobody wrote",
 			path: func(t *testing.T) string { return filepath.Join(t.TempDir(), "nothing.txt") },
 		},
-		{
-			name: "a file the caller may not read",
-			path: func(t *testing.T) string {
-				if os.Geteuid() == 0 {
-					t.Skip("root reads a file of any mode")
-				}
-				path := fileWith(t, "locked.txt", []byte("x"))
-				require.NoError(t, os.Chmod(path, 0o000))
-				return path
-			},
-		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -88,6 +77,21 @@ func TestAttachmentCreateRefusesAPathThatIsNoRegularFile(t *testing.T) {
 			assert.Empty(t, server.Requests())
 		})
 	}
+}
+
+func TestAttachmentCreateRefusesAFileTheCallerMayNotRead(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a file of any mode")
+	}
+	t.Parallel()
+	server := fake.ServeNothing(t)
+	path := fileWith(t, "locked.txt", []byte("x"))
+	require.NoError(t, os.Chmod(path, 0o000))
+
+	got := runWith(t, server.Env(), "attachment", "create", "DEV-1", path)
+
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+	assert.Empty(t, server.Requests())
 }
 
 func TestAttachmentCreateReadsALoneDashAsAFileOfThatName(t *testing.T) {
@@ -134,8 +138,8 @@ func TestAttachmentCreateSendsTheFileAndPrintsTheAttachment(t *testing.T) {
 	want := `id: "12-9"` + "\n" + `name: "one.bin"` + "\nsize: 6\n" + `mimeType: "application/octet-stream"` + "\n" +
 		`url: "` + server.Origin + `/api/files/12-9?sign=s&updated=1"` + "\n"
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []string{http.MethodPost}, sentMethods(server))
-	assert.Equal(t, []string{"/api/issues/DEV-1/attachments?fields=" + attachmentFields}, server.Targets())
+	assert.Equal(t, []string{http.MethodPost}, server.Methods())
+	assert.Equal(t, []string{"/api/issues/DEV-1/attachments?fields=" + attachmentFields}, server.Targets(t))
 	assert.Equal(t, formPart{
 		field:       uploadedField,
 		file:        name,

@@ -46,8 +46,8 @@ func TestIssueDeleteReadsTheIDAndDeletesByIt(t *testing.T) {
 	got := runWith(t, server.Env(), "issue", "delete", "dev-7")
 
 	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-7\"\n"}, got)
-	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
-	assert.Equal(t, []string{"/api/issues/dev-7?fields=" + deletedFields, "/api/issues/DEV-7?"}, server.Targets())
+	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, server.Methods())
+	assert.Equal(t, []string{"/api/issues/dev-7?fields=" + deletedFields, "/api/issues/DEV-7?"}, server.Targets(t))
 	assert.Equal(t, "Bearer "+fake.Token, server.Last(t).Header.Get("Authorization"))
 	assert.Equal(t, []string{"", ""}, server.Bodies())
 }
@@ -68,13 +68,5 @@ func TestIssueDeleteRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
-}
-
-func sentMethods(u *fake.Server) []string {
-	var methods []string
-	for _, request := range u.Requests() {
-		methods = append(methods, request.Method)
-	}
-	return methods
+	assert.Equal(t, []string{http.MethodGet}, server.Methods())
 }

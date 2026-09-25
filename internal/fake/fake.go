@@ -175,6 +175,22 @@ func (s *Server) LastJSON(t *testing.T) map[string]any {
 	return body
 }
 
+func (s *Server) Methods() []string {
+	var methods []string
+	for _, r := range s.Requests() {
+		methods = append(methods, r.Method)
+	}
+	return methods
+}
+
+func (s *Server) Routes() []string {
+	var routes []string
+	for _, r := range s.Requests() {
+		routes = append(routes, r.Method+" "+r.URL.Path)
+	}
+	return routes
+}
+
 func (s *Server) Paths() []string {
 	var paths []string
 	for _, r := range s.Requests() {
@@ -199,13 +215,12 @@ func (s *Server) Queries() []url.Values {
 	return queries
 }
 
-func (s *Server) Targets() []string {
+func (s *Server) Targets(t *testing.T) []string {
+	t.Helper()
 	var targets []string
 	for _, r := range s.Requests() {
 		query, err := url.QueryUnescape(r.URL.RawQuery)
-		if err != nil {
-			query = r.URL.RawQuery
-		}
+		require.NoError(t, err, "the query of %s %s", r.Method, r.URL)
 		targets = append(targets, r.URL.Path+"?"+query)
 	}
 	return targets
@@ -236,11 +251,11 @@ func Searching(t *testing.T, handler http.HandlerFunc) http.HandlerFunc {
 			handler(w, r)
 			return
 		}
-		JSON(http.StatusOK, Markup(t, SearchOf(t, r)))(w, r)
+		JSON(http.StatusOK, Markup(t, searchOf(t, r)))(w, r)
 	}
 }
 
-func SearchOf(t *testing.T, r *http.Request) string {
+func searchOf(t *testing.T, r *http.Request) string {
 	t.Helper()
 	body, err := io.ReadAll(r.Body)
 	assert.NoError(t, err)

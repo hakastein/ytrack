@@ -85,7 +85,7 @@ func TestCreateAttachmentRefusesANameTheServerWouldKeepAsAnother(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			_, fault := youtrack.CreateAttachment("DEV-1", attachmentFile(tc.file, "x"), nil)
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -165,7 +165,7 @@ func TestCreateAttachmentStreamsTheFileAsOnePart(t *testing.T) {
 			require.Nil(t, fault)
 			sent := server.Last(t)
 			assert.Equal(t, http.MethodPost, sent.Method)
-			assert.Equal(t, []string{tc.path + "?fields=id,name,size"}, server.Targets())
+			assert.Equal(t, []string{tc.path + "?fields=id,name,size"}, server.Targets(t))
 			assert.Equal(t, []string{"chunked"}, sent.TransferEncoding)
 			assert.EqualValues(t, -1, sent.ContentLength)
 			assert.Equal(t, []attachmentPart{{
@@ -285,7 +285,7 @@ func TestCreateAttachmentRefusesAnAnswerThatIsNotTheFileThatWentOut(t *testing.T
 					{Key: "request", Value: render.NewString("POST " + server.URL + tc.path + "?fields=id,name,size")},
 				}, tc.details...),
 			}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }
@@ -308,7 +308,7 @@ func TestDeleteAttachmentRefusesAnIDThatIsNoInternalID(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			_, fault := youtrack.DeleteAttachment("DEV-1", tc.id)
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -372,7 +372,7 @@ func TestDeleteAttachmentDeletesUnderTheOwnerTheReadNamed(t *testing.T) {
 				render.Pair{Key: "name", Value: render.NewString("a.txt")},
 				render.Pair{Key: tc.kind, Value: render.NewMap(
 					render.Pair{Key: "idReadable", Value: render.NewString(tc.readable)})}), node)
-			assert.Equal(t, tc.targets, server.Targets())
+			assert.Equal(t, tc.targets, server.Targets(t))
 		})
 	}
 }
@@ -423,7 +423,7 @@ func TestDeleteAttachmentRefusesAnAnswerItCannotAddressTheDeletionBy(t *testing.
 				{Key: "upstream_status", Value: render.NewNumber("200")},
 				{Key: "upstream_body", Value: render.NewString(tc.read)},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 			assert.Equal(t, []string{"/api/issues/DEV-7/attachments/12-5"}, server.Paths())
 		})
 	}
@@ -505,7 +505,7 @@ func TestFieldsRefuseTheContentOfAFile(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			_, fault := tc.call()
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }

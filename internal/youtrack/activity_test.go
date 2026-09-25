@@ -193,7 +193,7 @@ func TestListActivitiesRefusesACallItCannotSend(t *testing.T) {
 			t.Parallel()
 			_, fault := youtrack.ListActivities("DEV-1", tc.expression, youtrack.Page{Limit: 50}, tc.categories)
 
-			assert.Equal(t, tc.want, refusal(t, fault))
+			assert.Equal(t, tc.want, faultOf(t, fault))
 		})
 	}
 }
@@ -295,7 +295,7 @@ func TestListActivitiesSendsNoActivitiesWhereTheLinkTypesFail(t *testing.T) {
 		lastRequest(t, server),
 		{Key: "upstream_status", Value: render.NewNumber("500")},
 	}}
-	assert.Equal(t, want, refusal(t, fault))
+	assert.Equal(t, want, faultOf(t, fault))
 	assert.Equal(t, []string{activityLinkTypesPath}, server.Paths())
 }
 
@@ -333,7 +333,7 @@ func TestListActivitiesRefusesLinkTypesItCannotRead(t *testing.T) {
 
 			_, fault := activityList(t, server, nil)
 
-			assert.Equal(t, unreadable(lastRequest(t, server), tc.linkTypes), refusal(t, fault))
+			assert.Equal(t, unreadable(lastRequest(t, server), tc.linkTypes), faultOf(t, fault))
 			assert.Equal(t, []string{activityLinkTypesPath}, server.Paths())
 		})
 	}
@@ -428,7 +428,7 @@ func TestListActivitiesRefusesAnActivityItCannotRead(t *testing.T) {
 
 			_, fault := activityList(t, server, new("field,added,removed"))
 
-			assert.Equal(t, unreadable(lastRequest(t, server), tc.activities), refusal(t, fault))
+			assert.Equal(t, unreadable(lastRequest(t, server), tc.activities), faultOf(t, fault))
 		})
 	}
 }
@@ -446,7 +446,7 @@ func TestListActivitiesChecksTheOrderOfTheMomentsWhateverItPrints(t *testing.T) 
 
 			_, fault := activityList(t, server, &expression)
 
-			assert.Equal(t, unreadable(lastRequest(t, server), outOfOrder), refusal(t, fault))
+			assert.Equal(t, unreadable(lastRequest(t, server), outOfOrder), faultOf(t, fault))
 		})
 	}
 }
@@ -463,7 +463,7 @@ func TestListActivitiesChecksTheFilterOfAChangedFieldWhateverItPrints(t *testing
 
 			_, fault := activityList(t, server, &expression)
 
-			assert.Equal(t, unreadable(lastRequest(t, server), predefined), refusal(t, fault))
+			assert.Equal(t, unreadable(lastRequest(t, server), predefined), faultOf(t, fault))
 		})
 	}
 }

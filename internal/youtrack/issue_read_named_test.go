@@ -187,7 +187,7 @@ func TestShowIssueRefusesACustomFieldNameTheCatalogueDoesNotResolve(t *testing.T
 
 			_, fault := issueReadShown(t, server, tc.expression, youtrack.Comments{})
 
-			assert.Equal(t, issueReadUnresolved(server, tc.expression, tc.key, tc.entries...), refusal(t, fault))
+			assert.Equal(t, issueReadUnresolved(server, tc.expression, tc.key, tc.entries...), faultOf(t, fault))
 			assert.Equal(t, []string{issueReadCataloguePath}, server.Paths())
 		})
 	}
@@ -310,7 +310,7 @@ func TestListIssuesRefusesACustomFieldNameBeforeTheSearch(t *testing.T) {
 
 	want := issueReadUnresolved(server, "idReadable,customFields(Bogus)", "unknown",
 		issueReadNearest("nearest", "customFields(Bogus)", "Named"))
-	assert.Equal(t, want, refusal(t, fault))
+	assert.Equal(t, want, faultOf(t, fault))
 	assert.Equal(t, []string{fake.AssistPath, issueReadCataloguePath}, server.Paths())
 }
 

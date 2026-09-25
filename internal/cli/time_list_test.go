@@ -43,9 +43,7 @@ func TestTimeListAsksTheWorkItemsOfTheIssueInOneRequest(t *testing.T) {
 
 	want := "total: 2\nreturned: 2\ntruncated: false\nworkItems:\n" + printedWorkItemRow + printedSecondRow
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Len(t, server.Requests(), 1)
-	assert.Equal(t, http.MethodGet, server.Request(t, 0).Method)
-	assert.Equal(t, workItemsPath("DEV-1"), server.Request(t, 0).URL.Path)
+	assert.Equal(t, []string{http.MethodGet + " " + workItemsPath("DEV-1")}, server.Routes())
 	assert.Equal(t, url.Values{"fields": {sentWorkItemFields}, "$top": {"50"}}, server.Request(t, 0).URL.Query())
 }
 

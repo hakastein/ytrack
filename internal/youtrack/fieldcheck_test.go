@@ -145,7 +145,7 @@ func TestShowProjectRefusesAFieldMissingFromTheAnswer(t *testing.T) {
 			_, fault := expressionShown(t, server, tc.expression)
 
 			want := fieldcheckFault(server, diag.UpstreamInvalid, "/api/admin/projects/DEV", tc.expression, "missing", tc.missing...)
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }
@@ -215,7 +215,7 @@ func TestShowProjectRefusesANameNoSchemaOfItsNodeDeclares(t *testing.T) {
 			_, fault := expressionShown(t, server, tc.expression)
 
 			want := fieldcheckFault(server, diag.UnknownName, "/api/admin/projects/DEV", tc.expression, "unknown", tc.unknown)
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }
@@ -230,7 +230,7 @@ func TestShowUserRefusesANameNoSchemaOfItsNodeDeclares(t *testing.T) {
 
 	want := fieldcheckFault(server, diag.UnknownName, "/api/users/leader", "login,logn", "unknown",
 		issueReadNearest("nearest", "logn", "login"))
-	assert.Equal(t, want, refusal(t, fault))
+	assert.Equal(t, want, faultOf(t, fault))
 }
 
 func TestShowProjectLeavesOutAFieldTheNamedTypeDoesNotDeclare(t *testing.T) {

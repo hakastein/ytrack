@@ -74,7 +74,7 @@ func TestCommentUpdateReadsAnIssueCommentBeforeWritingIt(t *testing.T) {
 func TestCommentUpdateRefusesAReadThatSaysNothingOfDeleted(t *testing.T) {
 	t.Parallel()
 	const read = `{"$type":"IssueComment","deleted":null}`
-	server := updatingAComment(t, fake.JSON(http.StatusOK, read), noUpdate(t))
+	server := updatingAComment(t, fake.JSON(http.StatusOK, read), fake.Unexpected(t))
 
 	got := runWith(t, server.Env(), "comment", "update", "DEV-7", "7-12", "--text", "x")
 
@@ -87,7 +87,7 @@ func TestCommentUpdateRefusesAReadThatSaysNothingOfDeleted(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet}, server.Methods())
 }
 
 func TestCommentUpdateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
@@ -106,7 +106,7 @@ func TestCommentUpdateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireUncertainty(t, got))
-	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, server.Methods())
 }
 
 func TestCommentUpdateChecksTheResponseAgainstTheSchemaOfTheOwner(t *testing.T) {

@@ -56,7 +56,7 @@ func TestShowProjectRefusesAnExpressionItCannotRead(t *testing.T) {
 
 			_, fault := youtrack.ShowProject("DEV", tc.expression)
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -76,12 +76,12 @@ func TestShowIssueRefusesTheContentOfAFileOutsideQuotes(t *testing.T) {
 
 			_, fault := youtrack.ShowIssue("DEV-1", &tc.expression, youtrack.Comments{})
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
 
-func TestShowIssueTakesACustomFieldNamedInQuotesAsTheContentOfAFile(t *testing.T) {
+func TestShowIssueTakesAQuotedBase64ContentForACustomField(t *testing.T) {
 	t.Parallel()
 
 	_, fault := youtrack.ShowIssue("DEV-1", new(`customFields("base64Content")`), youtrack.Comments{})

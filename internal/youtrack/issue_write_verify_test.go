@@ -76,7 +76,7 @@ func TestCreateIssueRefusesAnAnswerThatDisagreesWithACustomField(t *testing.T) {
 			want := writtenMismatchFault(
 				requestTo(http.MethodPost, server, "/api/issues?fields=idReadable,summary,"+writtenCustomFields),
 				mismatch("Field", tc.expected, tc.actual))
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }
@@ -167,7 +167,7 @@ func TestUpdateIssueRefusesAnAnswerWhereAnEmptiedFieldHoldsAValue(t *testing.T) 
 			want := writtenMismatchFault(
 				requestTo(http.MethodPost, server, writtenIssuePath+"?fields=idReadable,"+writtenCustomFields),
 				mismatch("Field", tc.expected, tc.actual))
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }

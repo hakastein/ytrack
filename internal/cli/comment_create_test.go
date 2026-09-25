@@ -99,7 +99,7 @@ func TestCommentCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireUncertainty(t, got))
-	assert.Equal(t, []string{http.MethodPost}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodPost}, server.Methods())
 }
 
 func TestCommentCreateChecksTheResponseAgainstTheSchemaOfTheOwner(t *testing.T) {

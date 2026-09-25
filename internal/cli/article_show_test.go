@@ -45,7 +45,7 @@ func TestArticleShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
 	got := runWith(t, server.Env(), "article", "show", "DEV-A-1")
 
 	assert.Equal(t, outcome{stdout: printedArticleWithAChild}, got)
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet}, server.Methods())
 	assert.Equal(t, []string{"/api/articles/DEV-A-1"}, server.Paths())
 	assert.Equal(t, []url.Values{{"fields": {sentArticleFields}}}, server.Queries())
 }

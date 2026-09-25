@@ -123,7 +123,7 @@ func detailNamed(t *testing.T, found faultDocument, key string) any {
 			return printed.value
 		}
 	}
-	require.Fail(t, "the refusal printed no "+key, "%v", found.details)
+	require.Fail(t, "the fault printed no "+key, "%v", found.details)
 	return nil
 }
 

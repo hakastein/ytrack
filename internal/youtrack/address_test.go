@@ -61,7 +61,7 @@ func TestShowIssueRefusesAnIDOfAnyOtherForm(t *testing.T) {
 			t.Parallel()
 			_, fault := youtrack.ShowIssue(tc.id, new("id"), youtrack.Comments{})
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -109,7 +109,7 @@ func TestShowArticleRefusesAnIDOfAnyOtherForm(t *testing.T) {
 			t.Parallel()
 			_, fault := youtrack.ShowArticle(tc.id, new("id"), youtrack.Comments{})
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -153,7 +153,7 @@ func TestListCommentsRefusesAnOwnerOfNeitherForm(t *testing.T) {
 			t.Parallel()
 			_, fault := youtrack.ListComments(tc.id, new("id"), youtrack.Page{Limit: 1})
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -200,7 +200,7 @@ func TestDeleteCommentRefusesAnIDThatIsNoInternalID(t *testing.T) {
 			t.Parallel()
 			_, fault := youtrack.DeleteComment("DEV-1", tc.id)
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -250,7 +250,7 @@ func TestShowProjectRefusesACodeOfAnotherForm(t *testing.T) {
 			t.Parallel()
 			_, fault := youtrack.ShowProject(tc.code, "shortName")
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -305,7 +305,7 @@ func TestShowUserRefusesEveryFormTheServerReadsAsSomethingOtherThanALogin(t *tes
 			t.Parallel()
 			_, fault := youtrack.ShowUser(tc.login, "login")
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }

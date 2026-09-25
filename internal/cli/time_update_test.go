@@ -47,7 +47,7 @@ func TestTimeUpdateWritesTheNamedPartsAndPrintsWhatTheServerKept(t *testing.T) {
 		"/api/issues/DEV-1?fields=" + sentWorkItemSettingsFields,
 		workItemPath("DEV-1", "199-6") + "?fields=id,duration(minutes),date,text,type(id,name)," +
 			"attributes(id,name,value(id,name))",
-	}, server.Targets())
+	}, server.Targets(t))
 	assert.Equal(t, http.MethodPost, server.Last(t).Method)
 	assert.Equal(t, `{"duration":{"minutes":120},"type":{"id":"8-2"},"date":1788350400000,"text":"x",`+
 		`"attributes":[{"id":"9-1","value":{"id":"9-2"}}]}`, server.Last(t).Body)

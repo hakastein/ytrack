@@ -196,7 +196,7 @@ func TestListIssuesWarnsOfTheFreeTextOfASearchTheServerThenRefuses(t *testing.T)
 		{Key: "upstream_status", Value: render.NewNumber("400")},
 		{Key: "upstream_error", Value: render.NewString("invalid_query")},
 		{Key: "upstream_message", Value: render.NewString("refused")},
-	}}, refusal(t, fault))
+	}}, faultOf(t, fault))
 }
 
 func TestListIssuesSearchesNothingWhereTheSearchCannotBeMarkedUp(t *testing.T) {
@@ -210,7 +210,7 @@ func TestListIssuesSearchesNothingWhereTheSearchCannotBeMarkedUp(t *testing.T) {
 		{Key: "upstream_status", Value: render.NewNumber("500")},
 		{Key: "upstream_error", Value: render.NewString("server_error")},
 		{Key: "upstream_message", Value: render.NewString("failed")},
-	}}, refusal(t, fault))
+	}}, faultOf(t, fault))
 	assert.Equal(t, []string{fake.AssistPath}, server.Paths())
 }
 
@@ -274,7 +274,7 @@ func TestListIssuesRefusesAMarkupThatDoesNotFitTheSearch(t *testing.T) {
 
 			request := requestTo(http.MethodPost, server, fake.AssistPath+"?fields="+searchMarkupFields)
 			want := diag.Fault{Code: diag.UpstreamInvalid, Details: append([]render.Pair{request}, tc.afterRequest...)}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 			assert.Equal(t, []string{fake.AssistPath}, server.Paths())
 		})
 	}

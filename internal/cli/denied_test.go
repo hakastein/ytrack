@@ -77,7 +77,7 @@ func TestNoCommandNamesWhereTheTokenTheServerRefusedCameFrom(t *testing.T) {
 			}
 			assert.Equal(t, want, requireFault(t, got))
 			assertNoToken(t, got, bogusToken)
-			assert.Len(t, server.Requests(), 1)
+			assert.Equal(t, []string{"/api/admin/projects/DEV"}, server.Paths())
 		})
 	}
 }

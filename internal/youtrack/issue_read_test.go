@@ -53,7 +53,7 @@ func TestShowIssueRefusesAnExpressionBeforeTheNetwork(t *testing.T) {
 
 			_, fault := youtrack.ShowIssue("DEV-1", &tc.expression, youtrack.AllComments())
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -78,7 +78,7 @@ func TestListIssuesRefusesACallBeforeTheNetwork(t *testing.T) {
 
 			_, fault := youtrack.ListIssues(tc.query, &tc.expression, youtrack.Page{Limit: 50}, func(*diag.Warning) {})
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -189,7 +189,7 @@ func TestShowIssueRefusesAMomentThatIsNoWholeNumberOfMilliseconds(t *testing.T) 
 			_, fault := issueReadShown(t, server, "created", youtrack.Comments{})
 
 			want := unreadable(requestTo(http.MethodGet, server, issueReadPath+"?fields=created"), tc.body)
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }

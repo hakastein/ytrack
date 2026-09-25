@@ -86,3 +86,13 @@ func sentParts(t *testing.T, server *fake.Server, at int) []formPart {
 	require.True(t, isForm, "the body of %s %s is no multipart form: %q", sent.Method, sent.URL, sent.Body)
 	return parts
 }
+
+func sentTo(server *fake.Server, path string) int {
+	sent := 0
+	for _, p := range server.Paths() {
+		if p == path {
+			sent++
+		}
+	}
+	return sent
+}

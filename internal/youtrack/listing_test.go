@@ -103,7 +103,7 @@ func TestListProjectsRefusesAPageItCannotSend(t *testing.T) {
 			t.Parallel()
 			_, fault := youtrack.ListProjects("id", tc.page)
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -226,7 +226,7 @@ func TestListProjectsRefusesAPageTheCollectionCannotHold(t *testing.T) {
 
 			_, fault = call(t.Context(), client(t, server))
 
-			assert.Equal(t, tc.want, refusal(t, fault))
+			assert.Equal(t, tc.want, faultOf(t, fault))
 		})
 	}
 }
@@ -255,7 +255,7 @@ func TestListProjectsRefusesAnAnswerThatIsNoListOfObjects(t *testing.T) {
 				{Key: "upstream_status", Value: number(http.StatusOK)},
 				{Key: "upstream_body", Value: render.NewString(tc.answer)},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }

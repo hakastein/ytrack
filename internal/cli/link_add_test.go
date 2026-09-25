@@ -79,7 +79,7 @@ func TestLinkAddWritesTheLinkAndPrintsTheLinksOfTheIssue(t *testing.T) {
 		"/api/issues/DEV-1?fields=" + addSourceFields,
 		"/api/issues/DEV-2?fields=" + addTargetFields,
 		"/api/issues/DEV-1/links/5-1t/issues?fields=" + addWriteFields(linkListTarget),
-	}, server.Targets())
+	}, server.Targets(t))
 	assert.Equal(t, []string{"", "", `{"id":"3-2"}`}, server.Bodies())
 	assert.Equal(t, http.MethodPost, server.Last(t).Method)
 }

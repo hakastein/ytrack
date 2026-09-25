@@ -141,7 +141,7 @@ func TestCreateWorkItemRefusesADurationItCannotSend(t *testing.T) {
 			t.Parallel()
 			_, fault := youtrack.CreateWorkItem("DEV-1", tc.spent, nil, nil, nil, nil, nil)
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -168,7 +168,7 @@ func TestCreateWorkItemRefusesADayItCannotSend(t *testing.T) {
 			t.Parallel()
 			_, fault := youtrack.CreateWorkItem("DEV-1", "PT1H", new(tc.day), nil, nil, nil, nil)
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -196,7 +196,7 @@ func TestCreateWorkItemRefusesWhatItCannotSend(t *testing.T) {
 			t.Parallel()
 			_, fault := youtrack.CreateWorkItem("DEV-1", "PT1H", nil, tc.text, tc.workType, tc.attributes, tc.expression)
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -235,7 +235,7 @@ func TestUpdateWorkItemRefusesWhatItCannotSend(t *testing.T) {
 			_, fault := youtrack.UpdateWorkItem("DEV-1", "7-1", tc.spent, tc.day, tc.text, tc.workType,
 				tc.attributes, tc.cleared, tc.expression)
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -259,7 +259,7 @@ func TestListWorkItemsRefusesAnExpressionItCannotSend(t *testing.T) {
 			t.Parallel()
 			_, fault := youtrack.ListWorkItems("DEV-1", new(tc.expression), youtrack.Page{Limit: 50})
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -519,7 +519,7 @@ func TestWorkItemWriteAsksForWhatItChecksWhateverWasAskedToPrint(t *testing.T) {
 
 			require.Nil(t, fault)
 			assert.Equal(t, render.NewMap(render.Pair{Key: "id", Value: render.NewString("7-1")}), node)
-			assert.Equal(t, tc.targets, server.Targets())
+			assert.Equal(t, tc.targets, server.Targets(t))
 		})
 	}
 }
@@ -642,7 +642,7 @@ func TestCreateWorkItemRefusesWhatTheServerKeptOtherwise(t *testing.T) {
 						render.Pair{Key: "expected", Value: tc.expected},
 						render.Pair{Key: "actual", Value: tc.actual}))},
 				},
-			}, refusal(t, fault))
+			}, faultOf(t, fault))
 		})
 	}
 }
@@ -770,7 +770,7 @@ func TestUpdateWorkItemRefusesWhatTheServerKeptOtherwise(t *testing.T) {
 						render.Pair{Key: "expected", Value: tc.expected},
 						render.Pair{Key: "actual", Value: tc.actual}))},
 				},
-			}, refusal(t, fault))
+			}, faultOf(t, fault))
 		})
 	}
 }
@@ -794,7 +794,7 @@ func TestCreateWorkItemTellsAKeptTypeByItsIDFromOneOfTheSameName(t *testing.T) {
 				render.Pair{Key: "expected", Value: render.NewString("TWIN")},
 				render.Pair{Key: "actual", Value: render.NewString("Twin")}))},
 		},
-	}, refusal(t, fault))
+	}, faultOf(t, fault))
 }
 
 func TestWorkItemWriteChecksOnlyWhatItWrote(t *testing.T) {
@@ -986,7 +986,7 @@ func TestWorkItemWriteRefusesANameTheProjectDoesNotHave(t *testing.T) {
 					{Key: "project", Value: render.NewString("DEV")},
 					{Key: "unknown", Value: render.NewList(tc.unknown...)},
 				},
-			}, refusal(t, fault))
+			}, faultOf(t, fault))
 			assert.Equal(t, []string{"/api/issues/DEV-1"}, server.Paths())
 		})
 	}
@@ -1046,7 +1046,7 @@ func TestWorkItemWriteRefusesSettingsOfAnotherShape(t *testing.T) {
 				tc.attributes, nil))
 
 			assert.Equal(t, unreadable(lastRequest(t, server), tc.read),
-				refusal(t, fault))
+				faultOf(t, fault))
 			assert.Equal(t, []string{"/api/issues/DEV-1"}, server.Paths())
 		})
 	}
@@ -1092,7 +1092,7 @@ func TestDeleteWorkItemRemovesNothingByAReadOfAnotherShape(t *testing.T) {
 			_, fault := callOn(t, server)(youtrack.DeleteWorkItem("DEV-1", "7-1"))
 
 			assert.Equal(t, unreadable(lastRequest(t, server), tc.read),
-				refusal(t, fault))
+				faultOf(t, fault))
 			assert.Equal(t, []string{workItemOfTheIssue}, server.Paths())
 		})
 	}
@@ -1211,7 +1211,7 @@ func TestListWorkItemsRefusesAWorkItemOfAnotherShape(t *testing.T) {
 				{Key: "request", Value: render.NewString("GET " + server.URL + workItemsOfTheIssue + asked)},
 				{Key: "upstream_status", Value: render.NewNumber("200")},
 				{Key: "upstream_body", Value: render.NewString(body)},
-			}}, refusal(t, fault))
+			}}, faultOf(t, fault))
 		})
 	}
 }

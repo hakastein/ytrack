@@ -185,7 +185,7 @@ func TestLinkWriteRefusesAPhraseItCannotSend(t *testing.T) {
 			t.Parallel()
 			_, fault := tc.write()
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -224,7 +224,7 @@ func TestLinkRefusesAnExpressionOfTheTargetItCannotSend(t *testing.T) {
 			t.Parallel()
 			_, fault := tc.call()
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -331,7 +331,7 @@ func TestListLinksRefusesLinksOfAnotherShape(t *testing.T) {
 				requestTo(http.MethodGet, server, "/api/issues/DEV-1?fields="+linkListFields),
 				{Key: "upstream_status", Value: number(200)},
 				{Key: "upstream_body", Value: render.NewString(body)},
-			}}, refusal(t, fault))
+			}}, faultOf(t, fault))
 		})
 	}
 }
@@ -385,7 +385,7 @@ func TestAddLinkAsksForTheIssuesAndTheTargetAsAskedOfIt(t *testing.T) {
 		"/api/issues/dev-1?fields=" + linkSourceFields,
 		"/api/issues/DEV-2?fields=" + linkTargetFields,
 		"/api/issues/DEV-1/links/5-1t/issues?fields=" + linkWriteFields,
-	}, server.Targets())
+	}, server.Targets(t))
 }
 
 func TestAddLinkPrintsTheLinksTheWriteLeftTheIssueWith(t *testing.T) {
@@ -425,7 +425,7 @@ func TestAddLinkResolvesAPhraseTwoSlotsAnswerToByItsSpelling(t *testing.T) {
 			requestTo(http.MethodGet, server, "/api/issues/DEV-1?fields="+linkSourceFields),
 			{Key: "issue", Value: render.NewString("DEV-1")},
 			linkUnknownPhrase("NEEDS", "leads", "needs"),
-		}}, refusal(t, fault))
+		}}, faultOf(t, fault))
 		assert.Equal(t, []string{"/api/issues/DEV-1"}, server.Paths())
 	})
 }
@@ -470,7 +470,7 @@ func TestAddLinkRefusesAPhraseNoSlotGoesBy(t *testing.T) {
 				requestTo(http.MethodGet, server, "/api/issues/DEV-1?fields="+linkSourceFields),
 				{Key: "issue", Value: render.NewString("DEV-1")},
 				linkUnknownPhrase(tc.phrase, tc.nearest...),
-			}}, refusal(t, fault))
+			}}, faultOf(t, fault))
 			assert.Equal(t, []string{"/api/issues/DEV-1"}, server.Paths())
 		})
 	}
@@ -495,7 +495,7 @@ func TestAddLinkRefusesTwoSlotsUnderOnePhraseAndWritesEveryOther(t *testing.T) {
 			requestTo(http.MethodGet, server, "/api/issues/DEV-1?fields="+linkSourceFields),
 			{Key: "issue", Value: render.NewString("DEV-1")},
 			{Key: "phrase", Value: render.NewString("X")},
-		}}, refusal(t, fault))
+		}}, faultOf(t, fault))
 		assert.Equal(t, []string{"/api/issues/DEV-1"}, server.Paths())
 	})
 
@@ -569,7 +569,7 @@ func TestAddLinkRefusesASlotAddressedAgainstItsOwnEnd(t *testing.T) {
 				requestTo(http.MethodGet, server, "/api/issues/DEV-1?fields="+linkSourceFields),
 				{Key: "issue", Value: render.NewString("DEV-1")},
 				{Key: "phrase", Value: render.NewString(tc.phrase)},
-			}}, refusal(t, fault))
+			}}, faultOf(t, fault))
 			assert.Equal(t, []string{"/api/issues/DEV-1"}, server.Paths())
 		})
 	}
@@ -616,7 +616,7 @@ func TestAddLinkRefusesAnIssueReadOfAnotherShape(t *testing.T) {
 				requestTo(http.MethodGet, server, "/api/issues/DEV-1?fields="+linkSourceFields),
 				{Key: "upstream_status", Value: number(200)},
 				{Key: "upstream_body", Value: render.NewString(tc.source)},
-			}}, refusal(t, fault))
+			}}, faultOf(t, fault))
 			assert.Equal(t, []string{"/api/issues/DEV-1"}, server.Paths())
 		})
 	}
@@ -633,7 +633,7 @@ func TestAddLinkRefusesATargetUnderTheIDItIsAddressedByRatherThanTheInternalOne(
 		requestTo(http.MethodGet, server, "/api/issues/DEV-2?fields="+linkTargetFields),
 		{Key: "upstream_status", Value: number(200)},
 		{Key: "upstream_body", Value: render.NewString(target)},
-	}}, refusal(t, fault))
+	}}, faultOf(t, fault))
 	assert.Equal(t, []string{"/api/issues/DEV-1", "/api/issues/DEV-2"}, server.Paths())
 }
 
@@ -657,7 +657,7 @@ func TestAddLinkRefusesLinkingAnIssueToItself(t *testing.T) {
 				requestTo(http.MethodGet, server, "/api/issues/"+tc.target+"?fields="+linkTargetFields),
 				{Key: "issue", Value: render.NewString("DEV-1")},
 				{Key: "target", Value: render.NewString("DEV-1")},
-			}}, refusal(t, fault))
+			}}, faultOf(t, fault))
 			assert.Equal(t, []string{"/api/issues/DEV-1", "/api/issues/" + tc.target}, server.Paths())
 		})
 	}
@@ -703,7 +703,7 @@ func TestAddLinkRefusesAnIssueTheServerDoesNotHave(t *testing.T) {
 				{Key: "upstream_status", Value: number(404)},
 				{Key: "upstream_error", Value: render.NewString("Not Found")},
 				{Key: "upstream_message", Value: render.NewString("Entity not found")},
-			}}, refusal(t, fault))
+			}}, faultOf(t, fault))
 			assert.Equal(t, tc.paths, server.Paths())
 		})
 	}
@@ -755,7 +755,7 @@ func TestAddLinkRefusesAnAnswerThatDoesNotHoldTheLink(t *testing.T) {
 				Details: append([]render.Pair{
 					requestTo(http.MethodPost, server, "/api/issues/DEV-1/links/5-1t/issues?fields="+linkWriteFields),
 				}, linkNames()...),
-			}, refusal(t, fault))
+			}, faultOf(t, fault))
 		})
 	}
 }
@@ -776,7 +776,7 @@ func TestAddLinkNamesTheLinkInWhatTheServerSaidAboutTheWrite(t *testing.T) {
 			render.Pair{Key: "upstream_error", Value: render.NewString("invalid_properties")},
 			render.Pair{Key: "upstream_message", Value: render.NewString("A cycle")},
 		)...),
-	}, refusal(t, fault))
+	}, faultOf(t, fault))
 }
 
 func TestRemoveLinkTakesTheLinkAwayBySlotAndInternalID(t *testing.T) {
@@ -810,7 +810,7 @@ func TestRemoveLinkRefusesALinkTheIssueDoesNotHold(t *testing.T) {
 			render.Pair{Key: "upstream_error", Value: render.NewString("Not Found")},
 			render.Pair{Key: "upstream_message", Value: render.NewString("Entity not found")},
 		)...),
-	}, refusal(t, fault))
+	}, faultOf(t, fault))
 }
 
 func TestRemoveLinkRefusesBeforeTheRemovalTheWayAddDoes(t *testing.T) {
@@ -859,7 +859,7 @@ func TestRemoveLinkRefusesBeforeTheRemovalTheWayAddDoes(t *testing.T) {
 			assert.Equal(t, diag.Fault{
 				Code:    tc.code,
 				Details: append([]render.Pair{requestTo(http.MethodGet, server, tc.read)}, tc.details...),
-			}, refusal(t, fault))
+			}, faultOf(t, fault))
 			assert.Equal(t, tc.paths, server.Paths())
 		})
 	}

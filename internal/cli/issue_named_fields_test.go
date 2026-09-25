@@ -87,5 +87,5 @@ func TestIssueShowAsksForNoIssueWhereTheCatalogueIsClosed(t *testing.T) {
 	got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "customFields(State)")
 
 	assert.Equal(t, catalogueRequest(server.URL), detailNamed(t, requireFault(t, got), "request"))
-	assert.Len(t, server.Requests(), 1)
+	assert.Equal(t, []string{cataloguePath}, server.Paths())
 }

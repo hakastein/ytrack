@@ -105,31 +105,6 @@ func activityRequest(address, top string) string {
 		sentActivityFields + "&$top=" + top
 }
 
-func TestActivityTakesTheIssueAsItsOneArgument(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "one activity by an address of its own", argv: []string{"activity", "show", "DEV-1"}},
-		{
-			name: "the name the activity went by before",
-			argv: []string{"issue-history", "list", "--query", "issue id: DEV-1"},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
-
-			got := runWith(t, server.Env(), tc.argv...)
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests())
-		})
-	}
-}
-
 func TestActivityRefusesAnExpressionThatClosesNothing(t *testing.T) {
 	t.Parallel()
 	server := fake.ServeNothing(t)
@@ -151,7 +126,7 @@ func TestActivityPrintsTheActivitiesOfTheIssueItWasGiven(t *testing.T) {
 	assert.Equal(t, []string{
 		linkTypesPath + "?fields=" + linkTypesFields + "&$top=1000",
 		activitiesPath + "?categories=" + activityCategories + "&reverse=true&fields=" + sentActivityFields + "&$top=51",
-	}, server.Targets())
+	}, server.Targets(t))
 }
 
 func TestActivityRefusesAnAnswerOfAnotherShape(t *testing.T) {

@@ -39,9 +39,9 @@ func callOn(t *testing.T, server *fake.Server) func(youtrack.Call, *diag.Fault) 
 	}
 }
 
-func refusal(t *testing.T, fault *diag.Fault) diag.Fault {
+func faultOf(t *testing.T, fault *diag.Fault) diag.Fault {
 	t.Helper()
-	require.NotNil(t, fault, "nothing was refused")
+	require.NotNil(t, fault, "the call did not fail")
 	assert.NotEmpty(t, fault.Message)
 	kept := *fault
 	kept.Message = ""

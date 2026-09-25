@@ -233,7 +233,7 @@ func TestIssueDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 
 			assert.Equal(t, tc.want(server.URL), requireFaultDocument(t, got))
 			assert.Equal(t, tc.exit, got.code)
-			assert.Equal(t, tc.methods, sentMethods(server))
+			assert.Equal(t, tc.methods, server.Methods())
 		})
 	}
 }

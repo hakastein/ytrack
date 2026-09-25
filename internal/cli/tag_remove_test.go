@@ -39,12 +39,12 @@ func TestTagRemoveTakesTheTagOffTheOwnerAndNotOutOfTheInstance(t *testing.T) {
 
 	want := "idReadable: \"DEV-7\"\n" + "removed:\n  name: \"Ready\"\n  owner:\n    login: \"first\"\n"
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []string{http.MethodGet, http.MethodGet, http.MethodDelete}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet, http.MethodGet, http.MethodDelete}, server.Methods())
 	assert.Equal(t, []string{
 		"/api/issues/dev-7?fields=" + taggedOwnerFields,
 		tagsCollection + "?fields=" + resolvedTagFields + "&$top=-1",
 		tagOnOwnerPath("issues", "DEV-7", "10-5") + "?",
-	}, server.Targets())
+	}, server.Targets(t))
 	assert.Equal(t, []string{"", "", ""}, server.Bodies())
 }
 
@@ -94,7 +94,7 @@ func TestTagRemoveRefusesWhatTheReadsBeforeTheRemovalDoNotAllow(t *testing.T) {
 			got := runWith(t, server.Env(), "tag", "remove", "DEV-7", "--name", tc.written)
 
 			assert.Equal(t, tc.want(server.URL), requireFault(t, got))
-			assert.Equal(t, tc.methods, sentMethods(server))
+			assert.Equal(t, tc.methods, server.Methods())
 		})
 	}
 }
@@ -119,5 +119,5 @@ func TestTagRemoveRefusesATagTheOwnerDoesNotCarry(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet, http.MethodGet, http.MethodDelete}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet, http.MethodGet, http.MethodDelete}, server.Methods())
 }

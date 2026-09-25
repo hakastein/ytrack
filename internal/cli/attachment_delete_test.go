@@ -35,11 +35,11 @@ func TestAttachmentDeletePrintsWhatTheReadBeforeItFound(t *testing.T) {
 
 	want := `id: "12-5"` + "\n" + `name: "a.txt"` + "\n" + "issue:\n" + `  idReadable: "DEV-7"` + "\n"
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, server.Methods())
 	assert.Equal(t, []string{
 		"/api/issues/dev-7/attachments/12-5?fields=" + deletedAttachmentFields("issue"),
 		"/api/issues/DEV-7/attachments/12-5?",
-	}, server.Targets())
+	}, server.Targets(t))
 	assert.Equal(t, []string{"", ""}, server.Bodies())
 }
 
@@ -59,5 +59,5 @@ func TestAttachmentDeleteRefusesAnAnswerItCannotBeAddressedBy(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet}, server.Methods())
 }

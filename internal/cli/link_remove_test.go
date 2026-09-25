@@ -32,12 +32,12 @@ func TestLinkRemoveTakesTheLinkAwayBySlotAndInternalID(t *testing.T) {
 	got := runWith(t, server.Env(), "link", "remove", "DEV-1", "needs", "DEV-2")
 
 	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-1\"\nremoved:\n  \"needs\":\n    - {idReadable: \"DEV-2\"}\n"}, got)
-	assert.Equal(t, []string{http.MethodGet, http.MethodGet, http.MethodDelete}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet, http.MethodGet, http.MethodDelete}, server.Methods())
 	assert.Equal(t, []string{
 		"/api/issues/DEV-1?fields=" + addSourceFields,
 		"/api/issues/DEV-2?fields=" + addTargetFields,
 		removedLinkPath + "?",
-	}, server.Targets())
+	}, server.Targets(t))
 	assert.Equal(t, []string{"", "", ""}, server.Bodies(), "no request of a removal carries a body")
 }
 

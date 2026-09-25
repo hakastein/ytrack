@@ -61,9 +61,9 @@ func TestTagDeletePrintsWhatTheResolverFound(t *testing.T) {
 
 	want := `name: "Ready"` + "\n" + "owner:\n" + `  login: "first"` + "\n"
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, server.Methods())
 	assert.Equal(t, []string{"/api/tags?fields=" + resolvedTagFields + "&$top=-1", tagDeletionPath("10-5") + "?"},
-		server.Targets())
+		server.Targets(t))
 	assert.Equal(t, []string{"", ""}, server.Bodies())
 }
 
@@ -81,7 +81,7 @@ func TestTagDeleteRefusesANameNoTagCarries(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet}, server.Methods())
 }
 
 func TestTagDeleteRefusesAnIDItCannotAddressTheDeletionBy(t *testing.T) {
@@ -100,7 +100,7 @@ func TestTagDeleteRefusesAnIDItCannotAddressTheDeletionBy(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet}, server.Methods())
 }
 
 func TestTagDeleteRefusesATagGoneBetweenTheTwoRequests(t *testing.T) {
@@ -121,5 +121,5 @@ func TestTagDeleteRefusesATagGoneBetweenTheTwoRequests(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, server.Methods())
 }

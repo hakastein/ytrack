@@ -154,14 +154,14 @@ type writtenInvalid struct {
 	Value string
 }
 
-// issueWriteRefusal leaves the entries under invalid without their reason: it is prose, and only the field and the
+// issueWriteFault leaves the entries under invalid without their reason: it is prose, and only the field and the
 // value name what was refused. A node has no accessors, so the entries are read back from the document they print.
-func issueWriteRefusal(t *testing.T, fault *diag.Fault) (diag.Fault, []writtenInvalid) {
+func issueWriteFault(t *testing.T, fault *diag.Fault) (diag.Fault, []writtenInvalid) {
 	t.Helper()
-	kept := refusal(t, fault)
+	kept := faultOf(t, fault)
 	kept.Details = slices.Clone(kept.Details)
 	at := slices.IndexFunc(kept.Details, func(pair render.Pair) bool { return pair.Key == "invalid" })
-	require.GreaterOrEqual(t, at, 0, "the refusal names nothing under invalid: %v", kept.Details)
+	require.GreaterOrEqual(t, at, 0, "the fault names nothing under invalid: %v", kept.Details)
 	var printed strings.Builder
 	require.NoError(t, render.YAML{}.Render(&printed, render.NewMap(kept.Details[at])))
 	var document struct {
@@ -216,7 +216,7 @@ func TestCreateIssueRefusesACallBeforeAnyRequest(t *testing.T) {
 
 			_, fault := youtrack.CreateIssue("DEV", tc.summary, tc.description, tc.filled, tc.expression)
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -249,7 +249,7 @@ func TestUpdateIssueRefusesACallBeforeAnyRequest(t *testing.T) {
 
 			_, fault := youtrack.UpdateIssue("DEV-1", tc.summary, tc.description, tc.filled, tc.cleared, tc.expression)
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -482,7 +482,7 @@ func TestIssueWriteRefusesAnAnswerThatDisagreesWithTheText(t *testing.T) {
 			_, fault := callOn(t, server)(tc.call())
 
 			want := writtenMismatchFault(requestTo(http.MethodPost, server, tc.target), tc.mismatch...)
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }
@@ -500,7 +500,7 @@ func TestIssueWriteRefusesAnAnswerItCannotPrintAfterTheWrite(t *testing.T) {
 		{Key: "upstream_status", Value: render.NewNumber("200")},
 		{Key: "upstream_body", Value: render.NewString(answer)},
 	}}
-	assert.Equal(t, want, refusal(t, fault))
+	assert.Equal(t, want, faultOf(t, fault))
 }
 
 func TestIssueWritePrintsACustomFieldTheExpressionNamesAndChecksThemAll(t *testing.T) {
@@ -569,7 +569,7 @@ func TestIssueWriteIsUncertainOfATruncatedAnswerOnlyWhereItMayHaveWritten(t *tes
 				requestTo(http.MethodPost, server, writtenIssuePath+"?fields=idReadable,summary"),
 				{Key: "upstream_status", Value: render.NewNumber(json.Number(strconv.Itoa(tc.status)))},
 			}, tc.details...)}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }
@@ -623,7 +623,7 @@ func TestUpdateIssueRefusesAnIssueOfAnotherShape(t *testing.T) {
 				{Key: "upstream_status", Value: render.NewNumber("200")},
 				{Key: "upstream_body", Value: render.NewString(tc.read)},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 			assert.Equal(t, []string{writtenIssuePath}, server.Paths())
 		})
 	}
@@ -683,7 +683,7 @@ func TestDeleteIssueRefusesAReadableIDItCannotDeleteBy(t *testing.T) {
 				{Key: "upstream_status", Value: render.NewNumber("200")},
 				{Key: "upstream_body", Value: render.NewString(read)},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 			assert.Equal(t, []string{"/api/issues/dev-7"}, server.Paths())
 		})
 	}
@@ -700,5 +700,5 @@ func TestDeleteIssueRefusesADeletionAnsweredWithABody(t *testing.T) {
 		{Key: "upstream_status", Value: render.NewNumber("200")},
 		{Key: "upstream_body", Value: render.NewString(`{"x":1}`)},
 	}}
-	assert.Equal(t, want, refusal(t, fault))
+	assert.Equal(t, want, faultOf(t, fault))
 }

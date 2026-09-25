@@ -79,7 +79,7 @@ func TestTagNarrowsTheNameByTheOwnerOfTheTag(t *testing.T) {
 			got := runWith(t, server.Env(), tc.argv...)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			assert.Equal(t, tc.methods, sentMethods(server))
+			assert.Equal(t, tc.methods, server.Methods())
 			assert.Equal(t, tc.paths, server.Paths())
 		})
 	}

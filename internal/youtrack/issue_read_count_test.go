@@ -139,7 +139,7 @@ func TestListIssuesRefusesACountThatIsNoNumberOfIssues(t *testing.T) {
 
 			request := requestTo(http.MethodPost, server, issueCountTarget)
 			want := diag.Fault{Code: diag.UpstreamInvalid, Details: append([]render.Pair{request}, tc.afterRequest...)}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }
@@ -156,6 +156,6 @@ func TestListIssuesRefusesWhereTheCounterFailsWhenAskedAgain(t *testing.T) {
 		{Key: "upstream_status", Value: render.NewNumber("500")},
 		{Key: "upstream_error", Value: render.NewString("server_error")},
 		{Key: "upstream_message", Value: render.NewString("failed")},
-	}}, refusal(t, fault))
+	}}, faultOf(t, fault))
 	assert.Equal(t, []string{fake.AssistPath, searchIssuesPath, issueCountPath, issueCountPath}, server.Paths())
 }

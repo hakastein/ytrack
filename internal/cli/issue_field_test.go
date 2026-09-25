@@ -18,7 +18,7 @@ func projectOfTwoFields() string {
 
 func TestIssueCreateRefusesAValueTheFieldCannotHold(t *testing.T) {
 	t.Parallel()
-	server := creating(t, fake.JSON(http.StatusOK, projectOfTwoFields()), noCreation(t))
+	server := creating(t, fake.JSON(http.StatusOK, projectOfTwoFields()), fake.Unexpected(t))
 
 	got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x",
 		"--field", "First=Early", "--field", "localized=Late")
@@ -31,8 +31,8 @@ func TestIssueCreateRefusesAValueTheFieldCannotHold(t *testing.T) {
 			{"invalid", []any{[]detail{{"field", "First"}, {"value", "Late"}}}},
 		},
 	}
-	assert.Equal(t, want, requireIssueWriteRefusal(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
+	assert.Equal(t, want, requireIssueWriteFault(t, got))
+	assert.Equal(t, []string{http.MethodGet}, server.Methods())
 }
 
 func TestIssueWriteRefusesANameNoFieldOfTheProjectAnswersTo(t *testing.T) {
@@ -59,7 +59,7 @@ func TestIssueWriteRefusesANameNoFieldOfTheProjectAnswersTo(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := fake.Serve(t, readThenUpdate(fake.JSON(http.StatusOK, tc.read), noUpdate(t)))
+			server := fake.Serve(t, readThenUpdate(fake.JSON(http.StatusOK, tc.read), fake.Unexpected(t)))
 
 			got := runWith(t, server.Env(), tc.argv...)
 
@@ -75,7 +75,7 @@ func TestIssueWriteRefusesANameNoFieldOfTheProjectAnswersTo(t *testing.T) {
 				},
 			}
 			assert.Equal(t, want, requireFault(t, got))
-			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
+			assert.Equal(t, []string{http.MethodGet}, server.Methods())
 		})
 	}
 }

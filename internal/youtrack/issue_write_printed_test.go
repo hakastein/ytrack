@@ -204,7 +204,7 @@ func TestShowIssueRefusesCustomFieldsOfAnotherShape(t *testing.T) {
 				{Key: "upstream_status", Value: render.NewNumber("200")},
 				{Key: "upstream_body", Value: render.NewString(`{"$type":"Issue","idReadable":"DEV-1","customFields":` + tc.block + `}`)},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }

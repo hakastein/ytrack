@@ -70,13 +70,6 @@ func serveTheProject(t *testing.T, metadata string, field http.HandlerFunc) *fak
 	})
 }
 
-func noField(t *testing.T) http.HandlerFunc {
-	t.Helper()
-	return func(_ http.ResponseWriter, r *http.Request) {
-		assert.Fail(t, "a request for one field reached the server", "%s %s", r.Method, r.URL)
-	}
-}
-
 func TestFieldShowRefusesTheEmptyName(t *testing.T) {
 	t.Parallel()
 	server := fake.ServeNothing(t)
@@ -98,12 +91,12 @@ func TestFieldShowPrintsTheFieldItsNameResolvesTo(t *testing.T) {
 	assert.Equal(t, []string{
 		"/api/admin/projects/DEV?fields=" + metadataSent,
 		"/api/admin/projects/DEV/customFields/180-1?fields=" + enumFieldSent,
-	}, server.Targets())
+	}, server.Targets(t))
 }
 
 func TestFieldShowRefusesANameOfNoField(t *testing.T) {
 	t.Parallel()
-	server := serveTheProject(t, projectMetadata(projectField("180-1", "Type", "Kind")), noField(t))
+	server := serveTheProject(t, projectMetadata(projectField("180-1", "Type", "Kind")), fake.Unexpected(t))
 
 	got := runWith(t, server.Env(), "field", "show", "DEV", "Nothing")
 
@@ -121,7 +114,7 @@ func TestFieldShowRefusesANameOfNoField(t *testing.T) {
 func TestFieldShowRefusesAnIdItCannotAddress(t *testing.T) {
 	t.Parallel()
 	metadata := projectMetadata(projectField("..", "Type", "Kind"))
-	server := serveTheProject(t, metadata, noField(t))
+	server := serveTheProject(t, metadata, fake.Unexpected(t))
 
 	got := runWith(t, server.Env(), "field", "show", "DEV", "Type")
 
@@ -134,7 +127,7 @@ func TestFieldShowRefusesAnIdItCannotAddress(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, server.Requests(), 1)
+	assert.Equal(t, []string{"/api/admin/projects/DEV"}, server.Paths())
 }
 
 func TestFieldShowRefusesAFieldGoneBetweenTheTwoRequests(t *testing.T) {
@@ -155,7 +148,7 @@ func TestFieldShowRefusesAFieldGoneBetweenTheTwoRequests(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, server.Requests(), 2)
+	assert.Equal(t, []string{"/api/admin/projects/DEV", "/api/admin/projects/DEV/customFields/180-1"}, server.Paths())
 }
 
 func TestFieldShowRefusesAFieldRenamedBetweenTheTwoRequests(t *testing.T) {
@@ -180,7 +173,7 @@ func TestFieldShowRefusesAFieldRenamedBetweenTheTwoRequests(t *testing.T) {
 
 func TestFieldShowRefusesAProjectWithNoFields(t *testing.T) {
 	t.Parallel()
-	server := serveTheProject(t, projectMetadata(), noField(t))
+	server := serveTheProject(t, projectMetadata(), fake.Unexpected(t))
 
 	got := runWith(t, server.Env(), "field", "show", "DEV", "Type")
 

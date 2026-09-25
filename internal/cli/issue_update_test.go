@@ -49,13 +49,6 @@ func readThenUpdate(read, update http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func noUpdate(t *testing.T) http.HandlerFunc {
-	t.Helper()
-	return func(_ http.ResponseWriter, r *http.Request) {
-		assert.Fail(t, "an update reached the server", "%s %s", r.Method, r.URL)
-	}
-}
-
 func updateRequest(address, readable, fields string) string {
 	return "POST " + address + "/api/issues/" + readable + "?fields=" + fields
 }
@@ -86,11 +79,11 @@ func TestIssueUpdateReadsTheIssueAndWritesByTheIDOfIt(t *testing.T) {
 		"--field", "Held=First", "--clear", "Emptied", "--fields", "idReadable")
 
 	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-1\"\n"}, got)
-	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, server.Methods())
 	assert.Equal(t, []string{
 		"/api/issues/dev-1?fields=" + issueWriteFields,
 		"/api/issues/DEV-1?fields=idReadable,description," + customFieldsFields,
-	}, server.Targets())
+	}, server.Targets(t))
 	assert.JSONEq(t, `{"description":"Second","customFields":[`+
 		`{"$type":"StateMachineIssueCustomField","name":"Held","value":{"name":"First"}},`+
 		`{"$type":"SingleEnumIssueCustomField","name":"Emptied","value":null}]}`, server.Last(t).Body)
@@ -123,7 +116,7 @@ func TestIssueUpdateRefusesTheClassesOfTheIssueOfAnotherShape(t *testing.T) {
 		valueType: "state", canBeEmpty: true})
 	read := `{"$type":"Issue","idReadable":"DEV-1","customFields":[{"$type":7,"name":"Held",` +
 		`"projectCustomField":{"$type":"ProjectCustomField","id":"180-1"}}],"project":` + project + `}`
-	server := updating(t, fake.JSON(http.StatusOK, read), noUpdate(t))
+	server := updating(t, fake.JSON(http.StatusOK, read), fake.Unexpected(t))
 
 	got := runWith(t, server.Env(), "issue", "update", "DEV-1", "--field", "Held=First")
 
@@ -136,5 +129,5 @@ func TestIssueUpdateRefusesTheClassesOfTheIssueOfAnotherShape(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet}, server.Methods())
 }

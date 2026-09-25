@@ -287,7 +287,7 @@ func TestShowProjectRefusesAnAddressOfTheInstanceThatIsNoAbsolutePath(t *testing
 				{Key: "field", Value: render.NewString(tc.field)},
 				{Key: "upstream_value", Value: tc.received},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }

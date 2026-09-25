@@ -76,7 +76,7 @@ func TestArticleCreateFilesTheArticleInOneRequest(t *testing.T) {
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
-	assert.Equal(t, []string{http.MethodPost}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodPost}, server.Methods())
 	assert.Equal(t, []string{"/api/articles"}, server.Paths())
 	assert.Equal(t, []string{askedArticleFields}, server.Fields())
 	assert.Equal(t, map[string]any{

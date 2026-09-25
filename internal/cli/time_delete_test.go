@@ -36,11 +36,11 @@ func TestTimeDeleteReadsTheWorkItemAndThenRemovesIt(t *testing.T) {
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
 	assert.Equal(t, "id: \"199-7\"\nissue:\n  idReadable: \"DEV-1\"\n", got.stdout)
-	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, server.Methods())
 	assert.Equal(t, []string{
 		workItemPath("dev-1", "199-7") + "?fields=" + removedWorkItemFields,
 		workItemPath("DEV-1", "199-7") + "?",
-	}, server.Targets())
+	}, server.Targets(t))
 	assert.Equal(t, []string{"", ""}, server.Bodies())
 }
 
@@ -59,5 +59,5 @@ func TestTimeDeleteRemovesNothingByAReadOfAnotherShape(t *testing.T) {
 			{"upstream_body", read},
 		},
 	}, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet}, server.Methods())
 }

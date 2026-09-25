@@ -148,7 +148,7 @@ func TestTagRefusesACallBeforeAnyRequest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			_, fault := tc.call()
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -169,7 +169,7 @@ func TestCreateTagRefusesANameTheServerWouldCut(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			_, fault := youtrack.CreateTag(tc.written, youtrack.TagSharing{}, nil)
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -216,7 +216,7 @@ func TestCreateTagAsksForTheNameItChecks(t *testing.T) {
 	require.Nil(t, fault)
 	assert.Equal(t, render.NewMap(render.Pair{Key: "owner", Value: render.NewMap(
 		render.Pair{Key: "login", Value: render.NewString("first")})}), node)
-	assert.Equal(t, []string{"/api/tags?fields=owner(login),name"}, server.Targets())
+	assert.Equal(t, []string{"/api/tags?fields=owner(login),name"}, server.Targets(t))
 }
 
 func TestCreateTagRefusesANameTheServerKeptAsAnother(t *testing.T) {
@@ -263,7 +263,7 @@ func TestCreateTagRefusesANameTheServerKeptAsAnother(t *testing.T) {
 					render.Pair{Key: "expected", Value: render.NewString(tc.written)},
 					render.Pair{Key: "actual", Value: tc.actual}))},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }
@@ -378,7 +378,7 @@ func TestCreateTagAsksForTheGroupsOfEachSetItWrote(t *testing.T) {
 	assert.Equal(t, []string{
 		"/api/groups?fields=id,name&$top=-1",
 		"/api/tags?fields=name,readSharingSettings(permittedGroups(id)),tagSharingSettings(permittedGroups(id))",
-	}, server.Targets())
+	}, server.Targets(t))
 }
 
 func TestCreateTagRefusesGroupNamesItCannotResolve(t *testing.T) {
@@ -444,7 +444,7 @@ func TestCreateTagRefusesGroupNamesItCannotResolve(t *testing.T) {
 				Code:    diag.UnknownName,
 				Details: append([]render.Pair{{Key: "request", Value: render.NewString(tagGroupsRequest(server))}}, tc.details...),
 			}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 			assert.Equal(t, []string{"/api/groups"}, server.Paths())
 		})
 	}
@@ -507,7 +507,7 @@ func TestCreateTagRefusesGroupsItCannotShareTheTagWith(t *testing.T) {
 				{Key: "upstream_status", Value: render.NewNumber("200")},
 				{Key: "upstream_body", Value: render.NewString(tc.groups)},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 			assert.Equal(t, []string{"/api/groups"}, server.Paths())
 		})
 	}
@@ -585,7 +585,7 @@ func TestCreateTagRefusesASetOfGroupsThatCameBackAsAnother(t *testing.T) {
 					render.Pair{Key: "expected", Value: tc.expected},
 					render.Pair{Key: "actual", Value: tc.actual}))},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }
@@ -654,7 +654,7 @@ func TestDeleteTagReadsEveryTagOnceAndPrintsTheOneItDeleted(t *testing.T) {
 
 	require.Nil(t, fault)
 	assert.Equal(t, tagNode("Early", "first"), node)
-	assert.Equal(t, []string{tagCatalogueTarget, "/api/tags/10-1?"}, server.Targets())
+	assert.Equal(t, []string{tagCatalogueTarget, "/api/tags/10-1?"}, server.Targets(t))
 	assert.Equal(t, []string{"", ""}, server.Bodies())
 }
 
@@ -738,7 +738,7 @@ func TestDeleteTagRefusesANameThatNamesNoOneTag(t *testing.T) {
 				{Key: "request", Value: render.NewString("GET " + server.URL + tagCatalogueTarget)},
 				tc.detail,
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 			assert.Equal(t, []string{"/api/tags"}, server.Paths())
 		})
 	}
@@ -772,7 +772,7 @@ func TestDeleteTagRefusesTagsItCannotAddressTheDeletionBy(t *testing.T) {
 				{Key: "upstream_status", Value: render.NewNumber("200")},
 				{Key: "upstream_body", Value: render.NewString(catalogue)},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 			assert.Equal(t, []string{"/api/tags"}, server.Paths())
 		})
 	}
@@ -843,7 +843,7 @@ func TestAddAndRemoveTagRefuseAnOwnerTheReadNamedByAnIDOfAnotherShape(t *testing
 				{Key: "upstream_status", Value: render.NewNumber("200")},
 				{Key: "upstream_body", Value: render.NewString(tc.owner)},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 			assert.Equal(t, []string{tc.read}, server.Paths())
 		})
 	}
@@ -894,7 +894,7 @@ func TestAddTagWritesUnderTheIDsTheReadsFound(t *testing.T) {
 			_, fault = call(t.Context(), client(t, server))
 
 			require.Nil(t, fault)
-			assert.Equal(t, tc.targets, server.Targets())
+			assert.Equal(t, tc.targets, server.Targets(t))
 			assert.Equal(t, []string{"", "", `{"id":"10-1"}`}, server.Bodies())
 		})
 	}
@@ -965,7 +965,7 @@ func TestAddTagRefusesATagOtherThanTheOneResolved(t *testing.T) {
 				{Key: "upstream_status", Value: render.NewNumber("200")},
 				{Key: "upstream_body", Value: render.NewString(other)},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }
@@ -1022,7 +1022,7 @@ func TestRemoveTagTakesTheTagOffUnderTheIDsTheReadsFound(t *testing.T) {
 			assert.Equal(t, render.NewMap(
 				render.Pair{Key: "idReadable", Value: render.NewString(tc.readable)},
 				render.Pair{Key: "removed", Value: tagNode("Early", "first")}), node)
-			assert.Equal(t, tc.targets, server.Targets())
+			assert.Equal(t, tc.targets, server.Targets(t))
 			assert.Equal(t, []string{"", "", ""}, server.Bodies())
 		})
 	}

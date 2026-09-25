@@ -20,7 +20,7 @@ func issueToEmpty() string {
 	))
 }
 
-func requireIssueWriteRefusal(t *testing.T, got outcome) faultDocument {
+func requireIssueWriteFault(t *testing.T, got outcome) faultDocument {
 	t.Helper()
 	found := requireFault(t, got)
 	for at, pair := range found.details {
@@ -45,7 +45,7 @@ func requireIssueWriteRefusal(t *testing.T, got outcome) faultDocument {
 
 func TestIssueUpdateRefusesToEmptyEveryFieldTheProjectRequires(t *testing.T) {
 	t.Parallel()
-	server := updating(t, fake.JSON(http.StatusOK, issueToEmpty()), noUpdate(t))
+	server := updating(t, fake.JSON(http.StatusOK, issueToEmpty()), fake.Unexpected(t))
 
 	got := runWith(t, server.Env(), "issue", "update", "DEV-1",
 		"--clear", "First", "--clear", "Second", "--clear", "Single")
@@ -59,12 +59,12 @@ func TestIssueUpdateRefusesToEmptyEveryFieldTheProjectRequires(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet}, server.Methods())
 }
 
 func TestIssueUpdateRefusesAFieldWrittenAndEmptiedAtOnce(t *testing.T) {
 	t.Parallel()
-	server := updating(t, fake.JSON(http.StatusOK, issueToEmpty()), noUpdate(t))
+	server := updating(t, fake.JSON(http.StatusOK, issueToEmpty()), fake.Unexpected(t))
 
 	got := runWith(t, server.Env(), "issue", "update", "DEV-1", "--field", "Single=first", "--clear", "localized")
 
@@ -76,6 +76,6 @@ func TestIssueUpdateRefusesAFieldWrittenAndEmptiedAtOnce(t *testing.T) {
 			{"invalid", []any{[]detail{{"field", "Single"}, {"value", "first"}}}},
 		},
 	}
-	assert.Equal(t, want, requireIssueWriteRefusal(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
+	assert.Equal(t, want, requireIssueWriteFault(t, got))
+	assert.Equal(t, []string{http.MethodGet}, server.Methods())
 }

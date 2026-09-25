@@ -96,13 +96,6 @@ func creating(t *testing.T, metadata, creation http.HandlerFunc) *fake.Server {
 	})
 }
 
-func noCreation(t *testing.T) http.HandlerFunc {
-	t.Helper()
-	return func(_ http.ResponseWriter, r *http.Request) {
-		assert.Fail(t, "a creation reached the server", "%s %s", r.Method, r.URL)
-	}
-}
-
 func writeMetadataRequest(address, code string) string {
 	return "GET " + address + "/api/admin/projects/" + code + "?fields=" + projectWriteFields
 }
@@ -133,11 +126,11 @@ func TestIssueCreateReadsTheProjectAndFilesTheIssue(t *testing.T) {
 		"--field", "Field=Third", "--fields", "idReadable,description")
 
 	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-7\"\ndescription: |-\n  Second\n  line\n"}, got)
-	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, server.Methods())
 	assert.Equal(t, []string{
 		"/api/admin/projects/DEV?fields=" + projectWriteFields,
 		"/api/issues?fields=idReadable,description,summary," + customFieldsFields,
-	}, server.Targets())
+	}, server.Targets(t))
 	assert.JSONEq(t, `{"project":{"id":"0-1"},"summary":"First","description":"Second\nline",`+
 		`"customFields":[{"$type":"SimpleIssueCustomField","name":"Field","value":"Third"}]}`, server.Last(t).Body)
 }
@@ -150,7 +143,7 @@ func TestIssueCreateNamesEveryRequiredFieldAtOnce(t *testing.T) {
 		writableField{id: "180-3", name: "Second", valueType: "enum", isMultiValue: true},
 		writableField{id: "180-4", name: "Optional", valueType: "enum", isMultiValue: true, canBeEmpty: true},
 	)
-	server := creating(t, fake.JSON(http.StatusOK, metadata), noCreation(t))
+	server := creating(t, fake.JSON(http.StatusOK, metadata), fake.Unexpected(t))
 
 	got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x")
 
@@ -163,7 +156,7 @@ func TestIssueCreateNamesEveryRequiredFieldAtOnce(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet}, server.Methods())
 }
 
 func TestIssueCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
@@ -187,7 +180,7 @@ func TestIssueCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 func TestIssueCreateRefusesMetadataOfTheProjectOfAnotherShape(t *testing.T) {
 	t.Parallel()
 	const project = `{"$type":"Project","id":"0-1","shortName":7,"customFields":[]}`
-	server := creating(t, fake.JSON(http.StatusOK, project), noCreation(t))
+	server := creating(t, fake.JSON(http.StatusOK, project), fake.Unexpected(t))
 
 	got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x")
 
@@ -200,5 +193,5 @@ func TestIssueCreateRefusesMetadataOfTheProjectOfAnotherShape(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet}, server.Methods())
 }

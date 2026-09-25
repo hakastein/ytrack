@@ -152,7 +152,7 @@ func TestArticleCallsRefuseTheCommentsInTheExpression(t *testing.T) {
 			t.Parallel()
 			_, fault := tc.call()
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -176,7 +176,7 @@ func TestCreateArticleRefusesBeforeAnyRequest(t *testing.T) {
 			t.Parallel()
 			_, fault := youtrack.CreateArticle("DEV", tc.summary, tc.content, nil, nil)
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -210,7 +210,7 @@ func TestUpdateArticleRefusesBeforeAnyRequest(t *testing.T) {
 			t.Parallel()
 			_, fault := youtrack.UpdateArticle("DEV-A-7", tc.summary, tc.content, tc.parent, tc.cleared, nil)
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -536,7 +536,7 @@ func TestCreateArticleRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 				{Key: "article", Value: render.NewString(tc.article)},
 				{Key: "mismatch", Value: render.NewList(tc.mismatch...)},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }
@@ -605,7 +605,7 @@ func TestUpdateArticleRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 				{Key: "article", Value: render.NewString(articleWritten.readable)},
 				{Key: "mismatch", Value: render.NewList(tc.mismatch)},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }
@@ -696,7 +696,7 @@ func TestArticleWritesRefuseAParentOfAnotherProject(t *testing.T) {
 				{Key: "parent", Value: render.NewString(articleOfDEMO.readable)},
 				{Key: "parent_project", Value: render.NewString("DEMO")},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }
@@ -731,7 +731,7 @@ func TestUpdateArticleRefusesAnArticleItCannotWriteByTheRead(t *testing.T) {
 				{Key: "upstream_status", Value: render.NewNumber("200")},
 				{Key: "upstream_body", Value: render.NewString(tc.read)},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }
@@ -781,7 +781,7 @@ func TestUpdateArticleRefusesAParentThatClosesTheLine(t *testing.T) {
 				{Key: "parent", Value: tc.chain[0]},
 				{Key: "chain", Value: render.NewList(tc.chain...)},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }
@@ -826,7 +826,7 @@ func TestUpdateArticleRefusesALineOfParentsTheServerBrokeOff(t *testing.T) {
 				{Key: "fields", Value: render.NewString(server.Last(t).URL.Query().Get("fields"))},
 				{Key: "missing", Value: render.NewList(missing)},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }
@@ -877,7 +877,7 @@ func TestUpdateArticleRefusesAnAncestorItCannotRead(t *testing.T) {
 				{Key: "upstream_status", Value: render.NewNumber("200")},
 				{Key: "upstream_body", Value: render.NewString(tc.line)},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }
@@ -895,7 +895,7 @@ func TestUpdateArticleRefusesAParentOfAnotherShape(t *testing.T) {
 
 	_, fault = call(t.Context(), client(t, server))
 
-	assert.Equal(t, unreadable(lastRequest(t, server), line), refusal(t, fault))
+	assert.Equal(t, unreadable(lastRequest(t, server), line), faultOf(t, fault))
 }
 
 func TestUpdateArticleRefusesALineThatRepeatsAnArticle(t *testing.T) {
@@ -913,7 +913,7 @@ func TestUpdateArticleRefusesALineThatRepeatsAnArticle(t *testing.T) {
 		lastRequest(t, server),
 		{Key: "article", Value: render.NewString(articleChild.readable)},
 	}}
-	assert.Equal(t, want, refusal(t, fault))
+	assert.Equal(t, want, faultOf(t, fault))
 }
 
 func TestUpdateArticleReadsTheLineOnWhereItIsDeeperThanOneRequest(t *testing.T) {
@@ -1083,7 +1083,7 @@ func TestListArticlesRefusesASearchThatIsNoUTF8(t *testing.T) {
 			t.Parallel()
 			_, fault := youtrack.ListArticles(tc.search, nil, youtrack.Page{Limit: 1})
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }

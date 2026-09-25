@@ -112,7 +112,7 @@ func TestListFieldsRefusesAProjectWithNoFields(t *testing.T) {
 
 	_, fault := fieldMetaList(t, server, youtrack.FieldListFields)
 
-	assert.Equal(t, fieldMetaDenied(t, server), refusal(t, fault))
+	assert.Equal(t, fieldMetaDenied(t, server), faultOf(t, fault))
 }
 
 func TestShowFieldRefusesAProjectWithNoFields(t *testing.T) {
@@ -121,7 +121,7 @@ func TestShowFieldRefusesAProjectWithNoFields(t *testing.T) {
 
 	_, fault := fieldMetaShow(t, client(t, server), "First", nil)
 
-	assert.Equal(t, fieldMetaDenied(t, server), refusal(t, fault))
+	assert.Equal(t, fieldMetaDenied(t, server), faultOf(t, fault))
 	assert.Equal(t, []string{fieldMetaPath}, server.Paths())
 }
 
@@ -196,7 +196,7 @@ func TestListFieldsRefusesAnOrdinalItCannotOrderBy(t *testing.T) {
 
 			_, fault := fieldMetaList(t, server, "field(name)")
 
-			assert.Equal(t, unreadable(lastRequest(t, server), fields), refusal(t, fault))
+			assert.Equal(t, unreadable(lastRequest(t, server), fields), faultOf(t, fault))
 		})
 	}
 }
@@ -217,7 +217,7 @@ func TestShowFieldRefusesACallItCannotSend(t *testing.T) {
 			t.Parallel()
 			_, fault := youtrack.ShowField("DEV", tc.field, tc.expression)
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -361,7 +361,7 @@ func TestShowFieldRefusesMetadataItCannotRead(t *testing.T) {
 
 			_, fault := fieldMetaShow(t, client(t, server), "Field", tc.expression)
 
-			assert.Equal(t, unreadable(lastRequest(t, server), tc.metadata), refusal(t, fault))
+			assert.Equal(t, unreadable(lastRequest(t, server), tc.metadata), faultOf(t, fault))
 			assert.Equal(t, []string{fieldMetaPath}, server.Paths())
 		})
 	}
@@ -375,7 +375,7 @@ func TestShowFieldRefusesAFieldItCannotCompare(t *testing.T) {
 
 	_, fault := fieldMetaShow(t, client(t, server), "Field", new("canBeEmpty"))
 
-	assert.Equal(t, unreadable(lastRequest(t, server), answer), refusal(t, fault))
+	assert.Equal(t, unreadable(lastRequest(t, server), answer), faultOf(t, fault))
 }
 
 func TestShowFieldRefusesAFieldThatChangedBetweenTheTwoRequests(t *testing.T) {
@@ -406,7 +406,7 @@ func TestShowFieldRefusesAFieldThatChangedBetweenTheTwoRequests(t *testing.T) {
 				{Key: "field", Value: render.NewString("Field")},
 				{Key: "upstream_body", Value: render.NewString(answer)},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }
@@ -467,7 +467,7 @@ func TestShowFieldNamesTheCandidatesOfANameItCannotResolve(t *testing.T) {
 
 			_, fault := fieldMetaShow(t, client(t, server), tc.asked, nil)
 
-			assert.Equal(t, fieldMetaUnknown(t, server, tc.asked, tc.named...), refusal(t, fault))
+			assert.Equal(t, fieldMetaUnknown(t, server, tc.asked, tc.named...), faultOf(t, fault))
 			assert.Equal(t, []string{fieldMetaPath}, server.Paths())
 		})
 	}

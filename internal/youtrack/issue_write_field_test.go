@@ -219,7 +219,7 @@ func TestIssueWriteRefusesAValueItsFieldCannotHold(t *testing.T) {
 
 			_, fault := callOn(t, server)(youtrack.CreateIssue("DEV", "First", nil, []string{"Field=" + tc.given}, nil))
 
-			kept, invalid := issueWriteRefusal(t, fault)
+			kept, invalid := issueWriteFault(t, fault)
 			want := diag.Fault{Code: diag.BadUsage, Details: []render.Pair{
 				writtenMetadataRequest(server), writtenProjectDetail(), {Key: "invalid"},
 			}}
@@ -242,7 +242,7 @@ func TestIssueWriteNamesEveryValueItCannotSendAtOnce(t *testing.T) {
 	_, fault := callOn(t, server)(youtrack.CreateIssue("DEV", "First", nil,
 		[]string{"Third= x", "Second=P1D", "First=2.5"}, nil))
 
-	kept, invalid := issueWriteRefusal(t, fault)
+	kept, invalid := issueWriteFault(t, fault)
 	assert.Equal(t, diag.Fault{Code: diag.BadUsage, Details: []render.Pair{
 		writtenMetadataRequest(server), writtenProjectDetail(), {Key: "invalid"},
 	}}, kept)
@@ -289,7 +289,7 @@ func TestIssueWriteRefusesMoreThanAFieldTakesInOneWrite(t *testing.T) {
 
 			_, fault := callOn(t, server)(tc.call())
 
-			kept, invalid := issueWriteRefusal(t, fault)
+			kept, invalid := issueWriteFault(t, fault)
 			assert.Equal(t, diag.Fault{Code: diag.BadUsage, Details: []render.Pair{
 				tc.request(server), writtenProjectDetail(), {Key: "invalid"},
 			}}, kept)
@@ -444,7 +444,7 @@ func TestIssueWriteRefusesANameNoSingleFieldAnswersTo(t *testing.T) {
 			want := diag.Fault{Code: diag.UnknownName, Details: []render.Pair{
 				tc.request(server), writtenProjectDetail(), {Key: tc.key, Value: render.NewList(tc.named...)},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 			assert.Equal(t, []string{tc.read}, server.Paths())
 		})
 	}
@@ -490,7 +490,7 @@ func TestIssueWriteRefusesMetadataOfAnotherShape(t *testing.T) {
 				{Key: "upstream_status", Value: render.NewNumber("200")},
 				{Key: "upstream_body", Value: render.NewString(tc.project)},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 			assert.Equal(t, []string{writtenProjectPath}, server.Paths())
 		})
 	}

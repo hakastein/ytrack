@@ -39,7 +39,7 @@ func filingUnderAParent(t *testing.T, read, creation http.HandlerFunc) *fake.Ser
 func TestArticleCreateRefusesAParentLeftEmptyInTheResponse(t *testing.T) {
 	t.Parallel()
 	const found = `{"$type":"Article","id":null,"idReadable":"DEV-A-1","project":{"$type":"Project","shortName":"DEV"}}`
-	server := filingUnderAParent(t, fake.JSON(http.StatusOK, found), noCreation(t))
+	server := filingUnderAParent(t, fake.JSON(http.StatusOK, found), fake.Unexpected(t))
 
 	got := runWith(t, server.Env(), "article", "create", "DEV", "--summary", "Title", "--parent", "DEV-A-1")
 
@@ -52,5 +52,5 @@ func TestArticleCreateRefusesAParentLeftEmptyInTheResponse(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet}, server.Methods())
 }

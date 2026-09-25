@@ -108,7 +108,7 @@ func TestTimeCreateWritesTheWorkItemAndPrintsWhatTheServerKept(t *testing.T) {
 		"/api/issues/DEV-1?fields=" + sentWorkItemSettingsFields,
 		workItemsPath("DEV-1") + "?fields=id,duration(minutes),type(name,id),attributes(id,name,value(id,name))," +
 			"author(login),date,issue(idReadable," + customFieldsFields + "),text",
-	}, server.Targets())
+	}, server.Targets(t))
 	assert.Equal(t, http.MethodPost, server.Last(t).Method)
 	assert.Equal(t, `{"duration":{"minutes":90},"type":{"id":"8-1"},"date":1788264000000,"text":"first\nsecond",`+
 		`"attributes":[{"id":"9-1","value":{"id":"9-3"}}]}`, server.Last(t).Body)
@@ -128,7 +128,7 @@ func TestTimeCreateRefusesATypeTheProjectDoesNotHave(t *testing.T) {
 			{"unknown", []any{[]detail{{"type", "Secnd"}, {"nearest", []any{"Second"}}}}},
 		},
 	}, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
+	assert.Equal(t, []string{http.MethodGet}, server.Methods())
 }
 
 func TestTimeCreateRefusesADurationTheServerKeptOtherwise(t *testing.T) {

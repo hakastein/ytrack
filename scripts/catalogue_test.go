@@ -200,9 +200,10 @@ func TestCatalogueRefusesAShapeItDoesNotRead(t *testing.T) {
 				"Group":{"type":"object","discriminator":{"propertyName":"$type","mapping":{"Item":"#/components/schemas/User"}}}}}}`,
 		},
 		{
-			name: "a $type that another schema has for its name",
+			name: "a $type that another schema has for its name, though that schema goes by a $type of its own",
 			specification: `{"components":{"schemas":{"Person":{"type":"object"},"User":{"type":"object"},
-				"Member":{"type":"object","discriminator":{"propertyName":"$type","mapping":{"Person":"#/components/schemas/User"}}}}}}`,
+				"Member":{"type":"object","discriminator":{"propertyName":"$type","mapping":{
+					"Person":"#/components/schemas/User","Human":"#/components/schemas/Person"}}}}}}`,
 		},
 		{
 			name: "a schema discriminators give two $type",

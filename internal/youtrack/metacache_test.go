@@ -211,7 +211,7 @@ func TestShowFieldRefusesANameOnlyAfterReadingTheMetadataAgain(t *testing.T) {
 
 			_, fault = fieldMetaShowOf(t, fieldMetaCached(t, server, root), "DEV", tc.asked)
 
-			assert.Equal(t, fieldMetaUnknown(t, server, tc.asked, tc.nearest...), refusal(t, fault))
+			assert.Equal(t, fieldMetaUnknown(t, server, tc.asked, tc.nearest...), faultOf(t, fault))
 			assert.Equal(t, tc.paths, server.Paths())
 		})
 	}
@@ -282,7 +282,7 @@ func TestShowFieldRefusesAnIdNoPathCanHoldOverTheCacheAsWell(t *testing.T) {
 
 	_, fault = fieldMetaShowOf(t, fieldMetaCached(t, server, root), "DEV", "Field")
 
-	assert.Equal(t, unreadable(lastRequest(t, server), metadata), refusal(t, fault))
+	assert.Equal(t, unreadable(lastRequest(t, server), metadata), faultOf(t, fault))
 	assert.Equal(t, []string{fieldMetaPath, fieldMetaPath}, server.Paths())
 }
 
@@ -321,7 +321,7 @@ func TestShowFieldPassesOnAFailureOfTheFieldUnderAWarmCache(t *testing.T) {
 				lastRequest(t, server),
 				{Key: "upstream_status", Value: render.NewNumber(json.Number(strconv.Itoa(tc.status)))},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 			assert.Equal(t, tc.paths, server.Paths())
 		})
 	}

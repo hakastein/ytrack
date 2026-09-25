@@ -41,7 +41,7 @@ func documentsOf(t *testing.T, text string) []*yaml.Node {
 func requireWarning(t *testing.T, document *yaml.Node) warned {
 	t.Helper()
 	require.Equal(t, yaml.MappingNode, document.Kind)
-	require.Equal(t, []string{"code", "message", "query", "free_text"}, recordKeys(document))
+	require.Equal(t, []string{"code", "message", "query", "free_text"}, keysOf(document))
 	var found warned
 	require.NoError(t, document.Decode(&found))
 	assert.NotEmpty(t, document.Content[3].Value, "the warning says nothing")
@@ -70,7 +70,7 @@ func TestIssueListPrintsTheIssuesItWarnedAbout(t *testing.T) {
 	assert.Equal(t, 0, got.code)
 	assert.Equal(t, "total: 2\nreturned: 2\ntruncated: false\nissues:\n"+printedDEV1Row+printedDEV2Row, got.stdout)
 	assert.Equal(t, warningOf(query, "one"), requireWarned(t, got))
-	requireMarkedUpFirst(t, server, query)
+	assert.Equal(t, []string{fake.AssistPath, issuesPath}, server.Paths())
 }
 
 func TestIssueListWarnsBeforeItRefusesTheSearchTheServerWouldNotRun(t *testing.T) {
@@ -91,5 +91,5 @@ func TestIssueListWarnsBeforeItRefusesTheSearchTheServerWouldNotRun(t *testing.T
 	assert.Equal(t, 1, strings.Count(got.stderr, separator), "stderr: %q", got.stderr)
 	assert.False(t, strings.HasPrefix(got.stderr, "---"), "stderr: %q", got.stderr)
 	assert.True(t, strings.HasSuffix(got.stderr, "\n"), "stderr: %q", got.stderr)
-	requireMarkedUpFirst(t, server, query)
+	assert.Equal(t, []string{fake.AssistPath, issuesPath}, server.Paths())
 }

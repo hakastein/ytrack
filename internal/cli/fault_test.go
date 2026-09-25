@@ -66,7 +66,7 @@ func TestAFaultNamesTheRequestThatWasSent(t *testing.T) {
 			require.Equal(t, detail{"request", "GET " + server.URL + tc.target}, found.details[0])
 			printed, err := url.Parse(tc.target)
 			require.NoError(t, err)
-			assert.Len(t, server.Requests(), 1)
+			assert.Equal(t, []string{http.MethodGet}, server.Methods())
 			assert.Equal(t, printed.EscapedPath(), server.Request(t, 0).URL.EscapedPath())
 			assert.Equal(t, printed.Query(), server.Request(t, 0).URL.Query())
 		})
@@ -201,7 +201,7 @@ func TestProjectShowRefusesByTheStatusOfTheAnswer(t *testing.T) {
 				details: slices.Concat([]detail{{"request", showRequest(server.URL, "DEV")}}, tc.detailsAfterRequest),
 			}
 			assert.Equal(t, want, requireFault(t, got))
-			assert.Len(t, server.Requests(), 1)
+			assert.Equal(t, []string{"/api/admin/projects/DEV"}, server.Paths())
 		})
 	}
 }
@@ -343,7 +343,7 @@ func TestProjectShowRefusesAnAnswerOfAnotherShape(t *testing.T) {
 				},
 			}
 			assert.Equal(t, want, requireFault(t, got))
-			assert.Len(t, server.Requests(), 1)
+			assert.Equal(t, []string{"/api/admin/projects/DEV"}, server.Paths())
 		})
 	}
 }
@@ -370,7 +370,7 @@ func TestProjectShowDoesNotFollowARedirect(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, server.Requests(), 1)
+	assert.Equal(t, []string{"/api/admin/projects/DEV"}, server.Paths())
 }
 
 func TestProjectShowRefusesAnAnswerCutShort(t *testing.T) {

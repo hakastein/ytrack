@@ -31,14 +31,6 @@ func commentServer(t *testing.T, answers commentAnswers) *fake.Server {
 	return fake.Serve(t, routes.ServeHTTP)
 }
 
-func commentRoutes(server *fake.Server) []string {
-	var routes []string
-	for _, sent := range server.Requests() {
-		routes = append(routes, sent.Method+" "+sent.URL.Path)
-	}
-	return routes
-}
-
 func commentWritten(t *testing.T, id, text string) string {
 	t.Helper()
 	written, err := json.Marshal(map[string]any{"$type": "IssueComment", "id": id, "text": text})
@@ -116,7 +108,7 @@ func TestCommentWritesRefuseATextTheyWillNotSend(t *testing.T) {
 			t.Parallel()
 			_, fault := tc.call()
 
-			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, refusal(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.BadUsage}, faultOf(t, fault))
 		})
 	}
 }
@@ -191,7 +183,7 @@ func TestCommentCallsAddressTheCommentsOfTheOwnerTheyNamed(t *testing.T) {
 			_, fault = call(t.Context(), client(t, server))
 
 			require.Nil(t, fault)
-			assert.Equal(t, tc.routes, commentRoutes(server))
+			assert.Equal(t, tc.routes, server.Routes())
 		})
 	}
 }
@@ -299,7 +291,7 @@ func TestCommentWritesRefuseAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 				{Key: "comment", Value: render.NewString("7-12")},
 				{Key: "mismatch", Value: render.NewList(mismatch)},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }
@@ -358,8 +350,8 @@ func TestUpdateCommentWritesNothingWhereTheReadSaysNo(t *testing.T) {
 			request := render.Pair{Key: "request",
 				Value: render.NewString("GET " + server.URL + "/api/issues/DEV-7/comments/7-12?fields=deleted")}
 			want := diag.Fault{Code: tc.code, Details: append([]render.Pair{request}, tc.details...)}
-			assert.Equal(t, want, refusal(t, fault))
-			assert.Equal(t, []string{"GET /api/issues/DEV-7/comments/7-12"}, commentRoutes(server))
+			assert.Equal(t, want, faultOf(t, fault))
+			assert.Equal(t, []string{"GET /api/issues/DEV-7/comments/7-12"}, server.Routes())
 		})
 	}
 }
@@ -477,7 +469,7 @@ func TestCommentCallsCheckTheAnswerAgainstTheSchemaOfTheOwner(t *testing.T) {
 				{Key: "fields", Value: render.NewString(tc.fields)},
 				{Key: "unknown", Value: render.NewList(unknown)},
 			}}
-			assert.Equal(t, want, refusal(t, fault))
+			assert.Equal(t, want, faultOf(t, fault))
 		})
 	}
 }
