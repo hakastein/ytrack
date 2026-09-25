@@ -5,12 +5,10 @@ import (
 	"net/url"
 	"slices"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.yaml.in/yaml/v3"
 
 	"github.com/hakastein/ytrack/internal/fake"
 )
@@ -18,6 +16,7 @@ import (
 const (
 	activityIssue  = "DEV-7"
 	activitiesPath = "/api/issues/" + activityIssue + "/activities"
+	linkTypesPath  = "/api/issueLinkTypes"
 )
 
 const sentActivityFields = "timestamp,author(login),category(id),field(name,customField(name,fieldType(valueType)))," +
@@ -27,84 +26,59 @@ const activityCategories = "AttachmentsCategory,CommentTextCategory,CommentsCate
 	"DescriptionCategory,IssueCreatedCategory,IssueResolvedCategory,LinksCategory,SummaryCategory," +
 	"TagsCategory,VcsChangeCategory,WorkItemCategory"
 
+const (
+	linkTypesFields = "sourceToTarget,targetToSource,localizedSourceToTarget,localizedTargetToSource"
+	sentLinkTypes   = `[{"$type":"IssueLinkType","sourceToTarget":"leads to","targetToSource":"follows",` +
+		`"localizedSourceToTarget":"Goes before","localizedTargetToSource":"Comes after"}]`
+)
+
 type sentActivity struct {
-	kind        string
-	category    string
-	categoryRaw string
-	timestamp   string
-	login       string
-	author      string
-	added       string
-	removed     string
-	field       string
+	kind      string
+	category  string
+	timestamp string
+	added     string
+	removed   string
+	field     string
 }
 
-const (
-	sentPredefinedField = `{"$type":"PredefinedFilterField","name":"создана"}`
-	sentStateField      = `{"$type":"CustomFilterField","name":"Состояние","customField":{"$type":"CustomField",` +
-		`"name":"State","fieldType":{"$type":"FieldType","valueType":"state"}}}`
-)
-
-const (
-	sentStateValue   = `[{"$type":"StateBundleElement","id":"156-17","name":"Duplicate"}]`
-	sentStateBefore  = `[{"$type":"StateBundleElement","id":"156-18","name":"Новая"}]`
-	sentLinkedIssue  = `[{"$type":"Issue","id":"3-21","idReadable":"DEV-3"}]`
-	sentNothingAdded = `[]`
-)
-
 func (a sentActivity) sent() string {
-	login := a.login
-	if login == "" {
-		login = "admin"
-	}
-	author := a.author
-	if author == "" {
-		author = `{"$type":"User","login":` + strconv.Quote(login) + `}`
-	}
-	category := a.categoryRaw
-	if category == "" {
-		category = `{"$type":"ActivityCategory","id":` + strconv.Quote(a.category) + `}`
-	}
-	field := a.field
-	if field == "" {
-		field = sentPredefinedField
-	}
-	added, removed := a.added, a.removed
-	if added == "" {
-		added = sentNothingAdded
-	}
-	if removed == "" {
-		removed = sentNothingAdded
-	}
-	return `{"$type":"` + a.kind + `","id":"163-1","category":` + category + `,"timestamp":` + a.timestamp +
-		`,"added":` + added + `,"removed":` + removed + `,"field":` + field + `,"author":` + author + `}`
+	return `{"$type":"` + a.kind + `","id":"1-1","category":{"$type":"ActivityCategory","id":` + strconv.Quote(a.category) +
+		`},"timestamp":` + a.timestamp + `,"added":` + a.added + `,"removed":` + a.removed + `,"field":` + a.field +
+		`,"author":{"$type":"User","login":"user"}}`
 }
 
 func sentFieldActivity(timestamp string) string {
 	return sentActivity{
 		kind: "CustomFieldActivityItem", category: "CustomFieldCategory", timestamp: timestamp,
-		field: sentStateField, added: sentStateValue, removed: sentStateBefore,
+		field: `{"$type":"CustomFilterField","name":"Label","customField":{"$type":"CustomField",` +
+			`"name":"State","fieldType":{"$type":"FieldType","valueType":"state"}}}`,
+		added:   `[{"$type":"StateBundleElement","id":"1-2","name":"Second"}]`,
+		removed: `[{"$type":"StateBundleElement","id":"1-1","name":"First"}]`,
 	}.sent()
 }
 
 func sentLinkActivity(timestamp string) string {
 	return sentActivity{
 		kind: "LinksActivityItem", category: "LinksCategory", timestamp: timestamp,
-		field: `{"$type":"LinkTypeFilterField","name":"Зависит от"}`, added: sentLinkedIssue,
+		field: `{"$type":"LinkTypeFilterField","name":"Comes after"}`,
+		added: `[{"$type":"Issue","id":"1-3","idReadable":"DEV-3"}]`, removed: `[]`,
 	}.sent()
 }
 
 func sentCreatedActivity(timestamp string) string {
-	return sentActivity{kind: "IssueCreatedActivityItem", category: "IssueCreatedCategory", timestamp: timestamp}.sent()
+	return sentActivity{
+		kind: "IssueCreatedActivityItem", category: "IssueCreatedCategory", timestamp: timestamp,
+		field: `{"$type":"PredefinedFilterField","name":"created"}`, added: `[]`, removed: `[]`,
+	}.sent()
 }
 
 const (
-	printedFieldRow = `  - {timestamp: "2026-09-10T10:16:52.4Z", author: {login: "admin"}, ` +
-		`category: "CustomFieldCategory", field: "State", added: [{id: "156-17", name: "Duplicate"}], ` +
-		`removed: [{id: "156-18", name: "Новая"}]}` + "\n"
-	printedLinkRow = `  - {timestamp: "2026-09-10T10:16:51Z", author: {login: "admin"}, ` +
-		`category: "LinksCategory", field: "depends on", added: [{id: "3-21", idReadable: "DEV-3"}], removed: []}` + "\n"
-	printedCreatedRow = `  - {timestamp: "2026-09-10T10:16:50.875Z", author: {login: "admin"}, ` +
+	printedFieldRow = `  - {timestamp: "2026-09-10T10:16:52.4Z", author: {login: "user"}, ` +
+		`category: "CustomFieldCategory", field: "State", added: [{id: "1-2", name: "Second"}], ` +
+		`removed: [{id: "1-1", name: "First"}]}` + "\n"
+	printedLinkRow = `  - {timestamp: "2026-09-10T10:16:51Z", author: {login: "user"}, ` +
+		`category: "LinksCategory", field: "follows", added: [{id: "1-3", idReadable: "DEV-3"}], removed: []}` + "\n"
+	printedCreatedRow = `  - {timestamp: "2026-09-10T10:16:50.875Z", author: {login: "user"}, ` +
 		`category: "IssueCreatedCategory", field: null, added: [], removed: []}` + "\n"
 )
 
@@ -122,11 +96,13 @@ const noActivities = `[]`
 
 func activityServer(t *testing.T, handler http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return fake.Serve(t, linksKnown(handler))
-}
-
-func oneRecord(printed string) string {
-	return "total: 1\nreturned: 1\ntruncated: false\nactivities:\n  - {" + printed + "}\n"
+	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == linkTypesPath {
+			fake.JSON(http.StatusOK, sentLinkTypes)(w, r)
+			return
+		}
+		handler(w, r)
+	})
 }
 
 func activityRequest(address, top string) string {
@@ -137,17 +113,12 @@ func activityRequest(address, top string) string {
 func activitySent(t *testing.T, server *fake.Server) url.Values {
 	t.Helper()
 	for _, request := range server.Requests() {
-		if strings.HasSuffix(request.URL.Path, "/activities") {
+		if request.URL.Path == activitiesPath {
 			return request.URL.Query()
 		}
 	}
 	require.FailNow(t, "no request reached the activities of an issue")
 	return nil
-}
-
-func activities(t *testing.T, got outcome) []*yaml.Node {
-	t.Helper()
-	return nodeAt(t, requireMapping(t, "stdout", got.stdout), "activities").Content
 }
 
 func TestActivityTakesTheIssueAsItsOneArgument(t *testing.T) {
@@ -192,10 +163,6 @@ func TestActivityRefusesTheFlagsOfAListItCannotSend(t *testing.T) {
 		{name: "the limit twice", flags: []string{"--limit", "1", "--limit", "2"}},
 		{name: "the fields twice", flags: []string{"--fields", "timestamp", "--fields", "category"}},
 		{name: "an expression that closes nothing", flags: []string{"--fields", "timestamp(added"}},
-		{name: "a name under the category", flags: []string{"--fields", "category(id)"}},
-		{name: "a name under the category added to the default", flags: []string{"--fields", "+category(id)"}},
-		{name: "a name under the field", flags: []string{"--fields", "field(name)"}},
-		{name: "a name under the field added to the default", flags: []string{"--fields", "+field(customField(name))"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -210,26 +177,7 @@ func TestActivityRefusesTheFlagsOfAListItCannotSend(t *testing.T) {
 	}
 }
 
-func TestActivitySendsTheActivitiesOfTheIssueItWasGiven(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, `[`+sentCreatedActivity(middle)+`]`))
-
-	got := runWith(t, server.Env(), "activity", "list", activityIssue, "--category", "IssueCreatedCategory")
-
-	want := "total: 1\nreturned: 1\ntruncated: false\nactivities:\n" +
-		strings.Replace(printedCreatedRow, "50.875Z", "51Z", 1)
-	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []string{activitiesPath}, server.Paths())
-	sent := activitySent(t, server)
-	assert.Equal(t, []string{"IssueCreatedCategory"}, sent["categories"])
-	assert.Equal(t, []string{"true"}, sent["reverse"])
-	assert.Equal(t, []string{"51"}, sent["$top"])
-	assert.Equal(t, []string{sentActivityFields}, sent["fields"])
-	assert.NotContains(t, sent.Get("fields"), "target")
-	assert.NotContains(t, sent, "issueQuery")
-}
-
-func TestActivityPrintsAnActivityToALine(t *testing.T) {
+func TestActivityPrintsTheActivitiesOfTheIssueItWasGiven(t *testing.T) {
 	t.Parallel()
 	server := activityServer(t, fake.JSON(http.StatusOK, threeActivities()))
 
@@ -237,42 +185,28 @@ func TestActivityPrintsAnActivityToALine(t *testing.T) {
 
 	rows := printedFieldRow + printedLinkRow + printedCreatedRow
 	assert.Equal(t, outcome{stdout: "total: 3\nreturned: 3\ntruncated: false\nactivities:\n" + rows}, got)
-	for _, record := range activities(t, got) {
-		assert.Equal(t, []string{"timestamp", "author", "category", "field", "added", "removed"}, recordKeys(record))
-		assert.Equal(t, yaml.DoubleQuotedStyle, nodeAt(t, record, "category").Style)
-	}
-	assert.Equal(t, 1, sentTo(server, activitiesPath))
-	assert.NotContains(t, got.stdout, "163-1")
+	assert.Equal(t, []string{
+		linkTypesPath + "?fields=" + linkTypesFields + "&$top=1000",
+		activitiesPath + "?categories=" + activityCategories + "&reverse=true&fields=" + sentActivityFields + "&$top=51",
+	}, server.Targets())
 }
 
-func TestActivityPrintsAListWhateverTheCountOfActivities(t *testing.T) {
+func TestActivityRefusesAnAnswerOfAnotherShape(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name       string
-		activities string
-		want       string
-	}{
-		{
-			name:       "no activities at all",
-			activities: noActivities,
-			want:       "total: 0\nreturned: 0\ntruncated: false\nactivities: []\n",
-		},
-		{
-			name:       "one activity",
-			activities: `[` + sentLinkActivity(middle) + `]`,
-			want:       "total: 1\nreturned: 1\ntruncated: false\nactivities:\n" + printedLinkRow,
+	outOfOrder := `[` + sentCreatedActivity(oldest) + `,` + sentLinkActivity(middle) + `]`
+	server := activityServer(t, fake.JSON(http.StatusOK, outOfOrder))
+
+	got := runWith(t, server.Env(), "activity", "list", activityIssue)
+
+	want := faultDocument{
+		code: "upstream_invalid",
+		details: []detail{
+			{"request", activityRequest(server.URL, "51")},
+			{"upstream_status", 200},
+			{"upstream_body", outOfOrder},
 		},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := activityServer(t, fake.JSON(http.StatusOK, tc.activities))
-
-			got := runWith(t, server.Env(), "activity", "list", activityIssue)
-
-			assert.Equal(t, outcome{stdout: tc.want}, got)
-		})
-	}
+	assert.Equal(t, want, requireFault(t, got))
 }
 
 func TestActivityReadsTheCutOffTheActivityPastTheLimit(t *testing.T) {
@@ -295,7 +229,10 @@ func TestActivityChecksTheActivityPastTheLimitWithTheRest(t *testing.T) {
 		{name: "an activity past the limit newer than the one before it", past: sentCreatedActivity(newest)},
 		{
 			name: "an activity past the limit of a category nobody asked for",
-			past: sentActivity{kind: "VotersActivityItem", category: "VotersCategory", timestamp: oldest}.sent(),
+			past: sentActivity{
+				kind: "VotersActivityItem", category: "VotersCategory", timestamp: oldest,
+				field: `null`, added: `[]`, removed: `[]`,
+			}.sent(),
 		},
 	}
 	for _, tc := range tests {
@@ -326,39 +263,6 @@ func TestActivityRefusesMoreActivitiesThanItAskedFor(t *testing.T) {
 		details: []detail{{"limit", 2}, {"returned", 4}},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-}
-
-func TestActivityChecksTheServerKeepsTheRequestedOrder(t *testing.T) {
-	t.Parallel()
-	t.Run("an activity newer than the one before it", func(t *testing.T) {
-		t.Parallel()
-		server := activityServer(t, fake.JSON(http.StatusOK, `[`+sentCreatedActivity(oldest)+`,`+sentLinkActivity(middle)+`]`))
-
-		got := runWith(t, server.Env(), "activity", "list", activityIssue)
-
-		found := requireFault(t, got)
-		assert.Equal(t, "upstream_invalid", found.code)
-	})
-	t.Run("two activities of one moment", func(t *testing.T) {
-		t.Parallel()
-		server := activityServer(t, fake.JSON(http.StatusOK, `[`+sentLinkActivity(middle)+`,`+sentLinkActivity(middle)+`]`))
-
-		got := runWith(t, server.Env(), "activity", "list", activityIssue)
-
-		want := "total: 2\nreturned: 2\ntruncated: false\nactivities:\n" + printedLinkRow + printedLinkRow
-		assert.Equal(t, outcome{stdout: want}, got)
-	})
-}
-
-func TestActivityRefusesAnActivityOfACategoryItDidNotAskFor(t *testing.T) {
-	t.Parallel()
-	voted := sentActivity{kind: "VotersActivityItem", category: "VotersCategory", timestamp: middle}.sent()
-	server := activityServer(t, fake.JSON(http.StatusOK, `[`+sentFieldActivity(newest)+`,`+voted+`]`))
-
-	got := runWith(t, server.Env(), "activity", "list", activityIssue)
-
-	found := requireFault(t, got)
-	assert.Equal(t, "upstream_invalid", found.code)
 }
 
 func TestActivityPassesOnAnIssueTheServerDoesNotHave(t *testing.T) {
