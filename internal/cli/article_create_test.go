@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const askedArticleFields = articleShowFields + ",project(shortName)"
@@ -44,9 +46,9 @@ func filedArticleIn(readable, summary, content, project string) string {
 	return answeredArticle{readable: readable, summary: summary, content: content, project: project}.json()
 }
 
-func creatingAnArticle(t *testing.T, creation http.HandlerFunc) *upstream {
+func creatingAnArticle(t *testing.T, creation http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return serve(t, func(w http.ResponseWriter, r *http.Request) {
+	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		if !assert.Equal(t, http.MethodPost, r.Method, "a creation of an article sends one POST and nothing else") {
 			return
 		}
@@ -54,9 +56,9 @@ func creatingAnArticle(t *testing.T, creation http.HandlerFunc) *upstream {
 	})
 }
 
-func sentArticle(t *testing.T, u *upstream) map[string]any {
+func sentArticle(t *testing.T, u *fake.Server) map[string]any {
 	t.Helper()
-	asks := u.asks()
+	asks := u.Bodies()
 	require.Len(t, asks, 1)
 	var body map[string]any
 	require.NoError(t, json.Unmarshal([]byte(asks[0]), &body))
@@ -85,12 +87,12 @@ func TestArticleCreateRefusesBeforeAnyRequest(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -112,39 +114,39 @@ func TestArticleCreateRefusesTextTheServerWouldRewrite(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), append([]string{"article", "create", "DEV"}, tc.argv...)...)
+			got := runWith(t, server.Env(), append([]string{"article", "create", "DEV"}, tc.argv...)...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
 
 func TestArticleCreatePrintsNoComments(t *testing.T) {
 	t.Parallel()
-	server := serveNothing(t)
+	server := fake.ServeNothing(t)
 
-	got := runWith(t, server.env(), "article", "create", "DEV", "--summary", "x", "--fields", "+comments(text)")
+	got := runWith(t, server.Env(), "article", "create", "DEV", "--summary", "x", "--fields", "+comments(text)")
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.requests())
+	assert.Empty(t, server.Requests())
 }
 
 func TestArticleCreateFilesTheArticleInOneRequest(t *testing.T) {
 	t.Parallel()
 	const title = "[bug] fix login"
 	text := longContent()
-	server := creatingAnArticle(t, respondWith(http.StatusOK, createdArticle("DEV-A-7", title, asJSON(text))))
+	server := creatingAnArticle(t, fake.JSON(http.StatusOK, createdArticle("DEV-A-7", title, asJSON(text))))
 
-	got := runWith(t, server.env(), "article", "create", "DEV", "--summary", title, "--content", text)
+	got := runWith(t, server.Env(), "article", "create", "DEV", "--summary", title, "--content", text)
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
 	assert.Equal(t, []string{http.MethodPost}, sentMethods(server))
-	assert.Equal(t, []string{"/api/articles"}, server.sentPaths())
-	assert.Equal(t, []string{askedArticleFields}, server.sentFields())
+	assert.Equal(t, []string{"/api/articles"}, server.Paths())
+	assert.Equal(t, []string{askedArticleFields}, server.Fields())
 	assert.Equal(t, map[string]any{
 		"project": map[string]any{"shortName": "DEV"},
 		"summary": title,
@@ -223,9 +225,9 @@ func TestArticleCreateWritesTheTextItWasGiven(t *testing.T) {
 			if text, written := tc.want["content"].(string); written {
 				content = asJSON(text)
 			}
-			server := creatingAnArticle(t, respondWith(http.StatusOK, createdArticle("DEV-A-7", title, content)))
+			server := creatingAnArticle(t, fake.JSON(http.StatusOK, createdArticle("DEV-A-7", title, content)))
 
-			got := runWith(t, server.env(), append([]string{"article", "create", "DEV"}, tc.argv...)...)
+			got := runWith(t, server.Env(), append([]string{"article", "create", "DEV"}, tc.argv...)...)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			tc.want["project"] = map[string]any{"shortName": "DEV"}
@@ -292,14 +294,14 @@ func TestArticleCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := creatingAnArticle(t, respondWith(http.StatusOK, tc.filed))
+			server := creatingAnArticle(t, fake.JSON(http.StatusOK, tc.filed))
 
-			got := runWith(t, server.env(), append([]string{"article", "create", "DEV"}, tc.argv...)...)
+			got := runWith(t, server.Env(), append([]string{"article", "create", "DEV"}, tc.argv...)...)
 
 			want := faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", articleCreationRequest(server.url, askedArticleFields)},
+					{"request", articleCreationRequest(server.URL, askedArticleFields)},
 					{"article", tc.article},
 					{"mismatch", tc.mismatch},
 				},
@@ -312,9 +314,9 @@ func TestArticleCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 
 func TestArticleCreateChecksNoContentWhereNoneWasWritten(t *testing.T) {
 	t.Parallel()
-	server := creatingAnArticle(t, respondWith(http.StatusOK, createdArticle("DEV-A-7", "x", "null")))
+	server := creatingAnArticle(t, fake.JSON(http.StatusOK, createdArticle("DEV-A-7", "x", "null")))
 
-	got := runWith(t, server.env(), "article", "create", "DEV", "--summary", "x")
+	got := runWith(t, server.Env(), "article", "create", "DEV", "--summary", "x")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, map[string]any{"project": map[string]any{"shortName": "DEV"}, "summary": "x"},
@@ -361,14 +363,14 @@ func TestArticleCreateRefusesWhatTheServerRefused(t *testing.T) {
 			t.Parallel()
 			said := `{"error":` + strconv.Quote(tc.upstreamError) + `,"error_description":` +
 				strconv.Quote(tc.upstreamMessage) + `}`
-			server := creatingAnArticle(t, respondWith(tc.status, said))
+			server := creatingAnArticle(t, fake.JSON(tc.status, said))
 
-			got := runWith(t, server.env(), "article", "create", "DEV", "--summary", "x")
+			got := runWith(t, server.Env(), "article", "create", "DEV", "--summary", "x")
 
 			want := faultDocument{
 				code: tc.code,
 				details: append([]detail{
-					{"request", articleCreationRequest(server.url, askedArticleFields)},
+					{"request", articleCreationRequest(server.URL, askedArticleFields)},
 					{"upstream_status", tc.status},
 					{"upstream_error", tc.upstreamError},
 					{"upstream_message", tc.upstreamMessage},
@@ -384,22 +386,22 @@ func TestArticleCreateIsUncertainWhereTheAnswerNeverCame(t *testing.T) {
 	t.Parallel()
 	server := creatingAnArticle(t, breakOff)
 
-	got := runWith(t, server.env(), "article", "create", "DEV", "--summary", "x")
+	got := runWith(t, server.Env(), "article", "create", "DEV", "--summary", "x")
 
 	found := requireUncertainty(t, got)
 	assert.Equal(t, "write_uncertain", found.code)
-	assert.Equal(t, []detail{{"request", articleCreationRequest(server.url, askedArticleFields)}}, found.details)
+	assert.Equal(t, []detail{{"request", articleCreationRequest(server.URL, askedArticleFields)}}, found.details)
 	assert.Empty(t, got.stdout)
 }
 
 func TestArticleCreateChecksMoreThanItPrints(t *testing.T) {
 	t.Parallel()
-	server := creatingAnArticle(t, respondWith(http.StatusOK, createdArticle("DEV-A-7", "x", asJSON("первая"))))
+	server := creatingAnArticle(t, fake.JSON(http.StatusOK, createdArticle("DEV-A-7", "x", asJSON("первая"))))
 
-	got := runWith(t, server.env(), "article", "create", "DEV", "--summary", "x", "--content", "первая",
+	got := runWith(t, server.Env(), "article", "create", "DEV", "--summary", "x", "--content", "первая",
 		"--fields", "idReadable")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, "idReadable: \"DEV-A-7\"\n", got.stdout)
-	assert.Equal(t, []string{"idReadable,summary,content,project(shortName)"}, server.sentFields())
+	assert.Equal(t, []string{"idReadable,summary,content,project(shortName)"}, server.Fields())
 }

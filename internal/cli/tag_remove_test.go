@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func tagOnOwnerPath(collection, readable, tag string) string {
@@ -17,9 +19,9 @@ func tagRemovalRequest(address, collection, readable, tag string) string {
 	return "DELETE " + address + tagOnOwnerPath(collection, readable, tag)
 }
 
-func takingATagOff(t *testing.T, owner, catalogue, removal http.HandlerFunc) *upstream {
+func takingATagOff(t *testing.T, owner, catalogue, removal http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return serve(t, func(w http.ResponseWriter, r *http.Request) {
+	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodDelete:
 			removal(w, r)
@@ -61,9 +63,9 @@ func TestTagRemoveTakesTheTagOffTheOwnerAndNotOutOfTheInstance(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := takingATagOff(t, respondWith(http.StatusOK, tc.owner), shownTags(), deletionDone())
+			server := takingATagOff(t, fake.JSON(http.StatusOK, tc.owner), shownTags(), deletionDone())
 
-			got := runWith(t, server.env(), "tag", "remove", tc.written, "--name", "ready")
+			got := runWith(t, server.Env(), "tag", "remove", tc.written, "--name", "ready")
 
 			want := "idReadable: " + strconv.Quote(tc.readable) + "\n" +
 				"removed:\n  name: \"Ready\"\n  owner:\n    login: \"admin\"\n"
@@ -74,12 +76,12 @@ func TestTagRemoveTakesTheTagOffTheOwnerAndNotOutOfTheInstance(t *testing.T) {
 				"/api/" + tc.collection + "/" + tc.written,
 				tagsCollection,
 				tagOnOwnerPath(tc.collection, tc.readable, "10-5"),
-			}, server.sentPaths())
-			assert.Equal(t, []string{taggedOwnerFields, resolvedTagFields, ""}, server.sentFields())
-			assert.Equal(t, []string{"", "", ""}, server.asks())
-			assert.Empty(t, server.requests()[2].URL.RawQuery)
-			assert.NotContains(t, strings.Join(server.sentPaths(), " "), tc.apart)
-			assert.NotContains(t, strings.Join(server.sentPaths(), " "), tagDeletionPath("10-5"))
+			}, server.Paths())
+			assert.Equal(t, []string{taggedOwnerFields, resolvedTagFields, ""}, server.Fields())
+			assert.Equal(t, []string{"", "", ""}, server.Bodies())
+			assert.Empty(t, server.Request(t, 2).URL.RawQuery)
+			assert.NotContains(t, strings.Join(server.Paths(), " "), tc.apart)
+			assert.NotContains(t, strings.Join(server.Paths(), " "), tagDeletionPath("10-5"))
 			requireResolvedWithoutTheServer(t, server, "ready")
 		})
 	}
@@ -97,7 +99,7 @@ func TestTagRemoveReadsWhatTheServerAnsweredTheRemovalWith(t *testing.T) {
 	}{
 		{
 			name:    "a tag the owner does not carry",
-			removal: respondWith(http.StatusNotFound, missing),
+			removal: fake.JSON(http.StatusNotFound, missing),
 			code:    "not_found",
 			exit:    1,
 			details: []detail{
@@ -108,7 +110,7 @@ func TestTagRemoveReadsWhatTheServerAnsweredTheRemovalWith(t *testing.T) {
 		},
 		{
 			name:    "an answer carrying a body where the call is answered with none",
-			removal: respondWith(http.StatusOK, `{"x":1}`),
+			removal: fake.JSON(http.StatusOK, `{"x":1}`),
 			code:    "upstream_invalid",
 			exit:    2,
 			details: []detail{
@@ -120,16 +122,16 @@ func TestTagRemoveReadsWhatTheServerAnsweredTheRemovalWith(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := takingATagOff(t, respondWith(http.StatusOK, issueNamed("DEV-7")), shownTags(), tc.removal)
+			server := takingATagOff(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), shownTags(), tc.removal)
 
-			got := runWith(t, server.env(), "tag", "remove", "DEV-7", "--name", "ready")
+			got := runWith(t, server.Env(), "tag", "remove", "DEV-7", "--name", "ready")
 
 			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.exit, got.code)
 			want := faultDocument{
 				code: tc.code,
 				details: append([]detail{
-					{"request", tagRemovalRequest(server.url, "issues", "DEV-7", "10-5")},
+					{"request", tagRemovalRequest(server.URL, "issues", "DEV-7", "10-5")},
 					{"issue", "DEV-7"},
 					{"tag", "ready"},
 				}, tc.details...),

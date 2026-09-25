@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const bogusToken = "perm-bogus"
@@ -58,15 +60,15 @@ func TestNoCommandNamesWhereTheTokenTheServerRefusedCameFrom(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := fmt.Sprintf(`{"error":%q,"error_description":%q}`, tc.upstreamError, tc.upstreamMessage)
-			server := serve(t, respondWith(tc.status, body))
-			env, from := tc.where(t, server.url)
+			server := fake.Serve(t, fake.JSON(tc.status, body))
+			env, from := tc.where(t, server.URL)
 
 			got := runWith(t, env, "project", "show", "DEV")
 
 			want := faultDocument{
 				code: "denied",
 				details: []detail{
-					{"request", showRequest(server.url, "DEV")},
+					{"request", showRequest(server.URL, "DEV")},
 					{"upstream_status", tc.status},
 					{"upstream_error", tc.upstreamError},
 					{"upstream_message", tc.upstreamMessage},
@@ -75,7 +77,7 @@ func TestNoCommandNamesWhereTheTokenTheServerRefusedCameFrom(t *testing.T) {
 			}
 			assert.Equal(t, want, requireFault(t, got))
 			assertNoToken(t, got, bogusToken)
-			assert.Len(t, server.requests(), 1)
+			assert.Len(t, server.Requests(), 1)
 		})
 	}
 }
@@ -121,13 +123,13 @@ func TestNoCommandLeavesTheLoginSourceOutOfAFaultThatIsNotAboutTheToken(t *testi
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, func(w http.ResponseWriter, _ *http.Request) {
+			server := fake.Serve(t, func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", tc.contentType)
 				w.WriteHeader(tc.status)
 				_, _ = fmt.Fprint(w, tc.body)
 			})
 
-			got := runWith(t, server.env(), "project", "show", "DEV")
+			got := runWith(t, server.Env(), "project", "show", "DEV")
 
 			found := requireFault(t, got)
 			assert.Equal(t, tc.code, found.code)
@@ -136,7 +138,7 @@ func TestNoCommandLeavesTheLoginSourceOutOfAFaultThatIsNotAboutTheToken(t *testi
 				keys = append(keys, held.key)
 			}
 			assert.NotContains(t, keys, "auth_from")
-			assertNoToken(t, got, token)
+			assertNoToken(t, got, fake.Token)
 		})
 	}
 }

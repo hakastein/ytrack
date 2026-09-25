@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const sentWorkItemTypesFields = "idReadable,project(shortName,plugins(timeTrackingSettings(workItemTypes(id,name))))"
@@ -44,9 +46,9 @@ func devIssueWithWorkItemTypes() string {
 	return issueWithWorkItemTypes("DEV-1", "DEV", devWorkItemTypes()...)
 }
 
-func writingTimeOfAType(t *testing.T, read, write http.HandlerFunc) *upstream {
+func writingTimeOfAType(t *testing.T, read, write http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return serve(t, func(w http.ResponseWriter, r *http.Request) {
+	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			read(w, r)
 			return
@@ -55,10 +57,10 @@ func writingTimeOfAType(t *testing.T, read, write http.HandlerFunc) *upstream {
 	})
 }
 
-func sentWorkItemType(t *testing.T, u *upstream) any {
+func sentWorkItemType(t *testing.T, u *fake.Server) any {
 	t.Helper()
 	var body map[string]any
-	require.NoError(t, json.Unmarshal([]byte(lastAsk(u)), &body), "the body that went out: %s", lastAsk(u))
+	require.NoError(t, json.Unmarshal([]byte(u.Last(t).Body), &body), "the body that went out: %s", u.Last(t).Body)
 	return body[typeKeyName]
 }
 
@@ -76,12 +78,12 @@ func TestTimeCreateRefusesATypeItCannotResolve(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), append([]string{"time", "create", "DEV-1", "PT1H"}, tc.argv...)...)
+			got := runWith(t, server.Env(), append([]string{"time", "create", "DEV-1", "PT1H"}, tc.argv...)...)
 
 			assert.Equal(t, "bad_usage", requireFault(t, got).code)
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -102,20 +104,20 @@ func TestTimeCreateResolvesATypeOfTheProjectWithoutRegardToLetterCase(t *testing
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := writingTimeOfAType(t,
-				respondWith(http.StatusOK, devIssueWithWorkItemTypes()),
-				respondWith(http.StatusOK, answeredWorkItem{
+				fake.JSON(http.StatusOK, devIssueWithWorkItemTypes()),
+				fake.JSON(http.StatusOK, answeredWorkItem{
 					workType: `{"$type":"WorkItemType","id":"` + workItemTypeID(tc.at) + `","name":"` +
 						devWorkItemTypes()[tc.at] + `"}`,
 				}.json()))
 
-			got := runWith(t, server.env(), "time", "create", "dev-1", "PT1H30M", "--type", tc.named)
+			got := runWith(t, server.Env(), "time", "create", "dev-1", "PT1H30M", "--type", tc.named)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
 			assert.Equal(t, []string{
 				"/api/issues/dev-1?fields=" + sentWorkItemTypesFields,
 				workItemsPath("DEV-1") + "?fields=" + sentWorkItemWriteFieldsWithType,
-			}, server.sentTargets())
+			}, server.Targets())
 			assert.Equal(t, map[string]any{"id": workItemTypeID(tc.at)}, sentWorkItemType(t, server))
 			assert.Equal(t, devWorkItemTypes()[tc.at], nodeAt(t, requireMapping(t, "stdout", got.stdout), "type", "name").Value)
 		})
@@ -156,15 +158,15 @@ func TestTimeCreateRefusesATypeTheProjectDoesNotWriteAgainst(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := writingTimeOfAType(t,
-				respondWith(http.StatusOK, issueWithWorkItemTypes("DEV-1", "DEV", tc.types...)),
-				respondWith(http.StatusOK, answeredWorkItem{}.json()))
+				fake.JSON(http.StatusOK, issueWithWorkItemTypes("DEV-1", "DEV", tc.types...)),
+				fake.JSON(http.StatusOK, answeredWorkItem{}.json()))
 
-			got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H", "--type", tc.named)
+			got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H", "--type", tc.named)
 
 			want := faultDocument{
 				code: "unknown_name",
 				details: []detail{
-					{"request", issueRequest(server.url, "DEV-1", sentWorkItemTypesFields)},
+					{"request", issueRequest(server.URL, "DEV-1", sentWorkItemTypesFields)},
 					{"project", "DEV"},
 					{"unknown", []any{[]detail{{"type", tc.named}, {"nearest", tc.nearest}}}},
 				},
@@ -178,10 +180,10 @@ func TestTimeCreateRefusesATypeTheProjectDoesNotWriteAgainst(t *testing.T) {
 func TestTimeCreateTakesTheTypeWrittenByteForByte(t *testing.T) {
 	t.Parallel()
 	server := writingTimeOfAType(t,
-		respondWith(http.StatusOK, issueWithWorkItemTypes("DEV-1", "DEV", "Test", "TEST")),
-		respondWith(http.StatusOK, answeredWorkItem{workType: `{"$type":"WorkItemType","id":"178-1","name":"TEST"}`}.json()))
+		fake.JSON(http.StatusOK, issueWithWorkItemTypes("DEV-1", "DEV", "Test", "TEST")),
+		fake.JSON(http.StatusOK, answeredWorkItem{workType: `{"$type":"WorkItemType","id":"178-1","name":"TEST"}`}.json()))
 
-	got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M", "--type", "TEST")
+	got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H30M", "--type", "TEST")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, map[string]any{"id": "178-1"}, sentWorkItemType(t, server))
@@ -240,9 +242,9 @@ func TestTimeCreateWritesNothingWhereTheSettingsWereNotReceived(t *testing.T) {
 			if status == 0 {
 				status = http.StatusOK
 			}
-			server := writingTimeOfAType(t, respondWith(status, tc.read), respondWith(http.StatusOK, answeredWorkItem{}.json()))
+			server := writingTimeOfAType(t, fake.JSON(status, tc.read), fake.JSON(http.StatusOK, answeredWorkItem{}.json()))
 
-			got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H", "--type", "Разработка")
+			got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H", "--type", "Разработка")
 
 			found := requireFault(t, got)
 			assert.Equal(t, tc.code, found.code)
@@ -273,10 +275,10 @@ func TestTimeCreateRefusesATypeTheServerKeptOtherwise(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := writingTimeOfAType(t,
-				respondWith(http.StatusOK, devIssueWithWorkItemTypes()),
-				respondWith(http.StatusOK, answeredWorkItem{workType: tc.workType}.json()))
+				fake.JSON(http.StatusOK, devIssueWithWorkItemTypes()),
+				fake.JSON(http.StatusOK, answeredWorkItem{workType: tc.workType}.json()))
 
-			got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M", "--type", "разработка")
+			got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H30M", "--type", "разработка")
 
 			found := requireUncertainty(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
@@ -292,9 +294,9 @@ func TestTimeCreateRefusesATypeTheServerKeptOtherwise(t *testing.T) {
 
 func TestTimeCreateReadsNothingWhereNoTypeIsNamed(t *testing.T) {
 	t.Parallel()
-	server := writingTime(t, respondWith(http.StatusOK, answeredWorkItem{}.json()))
+	server := writingTime(t, fake.JSON(http.StatusOK, answeredWorkItem{}.json()))
 
-	got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M")
+	got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H30M")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, []string{http.MethodPost}, sentMethods(server))

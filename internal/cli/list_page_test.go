@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 type pagedList struct {
@@ -45,9 +47,9 @@ func pagedLists() []pagedList {
 	}
 }
 
-func pagedServer(t *testing.T, schema string, records int) *upstream {
+func pagedServer(t *testing.T, schema string, records int) *fake.Server {
 	t.Helper()
-	return serve(t, func(w http.ResponseWriter, r *http.Request) {
+	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
 		top, err := strconv.Atoi(query.Get("$top"))
 		if !assert.NoError(t, err, "$top of %s", r.URL) {
@@ -68,7 +70,7 @@ func pagedServer(t *testing.T, schema string, records int) *upstream {
 		for at := skip; at < end; at++ {
 			page = append(page, fmt.Sprintf(`{"$type":%q,"id":"1-%d"}`, schema, at))
 		}
-		respondWith(http.StatusOK, "["+strings.Join(page, ",")+"]")(w, r)
+		fake.JSON(http.StatusOK, "["+strings.Join(page, ",")+"]")(w, r)
 	})
 }
 
@@ -91,14 +93,14 @@ func TestListPrintsAPageInTheMiddleOfTheCollection(t *testing.T) {
 			t.Parallel()
 			server := pagedServer(t, list.schema, 5)
 
-			got := runWith(t, server.env(), slices.Concat(list.argv, []string{"--fields", "id", "--limit", "2", "--skip", "2"})...)
+			got := runWith(t, server.Env(), slices.Concat(list.argv, []string{"--fields", "id", "--limit", "2", "--skip", "2"})...)
 
 			assert.Equal(t, outcome{stdout: printedIDs(list.plural, 5, true, 2, 3)}, got)
 			assert.Equal(t, []url.Values{
 				list.sent(url.Values{"$top": {"2"}, "$skip": {"2"}}),
 				list.sent(url.Values{"$top": {"-1"}}),
-			}, server.sentQueries())
-			assert.Equal(t, []string{list.path, list.path}, server.sentPaths())
+			}, server.Queries())
+			assert.Equal(t, []string{list.path, list.path}, server.Paths())
 		})
 	}
 }
@@ -110,10 +112,10 @@ func TestListCountsNothingOnTheLastPage(t *testing.T) {
 			t.Parallel()
 			server := pagedServer(t, list.schema, 5)
 
-			got := runWith(t, server.env(), slices.Concat(list.argv, []string{"--fields", "id", "--limit", "2", "--skip", "4"})...)
+			got := runWith(t, server.Env(), slices.Concat(list.argv, []string{"--fields", "id", "--limit", "2", "--skip", "4"})...)
 
 			assert.Equal(t, outcome{stdout: printedIDs(list.plural, 5, false, 4)}, got)
-			assert.Equal(t, []url.Values{list.sent(url.Values{"$top": {"2"}, "$skip": {"4"}})}, server.sentQueries())
+			assert.Equal(t, []url.Values{list.sent(url.Values{"$top": {"2"}, "$skip": {"4"}})}, server.Queries())
 		})
 	}
 }
@@ -125,28 +127,28 @@ func TestListPrintsAnEmptyPagePastTheEnd(t *testing.T) {
 			t.Parallel()
 			server := pagedServer(t, list.schema, 5)
 
-			got := runWith(t, server.env(), slices.Concat(list.argv, []string{"--fields", "id", "--limit", "2", "--skip", "9"})...)
+			got := runWith(t, server.Env(), slices.Concat(list.argv, []string{"--fields", "id", "--limit", "2", "--skip", "9"})...)
 
 			assert.Equal(t, outcome{stdout: printedIDs(list.plural, 5, false)}, got)
-			assert.Len(t, server.requests(), 2)
+			assert.Len(t, server.Requests(), 2)
 		})
 	}
 }
 
 func TestListRefusesACountBelowThePageItFollows(t *testing.T) {
 	t.Parallel()
-	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
+	server := fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("$top") == "-1" {
-			respondWith(http.StatusOK, `[{"$type":"Tag","id":"1-0"},{"$type":"Tag","id":"1-1"},{"$type":"Tag","id":"1-2"}]`)(w, r)
+			fake.JSON(http.StatusOK, `[{"$type":"Tag","id":"1-0"},{"$type":"Tag","id":"1-1"},{"$type":"Tag","id":"1-2"}]`)(w, r)
 			return
 		}
-		respondWith(http.StatusOK, `[{"$type":"Tag","id":"1-2"},{"$type":"Tag","id":"1-3"}]`)(w, r)
+		fake.JSON(http.StatusOK, `[{"$type":"Tag","id":"1-2"},{"$type":"Tag","id":"1-3"}]`)(w, r)
 	})
 
-	got := runWith(t, server.env(), "tag", "list", "--fields", "id", "--limit", "2", "--skip", "2")
+	got := runWith(t, server.Env(), "tag", "list", "--fields", "id", "--limit", "2", "--skip", "2")
 
 	assert.Equal(t, "upstream_failed", requireFault(t, got).code)
-	assert.Len(t, server.requests(), 2)
+	assert.Len(t, server.Requests(), 2)
 }
 
 func TestListRefusesASkipItCannotSend(t *testing.T) {
@@ -167,12 +169,12 @@ func TestListRefusesASkipItCannotSend(t *testing.T) {
 		for _, tc := range tests {
 			t.Run(strings.Join(list, " ")+"/"+tc.name, func(t *testing.T) {
 				t.Parallel()
-				server := serveNothing(t)
+				server := fake.ServeNothing(t)
 
-				got := runWith(t, server.env(), slices.Concat(list, tc.argv)...)
+				got := runWith(t, server.Env(), slices.Concat(list, tc.argv)...)
 
 				assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-				assert.Empty(t, server.requests())
+				assert.Empty(t, server.Requests())
 			})
 		}
 	}
@@ -182,22 +184,22 @@ func TestListSendsNoSkipForTheFirstPage(t *testing.T) {
 	t.Parallel()
 	server := pagedServer(t, "Project", 1)
 
-	got := runWith(t, server.env(), "project", "list", "--fields", "id", "--skip", "0")
+	got := runWith(t, server.Env(), "project", "list", "--fields", "id", "--skip", "0")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, []url.Values{{"fields": {"id"}, "$top": {"50"}}}, server.sentQueries())
+	assert.Equal(t, []url.Values{{"fields": {"id"}, "$top": {"50"}}}, server.Queries())
 }
 
 func TestIssueListPrintsAPageInTheMiddleOfTheResults(t *testing.T) {
 	t.Parallel()
-	server := searching(t, countedIssues(`[`+listedDEV1()+`]`, countHandler("7")))
+	server := fake.Serve(t, fake.Searching(t, countedIssues(`[`+listedDEV1()+`]`, countHandler("7"))))
 
-	got := runWith(t, server.env(), "issue", "list", "--query", "project: DEV", "--limit", "1", "--skip", "3")
+	got := runWith(t, server.Env(), "issue", "list", "--query", "project: DEV", "--limit", "1", "--skip", "3")
 
 	want := "total: 7\nreturned: 1\ntruncated: true\nissues:\n" + printedDEV1Row
 	assert.Equal(t, outcome{stdout: want}, got)
 	var skips []string
-	for _, request := range server.requests() {
+	for _, request := range server.Requests() {
 		if request.URL.Path == "/api/issues" {
 			skips = append(skips, request.URL.Query().Get("$skip"))
 		}
@@ -208,9 +210,9 @@ func TestIssueListPrintsAPageInTheMiddleOfTheResults(t *testing.T) {
 
 func TestActivityPrintsAPageOfTheActivities(t *testing.T) {
 	t.Parallel()
-	server := activityServer(t, respondWith(http.StatusOK, `[`+sentLinkActivity(middle)+`,`+sentCreatedActivity(oldest)+`]`))
+	server := activityServer(t, fake.JSON(http.StatusOK, `[`+sentLinkActivity(middle)+`,`+sentCreatedActivity(oldest)+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue, "--limit", "1", "--skip", "1")
+	got := runWith(t, server.Env(), "activity", "list", activityIssue, "--limit", "1", "--skip", "1")
 
 	assert.Equal(t, outcome{stdout: "total: null\nreturned: 1\ntruncated: true\nactivities:\n" + printedLinkRow}, got)
 	sent := activitySent(t, server)
@@ -220,9 +222,9 @@ func TestActivityPrintsAPageOfTheActivities(t *testing.T) {
 
 func TestActivityCountsTheLastPageOfTheActivities(t *testing.T) {
 	t.Parallel()
-	server := activityServer(t, respondWith(http.StatusOK, `[`+sentLinkActivity(middle)+`,`+sentCreatedActivity(oldest)+`]`))
+	server := activityServer(t, fake.JSON(http.StatusOK, `[`+sentLinkActivity(middle)+`,`+sentCreatedActivity(oldest)+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue, "--limit", "5", "--skip", "1")
+	got := runWith(t, server.Env(), "activity", "list", activityIssue, "--limit", "5", "--skip", "1")
 
 	rows := printedLinkRow + printedCreatedRow
 	assert.Equal(t, outcome{stdout: "total: 3\nreturned: 2\ntruncated: false\nactivities:\n" + rows}, got)
@@ -230,9 +232,9 @@ func TestActivityCountsTheLastPageOfTheActivities(t *testing.T) {
 
 func TestActivityPrintsNoTotalForAnEmptyPagePastTheEnd(t *testing.T) {
 	t.Parallel()
-	server := activityServer(t, respondWith(http.StatusOK, noActivities))
+	server := activityServer(t, fake.JSON(http.StatusOK, noActivities))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue, "--skip", "9")
+	got := runWith(t, server.Env(), "activity", "list", activityIssue, "--skip", "9")
 
 	assert.Equal(t, outcome{stdout: "total: null\nreturned: 0\ntruncated: false\nactivities: []\n"}, got)
 }

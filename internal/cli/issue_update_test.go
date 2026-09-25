@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const issueWriteFields = "idReadable,customFields($type,name,projectCustomField(id))," +
@@ -33,9 +35,9 @@ func issueToUpdate(readable, project string, held ...currentField) string {
 		`,"customFields":[` + strings.Join(fields, ",") + `],"project":` + project + `}`
 }
 
-func updating(t *testing.T, read, update http.HandlerFunc) *upstream {
+func updating(t *testing.T, read, update http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return serve(t, readThenUpdate(read, update))
+	return fake.Serve(t, readThenUpdate(read, update))
 }
 
 func readThenUpdate(read, update http.HandlerFunc) http.HandlerFunc {
@@ -77,12 +79,12 @@ func TestIssueUpdateRefusesBeforeAnyRequest(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -102,22 +104,22 @@ func TestIssueUpdateNamesEachFieldTheClassItWasReceivedUnder(t *testing.T) {
 		receivedField{name: "Причина отклонения", valueType: "enum", ordinal: "2", binding: "180-23",
 			value: bundleElement("Дубль")},
 	)
-	server := updating(t, respondWith(http.StatusOK, read),
-		respondWith(http.StatusOK, createdIssueWith("DEV-1", "x", "null", held)))
+	server := updating(t, fake.JSON(http.StatusOK, read),
+		fake.JSON(http.StatusOK, createdIssueWith("DEV-1", "x", "null", held)))
 
-	got := runWith(t, server.env(), "issue", "update", "dev-1",
+	got := runWith(t, server.Env(), "issue", "update", "dev-1",
 		"--field", "State=Отклонена", "--field", "Причина отклонения=Дубль")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
 	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
-	assert.Equal(t, []string{"/api/issues/dev-1", "/api/issues/DEV-1"}, server.sentPaths())
-	assert.Equal(t, []string{issueWriteFields, askedIssueFields}, server.sentFields())
+	assert.Equal(t, []string{"/api/issues/dev-1", "/api/issues/DEV-1"}, server.Paths())
+	assert.Equal(t, []string{issueWriteFields, askedIssueFields}, server.Fields())
 
 	want := `{"customFields":[` +
 		`{"$type":"StateMachineIssueCustomField","name":"State","value":{"name":"Отклонена"}},` +
 		`{"$type":"SingleEnumIssueCustomField","name":"Причина отклонения","value":{"name":"Дубль"}}]}`
-	assert.JSONEq(t, want, server.asks()[1])
+	assert.JSONEq(t, want, server.Bodies()[1])
 }
 
 func TestIssueUpdateRefusesAnAnswerThatEmptiedWhatTheWriteFilled(t *testing.T) {
@@ -127,15 +129,15 @@ func TestIssueUpdateRefusesAnAnswerThatEmptiedWhatTheWriteFilled(t *testing.T) {
 	read := issueToUpdate("DEV-1", project,
 		currentField{name: "Оценка", kind: "PeriodIssueCustomField", binding: "187-2"})
 	held := receivedFields(receivedField{name: "Оценка", valueType: "period", binding: "187-2"})
-	server := updating(t, respondWith(http.StatusOK, read),
-		respondWith(http.StatusOK, createdIssueWith("DEV-1", "x", "null", held)))
+	server := updating(t, fake.JSON(http.StatusOK, read),
+		fake.JSON(http.StatusOK, createdIssueWith("DEV-1", "x", "null", held)))
 
-	got := runWith(t, server.env(), "issue", "update", "DEV-1", "--field", "Оценка=PT7H")
+	got := runWith(t, server.Env(), "issue", "update", "DEV-1", "--field", "Оценка=PT7H")
 
 	want := faultDocument{
 		code: "upstream_invalid",
 		details: []detail{
-			{"request", updateRequest(server.url, "DEV-1", askedIssueFields)},
+			{"request", updateRequest(server.URL, "DEV-1", askedIssueFields)},
 			{"issue", "DEV-1"},
 			{"mismatch", []any{[]detail{{"field", "Оценка"}, {"expected", "PT7H"}, {"actual", nil}}}},
 		},
@@ -143,7 +145,7 @@ func TestIssueUpdateRefusesAnAnswerThatEmptiedWhatTheWriteFilled(t *testing.T) {
 	assert.Equal(t, want, requireUncertainty(t, got))
 	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
 	assert.JSONEq(t, `{"customFields":[{"$type":"PeriodIssueCustomField","name":"Оценка","value":{"minutes":420}}]}`,
-		server.asks()[1])
+		server.Bodies()[1])
 }
 
 func TestIssueUpdateRefusesTheClassesOfTheIssueOfAnotherShape(t *testing.T) {
@@ -167,14 +169,14 @@ func TestIssueUpdateRefusesTheClassesOfTheIssueOfAnotherShape(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			read := `{"$type":"Issue","idReadable":"DEV-1","customFields":[` + tc.held + `],"project":` + project + `}`
-			server := updating(t, respondWith(http.StatusOK, read), noUpdate(t))
+			server := updating(t, fake.JSON(http.StatusOK, read), noUpdate(t))
 
-			got := runWith(t, server.env(), "issue", "update", "DEV-1", "--field", "State=Новая")
+			got := runWith(t, server.Env(), "issue", "update", "DEV-1", "--field", "State=Новая")
 
 			want := faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", issueRequest(server.url, "DEV-1", issueWriteFields)},
+					{"request", issueRequest(server.URL, "DEV-1", issueWriteFields)},
 					{"upstream_status", 200},
 					{"upstream_body", read},
 				},
@@ -202,48 +204,48 @@ func TestIssueUpdateTakesTheExpressionOfAWrite(t *testing.T) {
 	written := createdIssueWith("DEV-1", "x", "null", held)
 	t.Run("the check reads more than the document prints", func(t *testing.T) {
 		t.Parallel()
-		server := updating(t, respondWith(http.StatusOK, read), respondWith(http.StatusOK, written))
+		server := updating(t, fake.JSON(http.StatusOK, read), fake.JSON(http.StatusOK, written))
 
-		got := runWith(t, server.env(), "issue", "update", "DEV-1", "--summary", "x",
+		got := runWith(t, server.Env(), "issue", "update", "DEV-1", "--summary", "x",
 			"--field", "Type=Task", "--fields", "idReadable")
 
 		require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 		assert.Equal(t, "idReadable: \"DEV-1\"\n", got.stdout)
 		assert.Equal(t, []string{issueWriteFields, "idReadable,summary," + customFieldsFields},
-			server.sentFields())
+			server.Fields())
 	})
 	t.Run("a custom field named in the expression", func(t *testing.T) {
 		t.Parallel()
-		server := serve(t, func(w http.ResponseWriter, r *http.Request) {
+		server := fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case strings.HasPrefix(r.URL.Path, cataloguePath):
-				respondWith(http.StatusOK, devCatalogue())(w, r)
+				fake.JSON(http.StatusOK, devCatalogue())(w, r)
 			case r.Method == http.MethodPost:
-				respondWith(http.StatusOK, written)(w, r)
+				fake.JSON(http.StatusOK, written)(w, r)
 			default:
-				respondWith(http.StatusOK, read)(w, r)
+				fake.JSON(http.StatusOK, read)(w, r)
 			}
 		})
 
-		got := runWith(t, server.env(), "issue", "update", "DEV-1", "--field", "Type=Task",
+		got := runWith(t, server.Env(), "issue", "update", "DEV-1", "--field", "Type=Task",
 			"--fields", `idReadable,customFields("приоритет")`)
 
 		require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 		assert.Equal(t, "idReadable: \"DEV-1\"\ncustomFields:\n  \"Priority\": \"Low\"\n", got.stdout)
-		assert.Equal(t, []string{"/api/issues/DEV-1", cataloguePath, "/api/issues/DEV-1"}, server.sentPaths())
-		for _, query := range server.sentQueries() {
+		assert.Equal(t, []string{"/api/issues/DEV-1", cataloguePath, "/api/issues/DEV-1"}, server.Paths())
+		for _, query := range server.Queries() {
 			assert.Empty(t, query["customFields"], "a write never cuts the answer down by name")
 		}
 	})
 	t.Run("the comments of the issue", func(t *testing.T) {
 		t.Parallel()
-		server := serveNothing(t)
+		server := fake.ServeNothing(t)
 
-		got := runWith(t, server.env(), "issue", "update", "DEV-1", "--summary", "x",
+		got := runWith(t, server.Env(), "issue", "update", "DEV-1", "--summary", "x",
 			"--fields", "+comments(text)")
 
 		assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-		assert.Empty(t, server.requests())
+		assert.Empty(t, server.Requests())
 	})
 }
 
@@ -252,10 +254,10 @@ func TestIssueUpdateIsUncertainWhereTheAnswerCannotBePrinted(t *testing.T) {
 	project := projectResponse(writableField{id: "180-14", kind: "StateProjectCustomField", name: "State",
 		valueType: "state", canBeEmpty: true})
 	held := receivedFields(receivedField{name: "Примечание", valueType: "string", binding: "187-10", value: "42"})
-	server := updating(t, respondWith(http.StatusOK, issueToUpdate("DEV-1", project)),
-		respondWith(http.StatusOK, createdIssueWith("DEV-1", "x", "null", held)))
+	server := updating(t, fake.JSON(http.StatusOK, issueToUpdate("DEV-1", project)),
+		fake.JSON(http.StatusOK, createdIssueWith("DEV-1", "x", "null", held)))
 
-	got := runWith(t, server.env(), "issue", "update", "DEV-1", "--summary", "x")
+	got := runWith(t, server.Env(), "issue", "update", "DEV-1", "--summary", "x")
 
 	found := requireUncertainty(t, got)
 	assert.Equal(t, "upstream_invalid", found.code)

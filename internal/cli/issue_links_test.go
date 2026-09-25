@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const linkParts = "direction,linkType(sourceToTarget,targetToSource)"
@@ -65,13 +67,13 @@ func emptyIssueLinks() []receivedLink {
 
 func showLinks(t *testing.T, body, expression string) (outcome, *yaml.Node) {
 	t.Helper()
-	server := serve(t, respondWith(http.StatusOK, body))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", expression)
+	got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", expression)
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
-	assert.Equal(t, []string{linksFields("links", "idReadable")}, server.sentFields())
+	assert.Equal(t, []string{linksFields("links", "idReadable")}, server.Fields())
 	block := nodeAt(t, requireMapping(t, "stdout", got.stdout), "links")
 	require.Equal(t, yaml.MappingNode, block.Kind, "stdout: %q", got.stdout)
 	return got, block
@@ -182,14 +184,14 @@ func TestIssueShowRefusesLinksTheServerNamesBadly(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := issueWithLinks(tc.received...)
-			server := serve(t, respondWith(http.StatusOK, body))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "links")
+			got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "links")
 
 			assert.Equal(t, faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", issueRequest(server.url, "DEV-1", linksFields("links", "idReadable"))},
+					{"request", issueRequest(server.URL, "DEV-1", linksFields("links", "idReadable"))},
 					{"upstream_status", 200},
 					{"upstream_body", body},
 				},
@@ -221,14 +223,14 @@ func TestIssueShowRefusesLinksOfAShapeTheSpecificationDoesNotGive(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := `{"$type":"Issue","idReadable":"DEV-1","links":` + tc.links + `}`
-			server := serve(t, respondWith(http.StatusOK, body))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "links")
+			got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "links")
 
 			assert.Equal(t, faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", issueRequest(server.url, "DEV-1", linksFields("links", "idReadable"))},
+					{"request", issueRequest(server.URL, "DEV-1", linksFields("links", "idReadable"))},
 					{"upstream_status", 200},
 					{"upstream_body", body},
 				},
@@ -253,12 +255,12 @@ func TestIssueShowRefusesNamesWrittenUnderALinkSlot(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--fields", tc.expression)
+			got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--fields", tc.expression)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }

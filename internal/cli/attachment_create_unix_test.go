@@ -14,6 +14,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func aBlockDevice(t *testing.T) string {
@@ -69,14 +71,14 @@ func TestAttachmentCreateRefusesAFileThatIsNoOrdinaryOneOnUnix(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 			path := tc.path(t)
 
-			got := runWith(t, server.env(), "attachment", "create", "DEV-1", path)
+			got := runWith(t, server.Env(), "attachment", "create", "DEV-1", path)
 
 			found := requireFault(t, got)
 			assert.Equal(t, "bad_usage", found.code)
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -91,11 +93,11 @@ func TestAttachmentCreateRefusesAPathThatNoLongerPointsToTheCheckedFile(t *testi
 	path := filepath.Join(dir, name)
 	require.NoError(t, os.Symlink(one, path))
 	keepFlippingSymlink(t, path, one, two)
-	server := serve(t, respondWith(http.StatusOK, filed(name, length)))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, filed(name, length)))
 
 	deadline := time.Now().Add(10 * time.Second)
 	for attempt := 1; ; attempt++ {
-		got := runWith(t, server.env(), "attachment", "create", "DEV-1", path)
+		got := runWith(t, server.Env(), "attachment", "create", "DEV-1", path)
 		changedBetweenTheCalls := got.code != 0
 		if changedBetweenTheCalls {
 			found := requireFault(t, got)

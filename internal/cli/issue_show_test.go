@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func issueInProgress() string {
@@ -76,12 +78,12 @@ func TestIssueShowRefusesAnArgumentThatIsNoReadableID(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "issue", "show", tc.id)
+			got := runWith(t, server.Env(), "issue", "show", tc.id)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -99,30 +101,30 @@ func TestIssueShowRefusesTheInternalIDTheServerResolves(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "issue", "show", tc.id)
+			got := runWith(t, server.Env(), "issue", "show", tc.id)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
 
 func TestIssueShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, issueInProgress()))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, issueInProgress()))
 
-	got := runWith(t, server.env(), "issue", "show", "DEV-1")
+	got := runWith(t, server.Env(), "issue", "show", "DEV-1")
 
 	assert.Equal(t, outcome{stdout: printedInProgress}, got)
-	requests := server.requests()
+	requests := server.Requests()
 	require.Len(t, requests, 1)
 	request := requests[0]
 	assert.Equal(t, http.MethodGet, request.Method)
 	assert.Equal(t, "/api/issues/DEV-1", request.URL.Path)
 	assert.Equal(t, url.Values{"fields": {sentIssueFields}}, request.URL.Query())
-	assert.Equal(t, "Bearer "+token, request.Header.Get("Authorization"))
+	assert.Equal(t, "Bearer "+fake.Token, request.Header.Get("Authorization"))
 	assert.Equal(t, "application/json", request.Header.Get("Accept"))
 }
 
@@ -141,12 +143,12 @@ func TestIssueShowSendsEveryIDTheFormAllows(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(http.StatusOK, issueInProgress()))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, issueInProgress()))
 
-			got := runWith(t, server.env(), "issue", "show", tc.id)
+			got := runWith(t, server.Env(), "issue", "show", tc.id)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			requests := server.requests()
+			requests := server.Requests()
 			require.Len(t, requests, 1)
 			assert.Equal(t, "/api/issues/"+tc.escaped, requests[0].URL.EscapedPath())
 			assert.Equal(t, "/api/issues/"+tc.id, requests[0].URL.Path)

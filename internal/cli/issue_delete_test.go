@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const deletedFields = "idReadable"
@@ -27,9 +29,9 @@ func readThenDeletion(read, deletion http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func deleting(t *testing.T, read, deletion http.HandlerFunc) *upstream {
+func deleting(t *testing.T, read, deletion http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return serve(t, readThenDeletion(read, deletion))
+	return fake.Serve(t, readThenDeletion(read, deletion))
 }
 
 func deletionDone() http.HandlerFunc {
@@ -72,24 +74,24 @@ func TestIssueDeleteRefusesBeforeAnyRequest(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
 
 func TestIssueDeleteReadsTheIDAndDeletesByIt(t *testing.T) {
 	t.Parallel()
-	server := deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), deletionDone())
+	server := deleting(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), deletionDone())
 
-	got := runWith(t, server.env(), "issue", "delete", "dev-7")
+	got := runWith(t, server.Env(), "issue", "delete", "dev-7")
 
 	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-7\"\n"}, got)
-	requests := server.requests()
+	requests := server.Requests()
 	require.Len(t, requests, 2)
 	assert.Equal(t, http.MethodGet, requests[0].Method)
 	assert.Equal(t, "/api/issues/dev-7", requests[0].URL.Path)
@@ -97,17 +99,17 @@ func TestIssueDeleteReadsTheIDAndDeletesByIt(t *testing.T) {
 	assert.Equal(t, http.MethodDelete, requests[1].Method)
 	assert.Equal(t, "/api/issues/DEV-7", requests[1].URL.Path)
 	assert.Empty(t, requests[1].URL.RawQuery, "a deletion asks for no fields")
-	assert.Equal(t, "Bearer "+token, requests[1].Header.Get("Authorization"))
-	assert.Equal(t, []string{"", ""}, server.asks(), "neither request carries a body")
+	assert.Equal(t, "Bearer "+fake.Token, requests[1].Header.Get("Authorization"))
+	assert.Equal(t, []string{"", ""}, server.Bodies(), "neither request carries a body")
 }
 
 func TestIssueDeleteRefusesAnIssueTheReadDoesNotFind(t *testing.T) {
 	t.Parallel()
-	server := deleting(t, respondWith(http.StatusNotFound, entityNotFound("dev-7")), noDeletion(t))
+	server := deleting(t, fake.JSON(http.StatusNotFound, entityNotFound("dev-7")), noDeletion(t))
 
-	got := runWith(t, server.env(), "issue", "delete", "dev-7")
+	got := runWith(t, server.Env(), "issue", "delete", "dev-7")
 
-	assert.Equal(t, noIssueToDelete(server.url, "dev-7"), requireFault(t, got))
+	assert.Equal(t, noIssueToDelete(server.URL, "dev-7"), requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 }
 
@@ -141,14 +143,14 @@ func TestIssueDeleteRefusesWhatTheServerRefused(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := `{"error":` + strconv.Quote(tc.upstreamError) + `,"error_description":` + strconv.Quote(tc.upstreamMessage) + `}`
-			server := deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), respondWith(tc.status, body))
+			server := deleting(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), fake.JSON(tc.status, body))
 
-			got := runWith(t, server.env(), "issue", "delete", "DEV-7")
+			got := runWith(t, server.Env(), "issue", "delete", "DEV-7")
 
 			want := faultDocument{
 				code: tc.code,
 				details: append([]detail{
-					{"request", "DELETE " + server.url + "/api/issues/DEV-7"},
+					{"request", "DELETE " + server.URL + "/api/issues/DEV-7"},
 					{"upstream_status", tc.status},
 					{"upstream_error", tc.upstreamError},
 					{"upstream_message", tc.upstreamMessage},
@@ -173,18 +175,18 @@ func TestIssueDeleteRefusesA200ThatCarriesABody(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), func(w http.ResponseWriter, _ *http.Request) {
+			server := deleting(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", tc.contentType)
 				w.WriteHeader(http.StatusOK)
 				_, _ = io.WriteString(w, tc.body)
 			})
 
-			got := runWith(t, server.env(), "issue", "delete", "DEV-7")
+			got := runWith(t, server.Env(), "issue", "delete", "DEV-7")
 
 			want := faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", "DELETE " + server.url + "/api/issues/DEV-7"},
+					{"request", "DELETE " + server.URL + "/api/issues/DEV-7"},
 					{"upstream_status", 200},
 					{"upstream_body", tc.body},
 				},
@@ -210,14 +212,14 @@ func TestIssueDeleteRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := `{"$type":"Issue","idReadable":` + tc.received + `}`
-			server := deleting(t, respondWith(http.StatusOK, body), noDeletion(t))
+			server := deleting(t, fake.JSON(http.StatusOK, body), noDeletion(t))
 
-			got := runWith(t, server.env(), "issue", "delete", "dev-7")
+			got := runWith(t, server.Env(), "issue", "delete", "dev-7")
 
 			want := faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", issueRequest(server.url, "dev-7", deletedFields)},
+					{"request", issueRequest(server.URL, "dev-7", deletedFields)},
 					{"upstream_status", 200},
 					{"upstream_body", body},
 				},
@@ -228,9 +230,9 @@ func TestIssueDeleteRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 	}
 }
 
-func sentMethods(u *upstream) []string {
+func sentMethods(u *fake.Server) []string {
 	var methods []string
-	for _, request := range u.requests() {
+	for _, request := range u.Requests() {
 		methods = append(methods, request.Method)
 	}
 	return methods

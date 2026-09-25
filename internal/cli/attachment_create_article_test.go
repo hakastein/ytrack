@@ -10,6 +10,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func articleAttachmentWriteRequest(address, owner, fields string) string {
@@ -38,28 +40,28 @@ func TestAttachmentCreateSendsAnArticleTheSameMultipartAsAnIssue(t *testing.T) {
 	t.Parallel()
 	const name = "кот.png"
 	content := onePixelPNG()
-	server := serve(t, respondWith(http.StatusOK, filedByAnArticle(name, len(content))))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, filedByAnArticle(name, len(content))))
 	path := fileWith(t, name, content)
 
-	got := runWith(t, server.env(), "attachment", "create", "DEV-A-7", path)
+	got := runWith(t, server.Env(), "attachment", "create", "DEV-A-7", path)
 
 	want := `id: "522-9"` + "\n" + `name: "` + name + `"` + "\nsize: " + strconv.Itoa(len(content)) + "\n" +
 		`mimeType: "image/png"` + "\n" +
-		`url: "` + server.url + `/api/files/522-9?sign=s&updated=1"` + "\n"
+		`url: "` + server.Origin + `/api/files/522-9?sign=s&updated=1"` + "\n"
 	assert.Equal(t, outcome{stdout: want}, got)
 
-	asked := server.requests()
+	asked := server.Requests()
 	require.Len(t, asked, 1)
 	assert.Equal(t, http.MethodPost, asked[0].Method)
 	assert.Equal(t, "/api/articles/DEV-A-7/attachments", asked[0].URL.Path)
-	assert.Equal(t, []url.Values{{"fields": {attachmentFields}}}, server.sentQueries())
+	assert.Equal(t, []url.Values{{"fields": {attachmentFields}}}, server.Queries())
 	assert.True(t, strings.HasPrefix(asked[0].Header.Get("Content-Type"), multipartForm+"; boundary="),
 		"the content type names no boundary: %q", asked[0].Header.Get("Content-Type"))
 
 	sent := requireOnePart(t, server)
 	assert.Equal(t, name, sent.file)
 	assert.Equal(t, string(content), sent.content)
-	body := server.asks()[0]
+	body := server.Bodies()[0]
 	assert.False(t, json.Valid([]byte(body)), "the body is JSON: %q", body)
 	assert.NotContains(t, body, "base64Content")
 }
@@ -68,14 +70,14 @@ func TestAttachmentCreateRefusesTheSingleObjectTheSpecificationDeclaresForAnArti
 	t.Parallel()
 	const name = "кот.png"
 	content := onePixelPNG()
-	server := serve(t, respondWith(http.StatusOK, theArticleAttachment(name, len(content))))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, theArticleAttachment(name, len(content))))
 	path := fileWith(t, name, content)
 
-	got := runWith(t, server.env(), "attachment", "create", "DEV-A-7", path)
+	got := runWith(t, server.Env(), "attachment", "create", "DEV-A-7", path)
 
 	found := requireUncertainty(t, got)
 	assert.Equal(t, "upstream_invalid", found.code)
-	assert.Equal(t, detail{"request", articleAttachmentWriteRequest(server.url, "DEV-A-7", attachmentFields)},
+	assert.Equal(t, detail{"request", articleAttachmentWriteRequest(server.URL, "DEV-A-7", attachmentFields)},
 		found.details[0])
-	assert.Len(t, server.requests(), 1)
+	assert.Len(t, server.Requests(), 1)
 }

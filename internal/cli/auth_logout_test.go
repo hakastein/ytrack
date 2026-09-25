@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func logoutDocument(address, scope string) string {
@@ -43,17 +45,17 @@ func TestAuthLogoutTakesOutTheRecordOfTheDirectoryItWasCalledIn(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
 	above := filepath.Dir(scope)
-	server := serveNothing(t)
-	everywhere := unscopedRecord(server.url, everywhereToken)
-	parent := scopedRecord(above, server.url, aboveToken)
-	home, path := homeWith(t, recordFile(parent, scopedRecord(scope, server.url, hereToken), everywhere))
+	server := fake.ServeNothing(t)
+	everywhere := unscopedRecord(server.URL, everywhereToken)
+	parent := scopedRecord(above, server.URL, aboveToken)
+	home, path := homeWith(t, recordFile(parent, scopedRecord(scope, server.URL, hereToken), everywhere))
 
 	got := runWith(t, []string{"HOME=" + home, "PWD=" + stated}, "auth", "logout")
 
-	assert.Equal(t, outcome{stdout: logoutDocument(server.url, scope)}, got)
+	assert.Equal(t, outcome{stdout: logoutDocument(server.URL, scope)}, got)
 	assertNoRecordedToken(t, got)
 	assert.Equal(t, savedFile(everywhere, parent), fileBytes(t, path))
-	assert.Empty(t, server.requests())
+	assert.Empty(t, server.Requests())
 }
 
 func TestAuthLogoutGlobalTakesOutTheRecordForEverywhereAlone(t *testing.T) {
@@ -75,33 +77,33 @@ func TestAuthLogoutGlobalTakesOutTheRecordForEverywhereAlone(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
-			held := scopedRecord(scope, server.url, hereToken)
-			home, path := homeWith(t, recordFile(held, unscopedRecord(server.url, everywhereToken)))
+			server := fake.ServeNothing(t)
+			held := scopedRecord(scope, server.URL, hereToken)
+			home, path := homeWith(t, recordFile(held, unscopedRecord(server.URL, everywhereToken)))
 
 			got := runWith(t, tc.env(home), "auth", "logout", "--global")
 
-			assert.Equal(t, outcome{stdout: logoutDocument(server.url, "global")}, got)
+			assert.Equal(t, outcome{stdout: logoutDocument(server.URL, "global")}, got)
 			assertNoRecordedToken(t, got)
 			assert.Equal(t, savedFile(held), fileBytes(t, path))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
 
 func TestAuthLogoutTakesTheFileAwayWithTheLastRecord(t *testing.T) {
 	t.Parallel()
-	server := serveNothing(t)
-	home, path := homeWith(t, globalRecord(server.url, everywhereToken))
+	server := fake.ServeNothing(t)
+	home, path := homeWith(t, globalRecord(server.URL, everywhereToken))
 
 	got := runWith(t, []string{"HOME=" + home}, "auth", "logout", "--global")
 
-	assert.Equal(t, outcome{stdout: logoutDocument(server.url, "global")}, got)
+	assert.Equal(t, outcome{stdout: logoutDocument(server.URL, "global")}, got)
 	assertNoRecordedToken(t, got)
 	assert.NoFileExists(t, path)
 	assert.Empty(t, entries(t, filepath.Dir(path)))
 	assert.Equal(t, []string{".ytrack"}, entries(t, home))
-	assert.Empty(t, server.requests())
+	assert.Empty(t, server.Requests())
 }
 
 func TestAuthLogoutRefusesWhereTheDirectoryHasNoRecordOfItsOwn(t *testing.T) {
@@ -128,8 +130,8 @@ func TestAuthLogoutRefusesWhereTheDirectoryHasNoRecordOfItsOwn(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
-			held := recordFile(tc.records(server.url)...)
+			server := fake.ServeNothing(t)
+			held := recordFile(tc.records(server.URL)...)
 			home, path := homeWith(t, held)
 
 			got := runWith(t, []string{"HOME=" + home, "PWD=" + stated}, "auth", "logout")
@@ -138,7 +140,7 @@ func TestAuthLogoutRefusesWhereTheDirectoryHasNoRecordOfItsOwn(t *testing.T) {
 			assert.Equal(t, want, requireFault(t, got))
 			assertNoRecordedToken(t, got)
 			assert.Equal(t, held, fileBytes(t, path))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -146,8 +148,8 @@ func TestAuthLogoutRefusesWhereTheDirectoryHasNoRecordOfItsOwn(t *testing.T) {
 func TestAuthLogoutGlobalRefusesWithoutARecordForEverywhere(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
-	server := serveNothing(t)
-	held := recordFile(scopedRecord(scope, server.url, hereToken))
+	server := fake.ServeNothing(t)
+	held := recordFile(scopedRecord(scope, server.URL, hereToken))
 	home, path := homeWith(t, held)
 
 	got := runWith(t, []string{"HOME=" + home, "PWD=" + stated}, "auth", "logout", "--global")
@@ -156,7 +158,7 @@ func TestAuthLogoutGlobalRefusesWithoutARecordForEverywhere(t *testing.T) {
 	assert.Equal(t, want, requireFault(t, got))
 	assertNoRecordedToken(t, got)
 	assert.Equal(t, held, fileBytes(t, path))
-	assert.Empty(t, server.requests())
+	assert.Empty(t, server.Requests())
 }
 
 func TestAuthLogoutRefusesWithoutAFileOrADirectoryToTakeARecordFrom(t *testing.T) {
@@ -183,8 +185,8 @@ func TestAuthLogoutRefusesWithoutAFileOrADirectoryToTakeARecordFrom(t *testing.T
 	t.Run("a PWD naming a directory the call is not in", func(t *testing.T) {
 		t.Parallel()
 		stale := t.TempDir()
-		server := serveNothing(t)
-		held := recordFile(scopedRecord(scope, server.url, hereToken))
+		server := fake.ServeNothing(t)
+		held := recordFile(scopedRecord(scope, server.URL, hereToken))
 		home, path := homeWith(t, held)
 
 		got := runWith(t, []string{"HOME=" + home, "PWD=" + stale}, "auth", "logout")
@@ -198,47 +200,47 @@ func TestAuthLogoutRefusesWithoutAFileOrADirectoryToTakeARecordFrom(t *testing.T
 func TestAuthLogoutLeavesEveryOtherRecordByteForByte(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
-	server := serveNothing(t)
+	server := fake.ServeNothing(t)
 	const oddToken = "perm-ytrack-test-odd"
 	const nearToken = "perm-ytrack-test-near"
 	odd := `{"scope":"\/tmp\/а \"b\"\nк","url":"http://h","token":"` + oddToken + `"}`
 	near := `{ "url" : "http://g", "scope" : "/aaa", "token" : "` + nearToken + `" }`
-	everywhere := unscopedRecord(server.url, everywhereToken)
-	home, path := homeWith(t, recordFile(odd, scopedRecord(scope, server.url, hereToken), near, everywhere))
+	everywhere := unscopedRecord(server.URL, everywhereToken)
+	home, path := homeWith(t, recordFile(odd, scopedRecord(scope, server.URL, hereToken), near, everywhere))
 
 	got := runWith(t, []string{"HOME=" + home, "PWD=" + stated}, "auth", "logout")
 
-	assert.Equal(t, outcome{stdout: logoutDocument(server.url, scope)}, got)
+	assert.Equal(t, outcome{stdout: logoutDocument(server.URL, scope)}, got)
 	assertNoRecordedToken(t, got)
 	assertNoToken(t, got, oddToken)
 	assertNoToken(t, got, nearToken)
 	assert.Equal(t, savedFile(everywhere, near, odd), fileBytes(t, path))
-	assert.Empty(t, server.requests())
+	assert.Empty(t, server.Requests())
 }
 
 func TestAuthLogoutPrintsTheAddressWithoutItsPassword(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
-	server := serveNothing(t)
-	behind, err := url.Parse(server.url)
+	server := fake.ServeNothing(t)
+	behind, err := url.Parse(server.URL)
 	require.NoError(t, err)
 	behind.User = url.UserPassword("svc", "secret")
 	home, path := homeWith(t, recordFile(scopedRecord(scope, behind.String(), hereToken)))
 
 	got := runWith(t, []string{"HOME=" + home, "PWD=" + stated}, "auth", "logout")
 
-	assert.Equal(t, outcome{stdout: logoutDocument("http://svc:xxxxx@"+behind.Host, scope)}, got)
+	assert.Equal(t, outcome{stdout: logoutDocument("http://svc:xxxxx@"+behind.Host+behind.Path, scope)}, got)
 	assert.NotContains(t, got.stdout, "secret")
 	assertNoRecordedToken(t, got)
 	assert.NoFileExists(t, path)
-	assert.Empty(t, server.requests())
+	assert.Empty(t, server.Requests())
 }
 
 func TestAuthLogoutLeavesTheFileReadableByItsOwnerAlone(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
-	server := serveNothing(t)
-	records := recordFile(scopedRecord(scope, server.url, hereToken), unscopedRecord(server.url, everywhereToken))
+	server := fake.ServeNothing(t)
+	records := recordFile(scopedRecord(scope, server.URL, hereToken), unscopedRecord(server.URL, everywhereToken))
 	home, path := homeWith(t, records)
 	require.NoError(t, os.Chmod(path, 0o644))
 
@@ -248,14 +250,14 @@ func TestAuthLogoutLeavesTheFileReadableByItsOwnerAlone(t *testing.T) {
 	held, err := os.Stat(path)
 	require.NoError(t, err)
 	assert.Equal(t, fs.FileMode(0o600), held.Mode().Perm())
-	assert.Empty(t, server.requests())
+	assert.Empty(t, server.Requests())
 }
 
 func TestAuthLogoutWritesNothingIntoTheDirectoryItWasCalledIn(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
-	server := serveNothing(t)
-	home, _ := homeWith(t, recordFile(scopedRecord(scope, server.url, hereToken)))
+	server := fake.ServeNothing(t)
+	home, _ := homeWith(t, recordFile(scopedRecord(scope, server.URL, hereToken)))
 	before := entries(t, stated)
 
 	got := runWith(t, []string{"HOME=" + home, "PWD=" + stated}, "auth", "logout")

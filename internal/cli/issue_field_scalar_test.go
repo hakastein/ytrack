@@ -12,6 +12,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 type scalarRow struct {
@@ -142,15 +144,15 @@ func TestIssueCreateRefusesAScalarValueTheServerWouldRewrite(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := creating(t, respondWith(http.StatusOK, scalarProject()), noCreation(t))
+			server := creating(t, fake.JSON(http.StatusOK, scalarProject()), noCreation(t))
 
-			got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x",
+			got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x",
 				"--field", tc.field+"="+tc.given)
 
 			found := requireFault(t, got)
 			assert.Equal(t, "bad_usage", found.code)
 			assert.Equal(t, []detail{
-				{"request", writeMetadataRequest(server.url, "DEV")},
+				{"request", writeMetadataRequest(server.URL, "DEV")},
 				{"project", "DEV"},
 			}, found.details[:2])
 			shown := cmp.Or(tc.shownInError, tc.given)
@@ -176,9 +178,9 @@ func TestIssueCreateNamesEveryValueItCannotSendAtOnce(t *testing.T) {
 	for _, row := range slices.Backward(refusedInProjectOrder) {
 		argv = append(argv, "--field", row.field+"="+row.given)
 	}
-	server := creating(t, respondWith(http.StatusOK, scalarProject()), noCreation(t))
+	server := creating(t, fake.JSON(http.StatusOK, scalarProject()), noCreation(t))
 
-	got := runWith(t, server.env(), argv...)
+	got := runWith(t, server.Env(), argv...)
 
 	want := make([]invalidField, 0, len(refusedInProjectOrder))
 	for _, row := range refusedInProjectOrder {
@@ -225,16 +227,16 @@ func TestIssueCreateWritesAScalarValueAsItsFieldTypeExpects(t *testing.T) {
 			t.Parallel()
 			row := scalarRowNamed(t, tc.field)
 			held := receivedFields(row.received(tc.received))
-			server := creating(t, respondWith(http.StatusOK, scalarProject()),
-				respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
+			server := creating(t, fake.JSON(http.StatusOK, scalarProject()),
+				fake.JSON(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
 
-			got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x",
+			got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x",
 				"--field", tc.field+"="+tc.given)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			want := `{"project":{"id":"0-1"},"summary":"x","customFields":[{"$type":` + strconv.Quote(row.sent) +
 				`,"name":` + strconv.Quote(tc.field) + `,"value":` + tc.sentJSON + `}]}`
-			assert.JSONEq(t, want, server.asks()[1])
+			assert.JSONEq(t, want, server.Bodies()[1])
 		})
 	}
 }
@@ -290,10 +292,10 @@ func TestIssueCreateChecksAScalarResponseAgainstTheValueItWrote(t *testing.T) {
 			t.Parallel()
 			row := scalarRowNamed(t, tc.field)
 			held := receivedFields(row.received(tc.received))
-			server := creating(t, respondWith(http.StatusOK, scalarProject()),
-				respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
+			server := creating(t, fake.JSON(http.StatusOK, scalarProject()),
+				fake.JSON(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
 
-			got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x",
+			got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x",
 				"--field", tc.field+"="+tc.given)
 
 			if tc.mismatch == nil {
@@ -304,7 +306,7 @@ func TestIssueCreateChecksAScalarResponseAgainstTheValueItWrote(t *testing.T) {
 			want := faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", creationRequest(server.url, askedIssueFields)},
+					{"request", creationRequest(server.URL, askedIssueFields)},
 					{"issue", "DEV-7"},
 					{"mismatch", []any{tc.mismatch}},
 				},
@@ -332,9 +334,9 @@ func TestIssueShowRefusesAScalarOfAnotherShape(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := issueWithFields(receivedField{name: "Field", valueType: tc.valueType, value: tc.value})
-			server := serve(t, respondWith(http.StatusOK, body))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "customFields")
+			got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "customFields")
 
 			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)

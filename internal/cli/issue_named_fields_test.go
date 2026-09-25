@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const (
@@ -46,11 +48,11 @@ func devCatalogue() string {
 	)
 }
 
-func serveNamedFields(t *testing.T, catalogue string, issue http.HandlerFunc) *upstream {
+func serveNamedFields(t *testing.T, catalogue string, issue http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return serve(t, func(w http.ResponseWriter, r *http.Request) {
+	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, cataloguePath) {
-			respondWith(http.StatusOK, catalogue)(w, r)
+			fake.JSON(http.StatusOK, catalogue)(w, r)
 			return
 		}
 		issue(w, r)
@@ -63,13 +65,13 @@ func catalogueRequest(address string) string {
 
 func showNamedFields(t *testing.T, expression, body string) (outcome, []detail) {
 	t.Helper()
-	server := serveNamedFields(t, devCatalogue(), respondWith(http.StatusOK, body))
+	server := serveNamedFields(t, devCatalogue(), fake.JSON(http.StatusOK, body))
 
-	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", expression)
+	got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", expression)
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
-	assert.Equal(t, []string{cataloguePath, "/api/issues/DEV-1"}, server.sentPaths())
+	assert.Equal(t, []string{cataloguePath, "/api/issues/DEV-1"}, server.Paths())
 	printed := requireDocument(t, got.stdout)
 	require.Len(t, printed, 1, "stdout: %q", got.stdout)
 	require.Equal(t, "customFields", printed[0].key)
@@ -95,12 +97,12 @@ func TestIssueShowRefusesAnExpressionNoCustomFieldNameFits(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--fields", tc.expression)
+			got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--fields", tc.expression)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -108,12 +110,12 @@ func TestIssueShowRefusesAnExpressionNoCustomFieldNameFits(t *testing.T) {
 func TestIssueShowSendsEveryNamedCustomFieldAsAParameter(t *testing.T) {
 	t.Parallel()
 	expression := `customFields("Модуль системы",state,"Статус разработки")`
-	server := serveNamedFields(t, devCatalogue(), respondWith(http.StatusOK, issueWithFields()))
+	server := serveNamedFields(t, devCatalogue(), fake.JSON(http.StatusOK, issueWithFields()))
 
-	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", expression)
+	got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", expression)
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	queries := server.sentQueries()
+	queries := server.Queries()
 	require.Len(t, queries, 2)
 	assert.Equal(t, []string{catalogueFields}, queries[0]["fields"])
 	assert.Equal(t, []string{"-1"}, queries[0]["$top"])
@@ -125,13 +127,13 @@ func TestIssueShowSendsANamedCustomFieldWhoseNameContainsAQuote(t *testing.T) {
 	t.Parallel()
 	quoted := `a: b #c "d"`
 	catalogue := catalogueOf(cataloguedField{name: quoted})
-	server := serveNamedFields(t, catalogue, respondWith(http.StatusOK, issueWithFields()))
+	server := serveNamedFields(t, catalogue, fake.JSON(http.StatusOK, issueWithFields()))
 
-	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0",
+	got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0",
 		"--fields", `customFields("a: b #c \"d\"")`)
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	queries := server.sentQueries()
+	queries := server.Queries()
 	require.Len(t, queries, 2)
 	assert.Equal(t, []string{quoted}, queries[1]["customFields"])
 }
@@ -242,12 +244,12 @@ func TestIssueShowResolvesANameAgainstBothNamesAFieldAnswersTo(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNamedFields(t, devCatalogue(), respondWith(http.StatusOK, received))
+			server := serveNamedFields(t, devCatalogue(), fake.JSON(http.StatusOK, received))
 
-			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", tc.expression)
+			got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", tc.expression)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			queries := server.sentQueries()
+			queries := server.Queries()
 			require.Len(t, queries, 2)
 			assert.Equal(t, tc.sent, queries[1]["customFields"])
 			assert.Equal(t, []detail{{"customFields", tc.printed}}, requireDocument(t, got.stdout))
@@ -266,13 +268,13 @@ func TestIssueShowResolvesANameToTheFieldItNamesRatherThanTheOneItTranslates(t *
 		receivedField{name: "State", valueType: "state", ordinal: "8", binding: "180-14",
 			value: bundleElement("In Progress")},
 	)
-	server := serveNamedFields(t, catalogue, respondWith(http.StatusOK, received))
+	server := serveNamedFields(t, catalogue, fake.JSON(http.StatusOK, received))
 
-	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0",
+	got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0",
 		"--fields", `customFields("Состояние")`)
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	queries := server.sentQueries()
+	queries := server.Queries()
 	require.Len(t, queries, 2)
 	assert.Equal(t, []string{"Состояние"}, queries[1]["customFields"])
 	assert.Equal(t, []detail{{"customFields", []detail{{"Состояние", "Новая"}}}}, requireDocument(t, got.stdout))
@@ -284,13 +286,13 @@ func TestIssueShowRefusesANameNoCustomFieldOfTheInstanceAnswersTo(t *testing.T) 
 		assert.Fail(t, "the issue was asked for", "%s %s", r.Method, r.URL)
 	})
 
-	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0",
+	got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0",
 		"--fields", `customFields("Статус разрабтки",Stat)`)
 
 	assert.Equal(t, faultDocument{
 		code: "unknown_name",
 		details: []detail{
-			{"request", catalogueRequest(server.url)},
+			{"request", catalogueRequest(server.URL)},
 			{"fields", `customFields("Статус разрабтки",Stat)`},
 			{"unknown", []any{
 				[]detail{
@@ -301,7 +303,7 @@ func TestIssueShowRefusesANameNoCustomFieldOfTheInstanceAnswersTo(t *testing.T) 
 			}},
 		},
 	}, requireFault(t, got))
-	assert.Equal(t, []string{cataloguePath}, server.sentPaths())
+	assert.Equal(t, []string{cataloguePath}, server.Paths())
 }
 
 func TestIssueShowSuggestsTheNamesNearestAMisspeltCustomField(t *testing.T) {
@@ -326,17 +328,17 @@ func TestIssueShowSuggestsTheNamesNearestAMisspeltCustomField(t *testing.T) {
 			})
 			expression := `customFields("` + tc.written + `")`
 
-			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", expression)
+			got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", expression)
 
 			assert.Equal(t, faultDocument{
 				code: "unknown_name",
 				details: []detail{
-					{"request", catalogueRequest(server.url)},
+					{"request", catalogueRequest(server.URL)},
 					{"fields", expression},
 					{"unknown", []any{[]detail{{"field", expression}, {"nearest", tc.nearest}}}},
 				},
 			}, requireFault(t, got))
-			assert.Equal(t, []string{cataloguePath}, server.sentPaths())
+			assert.Equal(t, []string{cataloguePath}, server.Paths())
 		})
 	}
 }
@@ -351,12 +353,12 @@ func TestIssueShowRefusesANameMoreThanOneCustomFieldAnswersTo(t *testing.T) {
 		assert.Fail(t, "the issue was asked for", "%s %s", r.Method, r.URL)
 	})
 
-	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", `customFields("Оценка")`)
+	got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", `customFields("Оценка")`)
 
 	assert.Equal(t, faultDocument{
 		code: "unknown_name",
 		details: []detail{
-			{"request", catalogueRequest(server.url)},
+			{"request", catalogueRequest(server.URL)},
 			{"fields", `customFields("Оценка")`},
 			{"ambiguous", []any{[]detail{
 				{"field", `customFields("Оценка")`},
@@ -364,30 +366,30 @@ func TestIssueShowRefusesANameMoreThanOneCustomFieldAnswersTo(t *testing.T) {
 			}}},
 		},
 	}, requireFault(t, got))
-	assert.Equal(t, []string{cataloguePath}, server.sentPaths())
+	assert.Equal(t, []string{cataloguePath}, server.Paths())
 }
 
 func TestIssueShowRefusesTheNamesTheCatalogueIsClosedTo(t *testing.T) {
 	t.Parallel()
 	body := `{"error":"Forbidden","error_description":"HTTP 403 Forbidden"}`
-	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
+	server := fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		require.True(t, strings.HasPrefix(r.URL.Path, cataloguePath), "the issue was asked for")
-		respondWith(http.StatusForbidden, body)(w, r)
+		fake.JSON(http.StatusForbidden, body)(w, r)
 	})
 
-	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "customFields(State)")
+	got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "customFields(State)")
 
 	assert.Equal(t, faultDocument{
 		code: "denied",
 		details: []detail{
-			{"request", catalogueRequest(server.url)},
+			{"request", catalogueRequest(server.URL)},
 			{"upstream_status", 403},
 			{"upstream_error", "Forbidden"},
 			{"upstream_message", "HTTP 403 Forbidden"},
 			authFromEnv(),
 		},
 	}, requireFault(t, got))
-	assert.Len(t, server.requests(), 1)
+	assert.Len(t, server.Requests(), 1)
 }
 
 func TestIssueShowReadsNoCatalogueWhereNoCustomFieldWasNamed(t *testing.T) {
@@ -404,13 +406,13 @@ func TestIssueShowReadsNoCatalogueWhereNoCustomFieldWasNamed(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := issueInProgress()
-			server := serve(t, respondWith(http.StatusOK, body))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", tc.expression)
+			got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", tc.expression)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			assert.Equal(t, []string{"/api/issues/DEV-1"}, server.sentPaths())
-			assert.Empty(t, server.sentQueries()[0]["customFields"])
+			assert.Equal(t, []string{"/api/issues/DEV-1"}, server.Paths())
+			assert.Empty(t, server.Queries()[0]["customFields"])
 		})
 	}
 }
@@ -431,13 +433,13 @@ func TestIssueShowSendsNoNamesWhereAnotherIssueCarriesCustomFieldsToo(t *testing
 				value: bundleElement("Bug")},
 		) + `}`},
 	}) + `}`
-	server := serveNamedFields(t, devCatalogue(), respondWith(http.StatusOK, body))
+	server := serveNamedFields(t, devCatalogue(), fake.JSON(http.StatusOK, body))
 
-	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0",
+	got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0",
 		"--fields", "customFields(State),links(issues(customFields))")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	queries := server.sentQueries()
+	queries := server.Queries()
 	require.Len(t, queries, 2)
 	assert.Empty(t, queries[1]["customFields"], "the parameter would cut down the links as well")
 	assert.Equal(t, []detail{

@@ -7,13 +7,15 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func loginEnvironment(t *testing.T) (env []string, home, path string) {
 	t.Helper()
 	stated, _ := here(t)
 	home, path = emptyHome(t)
-	return append(serveNothing(t).env(), "HOME="+home, "PWD="+stated), home, path
+	return append(fake.ServeNothing(t).Env(), "HOME="+home, "PWD="+stated), home, path
 }
 
 func TestAuthLoginRefusesAStdinThatIsNotATerminal(t *testing.T) {
@@ -53,7 +55,7 @@ func TestAuthLoginRefusesAStdinThatIsNotATerminal(t *testing.T) {
 			got := runOn(t, tc.stdin(t), env, tc.argv...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assertNoToken(t, got, token)
+			assertNoToken(t, got, fake.Token)
 			assert.NoFileExists(t, path)
 			assert.Empty(t, entries(t, home))
 		})
@@ -63,7 +65,7 @@ func TestAuthLoginRefusesAStdinThatIsNotATerminal(t *testing.T) {
 func TestAuthLoginReadsNothingOfThePipeItIsHanded(t *testing.T) {
 	t.Parallel()
 	env, home, path := loginEnvironment(t)
-	const dialogue = "http://h\n" + token + "\n"
+	const dialogue = "http://h\n" + fake.Token + "\n"
 	read, write, err := os.Pipe()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = read.Close() })
@@ -74,7 +76,7 @@ func TestAuthLoginReadsNothingOfThePipeItIsHanded(t *testing.T) {
 	got := runOn(t, read, env, "auth", "login")
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assertNoToken(t, got, token)
+	assertNoToken(t, got, fake.Token)
 	unread, err := io.ReadAll(read)
 	require.NoError(t, err)
 	assert.Equal(t, dialogue, string(unread))

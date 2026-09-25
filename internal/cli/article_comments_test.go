@@ -7,6 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const articleCommentFields = "comments(id,author(login),created,text)"
@@ -45,12 +47,12 @@ func TestArticleShowRefusesACommentsFlagThatIsNeitherAllNorACount(t *testing.T) 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), append([]string{"article", "show", "DEV-A-1"}, tc.argv...)...)
+			got := runWith(t, server.Env(), append([]string{"article", "show", "DEV-A-1"}, tc.argv...)...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -68,12 +70,12 @@ func TestArticleShowRefusesCommentsAskedForInTheExpression(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "article", "show", "DEV-A-1", "--fields", tc.expression)
+			got := runWith(t, server.Env(), "article", "show", "DEV-A-1", "--fields", tc.expression)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -114,13 +116,13 @@ func TestArticleShowPrintsTheCommentsAskedForOldestFirst(t *testing.T) {
 				receivedArticleComment("8-3", 1789035411000, "admin", "четвёртый"),
 				receivedArticleComment("8-1", 1789035410500, "dev.member", "второй"),
 			)
-			server := serve(t, respondWith(http.StatusOK, body))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
 			argv := append([]string{"article", "show", "DEV-A-1", "--fields", "idReadable"}, tc.argv...)
-			got := runWith(t, server.env(), argv...)
+			got := runWith(t, server.Env(), argv...)
 
-			assert.Equal(t, []string{tc.sent}, server.sentFields())
-			assert.NotContains(t, server.sentFields()[0], "deleted")
+			assert.Equal(t, []string{tc.sent}, server.Fields())
+			assert.NotContains(t, server.Fields()[0], "deleted")
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Empty(t, got.stderr)
 			want := []detail{{"idReadable", "DEV-A-1"}}
@@ -143,9 +145,9 @@ func TestArticleShowPrintsTheTextOfACommentAsReceived(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := articleWithComments(t, receivedArticleComment("8-0", 1789035410875, "admin", tc.text))
-			server := serve(t, respondWith(http.StatusOK, body))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-			got := runWith(t, server.env(), "article", "show", "DEV-A-1", "--fields", "idReadable")
+			got := runWith(t, server.Env(), "article", "show", "DEV-A-1", "--fields", "idReadable")
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			root := requireMapping(t, "stdout", got.stdout)

@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func TestProjectShowRefusesFieldsThatDoNotParse(t *testing.T) {
@@ -32,9 +34,9 @@ func TestProjectShowRefusesFieldsThatDoNotParse(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "project", "show", "DEV", "--fields", tc.fields)
+			got := runWith(t, server.Env(), "project", "show", "DEV", "--fields", tc.fields)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 		})
@@ -55,9 +57,9 @@ func TestProjectShowRefusesANameItCannotPrintAsAKey(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "project", "show", "DEV", "--fields", tc.fields)
+			got := runWith(t, server.Env(), "project", "show", "DEV", "--fields", tc.fields)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 		})
@@ -82,9 +84,9 @@ func TestProjectShowRefusesFieldsGivenTwice(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), slices.Concat([]string{"project", "show", "DEV"}, tc.flags)...)
+			got := runWith(t, server.Env(), slices.Concat([]string{"project", "show", "DEV"}, tc.flags)...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 		})
@@ -109,23 +111,23 @@ func TestProjectShowSendsEachFieldOnceInOneForm(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(http.StatusOK, `{"shortName":"DEV","name":"DEVELOPMENT","archived":false,"description":null,`+
+			server := fake.Serve(t, fake.JSON(http.StatusOK, `{"shortName":"DEV","name":"DEVELOPMENT","archived":false,"description":null,`+
 				`"leader":{"login":"admin","fullName":"Administrator"},"team":{"name":"DEV Team","users":[{"login":"admin","fullName":"Administrator"}]},`+
 				`"plugins":{"timeTrackingSettings":{"enabled":true,"workItemTypes":[]}}}`))
 
-			got := runWith(t, server.env(), "project", "show", "DEV", "--fields", tc.fields)
+			got := runWith(t, server.Env(), "project", "show", "DEV", "--fields", tc.fields)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			assert.Equal(t, []string{tc.sent}, server.sentFields())
+			assert.Equal(t, []string{tc.sent}, server.Fields())
 		})
 	}
 }
 
 func TestProjectShowPrintsTheTypeWhenAskedFor(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, projectDEV))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, projectDEV))
 
-	got := runWith(t, server.env(), "project", "show", "DEV", "--fields", "$type,shortName")
+	got := runWith(t, server.Env(), "project", "show", "DEV", "--fields", "$type,shortName")
 
 	assert.Equal(t, outcome{stdout: "$type: \"Project\"\nshortName: \"DEV\"\n"}, got)
 }
@@ -133,10 +135,10 @@ func TestProjectShowPrintsTheTypeWhenAskedFor(t *testing.T) {
 func TestProjectShowPrintsScalarsAsReceived(t *testing.T) {
 	t.Parallel()
 	const pastFloat64Precision = "9007199254740993"
-	server := serve(t, respondWith(http.StatusOK, `{"name":"[bug] fix login","archived":true,"startingNumber":`+
+	server := fake.Serve(t, fake.JSON(http.StatusOK, `{"name":"[bug] fix login","archived":true,"startingNumber":`+
 		pastFloat64Precision+`,"issues":[],"leader":null,"$type":"Project"}`))
 
-	got := runWith(t, server.env(), "project", "show", "DEV", "--fields", "name,archived,startingNumber,issues(idReadable),leader(login)")
+	got := runWith(t, server.Env(), "project", "show", "DEV", "--fields", "name,archived,startingNumber,issues(idReadable),leader(login)")
 
 	const want = `name: "[bug] fix login"
 archived: true
@@ -153,9 +155,9 @@ func TestProjectShowPrintsAListOneFlowItemALine(t *testing.T) {
 		`{"login": "admin", "banned": false, "online": 1, "profile": {}, "groups": [{"name": "All Users"}, {"name": "DEV \"Team\""}], "tags": []}, ` +
 		`{"login": "dev.member", "banned": true, "online": null, "profile": null, "groups": [], "tags": ["a", "b"]}]}, ` +
 		`"watchers": [], "codes": [1, null, "DEV", true, [], {}]}`
-	server := serve(t, respondWith(http.StatusOK, body))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-	got := runWith(t, server.env(), "project", "show", "DEV", "--fields", "shortName,team(name,users(login,banned,online,profile,groups(name),tags)),watchers,codes")
+	got := runWith(t, server.Env(), "project", "show", "DEV", "--fields", "shortName,team(name,users(login,banned,online,profile,groups(name),tags)),watchers,codes")
 
 	const want = `shortName: "DEV"
 team:

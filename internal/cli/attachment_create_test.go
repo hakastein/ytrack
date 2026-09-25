@@ -13,6 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const uploadedField = "files[0]"
@@ -43,7 +45,7 @@ func aFileToAttach(t *testing.T) string {
 	return fileWith(t, "attached.txt", []byte("ytrack"))
 }
 
-func requireOnePart(t *testing.T, server *upstream) formPart {
+func requireOnePart(t *testing.T, server *fake.Server) formPart {
 	t.Helper()
 	parts := sentParts(t, server, 0)
 	require.Len(t, parts, 1, "an upload is one part and nothing else")
@@ -80,13 +82,13 @@ func TestAttachmentCreateRefusesAPathThatIsNoRegularFile(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 			path := tc.path(t)
 
-			got := runWith(t, server.env(), "attachment", "create", "DEV-1", path)
+			got := runWith(t, server.Env(), "attachment", "create", "DEV-1", path)
 
 			assert.Equal(t, "bad_usage", requireFault(t, got).code)
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -96,15 +98,15 @@ func TestAttachmentCreateReadsALoneDashAsAFileOfThatName(t *testing.T) {
 
 	t.Run("no file of that name here", func(t *testing.T) {
 		t.Parallel()
-		server := serveNothing(t)
+		server := fake.ServeNothing(t)
 		stdin, err := os.Open(fileWith(t, "standard-input.bin", []byte("the bytes of standard input")))
 		require.NoError(t, err)
 		t.Cleanup(func() { assert.NoError(t, stdin.Close()) })
 
-		got := runOn(t, stdin, server.env(), "attachment", "create", "DEV-1", "-")
+		got := runOn(t, stdin, server.Env(), "attachment", "create", "DEV-1", "-")
 
 		assert.Equal(t, "bad_usage", requireFault(t, got).code)
-		assert.Empty(t, server.requests())
+		assert.Empty(t, server.Requests())
 		read, err := stdin.Seek(0, io.SeekCurrent)
 		require.NoError(t, err)
 		assert.Zero(t, read, "a byte of standard input was read")
@@ -112,10 +114,10 @@ func TestAttachmentCreateReadsALoneDashAsAFileOfThatName(t *testing.T) {
 
 	t.Run("a file of that name goes out under it", func(t *testing.T) {
 		t.Parallel()
-		server := serve(t, respondWith(http.StatusOK, filed("-", 1)))
+		server := fake.Serve(t, fake.JSON(http.StatusOK, filed("-", 1)))
 		path := fileWith(t, "-", []byte("x"))
 
-		got := runWith(t, server.env(), "attachment", "create", "DEV-1", path)
+		got := runWith(t, server.Env(), "attachment", "create", "DEV-1", path)
 
 		require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 		sent := requireOnePart(t, server)
@@ -144,13 +146,13 @@ func TestAttachmentCreateRefusesANameTheServerWouldRewrite(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 			path := fileWith(t, tc.file, []byte("x"))
 
-			got := runWith(t, server.env(), "attachment", "create", "DEV-1", path)
+			got := runWith(t, server.Env(), "attachment", "create", "DEV-1", path)
 
 			assert.Equal(t, "bad_usage", requireFault(t, got).code)
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -159,14 +161,14 @@ func TestAttachmentCreateSendsTheFileAsOneStreamedPart(t *testing.T) {
 	t.Parallel()
 	const name = "[bug] заметка; 100%.bin"
 	content := repeatedBytes(300 * 1024)
-	server := serve(t, respondWith(http.StatusOK, filed(name, len(content))))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, filed(name, len(content))))
 	path := fileWith(t, name, content)
 
-	got := runWith(t, server.env(), "attachment", "create", "DEV-1", path)
+	got := runWith(t, server.Env(), "attachment", "create", "DEV-1", path)
 
 	want := `id: "12-9"` + "\n" + `name: "` + name + `"` + "\nsize: " + strconv.Itoa(len(content)) + "\n" +
 		`mimeType: "application/octet-stream"` + "\n" +
-		`url: "` + server.url + `/api/files/12-9?sign=s&updated=1"` + "\n"
+		`url: "` + server.Origin + `/api/files/12-9?sign=s&updated=1"` + "\n"
 	assert.Equal(t, outcome{stdout: want}, got)
 
 	sent := requireOnePart(t, server)
@@ -174,13 +176,13 @@ func TestAttachmentCreateSendsTheFileAsOneStreamedPart(t *testing.T) {
 	assert.Equal(t, `form-data; name="`+uploadedField+`"; filename="`+name+`"`, sent.disposition)
 	assert.Equal(t, string(content), sent.content)
 
-	asked := server.requests()
+	asked := server.Requests()
 	require.Len(t, asked, 1)
 	assert.Equal(t, http.MethodPost, asked[0].Method)
 	assert.Equal(t, "/api/issues/DEV-1/attachments", asked[0].URL.Path)
 	assert.Equal(t, []string{"chunked"}, asked[0].TransferEncoding)
 	assert.EqualValues(t, -1, asked[0].ContentLength)
-	assert.Equal(t, []url.Values{{"fields": {attachmentFields}}}, server.sentQueries())
+	assert.Equal(t, []url.Values{{"fields": {attachmentFields}}}, server.Queries())
 	assert.True(t, strings.HasPrefix(asked[0].Header.Get("Content-Type"), multipartForm+"; boundary="),
 		"the content type names no boundary: %q", asked[0].Header.Get("Content-Type"))
 }
@@ -204,10 +206,10 @@ func TestAttachmentCreateSendsEveryOtherNameUnchanged(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(http.StatusOK, filed(tc.file, 1)))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, filed(tc.file, 1)))
 			path := fileWith(t, tc.file, []byte("x"))
 
-			got := runWith(t, server.env(), "attachment", "create", "DEV-1", path)
+			got := runWith(t, server.Env(), "attachment", "create", "DEV-1", path)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			sent := requireOnePart(t, server)
@@ -232,9 +234,9 @@ func TestAttachmentCreateReadsARelativePathAgainstTheWorkingDirectory(t *testing
 	for _, path := range []string{absolute, relative} {
 		t.Run(map[bool]string{true: "absolute", false: "relative"}[filepath.IsAbs(path)], func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(http.StatusOK, filed(name, len(content))))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, filed(name, len(content))))
 
-			got := runWith(t, server.env(), "attachment", "create", "DEV-1", path)
+			got := runWith(t, server.Env(), "attachment", "create", "DEV-1", path)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			sent := requireOnePart(t, server)
@@ -246,13 +248,13 @@ func TestAttachmentCreateReadsARelativePathAgainstTheWorkingDirectory(t *testing
 
 func TestAttachmentCreateAsksForTheNameAndTheSizeItChecks(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, filed("one.txt", 1)))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, filed("one.txt", 1)))
 	path := fileWith(t, "one.txt", []byte("x"))
 
-	got := runWith(t, server.env(), "attachment", "create", "DEV-1", path, "--fields", "id")
+	got := runWith(t, server.Env(), "attachment", "create", "DEV-1", path, "--fields", "id")
 
 	assert.Equal(t, outcome{stdout: `id: "12-9"` + "\n"}, got)
-	assert.Equal(t, []string{"id,name,size"}, server.sentFields())
+	assert.Equal(t, []string{"id,name,size"}, server.Fields())
 }
 
 func TestAttachmentCreateRefusesAnAnswerThatIsNotTheFileThatWentOut(t *testing.T) {
@@ -310,17 +312,17 @@ func TestAttachmentCreateRefusesAnAnswerThatIsNotTheFileThatWentOut(t *testing.T
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(http.StatusOK, tc.body))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, tc.body))
 			path := fileWith(t, name, content)
 
-			got := runWith(t, server.env(), "attachment", "create", "DEV-1", path)
+			got := runWith(t, server.Env(), "attachment", "create", "DEV-1", path)
 
 			found := requireUncertainty(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
-			assert.Equal(t, detail{"request", attachmentWriteRequest(server.url, "DEV-1", attachmentFields)},
+			assert.Equal(t, detail{"request", attachmentWriteRequest(server.URL, "DEV-1", attachmentFields)},
 				found.details[0])
 			assert.Subset(t, found.details, tc.details)
-			assert.Len(t, server.requests(), 1)
+			assert.Len(t, server.Requests(), 1)
 		})
 	}
 }
@@ -359,17 +361,17 @@ func TestAttachmentCreateRefusesWhatTheServerAnswered(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(tc.status, tc.body))
+			server := fake.Serve(t, fake.JSON(tc.status, tc.body))
 			path := aFileToAttach(t)
 
-			got := runWith(t, server.env(), "attachment", "create", "DEV-1", path)
+			got := runWith(t, server.Env(), "attachment", "create", "DEV-1", path)
 
 			found := requireFault(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.message, detailNamed(t, found, "upstream_message"))
-			assert.Equal(t, detail{"request", attachmentWriteRequest(server.url, "DEV-1", attachmentFields)},
+			assert.Equal(t, detail{"request", attachmentWriteRequest(server.URL, "DEV-1", attachmentFields)},
 				found.details[0])
-			assert.Len(t, server.requests(), 1)
+			assert.Len(t, server.Requests(), 1)
 		})
 	}
 }

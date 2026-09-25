@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func oneWorkItem(duration, date string) string {
@@ -32,13 +34,13 @@ func TestTimeListRefusesANameUnderTheDuration(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "time", "list", "DEV-1", "--fields", tc.expression)
+			got := runWith(t, server.Env(), "time", "list", "DEV-1", "--fields", tc.expression)
 
 			want := faultDocument{code: "bad_usage"}
 			assert.Equal(t, want, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -61,14 +63,14 @@ func TestTimeListPrintsTheDurationAsAPeriodOfTheMinutes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := oneWorkItem(receivedDuration(tc.minutes, "1ч 30м"), "1788220800000")
-			server := serve(t, respondWith(http.StatusOK, body))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-			got := runWith(t, server.env(), "time", "list", "DEV-1", "--fields", "id,duration")
+			got := runWith(t, server.Env(), "time", "list", "DEV-1", "--fields", "id,duration")
 
 			want := "total: 1\nreturned: 1\ntruncated: false\nworkItems:\n" +
 				`  - {id: "199-6", duration: "` + tc.want + `"}` + "\n"
 			assert.Equal(t, outcome{stdout: want}, got)
-			requests := server.requests()
+			requests := server.Requests()
 			require.Len(t, requests, 1)
 			assert.Equal(t, url.Values{"fields": {"id,duration(minutes)"}, "$top": {"50"}}, requests[0].URL.Query())
 			assert.NotContains(t, got.stdout, "presentation")
@@ -92,9 +94,9 @@ func TestTimeListRefusesADurationItCannotRead(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(http.StatusOK, oneWorkItem(tc.received, "1788220800000")))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, oneWorkItem(tc.received, "1788220800000")))
 
-			got := runWith(t, server.env(), "time", "list", "DEV-1", "--fields", "id,duration")
+			got := runWith(t, server.Env(), "time", "list", "DEV-1", "--fields", "id,duration")
 
 			assert.Equal(t, "upstream_invalid", requireFault(t, got).code)
 			assert.Empty(t, got.stdout)
@@ -104,9 +106,9 @@ func TestTimeListRefusesADurationItCannotRead(t *testing.T) {
 
 func TestTimeListPrintsADurationTheWorkItemHasNone(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, oneWorkItem("null", "null")))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, oneWorkItem("null", "null")))
 
-	got := runWith(t, server.env(), "time", "list", "DEV-1", "--fields", "id,duration,date")
+	got := runWith(t, server.Env(), "time", "list", "DEV-1", "--fields", "id,duration,date")
 
 	want := "total: 1\nreturned: 1\ntruncated: false\nworkItems:\n" +
 		`  - {id: "199-6", duration: null, date: null}` + "\n"
@@ -126,9 +128,9 @@ func TestTimeListPrintsTheDayOfAWorkItemInUTC(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(http.StatusOK, oneWorkItem(receivedDuration("90", "1ч 30м"), tc.received)))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, oneWorkItem(receivedDuration("90", "1ч 30м"), tc.received)))
 
-			got := runWith(t, server.env(), "time", "list", "DEV-1", "--fields", "id,date")
+			got := runWith(t, server.Env(), "time", "list", "DEV-1", "--fields", "id,date")
 
 			want := "total: 1\nreturned: 1\ntruncated: false\nworkItems:\n" +
 				`  - {id: "199-6", date: "` + tc.want + `"}` + "\n"

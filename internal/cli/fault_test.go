@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hakastein/ytrack/internal/cli"
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func showRequest(address, code string) string {
@@ -57,18 +58,17 @@ func TestAFaultNamesTheRequestThatWasSent(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(http.StatusNotFound, `{"error":"Not Found","error_description":"none"}`))
+			server := fake.Serve(t, fake.JSON(http.StatusNotFound, `{"error":"Not Found","error_description":"none"}`))
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			found := requireFault(t, got)
-			require.Equal(t, detail{"request", "GET " + server.url + tc.target}, found.details[0])
-			printed, err := url.Parse(server.url + tc.target)
+			require.Equal(t, detail{"request", "GET " + server.URL + tc.target}, found.details[0])
+			printed, err := url.Parse(tc.target)
 			require.NoError(t, err)
-			requests := server.requests()
-			require.Len(t, requests, 1)
-			assert.Equal(t, requests[0].URL.EscapedPath(), printed.EscapedPath())
-			assert.Equal(t, requests[0].URL.Query(), printed.Query())
+			assert.Len(t, server.Requests(), 1)
+			assert.Equal(t, printed.EscapedPath(), server.Request(t, 0).URL.EscapedPath())
+			assert.Equal(t, printed.Query(), server.Request(t, 0).URL.Query())
 		})
 	}
 }
@@ -189,19 +189,19 @@ func TestProjectShowRefusesByTheStatusOfTheAnswer(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, func(w http.ResponseWriter, r *http.Request) {
+			server := fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 				maps.Copy(w.Header(), tc.header)
-				respondWith(tc.status, tc.body)(w, r)
+				fake.JSON(tc.status, tc.body)(w, r)
 			})
 
-			got := runWith(t, server.env(), "project", "show", "DEV")
+			got := runWith(t, server.Env(), "project", "show", "DEV")
 
 			want := faultDocument{
 				code:    tc.code,
-				details: slices.Concat([]detail{{"request", showRequest(server.url, "DEV")}}, tc.detailsAfterRequest),
+				details: slices.Concat([]detail{{"request", showRequest(server.URL, "DEV")}}, tc.detailsAfterRequest),
 			}
 			assert.Equal(t, want, requireFault(t, got))
-			assert.Len(t, server.requests(), 1)
+			assert.Len(t, server.Requests(), 1)
 		})
 	}
 }
@@ -267,66 +267,66 @@ func TestProjectShowRefusesAnAnswerOfAnotherShape(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, func(w http.ResponseWriter, _ *http.Request) {
+			server := fake.Serve(t, func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", tc.contentType)
 				w.WriteHeader(tc.status)
 				_, _ = io.WriteString(w, tc.body)
 			})
 
-			got := runWith(t, server.env(), "project", "show", "DEV")
+			got := runWith(t, server.Env(), "project", "show", "DEV")
 
 			want := faultDocument{
 				code: tc.code,
 				details: []detail{
-					{"request", showRequest(server.url, "DEV")},
+					{"request", showRequest(server.URL, "DEV")},
 					{"upstream_status", tc.status},
 					{"upstream_body", tc.body},
 				},
 			}
 			assert.Equal(t, want, requireFault(t, got))
-			assert.Len(t, server.requests(), 1)
+			assert.Len(t, server.Requests(), 1)
 		})
 	}
 }
 
 func TestProjectShowDoesNotFollowARedirect(t *testing.T) {
 	t.Parallel()
-	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
+	server := fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/moved" {
-			respondWith(http.StatusOK, projectDEV)(w, r)
+			fake.JSON(http.StatusOK, projectDEV)(w, r)
 			return
 		}
 		w.Header().Set("Location", "/moved")
 		w.WriteHeader(http.StatusFound)
 	})
 
-	got := runWith(t, server.env(), "project", "show", "DEV")
+	got := runWith(t, server.Env(), "project", "show", "DEV")
 
 	want := faultDocument{
 		code: "upstream_invalid",
 		details: []detail{
-			{"request", showRequest(server.url, "DEV")},
+			{"request", showRequest(server.URL, "DEV")},
 			{"upstream_status", 302},
 			{"upstream_body", ""},
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, server.requests(), 1)
+	assert.Len(t, server.Requests(), 1)
 }
 
 func TestProjectShowRefusesAnAnswerCutShort(t *testing.T) {
 	t.Parallel()
-	server := serve(t, func(w http.ResponseWriter, _ *http.Request) {
+	server := fake.Serve(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Length", "1000")
 		_, _ = io.WriteString(w, projectDEV)
 	})
 
-	got := runWith(t, server.env(), "project", "show", "DEV")
+	got := runWith(t, server.Env(), "project", "show", "DEV")
 
 	want := faultDocument{
 		code: "upstream_failed",
 		details: []detail{
-			{"request", showRequest(server.url, "DEV")},
+			{"request", showRequest(server.URL, "DEV")},
 			{"upstream_status", 200},
 		},
 	}
@@ -335,14 +335,12 @@ func TestProjectShowRefusesAnAnswerCutShort(t *testing.T) {
 
 func TestProjectShowRefusesWhenNothingListens(t *testing.T) {
 	t.Parallel()
-	const nowhere = "http://127.0.0.1:0"
-
-	got := runWith(t, []string{"YTRACK_URL=" + nowhere, "YTRACK_TOKEN=" + token}, "project", "show", "DEV")
+	got := runWith(t, fake.Unreachable().Env(), "project", "show", "DEV")
 
 	found := requireFault(t, got)
 	assert.Equal(t, "upstream_failed", found.code)
-	assert.Equal(t, []detail{{"request", showRequest(nowhere, "DEV")}}, found.details)
-	assert.NotContains(t, got.stderr, token)
+	assert.Equal(t, []detail{{"request", showRequest(fake.NobodyListens, "DEV")}}, found.details)
+	assert.NotContains(t, got.stderr, fake.Token)
 }
 
 func TestProjectShowDoesNotOfferHTTP2ToAServerThatSpeaksIt(t *testing.T) {
@@ -363,7 +361,7 @@ func TestProjectShowDoesNotOfferHTTP2ToAServerThatSpeaksIt(t *testing.T) {
 	server.StartTLS()
 	t.Cleanup(server.Close)
 
-	got := runWith(t, []string{"YTRACK_URL=" + server.URL, "YTRACK_TOKEN=" + token}, "project", "show", "DEV")
+	got := runWith(t, []string{"YTRACK_URL=" + server.URL, "YTRACK_TOKEN=" + fake.Token}, "project", "show", "DEV")
 
 	found := requireFault(t, got)
 	assert.Equal(t, "upstream_failed", found.code)
@@ -376,19 +374,19 @@ func TestProjectShowDoesNotOfferHTTP2ToAServerThatSpeaksIt(t *testing.T) {
 
 func TestProjectShowRefusesWhenNoResponseComesInTime(t *testing.T) {
 	t.Parallel()
-	server := serve(t, func(_ http.ResponseWriter, r *http.Request) {
+	server := fake.Serve(t, func(_ http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 	})
 	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 	defer cancel()
 	var stdout, stderr bytes.Buffer
 
-	code := cli.Run(ctx, []string{"project", "show", "DEV"}, server.env(), nil, nil, &stdout, &stderr)
+	code := cli.Run(ctx, []string{"project", "show", "DEV"}, server.Env(), nil, nil, &stdout, &stderr)
 
 	got := outcome{code: code, stdout: stdout.String(), stderr: stderr.String()}
 	want := faultDocument{
 		code:    "upstream_failed",
-		details: []detail{{"request", showRequest(server.url, "DEV")}},
+		details: []detail{{"request", showRequest(server.URL, "DEV")}},
 	}
 	assert.Equal(t, want, requireFault(t, got))
 }

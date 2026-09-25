@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const articleShowFields = "idReadable,summary,reporter(login),created,updated,tags(name)," +
@@ -51,12 +53,12 @@ func articleWith(t *testing.T, keys map[string]any) string {
 
 func TestArticleShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, articleWithAChild()))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, articleWithAChild()))
 
-	got := runWith(t, server.env(), "article", "show", "DEV-A-1")
+	got := runWith(t, server.Env(), "article", "show", "DEV-A-1")
 
 	assert.Equal(t, outcome{stdout: printedArticleWithAChild}, got)
-	requests := server.requests()
+	requests := server.Requests()
 	require.Len(t, requests, 1)
 	request := requests[0]
 	assert.Equal(t, http.MethodGet, request.Method)
@@ -69,9 +71,9 @@ func TestArticleShowPrintsContentAsALiteralBlockWhereverItCanCarryIt(t *testing.
 	for _, tc := range textCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(http.StatusOK, articleWith(t, map[string]any{"content": tc.text})))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, articleWith(t, map[string]any{"content": tc.text})))
 
-			got := runWith(t, server.env(), "article", "show", "DEV-A-1", "--comments=0", "--fields", "idReadable,content")
+			got := runWith(t, server.Env(), "article", "show", "DEV-A-1", "--comments=0", "--fields", "idReadable,content")
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Empty(t, got.stderr)
@@ -89,9 +91,9 @@ func TestArticleShowPrintsAnEmptyArticle(t *testing.T) {
 		"created": 1789035410875, "updated": 1789035410875, "tags": []any{},
 		"parentArticle": nil, "childArticles": []any{}, "content": nil, "comments": []any{},
 	}
-	server := serve(t, respondWith(http.StatusOK, articleWith(t, empty)))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, articleWith(t, empty)))
 
-	got := runWith(t, server.env(), "article", "show", "DEV-A-1")
+	got := runWith(t, server.Env(), "article", "show", "DEV-A-1")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, []detail{
@@ -128,13 +130,13 @@ func TestArticleShowPassesOnWhatTheServerAnswered(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(tc.status, tc.body))
+			server := fake.Serve(t, fake.JSON(tc.status, tc.body))
 
-			got := runWith(t, server.env(), "article", "show", "DEV-A-1")
+			got := runWith(t, server.Env(), "article", "show", "DEV-A-1")
 
 			found := requireFault(t, got)
 			assert.Equal(t, tc.code, found.code)
-			assert.Len(t, server.requests(), 1)
+			assert.Len(t, server.Requests(), 1)
 		})
 	}
 }

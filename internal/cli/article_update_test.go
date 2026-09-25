@@ -7,15 +7,17 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func articleUpdateRequest(address, readable, fields string) string {
 	return "POST " + address + "/api/articles/" + readable + "?fields=" + fields
 }
 
-func updatingAnArticle(t *testing.T, read, update http.HandlerFunc) *upstream {
+func updatingAnArticle(t *testing.T, read, update http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return serve(t, func(w http.ResponseWriter, r *http.Request) {
+	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			read(w, r)
 			return
@@ -27,10 +29,10 @@ func updatingAnArticle(t *testing.T, read, update http.HandlerFunc) *upstream {
 	})
 }
 
-func sentChanges(t *testing.T, u *upstream) map[string]any {
+func sentChanges(t *testing.T, u *fake.Server) map[string]any {
 	t.Helper()
 	var body map[string]any
-	require.NoError(t, json.Unmarshal([]byte(lastAsk(u)), &body))
+	require.NoError(t, json.Unmarshal([]byte(u.Last(t).Body), &body))
 	return body
 }
 
@@ -63,12 +65,12 @@ func TestArticleUpdateRefusesBeforeAnyRequest(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), append([]string{"article", "update"}, tc.argv...)...)
+			got := runWith(t, server.Env(), append([]string{"article", "update"}, tc.argv...)...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -112,15 +114,15 @@ func TestArticleUpdateWritesOnlyThePartsItWasGiven(t *testing.T) {
 			}
 			filed := answeredArticle{readable: "DEV-A-7", summary: title, content: text}
 			server := updatingAnArticle(t,
-				respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-				respondWith(http.StatusOK, filed.json()))
+				fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+				fake.JSON(http.StatusOK, filed.json()))
 
-			got := runWith(t, server.env(), append([]string{"article", "update", "dev-A-7"}, tc.argv...)...)
+			got := runWith(t, server.Env(), append([]string{"article", "update", "dev-A-7"}, tc.argv...)...)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Empty(t, got.stderr)
 			assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
-			assert.Equal(t, []string{"/api/articles/dev-A-7", "/api/articles/DEV-A-7"}, server.sentPaths())
+			assert.Equal(t, []string{"/api/articles/dev-A-7", "/api/articles/DEV-A-7"}, server.Paths())
 			assert.Equal(t, tc.want, sentChanges(t, server))
 		})
 	}
@@ -130,13 +132,13 @@ func TestArticleUpdateChecksTheResponseAgainstThePartsItWrote(t *testing.T) {
 	t.Parallel()
 	filed := answeredArticle{readable: "DEV-A-7", summary: "заголовок, которого никто не писал", content: "null"}
 	server := updatingAnArticle(t,
-		respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		respondWith(http.StatusOK, filed.json()))
+		fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+		fake.JSON(http.StatusOK, filed.json()))
 
-	got := runWith(t, server.env(), "article", "update", "DEV-A-7", "--clear", "content")
+	got := runWith(t, server.Env(), "article", "update", "DEV-A-7", "--clear", "content")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, []string{articleToWriteFields, articleShowFields}, server.sentFields())
+	assert.Equal(t, []string{articleToWriteFields, articleShowFields}, server.Fields())
 	mapping := requireMapping(t, "stdout", got.stdout)
 	assert.Equal(t, "заголовок, которого никто не писал", nodeAt(t, mapping, "summary").Value)
 	assert.Nil(t, requireValue(t, nodeAt(t, mapping, "content")))
@@ -159,10 +161,10 @@ func TestArticleUpdateWritesTheTitleItWasGiven(t *testing.T) {
 			t.Parallel()
 			filed := answeredArticle{readable: "DEV-A-7", summary: tc.title, content: "null"}
 			server := updatingAnArticle(t,
-				respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-				respondWith(http.StatusOK, filed.json()))
+				fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+				fake.JSON(http.StatusOK, filed.json()))
 
-			got := runWith(t, server.env(), "article", "update", "DEV-A-7", "--summary", tc.title)
+			got := runWith(t, server.Env(), "article", "update", "DEV-A-7", "--summary", tc.title)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Empty(t, got.stderr)
@@ -208,15 +210,15 @@ func TestArticleUpdateChecksMoreThanItPrints(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := updatingAnArticle(t,
-				respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-				respondWith(http.StatusOK, tc.filed.json()))
+				fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+				fake.JSON(http.StatusOK, tc.filed.json()))
 			argv := append([]string{"article", "update", "dev-A-7"}, tc.argv...)
 
-			got := runWith(t, server.env(), append(argv, "--fields", "idReadable")...)
+			got := runWith(t, server.Env(), append(argv, "--fields", "idReadable")...)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Equal(t, "idReadable: \"DEV-A-7\"\n", got.stdout)
-			assert.Equal(t, []string{articleToWriteFields, tc.asked}, server.sentFields())
+			assert.Equal(t, []string{articleToWriteFields, tc.asked}, server.Fields())
 		})
 	}
 }
@@ -254,15 +256,15 @@ func TestArticleUpdateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := updatingAnArticle(t,
-				respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-				respondWith(http.StatusOK, tc.filed.json()))
+				fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+				fake.JSON(http.StatusOK, tc.filed.json()))
 
-			got := runWith(t, server.env(), append([]string{"article", "update", "DEV-A-7"}, tc.argv...)...)
+			got := runWith(t, server.Env(), append([]string{"article", "update", "DEV-A-7"}, tc.argv...)...)
 
 			want := faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", articleUpdateRequest(server.url, "DEV-A-7", articleShowFields)},
+					{"request", articleUpdateRequest(server.URL, "DEV-A-7", articleShowFields)},
 					{"article", "DEV-A-7"},
 					{"mismatch", tc.mismatch},
 				},
@@ -276,14 +278,14 @@ func TestArticleUpdateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 func TestArticleUpdateRefusesAnArticleTheReadDoesNotFind(t *testing.T) {
 	t.Parallel()
 	said := `{"error":"Not Found","error_description":"Can't find article with id DEV-A-99999"}`
-	server := updatingAnArticle(t, respondWith(http.StatusNotFound, said), noUpdate(t))
+	server := updatingAnArticle(t, fake.JSON(http.StatusNotFound, said), noUpdate(t))
 
-	got := runWith(t, server.env(), "article", "update", "DEV-A-99999", "--summary", "x")
+	got := runWith(t, server.Env(), "article", "update", "DEV-A-99999", "--summary", "x")
 
 	want := faultDocument{
 		code: "not_found",
 		details: []detail{
-			{"request", articleToWriteRequest(server.url, "DEV-A-99999")},
+			{"request", articleToWriteRequest(server.URL, "DEV-A-99999")},
 			{"upstream_status", 404},
 			{"upstream_error", "Not Found"},
 			{"upstream_message", "Can't find article with id DEV-A-99999"},
@@ -310,14 +312,14 @@ func TestArticleUpdateRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 			t.Parallel()
 			body := `{"$type":"Article","id":"177-7","idReadable":` + tc.received +
 				`,"project":{"$type":"Project","shortName":"DEV"}}`
-			server := updatingAnArticle(t, respondWith(http.StatusOK, body), noUpdate(t))
+			server := updatingAnArticle(t, fake.JSON(http.StatusOK, body), noUpdate(t))
 
-			got := runWith(t, server.env(), "article", "update", "dev-A-7", "--summary", "x")
+			got := runWith(t, server.Env(), "article", "update", "dev-A-7", "--summary", "x")
 
 			want := faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", articleToWriteRequest(server.url, "dev-A-7")},
+					{"request", articleToWriteRequest(server.URL, "dev-A-7")},
 					{"upstream_status", 200},
 					{"upstream_body", body},
 				},
@@ -331,16 +333,16 @@ func TestArticleUpdateRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 func TestArticleUpdateRefusesAParentReadableIDItCannotAddressBy(t *testing.T) {
 	t.Parallel()
 	server := movingAnArticle(t, map[string]http.HandlerFunc{
-		"DEV-A-7": respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		"DEV-A-1": respondWith(http.StatusOK, articleAbove("177-1", "DEV-1", "DEV", rootParent)),
+		"DEV-A-7": fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+		"DEV-A-1": fake.JSON(http.StatusOK, articleAbove("177-1", "DEV-1", "DEV", rootParent)),
 	}, noUpdate(t))
 
-	got := runWith(t, server.env(), "article", "update", "DEV-A-7", "--parent", "DEV-A-1")
+	got := runWith(t, server.Env(), "article", "update", "DEV-A-7", "--parent", "DEV-A-1")
 
 	want := faultDocument{
 		code: "upstream_invalid",
 		details: []detail{
-			{"request", articleLineRequest(server.url, "DEV-A-1")},
+			{"request", articleLineRequest(server.URL, "DEV-A-1")},
 			{"upstream_status", 200},
 			{"upstream_body", articleAbove("177-1", "DEV-1", "DEV", rootParent)},
 		},
@@ -351,13 +353,13 @@ func TestArticleUpdateRefusesAParentReadableIDItCannotAddressBy(t *testing.T) {
 
 func TestArticleUpdateIsUncertainWhereTheAnswerNeverCame(t *testing.T) {
 	t.Parallel()
-	server := updatingAnArticle(t, respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")), breakOff)
+	server := updatingAnArticle(t, fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")), breakOff)
 
-	got := runWith(t, server.env(), "article", "update", "DEV-A-7", "--summary", "x")
+	got := runWith(t, server.Env(), "article", "update", "DEV-A-7", "--summary", "x")
 
 	found := requireUncertainty(t, got)
 	assert.Equal(t, "write_uncertain", found.code)
-	assert.Equal(t, []detail{{"request", articleUpdateRequest(server.url, "DEV-A-7", articleShowFields)}},
+	assert.Equal(t, []detail{{"request", articleUpdateRequest(server.URL, "DEV-A-7", articleShowFields)}},
 		found.details)
 	assert.Empty(t, got.stdout)
 }

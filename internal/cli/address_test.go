@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const cyrillicCapitalA = "А"
@@ -74,12 +76,12 @@ func TestIssueCommandsRefuseAnIDOfAnyOtherForm(t *testing.T) {
 			for _, command := range issueCommands() {
 				t.Run(command.name, func(t *testing.T) {
 					t.Parallel()
-					server := serveNothing(t)
+					server := fake.ServeNothing(t)
 
-					got := runWith(t, server.env(), command.argv(tc.id)...)
+					got := runWith(t, server.Env(), command.argv(tc.id)...)
 
 					assert.Equal(t, "bad_usage", requireFault(t, got).code)
-					assert.Empty(t, server.requests())
+					assert.Empty(t, server.Requests())
 				})
 			}
 		})
@@ -106,12 +108,12 @@ func TestIssueCommandsSendEveryFormOfAnIssueToTheIssues(t *testing.T) {
 			for _, command := range issueCommands() {
 				t.Run(command.name, func(t *testing.T) {
 					t.Parallel()
-					server := serve(t, respondWith(http.StatusNotFound, entityNotFound(tc.id)))
+					server := fake.Serve(t, fake.JSON(http.StatusNotFound, entityNotFound(tc.id)))
 
-					got := runWith(t, server.env(), command.argv(tc.id)...)
+					got := runWith(t, server.Env(), command.argv(tc.id)...)
 
 					assert.Equal(t, "not_found", requireFault(t, got).code)
-					paths := server.sentPaths()
+					paths := server.Paths()
 					require.Len(t, paths, 1)
 					assert.True(t, strings.HasPrefix(paths[0], "/api/issues/"), "the request went to %s", paths[0])
 					assert.NotContains(t, strings.Join(paths, " "), "/api/articles")
@@ -155,12 +157,12 @@ func TestArticleCommandsRefuseAnIDOfAnyOtherForm(t *testing.T) {
 			for _, command := range articleCommands() {
 				t.Run(command.name, func(t *testing.T) {
 					t.Parallel()
-					server := serveNothing(t)
+					server := fake.ServeNothing(t)
 
-					got := runWith(t, server.env(), command.argv(tc.id)...)
+					got := runWith(t, server.Env(), command.argv(tc.id)...)
 
 					assert.Equal(t, "bad_usage", requireFault(t, got).code)
-					assert.Empty(t, server.requests())
+					assert.Empty(t, server.Requests())
 				})
 			}
 		})
@@ -184,12 +186,12 @@ func TestArticleCommandsSendEveryFormOfAnArticleToTheArticles(t *testing.T) {
 			for _, command := range articleCommands() {
 				t.Run(command.name, func(t *testing.T) {
 					t.Parallel()
-					server := serve(t, respondWith(http.StatusNotFound, entityNotFound(tc.id)))
+					server := fake.Serve(t, fake.JSON(http.StatusNotFound, entityNotFound(tc.id)))
 
-					got := runWith(t, server.env(), command.argv(tc.id)...)
+					got := runWith(t, server.Env(), command.argv(tc.id)...)
 
 					assert.Equal(t, "not_found", requireFault(t, got).code)
-					paths := server.sentPaths()
+					paths := server.Paths()
 					require.Len(t, paths, 1)
 					assert.True(t, strings.HasPrefix(paths[0], "/api/articles/"), "the request went to %s", paths[0])
 					assert.NotContains(t, strings.Join(paths, " "), "/api/issues")
@@ -250,12 +252,12 @@ func TestOwnerCommandsRefuseAStringOfNeitherForm(t *testing.T) {
 			for _, command := range ownerCommands(t) {
 				t.Run(command.name, func(t *testing.T) {
 					t.Parallel()
-					server := serveNothing(t)
+					server := fake.ServeNothing(t)
 
-					got := runWith(t, server.env(), command.argv(tc.id)...)
+					got := runWith(t, server.Env(), command.argv(tc.id)...)
 
 					assert.Equal(t, "bad_usage", requireFault(t, got).code)
-					assert.Empty(t, server.requests())
+					assert.Empty(t, server.Requests())
 				})
 			}
 		})
@@ -286,12 +288,12 @@ func TestOwnerCommandsSendEachFormToTheAPIOfItsKind(t *testing.T) {
 			for _, command := range ownerCommands(t) {
 				t.Run(command.name, func(t *testing.T) {
 					t.Parallel()
-					server := serve(t, respondWith(http.StatusNotFound, entityNotFound(tc.id)))
+					server := fake.Serve(t, fake.JSON(http.StatusNotFound, entityNotFound(tc.id)))
 
-					got := runWith(t, server.env(), command.argv(tc.id)...)
+					got := runWith(t, server.Env(), command.argv(tc.id)...)
 
 					assert.Equal(t, "not_found", requireFault(t, got).code)
-					paths := server.sentPaths()
+					paths := server.Paths()
 					require.Len(t, paths, 1)
 					assert.True(t, strings.HasPrefix(paths[0], tc.under), "the request went to %s", paths[0])
 					assert.NotContains(t, strings.Join(paths, " "), tc.apart)
@@ -357,12 +359,12 @@ func TestChildCommandsRefuseAStringThatIsNoInternalID(t *testing.T) {
 			for _, command := range childCommands() {
 				t.Run(command.name, func(t *testing.T) {
 					t.Parallel()
-					server := serveNothing(t)
+					server := fake.ServeNothing(t)
 
-					got := runWith(t, server.env(), command.argv(tc.id)...)
+					got := runWith(t, server.Env(), command.argv(tc.id)...)
 
 					assert.Equal(t, "bad_usage", requireFault(t, got).code)
-					assert.Empty(t, server.requests())
+					assert.Empty(t, server.Requests())
 				})
 			}
 		})
@@ -386,12 +388,12 @@ func TestChildCommandsSendEveryInternalIDToTheServer(t *testing.T) {
 			for _, command := range childCommands() {
 				t.Run(command.name, func(t *testing.T) {
 					t.Parallel()
-					server := serve(t, respondWith(http.StatusNotFound, entityNotFound(tc.id)))
+					server := fake.Serve(t, fake.JSON(http.StatusNotFound, entityNotFound(tc.id)))
 
-					got := runWith(t, server.env(), command.argv(tc.id)...)
+					got := runWith(t, server.Env(), command.argv(tc.id)...)
 
 					assert.Equal(t, "not_found", requireFault(t, got).code)
-					paths := server.sentPaths()
+					paths := server.Paths()
 					require.Len(t, paths, 1)
 					assert.True(t, strings.HasSuffix(paths[0], command.under+tc.id), "the request went to %s", paths[0])
 				})
@@ -434,12 +436,12 @@ func TestProjectCodeCommandsRefuseACodeOfAnotherForm(t *testing.T) {
 			for _, command := range codeCommands() {
 				t.Run(command.name, func(t *testing.T) {
 					t.Parallel()
-					server := serveNothing(t)
+					server := fake.ServeNothing(t)
 
-					got := runWith(t, server.env(), command.argv(tc.code)...)
+					got := runWith(t, server.Env(), command.argv(tc.code)...)
 
 					assert.Equal(t, "bad_usage", requireFault(t, got).code)
-					assert.Empty(t, server.requests())
+					assert.Empty(t, server.Requests())
 				})
 			}
 		})
@@ -464,12 +466,12 @@ func TestProjectCodeCommandsSendEveryFormOfACodeToTheProjects(t *testing.T) {
 			for _, command := range codeCommands() {
 				t.Run(command.name, func(t *testing.T) {
 					t.Parallel()
-					server := serve(t, respondWith(http.StatusNotFound, entityNotFound(tc.code)))
+					server := fake.Serve(t, fake.JSON(http.StatusNotFound, entityNotFound(tc.code)))
 
-					got := runWith(t, server.env(), command.argv(tc.code)...)
+					got := runWith(t, server.Env(), command.argv(tc.code)...)
 
 					assert.Equal(t, "not_found", requireFault(t, got).code)
-					paths := server.sentPaths()
+					paths := server.Paths()
 					require.Len(t, paths, 1)
 					assert.True(t, strings.HasPrefix(paths[0], "/api/admin/projects/"), "the request went to %s", paths[0])
 					assert.NotContains(t, strings.Join(paths, " "), "/api/issues")

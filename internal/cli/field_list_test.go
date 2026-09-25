@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const fieldListDefault = "field(name,localizedName,fieldType(valueType,isMultiValue)),canBeEmpty"
@@ -34,9 +36,9 @@ func TestFieldRefusesACallItCannotSend(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 		})
@@ -55,9 +57,9 @@ func TestFieldRefusesAFlagGivenTwice(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 		})
@@ -75,16 +77,16 @@ const shuffledFields = `[
 
 func TestFieldListPrintsTheKeysAsAskedAndTheRecordsByOrdinal(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, shuffledFields))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, shuffledFields))
 
-	got := runWith(t, server.env(), "field", "list", "DEV")
+	got := runWith(t, server.Env(), "field", "list", "DEV")
 
 	want := "total: 3\nreturned: 3\ntruncated: false\nfields:\n" +
 		`  - {field: {name: "First", localizedName: "Первое", fieldType: {valueType: "enum", isMultiValue: true}}, canBeEmpty: false}` + "\n" +
 		`  - {field: {name: "Second", localizedName: null, fieldType: {valueType: "state", isMultiValue: false}}, canBeEmpty: true}` + "\n" +
 		`  - {field: {name: "Third", localizedName: null, fieldType: {valueType: "string", isMultiValue: false}}, canBeEmpty: true}` + "\n"
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, fieldsQueries(fieldListSent), server.sentQueries())
+	assert.Equal(t, fieldsQueries(fieldListSent), server.Queries())
 }
 
 const goSortIsStableUpTo = 12
@@ -106,9 +108,9 @@ func listedField(place int, name string) string {
 
 func TestFieldListKeepsTheOrderTheServerSentFieldsOfOneOrdinalIn(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, unplacedFields()))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, unplacedFields()))
 
-	got := runWith(t, server.env(), "field", "list", "DEV")
+	got := runWith(t, server.Env(), "field", "list", "DEV")
 
 	var lines []string
 	for i := 1; i <= 12; i++ {
@@ -124,16 +126,16 @@ func TestFieldListKeepsTheOrderTheServerSentFieldsOfOneOrdinalIn(t *testing.T) {
 
 func TestFieldListPrintsTheOrdinalOnlyWhenItIsAskedFor(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, shuffledFields))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, shuffledFields))
 
-	got := runWith(t, server.env(), "field", "list", "DEV", "--fields", "field(name),ordinal")
+	got := runWith(t, server.Env(), "field", "list", "DEV", "--fields", "field(name),ordinal")
 
 	want := "total: 3\nreturned: 3\ntruncated: false\nfields:\n" +
 		`  - {field: {name: "First"}, ordinal: 1}` + "\n" +
 		`  - {field: {name: "Second"}, ordinal: 2}` + "\n" +
 		`  - {field: {name: "Third"}, ordinal: 3}` + "\n"
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, fieldsQueries("field(name),ordinal"), server.sentQueries())
+	assert.Equal(t, fieldsQueries("field(name),ordinal"), server.Queries())
 }
 
 func TestFieldListRefusesAnOrdinalItCannotOrderBy(t *testing.T) {
@@ -151,14 +153,14 @@ func TestFieldListRefusesAnOrdinalItCannotOrderBy(t *testing.T) {
 			t.Parallel()
 			body := `[{"$type":"EnumProjectCustomField","canBeEmpty":true,"ordinal":` + tc.ordinal +
 				`,"field":{"$type":"CustomField","name":"A","localizedName":null,"fieldType":{"$type":"FieldType","valueType":"enum","isMultiValue":false}}}]`
-			server := serve(t, respondWith(http.StatusOK, body))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-			got := runWith(t, server.env(), "field", "list", "DEV")
+			got := runWith(t, server.Env(), "field", "list", "DEV")
 
 			want := faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", fieldsRequest(server.url, "DEV", fieldListSent)},
+					{"request", fieldsRequest(server.URL, "DEV", fieldListSent)},
 					{"upstream_status", 200},
 					{"upstream_body", body},
 				},
@@ -172,14 +174,14 @@ func TestFieldListRefusesAnOrdinalMissingFromTheResponse(t *testing.T) {
 	t.Parallel()
 	body := `[{"$type":"EnumProjectCustomField","canBeEmpty":true,` +
 		`"field":{"$type":"CustomField","name":"A","localizedName":null,"fieldType":{"$type":"FieldType","valueType":"enum","isMultiValue":false}}}]`
-	server := serve(t, respondWith(http.StatusOK, body))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-	got := runWith(t, server.env(), "field", "list", "DEV")
+	got := runWith(t, server.Env(), "field", "list", "DEV")
 
 	want := faultDocument{
 		code: "upstream_invalid",
 		details: []detail{
-			{"request", fieldsRequest(server.url, "DEV", fieldListSent)},
+			{"request", fieldsRequest(server.URL, "DEV", fieldListSent)},
 			{"fields", fieldListSent},
 			{"missing", []any{missingEntry("ordinal", "EnumProjectCustomField")}},
 		},

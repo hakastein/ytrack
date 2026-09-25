@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func articleNamed(readable string) string {
@@ -47,24 +49,24 @@ func TestArticleDeleteRefusesBeforeAnyRequest(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
 
 func TestArticleDeleteReadsTheIDAndDeletesByIt(t *testing.T) {
 	t.Parallel()
-	server := deleting(t, respondWith(http.StatusOK, articleNamed("DEV-A-7")), deletionDone())
+	server := deleting(t, fake.JSON(http.StatusOK, articleNamed("DEV-A-7")), deletionDone())
 
-	got := runWith(t, server.env(), "article", "delete", "dev-A-7")
+	got := runWith(t, server.Env(), "article", "delete", "dev-A-7")
 
 	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-A-7\"\n"}, got)
-	requests := server.requests()
+	requests := server.Requests()
 	require.Len(t, requests, 2)
 	assert.Equal(t, http.MethodGet, requests[0].Method)
 	assert.Equal(t, "/api/articles/dev-A-7", requests[0].URL.Path)
@@ -72,8 +74,8 @@ func TestArticleDeleteReadsTheIDAndDeletesByIt(t *testing.T) {
 	assert.Equal(t, http.MethodDelete, requests[1].Method)
 	assert.Equal(t, "/api/articles/DEV-A-7", requests[1].URL.Path)
 	assert.Empty(t, requests[1].URL.RawQuery, "a deletion asks for no fields")
-	assert.Equal(t, "Bearer "+token, requests[1].Header.Get("Authorization"))
-	assert.Equal(t, []string{"", ""}, server.asks(), "neither request carries a body")
+	assert.Equal(t, "Bearer "+fake.Token, requests[1].Header.Get("Authorization"))
+	assert.Equal(t, []string{"", ""}, server.Bodies(), "neither request carries a body")
 }
 
 func TestArticleDeleteRefusesAnArticleTheReadDoesNotFind(t *testing.T) {
@@ -88,11 +90,11 @@ func TestArticleDeleteRefusesAnArticleTheReadDoesNotFind(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := `{"error":"Not Found","error_description":` + strconv.Quote(tc.said) + `}`
-			server := deleting(t, respondWith(http.StatusNotFound, body), noDeletion(t))
+			server := deleting(t, fake.JSON(http.StatusNotFound, body), noDeletion(t))
 
-			got := runWith(t, server.env(), "article", "delete", "dev-A-7")
+			got := runWith(t, server.Env(), "article", "delete", "dev-A-7")
 
-			assert.Equal(t, noArticleToDelete(server.url, "dev-A-7", tc.said), requireFault(t, got))
+			assert.Equal(t, noArticleToDelete(server.URL, "dev-A-7", tc.said), requireFault(t, got))
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 		})
 	}
@@ -128,14 +130,14 @@ func TestArticleDeleteRefusesWhatTheServerRefused(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := `{"error":` + strconv.Quote(tc.upstreamError) + `,"error_description":` + strconv.Quote(tc.upstreamMessage) + `}`
-			server := deleting(t, respondWith(http.StatusOK, articleNamed("DEV-A-7")), respondWith(tc.status, body))
+			server := deleting(t, fake.JSON(http.StatusOK, articleNamed("DEV-A-7")), fake.JSON(tc.status, body))
 
-			got := runWith(t, server.env(), "article", "delete", "DEV-A-7")
+			got := runWith(t, server.Env(), "article", "delete", "DEV-A-7")
 
 			want := faultDocument{
 				code: tc.code,
 				details: append([]detail{
-					{"request", articleDeletionRequest(server.url, "DEV-A-7")},
+					{"request", articleDeletionRequest(server.URL, "DEV-A-7")},
 					{"upstream_status", tc.status},
 					{"upstream_error", tc.upstreamError},
 					{"upstream_message", tc.upstreamMessage},
@@ -160,18 +162,18 @@ func TestArticleDeleteRefusesA200ThatCarriesABody(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := deleting(t, respondWith(http.StatusOK, articleNamed("DEV-A-7")), func(w http.ResponseWriter, _ *http.Request) {
+			server := deleting(t, fake.JSON(http.StatusOK, articleNamed("DEV-A-7")), func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", tc.contentType)
 				w.WriteHeader(http.StatusOK)
 				_, _ = io.WriteString(w, tc.body)
 			})
 
-			got := runWith(t, server.env(), "article", "delete", "DEV-A-7")
+			got := runWith(t, server.Env(), "article", "delete", "DEV-A-7")
 
 			want := faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", articleDeletionRequest(server.url, "DEV-A-7")},
+					{"request", articleDeletionRequest(server.URL, "DEV-A-7")},
 					{"upstream_status", 200},
 					{"upstream_body", tc.body},
 				},
@@ -197,14 +199,14 @@ func TestArticleDeleteRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := `{"$type":"Article","idReadable":` + tc.received + `}`
-			server := deleting(t, respondWith(http.StatusOK, body), noDeletion(t))
+			server := deleting(t, fake.JSON(http.StatusOK, body), noDeletion(t))
 
-			got := runWith(t, server.env(), "article", "delete", "dev-A-7")
+			got := runWith(t, server.Env(), "article", "delete", "dev-A-7")
 
 			want := faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", articleReadRequest(server.url, "dev-A-7")},
+					{"request", articleReadRequest(server.URL, "dev-A-7")},
 					{"upstream_status", 200},
 					{"upstream_body", body},
 				},

@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const recordToken = "perm-ytrack-test-record"
@@ -50,9 +52,9 @@ func globalRecord(address, secret string) string {
 	return recordFile(unscopedRecord(address, secret))
 }
 
-func serveUserOfTheToken(t *testing.T, users map[string]string) *upstream {
+func serveUserOfTheToken(t *testing.T, users map[string]string) *fake.Server {
 	t.Helper()
-	return serve(t, func(w http.ResponseWriter, r *http.Request) {
+	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		secret := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		user, known := users[secret]
 		if !assert.True(t, known, "the server was sent a token no scenario handed out") {
@@ -79,11 +81,11 @@ func directoryDetail(path string) detail {
 func TestAuthStatusTakesBothValuesFromTheGlobalRecord(t *testing.T) {
 	t.Parallel()
 	server := serveUserOfTheToken(t, map[string]string{recordToken: recordUser})
-	home, _ := homeWith(t, globalRecord(server.url, recordToken))
+	home, _ := homeWith(t, globalRecord(server.URL, recordToken))
 
 	got := runWith(t, []string{"HOME=" + home}, "auth", "status")
 
-	want := status(server.url, "settings", recordUser, recordUser)
+	want := status(server.URL, "settings", recordUser, recordUser)
 	assert.Equal(t, outcome{stdout: want}, got)
 	assertNoToken(t, got, recordToken)
 }
@@ -92,38 +94,38 @@ func TestNoCommandTakesHalfALoginFromTheEnvironment(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
-		set  func(asked *upstream) string
+		set  func(asked *fake.Server) string
 	}{
-		{name: "an address and no token", set: func(asked *upstream) string { return "YTRACK_URL=" + asked.url }},
-		{name: "a token and no address", set: func(*upstream) string { return "YTRACK_TOKEN=" + token }},
+		{name: "an address and no token", set: func(asked *fake.Server) string { return "YTRACK_URL=" + asked.URL }},
+		{name: "a fake.Token and no address", set: func(*fake.Server) string { return "YTRACK_TOKEN=" + fake.Token }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			asked, recorded := serveNothing(t), serveNothing(t)
-			home, _ := homeWith(t, globalRecord(recorded.url, recordToken))
+			asked, recorded := fake.ServeNothing(t), fake.ServeNothing(t)
+			home, _ := homeWith(t, globalRecord(recorded.URL, recordToken))
 
 			got := runWith(t, []string{"HOME=" + home, tc.set(asked)}, "auth", "status")
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assertNoToken(t, got, recordToken)
-			assertNoToken(t, got, token)
-			assert.Empty(t, asked.requests())
-			assert.Empty(t, recorded.requests())
+			assertNoToken(t, got, fake.Token)
+			assert.Empty(t, asked.Requests())
+			assert.Empty(t, recorded.Requests())
 		})
 	}
 }
 
 func TestAuthStatusDoesNotReadTheFileWhenTheEnvironmentHasBothValues(t *testing.T) {
 	t.Parallel()
-	server := serveUserOfTheToken(t, map[string]string{token: envUser})
+	server := serveUserOfTheToken(t, map[string]string{fake.Token: envUser})
 	home, _ := homeWith(t, "not a file of login records")
 
-	got := runWith(t, []string{"HOME=" + home, "YTRACK_URL=" + server.url, "YTRACK_TOKEN=" + token}, "auth", "status")
+	got := runWith(t, []string{"HOME=" + home, "YTRACK_URL=" + server.URL, "YTRACK_TOKEN=" + fake.Token}, "auth", "status")
 
-	want := status(server.url, "environment", envUser, envUser)
+	want := status(server.URL, "environment", envUser, envUser)
 	assert.Equal(t, outcome{stdout: want}, got)
-	assertNoToken(t, got, token)
+	assertNoToken(t, got, fake.Token)
 }
 
 func TestNoCommandUsesAFileOfLoginRecordsItCannotRead(t *testing.T) {
@@ -184,8 +186,8 @@ func TestNoCommandMendsAFileOfLoginRecordsTheSystemKeepsFromIt(t *testing.T) {
 	})
 	t.Run("a directory the last record cannot be taken out of", func(t *testing.T) {
 		t.Parallel()
-		server := serveNothing(t)
-		home, path := homeWith(t, globalRecord(server.url, everywhereToken))
+		server := fake.ServeNothing(t)
+		home, path := homeWith(t, globalRecord(server.URL, everywhereToken))
 		withoutTheRightToWrite(t, filepath.Dir(path))
 
 		got := runWith(t, []string{"HOME=" + home}, "auth", "logout", "--global")
@@ -198,8 +200,8 @@ func TestNoCommandMendsAFileOfLoginRecordsTheSystemKeepsFromIt(t *testing.T) {
 	t.Run("a directory the records left cannot be written back into", func(t *testing.T) {
 		t.Parallel()
 		stated, scope := here(t)
-		server := serveNothing(t)
-		held := recordFile(scopedRecord(scope, server.url, hereToken), unscopedRecord(server.url, everywhereToken))
+		server := fake.ServeNothing(t)
+		held := recordFile(scopedRecord(scope, server.URL, hereToken), unscopedRecord(server.URL, everywhereToken))
 		home, path := homeWith(t, held)
 		withoutTheRightToWrite(t, filepath.Dir(path))
 
@@ -215,14 +217,14 @@ func TestNoCommandMendsAFileOfLoginRecordsTheSystemKeepsFromIt(t *testing.T) {
 
 func TestNoCommandSendsATokenARecordCannotCarry(t *testing.T) {
 	t.Parallel()
-	server := serveNothing(t)
-	home, path := homeWith(t, globalRecord(server.url, recordToken+"\r"))
+	server := fake.ServeNothing(t)
+	home, path := homeWith(t, globalRecord(server.URL, recordToken+"\r"))
 
 	got := runWith(t, []string{"HOME=" + home}, "auth", "status")
 
 	assert.Equal(t, faultDocument{code: "bad_usage", details: []detail{fileDetail(path)}}, requireFault(t, got))
 	assertNoToken(t, got, recordToken)
-	assert.Empty(t, server.requests())
+	assert.Empty(t, server.Requests())
 }
 
 func TestNoCommandFindsAValueWithoutAFileToFindItIn(t *testing.T) {
@@ -257,25 +259,25 @@ func TestNoCommandFindsAValueWithoutAFileToFindItIn(t *testing.T) {
 func TestAuthStatusTakesTheRecordWhenTheVariablesAreEmpty(t *testing.T) {
 	t.Parallel()
 	server := serveUserOfTheToken(t, map[string]string{recordToken: recordUser})
-	home, _ := homeWith(t, globalRecord(server.url, recordToken))
+	home, _ := homeWith(t, globalRecord(server.URL, recordToken))
 
 	got := runWith(t, []string{"HOME=" + home, "YTRACK_URL=", "YTRACK_TOKEN="}, "auth", "status")
 
-	want := status(server.url, "settings", recordUser, recordUser)
+	want := status(server.URL, "settings", recordUser, recordUser)
 	assert.Equal(t, outcome{stdout: want}, got)
 	assertNoToken(t, got, recordToken)
 }
 
 func TestProjectShowGoesToTheAddressOfTheGlobalRecordWithItsToken(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, projectDEV))
-	home, _ := homeWith(t, globalRecord(server.url, recordToken))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, projectDEV))
+	home, _ := homeWith(t, globalRecord(server.URL, recordToken))
 
 	got := runWith(t, []string{"HOME=" + home}, "project", "show", "DEV")
 
 	assert.Equal(t, outcome{stdout: printedDEV}, got)
 	assertNoToken(t, got, recordToken)
-	requests := server.requests()
+	requests := server.Requests()
 	require.Len(t, requests, 1)
 	assert.Equal(t, "/api/admin/projects/DEV", requests[0].URL.Path)
 	assert.Equal(t, "Bearer "+recordToken, requests[0].Header.Get("Authorization"))
@@ -304,7 +306,7 @@ func TestNoCommandPrintsThePasswordOfAnAddressItCannotUse(t *testing.T) {
 				env = []string{"HOME=" + home}
 				want = faultDocument{code: "bad_usage", details: []detail{fileDetail(path)}}
 			} else {
-				env = []string{"YTRACK_URL=" + tc.address, "YTRACK_TOKEN=" + token}
+				env = []string{"YTRACK_URL=" + tc.address, "YTRACK_TOKEN=" + fake.Token}
 				want = faultDocument{code: "bad_usage"}
 			}
 

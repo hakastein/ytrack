@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func sentFieldChange(valueType, added, removed string) string {
@@ -78,9 +80,9 @@ func TestActivityPrintsTheValuesOfAChangeAlwaysAsAList(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := activityServer(t, respondWith(http.StatusOK, `[`+tc.activity+`]`))
+			server := activityServer(t, fake.JSON(http.StatusOK, `[`+tc.activity+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", activityIssue,
+			got := runWith(t, server.Env(), "activity", "list", activityIssue,
 				"--fields", "added(id,idReadable),removed(id,idReadable)")
 
 			assert.Equal(t, outcome{stdout: oneRecord(tc.want)}, got)
@@ -125,9 +127,9 @@ func TestActivityPrintsTheValuesOfACustomFieldByTheTypeOfTheField(t *testing.T) 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := activityServer(t, respondWith(http.StatusOK, `[`+sentFieldChange(tc.valueType, tc.added, "")+`]`))
+			server := activityServer(t, fake.JSON(http.StatusOK, `[`+sentFieldChange(tc.valueType, tc.added, "")+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "+added")
+			got := runWith(t, server.Env(), "activity", "list", activityIssue, "--fields", "+added")
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Contains(t, got.stdout, "added: "+tc.want+", removed: []}")
@@ -157,9 +159,9 @@ func TestActivityPrintsAValueByTheNamesAskedOfIt(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := activityServer(t, respondWith(http.StatusOK, `[`+comment+`]`))
+			server := activityServer(t, fake.JSON(http.StatusOK, `[`+comment+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", tc.fields)
+			got := runWith(t, server.Env(), "activity", "list", activityIssue, "--fields", tc.fields)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Contains(t, got.stdout, tc.want)
@@ -179,9 +181,9 @@ func TestActivityLeavesOutOfAValueANameOnlyAnotherTypeDeclares(t *testing.T) {
 		kind: "CommentActivityItem", category: "CommentsCategory", timestamp: oldest,
 		added: `[{"$type":"IssueComment"}]`,
 	}.sent()
-	server := activityServer(t, respondWith(http.StatusOK, `[`+assigned+`,`+sentLinkActivity(middle)+`,`+commented+`]`))
+	server := activityServer(t, fake.JSON(http.StatusOK, `[`+assigned+`,`+sentLinkActivity(middle)+`,`+commented+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "category,added(login,idReadable)")
+	got := runWith(t, server.Env(), "activity", "list", activityIssue, "--fields", "category,added(login,idReadable)")
 
 	want := "total: 3\nreturned: 3\ntruncated: false\nactivities:\n" +
 		`  - {category: "CustomFieldCategory", added: [{login: "admin"}]}` + "\n" +
@@ -212,25 +214,25 @@ func TestActivityRefusesANameNoTypeOfAValueDeclares(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", tc.fields)
+			got := runWith(t, server.Env(), "activity", "list", activityIssue, "--fields", tc.fields)
 
 			want := faultDocument{
 				code:    "unknown_name",
 				details: []detail{{"fields", tc.fields}, {"unknown", tc.unknown}},
 			}
 			assert.Equal(t, want, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
 
 func TestActivityTakesANameAnyTypeOfAValueDeclares(t *testing.T) {
 	t.Parallel()
-	server := activityServer(t, respondWith(http.StatusOK, `[`+sentLinkActivity(middle)+`]`))
+	server := activityServer(t, fake.JSON(http.StatusOK, `[`+sentLinkActivity(middle)+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue,
+	got := runWith(t, server.Env(), "activity", "list", activityIssue,
 		"--fields", "added(idReadable,localizedName,version),removed(text)")
 
 	assert.Equal(t, outcome{stdout: oneRecord(`added: [{idReadable: "DEV-3"}], removed: []`)}, got)
@@ -243,9 +245,9 @@ func TestActivityPrintsTheDurationOfAWorkItemAsAPeriod(t *testing.T) {
 		field: `{"$type":"WorkItemFilterField","name":"работа"}`,
 		added: `{"$type":"DurationValue","id":"120","minutes":120}`, removed: `{"$type":"DurationValue","id":"90","minutes":90}`,
 	}.sent()
-	server := activityServer(t, respondWith(http.StatusOK, `[`+changed+`]`))
+	server := activityServer(t, fake.JSON(http.StatusOK, `[`+changed+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "added,removed")
+	got := runWith(t, server.Env(), "activity", "list", activityIssue, "--fields", "added,removed")
 
 	assert.Equal(t, outcome{stdout: oneRecord(`added: ["PT2H"], removed: ["PT1H30M"]`)}, got)
 	assert.Contains(t, activitySent(t, server).Get("fields"), "added(minutes)")
@@ -260,9 +262,9 @@ func TestActivityPrintsTheTextOfAnEditOnTheOneLineOfTheRecord(t *testing.T) {
 				kind: "TextMarkupActivityItem", category: "DescriptionCategory", timestamp: middle,
 				added: sentJSON(t, tc.text), removed: "null",
 			}.sent()
-			server := activityServer(t, respondWith(http.StatusOK, `[`+edit+`]`))
+			server := activityServer(t, fake.JSON(http.StatusOK, `[`+edit+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "added,removed")
+			got := runWith(t, server.Env(), "activity", "list", activityIssue, "--fields", "added,removed")
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			record := requireMapping(t, "stdout", got.stdout)
@@ -326,9 +328,9 @@ func TestActivityRefusesValuesTheFieldOfTheChangeDoesNotReferTo(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := activityServer(t, respondWith(http.StatusOK, `[`+tc.activity+`]`))
+			server := activityServer(t, fake.JSON(http.StatusOK, `[`+tc.activity+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", activityIssue)
+			got := runWith(t, server.Env(), "activity", "list", activityIssue)
 
 			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
@@ -346,9 +348,9 @@ const capturedFieldActivities = `[` +
 
 func TestActivityPrintsTheChangesOfCustomFieldsOfALiveInstance(t *testing.T) {
 	t.Parallel()
-	server := activityServer(t, respondWith(http.StatusOK, capturedFieldActivities))
+	server := activityServer(t, fake.JSON(http.StatusOK, capturedFieldActivities))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue, "--category", "CustomFieldCategory")
+	got := runWith(t, server.Env(), "activity", "list", activityIssue, "--category", "CustomFieldCategory")
 
 	want := "total: 4\nreturned: 4\ntruncated: false\nactivities:\n" +
 		`  - {timestamp: "2025-12-25T07:19:57.137Z", author: {login: "Сидорова.Анна"}, category: "CustomFieldCategory", ` +

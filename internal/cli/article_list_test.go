@@ -9,6 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const articleListFields = "idReadable,summary"
@@ -34,10 +36,10 @@ func searchingArticles(search, limit string) []url.Values {
 	}
 }
 
-func selecting(t *testing.T, handler http.HandlerFunc) *upstream {
+func selecting(t *testing.T, handler http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return serve(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == assistPath {
+	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == fake.AssistPath {
 			assert.Fail(t, "an article list asked for a markup", "%s %s", r.Method, r.URL)
 			http.Error(w, "the language of articles is not marked up", http.StatusInternalServerError)
 			return
@@ -52,7 +54,7 @@ func countedArticles(records string, count http.HandlerFunc) http.HandlerFunc {
 			count(w, r)
 			return
 		}
-		respondWith(http.StatusOK, records)(w, r)
+		fake.JSON(http.StatusOK, records)(w, r)
 	}
 }
 
@@ -70,12 +72,12 @@ func TestArticleListTakesItsSearchFromTheQueryFlagAlone(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), slices.Concat([]string{"article", "list"}, tc.argv)...)
+			got := runWith(t, server.Env(), slices.Concat([]string{"article", "list"}, tc.argv)...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -93,12 +95,12 @@ func TestArticleListRefusesWhatItCannotSend(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), slices.Concat([]string{"article", "list", "--query", ""}, tc.flags)...)
+			got := runWith(t, server.Env(), slices.Concat([]string{"article", "list", "--query", ""}, tc.flags)...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -119,13 +121,13 @@ func TestArticleListSendsTheSearchWordForWordAndAsksForNoMarkup(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := selecting(t, respondWith(http.StatusOK, "["+listedParent+"]"))
+			server := selecting(t, fake.JSON(http.StatusOK, "["+listedParent+"]"))
 
-			got := runWith(t, server.env(), "article", "list", "--query", tc.search)
+			got := runWith(t, server.Env(), "article", "list", "--query", tc.search)
 
 			want := "total: 1\nreturned: 1\ntruncated: false\narticles:\n" + printedParentRow
 			assert.Equal(t, outcome{stdout: want}, got)
-			requests := server.requests()
+			requests := server.Requests()
 			require.Len(t, requests, 1)
 			assert.Equal(t, "/api/articles", requests[0].URL.Path)
 			assert.Equal(t, url.Values{"fields": {articleListFields}, "$top": {"50"}, "query": {tc.search}},
@@ -156,9 +158,9 @@ func TestArticleListPrintsTheSameDocumentHoweverManyWereFound(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := selecting(t, respondWith(http.StatusOK, tc.records))
+			server := selecting(t, fake.JSON(http.StatusOK, tc.records))
 
-			got := runWith(t, server.env(), "article", "list", "--query", "project: DEV")
+			got := runWith(t, server.Env(), "article", "list", "--query", "project: DEV")
 
 			assert.Equal(t, outcome{stdout: tc.want}, got)
 			for _, record := range articleRecords(t, got) {
@@ -177,24 +179,24 @@ func articleRecords(t *testing.T, got outcome) []*yaml.Node {
 func TestArticleListCountsTheArticlesWhenTheyFillTheLimit(t *testing.T) {
 	t.Parallel()
 	const found = `[{"id":"177-1","$type":"Article"},{"id":"177-2","$type":"Article"},{"id":"177-3","$type":"Article"}]`
-	server := selecting(t, countedArticles("["+listedParent+","+listedChild+"]", respondWith(http.StatusOK, found)))
+	server := selecting(t, countedArticles("["+listedParent+","+listedChild+"]", fake.JSON(http.StatusOK, found)))
 
-	got := runWith(t, server.env(), "article", "list", "--query", "project: DEV", "--limit", "2")
+	got := runWith(t, server.Env(), "article", "list", "--query", "project: DEV", "--limit", "2")
 
 	want := "total: 3\nreturned: 2\ntruncated: true\narticles:\n" + printedParentRow + printedChildRow
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, searchingArticles("project: DEV", "2"), server.sentQueries())
+	assert.Equal(t, searchingArticles("project: DEV", "2"), server.Queries())
 }
 
 func TestArticleListCountsNothingWhenThePageIsShortOfTheLimit(t *testing.T) {
 	t.Parallel()
-	server := selecting(t, respondWith(http.StatusOK, "["+listedParent+"]"))
+	server := selecting(t, fake.JSON(http.StatusOK, "["+listedParent+"]"))
 
-	got := runWith(t, server.env(), "article", "list", "--query", "project: DEV", "--limit", "2")
+	got := runWith(t, server.Env(), "article", "list", "--query", "project: DEV", "--limit", "2")
 
 	want := "total: 1\nreturned: 1\ntruncated: false\narticles:\n" + printedParentRow
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Len(t, server.requests(), 1)
+	assert.Len(t, server.Requests(), 1)
 }
 
 func TestArticleListRefusesWhenTheCountDoesNotMatch(t *testing.T) {
@@ -207,7 +209,7 @@ func TestArticleListRefusesWhenTheCountDoesNotMatch(t *testing.T) {
 	}{
 		{
 			name:  "a count of none over a page of one",
-			count: respondWith(http.StatusOK, "[]"),
+			count: fake.JSON(http.StatusOK, "[]"),
 			want: faultDocument{
 				code:    "upstream_failed",
 				details: []detail{{"total", 0}, {"returned", 1}},
@@ -215,7 +217,7 @@ func TestArticleListRefusesWhenTheCountDoesNotMatch(t *testing.T) {
 		},
 		{
 			name:  "a server that failed the count",
-			count: respondWith(http.StatusInternalServerError, said),
+			count: fake.JSON(http.StatusInternalServerError, said),
 			want: faultDocument{
 				code: "upstream_failed",
 				details: []detail{
@@ -232,45 +234,45 @@ func TestArticleListRefusesWhenTheCountDoesNotMatch(t *testing.T) {
 			t.Parallel()
 			server := selecting(t, countedArticles("["+listedParent+"]", tc.count))
 
-			got := runWith(t, server.env(), "article", "list", "--query", "project: DEV", "--limit", "1")
+			got := runWith(t, server.Env(), "article", "list", "--query", "project: DEV", "--limit", "1")
 
 			want := tc.want
 			for i, printed := range want.details {
 				if printed.key == "request" {
-					want.details[i].value = articleListRequest(server.url, "id", "-1", "project%3A+DEV")
+					want.details[i].value = articleListRequest(server.URL, "id", "-1", "project%3A+DEV")
 				}
 			}
 			assert.Equal(t, want, requireFault(t, got))
-			assert.Len(t, server.requests(), 2)
+			assert.Len(t, server.Requests(), 2)
 		})
 	}
 }
 
 func TestArticleListRefusesMoreArticlesThanTheLimit(t *testing.T) {
 	t.Parallel()
-	server := selecting(t, respondWith(http.StatusOK, "["+listedParent+","+listedChild+"]"))
+	server := selecting(t, fake.JSON(http.StatusOK, "["+listedParent+","+listedChild+"]"))
 
-	got := runWith(t, server.env(), "article", "list", "--query", "project: DEV", "--limit", "1")
+	got := runWith(t, server.Env(), "article", "list", "--query", "project: DEV", "--limit", "1")
 
 	want := faultDocument{
 		code:    "upstream_invalid",
 		details: []detail{{"limit", 1}, {"returned", 2}},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, server.requests(), 1)
+	assert.Len(t, server.Requests(), 1)
 }
 
 func TestArticleListPassesOnTheServerRefusingASearch(t *testing.T) {
 	t.Parallel()
 	const said = `{"error":"invalid_query","error_description":"Can't parse search query, please check and update query syntax"}`
-	server := selecting(t, respondWith(http.StatusBadRequest, said))
+	server := selecting(t, fake.JSON(http.StatusBadRequest, said))
 
-	got := runWith(t, server.env(), "article", "list", "--query", "has: parent")
+	got := runWith(t, server.Env(), "article", "list", "--query", "has: parent")
 
 	want := faultDocument{
 		code: "rejected",
 		details: []detail{
-			{"request", articleListRequest(server.url, articleListFields, "50", "has%3A+parent")},
+			{"request", articleListRequest(server.URL, articleListFields, "50", "has%3A+parent")},
 			{"upstream_status", 400},
 			{"upstream_error", "invalid_query"},
 			{"upstream_message", "Can't parse search query, please check and update query syntax"},

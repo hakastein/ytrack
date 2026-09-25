@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func deletedAttachmentFields(owner string) string {
@@ -48,45 +50,45 @@ func TestAttachmentDeleteRefusesAnIDThatIsNoInternalID(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "attachment", "delete", "--", "DEV-1", tc.id)
+			got := runWith(t, server.Env(), "attachment", "delete", "--", "DEV-1", tc.id)
 
 			refused := requireFault(t, got)
 			assert.Equal(t, "bad_usage", refused.code)
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
 
 func TestAttachmentDeleteRefusesAnInternalIDForItsOwner(t *testing.T) {
 	t.Parallel()
-	server := serveNothing(t)
+	server := fake.ServeNothing(t)
 
-	got := runWith(t, server.env(), "attachment", "delete", "3-19", "12-2")
+	got := runWith(t, server.Env(), "attachment", "delete", "3-19", "12-2")
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.requests())
+	assert.Empty(t, server.Requests())
 }
 
 func TestAttachmentDeletePrintsWhatTheReadBeforeItFound(t *testing.T) {
 	t.Parallel()
-	server := deleting(t, respondWith(http.StatusOK, attachmentOfDEV7()), deletionDone())
+	server := deleting(t, fake.JSON(http.StatusOK, attachmentOfDEV7()), deletionDone())
 
-	got := runWith(t, server.env(), "attachment", "delete", "dev-7", "12-5")
+	got := runWith(t, server.Env(), "attachment", "delete", "dev-7", "12-5")
 
 	want := `id: "12-5"` + "\n" + `name: "a.txt"` + "\n" + "issue:\n" + `  idReadable: "DEV-7"` + "\n"
 	assert.Equal(t, outcome{stdout: want}, got)
 
-	asked := server.requests()
+	asked := server.Requests()
 	require.Len(t, asked, 2)
 	assert.Equal(t, http.MethodGet, asked[0].Method)
 	assert.Equal(t, "/api/issues/dev-7/attachments/12-5", asked[0].URL.Path)
-	assert.Equal(t, deletedAttachmentFields("issue"), server.sentFields()[0])
+	assert.Equal(t, deletedAttachmentFields("issue"), server.Fields()[0])
 	assert.Equal(t, http.MethodDelete, asked[1].Method)
 	assert.Equal(t, "/api/issues/DEV-7/attachments/12-5", asked[1].URL.Path)
 	assert.Empty(t, asked[1].URL.RawQuery)
-	assert.Empty(t, server.asks()[1])
+	assert.Empty(t, server.Bodies()[1])
 }
 
 func TestAttachmentDeleteReadsTheStatusOfEachRequest(t *testing.T) {
@@ -102,7 +104,7 @@ func TestAttachmentDeleteReadsTheStatusOfEachRequest(t *testing.T) {
 	}{
 		{
 			name:     "an attachment the owner has none of",
-			read:     respondWith(http.StatusNotFound, entityNotFound("12-5")),
+			read:     fake.JSON(http.StatusNotFound, entityNotFound("12-5")),
 			deletion: noDeletion,
 			code:     "not_found",
 			exit:     1,
@@ -113,8 +115,8 @@ func TestAttachmentDeleteReadsTheStatusOfEachRequest(t *testing.T) {
 		},
 		{
 			name:     "an attachment taken away between the read and the deletion",
-			read:     respondWith(http.StatusOK, attachmentOfDEV7()),
-			deletion: func(*testing.T) http.HandlerFunc { return respondWith(http.StatusNotFound, entityNotFound("12-5")) },
+			read:     fake.JSON(http.StatusOK, attachmentOfDEV7()),
+			deletion: func(*testing.T) http.HandlerFunc { return fake.JSON(http.StatusNotFound, entityNotFound("12-5")) },
 			code:     "not_found",
 			exit:     1,
 			request:  func(address string) string { return attachmentDeletionRequest(address, "issues", "DEV-7", "12-5") },
@@ -122,10 +124,10 @@ func TestAttachmentDeleteReadsTheStatusOfEachRequest(t *testing.T) {
 		},
 		{
 			name: "a token that may read the attachment and not take it away",
-			read: respondWith(http.StatusOK, attachmentOfDEV7()),
+			read: fake.JSON(http.StatusOK, attachmentOfDEV7()),
 			deletion: func(*testing.T) http.HandlerFunc {
 				said := `{"error":"Forbidden","error_description":"Insufficient rights"}`
-				return respondWith(http.StatusForbidden, said)
+				return fake.JSON(http.StatusForbidden, said)
 			},
 			code:    "denied",
 			exit:    1,
@@ -138,12 +140,12 @@ func TestAttachmentDeleteReadsTheStatusOfEachRequest(t *testing.T) {
 			t.Parallel()
 			server := deleting(t, tc.read, tc.deletion(t))
 
-			got := runWith(t, server.env(), "attachment", "delete", "DEV-7", "12-5")
+			got := runWith(t, server.Env(), "attachment", "delete", "DEV-7", "12-5")
 
 			refused := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, refused.code)
 			assert.Equal(t, tc.exit, got.code)
-			assert.Equal(t, detail{"request", tc.request(server.url)}, refused.details[0])
+			assert.Equal(t, detail{"request", tc.request(server.URL)}, refused.details[0])
 			assert.Equal(t, tc.methods, sentMethods(server))
 		})
 	}
@@ -160,29 +162,29 @@ func TestAttachmentDeleteRefusesAnAnswerItCannotBeAddressedBy(t *testing.T) {
 	}{
 		{
 			name:     "another attachment than the one asked for",
-			read:     respondWith(http.StatusOK, attachmentOf("12-6", "a.txt", "DEV-7")),
+			read:     fake.JSON(http.StatusOK, attachmentOf("12-6", "a.txt", "DEV-7")),
 			deletion: noDeletion,
 			exit:     1,
 			methods:  []string{http.MethodGet},
 		},
 		{
 			name:     "an owner no request can be addressed by",
-			read:     respondWith(http.StatusOK, attachmentOf("12-5", "a.txt", "..")),
+			read:     fake.JSON(http.StatusOK, attachmentOf("12-5", "a.txt", "..")),
 			deletion: noDeletion,
 			exit:     1,
 			methods:  []string{http.MethodGet},
 		},
 		{
 			name:     "an owner that arrived as no object at all",
-			read:     respondWith(http.StatusOK, `{"$type":"IssueAttachment","id":"12-5","name":"a.txt","issue":null}`),
+			read:     fake.JSON(http.StatusOK, `{"$type":"IssueAttachment","id":"12-5","name":"a.txt","issue":null}`),
 			deletion: noDeletion,
 			exit:     1,
 			methods:  []string{http.MethodGet},
 		},
 		{
 			name:     "a deletion answered with a body",
-			read:     respondWith(http.StatusOK, attachmentOfDEV7()),
-			deletion: func(*testing.T) http.HandlerFunc { return respondWith(http.StatusOK, `{"x":1}`) },
+			read:     fake.JSON(http.StatusOK, attachmentOfDEV7()),
+			deletion: func(*testing.T) http.HandlerFunc { return fake.JSON(http.StatusOK, `{"x":1}`) },
 			exit:     2,
 			methods:  []string{http.MethodGet, http.MethodDelete},
 		},
@@ -192,7 +194,7 @@ func TestAttachmentDeleteRefusesAnAnswerItCannotBeAddressedBy(t *testing.T) {
 			t.Parallel()
 			server := deleting(t, tc.read, tc.deletion(t))
 
-			got := runWith(t, server.env(), "attachment", "delete", "DEV-7", "12-5")
+			got := runWith(t, server.Env(), "attachment", "delete", "DEV-7", "12-5")
 
 			refused := requireFaultDocument(t, got)
 			assert.Equal(t, "upstream_invalid", refused.code)
@@ -206,14 +208,14 @@ func TestAttachmentDeleteTakesAFileOffAnArticleThroughItsOwnAPI(t *testing.T) {
 	t.Parallel()
 	const answered = `{"$type":"ArticleAttachment","id":"522-4","name":"кот.png",` +
 		`"article":{"$type":"Article","idReadable":"DEV-A-7"}}`
-	server := deleting(t, respondWith(http.StatusOK, answered), deletionDone())
+	server := deleting(t, fake.JSON(http.StatusOK, answered), deletionDone())
 
-	got := runWith(t, server.env(), "attachment", "delete", "DEV-A-7", "522-4")
+	got := runWith(t, server.Env(), "attachment", "delete", "DEV-A-7", "522-4")
 
 	want := `id: "522-4"` + "\n" + `name: "кот.png"` + "\n" + "article:\n" + `  idReadable: "DEV-A-7"` + "\n"
 	assert.Equal(t, outcome{stdout: want}, got)
 	assert.Equal(t, []string{"/api/articles/DEV-A-7/attachments/522-4", "/api/articles/DEV-A-7/attachments/522-4"},
-		server.sentPaths())
-	assert.Equal(t, deletedAttachmentFields("article"), server.sentFields()[0])
-	assert.NotContains(t, strings.Join(server.sentPaths(), " "), "/api/issues")
+		server.Paths())
+	assert.Equal(t, deletedAttachmentFields("article"), server.Fields()[0])
+	assert.NotContains(t, strings.Join(server.Paths(), " "), "/api/issues")
 }

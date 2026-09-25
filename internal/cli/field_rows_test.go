@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const (
@@ -41,29 +43,29 @@ func TestFieldShowRefusesTheDefaultOfATypeOutsideTheCatalogue(t *testing.T) {
 			metadata := projectMetadata(stateOfMany)
 			server := serveTheProject(t, metadata, noField(t))
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			want := faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", metadataRequest(server.url, "DEV")},
+					{"request", metadataRequest(server.URL, "DEV")},
 					{"upstream_status", 200},
 					{"upstream_body", metadata},
 				},
 			}
 			assert.Equal(t, want, requireFault(t, got))
-			assert.Len(t, server.requests(), 1)
+			assert.Len(t, server.Requests(), 1)
 		})
 	}
 }
 
 func TestFieldShowPrintsAFieldOfATypeOutsideTheCatalogueTheCallerAsksFor(t *testing.T) {
 	t.Parallel()
-	field := respondWith(http.StatusOK, answeredStateOfMany)
+	field := fake.JSON(http.StatusOK, answeredStateOfMany)
 	server := serveTheProject(t, projectMetadata(stateOfMany), field)
 
-	got := runWith(t, server.env(), "field", "show", "DEV", "State", "--fields", "field(name)")
+	got := runWith(t, server.Env(), "field", "show", "DEV", "State", "--fields", "field(name)")
 
 	assert.Equal(t, outcome{stdout: "field:\n  name: \"State\"\n"}, got)
-	assert.Len(t, server.requests(), 2)
+	assert.Len(t, server.Requests(), 2)
 }

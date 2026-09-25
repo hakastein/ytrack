@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const (
@@ -84,24 +86,24 @@ func (i *instance) handle(w http.ResponseWriter, r *http.Request) {
 	i.mu.Unlock()
 	id, isOneField := strings.CutPrefix(r.URL.Path, metadataPath+"/customFields/")
 	if !isOneField {
-		respondWith(http.StatusOK, metadata)(w, r)
+		fake.JSON(http.StatusOK, metadata)(w, r)
 		return
 	}
 	held, there := fields[id]
 	if !there {
-		respondWith(http.StatusNotFound, `{"error":"Not Found","error_description":"Entity with id `+id+` not found"}`)(w, r)
+		fake.JSON(http.StatusNotFound, `{"error":"Not Found","error_description":"Entity with id `+id+` not found"}`)(w, r)
 		return
 	}
-	respondWith(http.StatusOK, held)(w, r)
+	fake.JSON(http.StatusOK, held)(w, r)
 }
 
-func atHome(u *upstream, home string) []string {
-	return append(u.env(), "HOME="+home)
+func atHome(u *fake.Server, home string) []string {
+	return append(u.Env(), "HOME="+home)
 }
 
-func aProject(t *testing.T, held *instance) (*upstream, string) {
+func aProject(t *testing.T, held *instance) (*fake.Server, string) {
 	t.Helper()
-	return serve(t, held.handle), t.TempDir()
+	return fake.Serve(t, held.handle), t.TempDir()
 }
 
 func TestFieldShowTakesTheMetadataTheRunBeforeLeftOnDisk(t *testing.T) {
@@ -113,7 +115,7 @@ func TestFieldShowTakesTheMetadataTheRunBeforeLeftOnDisk(t *testing.T) {
 
 	assert.Equal(t, outcome{stdout: printedEnumType}, first)
 	assert.Equal(t, first, second)
-	assert.Equal(t, []string{metadataPath, firstFieldPath, firstFieldPath}, server.sentPaths())
+	assert.Equal(t, []string{metadataPath, firstFieldPath, firstFieldPath}, server.Paths())
 }
 
 func TestFieldShowReadsTheMetadataAgainForAFieldAddedSinceTheCacheWasWritten(t *testing.T) {
@@ -129,7 +131,7 @@ func TestFieldShowReadsTheMetadataAgainForAFieldAddedSinceTheCacheWasWritten(t *
 	got := runWith(t, atHome(server, home), "field", "show", "DEV", "Срок")
 
 	assert.Equal(t, outcome{stdout: printedDueDate}, got)
-	assert.Equal(t, []string{metadataPath, firstFieldPath, metadataPath, secondFieldPath}, server.sentPaths())
+	assert.Equal(t, []string{metadataPath, firstFieldPath, metadataPath, secondFieldPath}, server.Paths())
 }
 
 func TestFieldShowRefusesAnUnknownNameOnlyAfterReadingTheMetadataAgain(t *testing.T) {
@@ -142,13 +144,13 @@ func TestFieldShowRefusesAnUnknownNameOnlyAfterReadingTheMetadataAgain(t *testin
 	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{
-			{"request", metadataRequest(server.url, "DEV")},
+			{"request", metadataRequest(server.URL, "DEV")},
 			{"project", "DEV"},
 			{"unknown", []any{unknownEntry("Нет", "Type")}},
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{metadataPath, firstFieldPath, metadataPath}, server.sentPaths())
+	assert.Equal(t, []string{metadataPath, firstFieldPath, metadataPath}, server.Paths())
 }
 
 func TestFieldShowLeavesTheCacheWarmAfterAFault(t *testing.T) {
@@ -179,7 +181,7 @@ func TestFieldShowLeavesTheCacheWarmAfterAFault(t *testing.T) {
 			got := runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
 
 			assert.Equal(t, outcome{stdout: printedEnumType}, got)
-			assert.Equal(t, []string{metadataPath, firstFieldPath}, server.sentPaths())
+			assert.Equal(t, []string{metadataPath, firstFieldPath}, server.Paths())
 		})
 	}
 }
@@ -195,14 +197,14 @@ func TestFieldShowRefusesAnIdItCannotAddressOverTheCacheAsWell(t *testing.T) {
 	want := faultDocument{
 		code: "upstream_invalid",
 		details: []detail{
-			{"request", metadataRequest(server.url, "DEV")},
+			{"request", metadataRequest(server.URL, "DEV")},
 			{"upstream_status", 200},
 			{"upstream_body", metadata},
 		},
 	}
 	assert.Equal(t, want, requireFault(t, first))
 	assert.Equal(t, want, requireFault(t, second))
-	assert.Equal(t, []string{metadataPath, metadataPath}, server.sentPaths())
+	assert.Equal(t, []string{metadataPath, metadataPath}, server.Paths())
 }
 
 func TestFieldShowRefusesAFieldRemovedSinceTheCacheWasWrittenByName(t *testing.T) {
@@ -223,13 +225,13 @@ func TestFieldShowRefusesAFieldRemovedSinceTheCacheWasWrittenByName(t *testing.T
 	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{
-			{"request", metadataRequest(server.url, "DEV")},
+			{"request", metadataRequest(server.URL, "DEV")},
 			{"project", "DEV"},
 			{"unknown", []any{unknownEntry("Type", "Priority")}},
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{metadataPath, firstFieldPath, firstFieldPath, metadataPath}, server.sentPaths())
+	assert.Equal(t, []string{metadataPath, firstFieldPath, firstFieldPath, metadataPath}, server.Paths())
 }
 
 func TestFieldShowAsksAgainForAFieldThatChangedTypeSinceTheCacheWasWritten(t *testing.T) {
@@ -242,9 +244,9 @@ func TestFieldShowAsksAgainForAFieldThatChangedTypeSinceTheCacheWasWritten(t *te
 	got := runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
 
 	assert.Equal(t, outcome{stdout: printedUserType}, got)
-	assert.Equal(t, []string{metadataPath, firstFieldPath, firstFieldPath, metadataPath, firstFieldPath}, server.sentPaths())
+	assert.Equal(t, []string{metadataPath, firstFieldPath, firstFieldPath, metadataPath, firstFieldPath}, server.Paths())
 	assert.Equal(t, []string{metadataSent, fieldShowDefault(bundleValues), fieldShowDefault(bundleValues),
-		metadataSent, fieldShowDefault(bundleUsers)}, server.sentFields())
+		metadataSent, fieldShowDefault(bundleUsers)}, server.Fields())
 }
 
 func TestFieldShowTakesAFieldWithNoTranslationOffTheDiskAsItWas(t *testing.T) {
@@ -259,7 +261,7 @@ func TestFieldShowTakesAFieldWithNoTranslationOffTheDiskAsItWas(t *testing.T) {
 
 	assert.Equal(t, outcome{stdout: printedDueDate}, first)
 	assert.Equal(t, first, second)
-	assert.Equal(t, []string{metadataPath, firstFieldPath, firstFieldPath}, server.sentPaths())
+	assert.Equal(t, []string{metadataPath, firstFieldPath, firstFieldPath}, server.Paths())
 }
 
 func TestFieldShowKeepsTheMetadataOfOneProjectOutOfAnothers(t *testing.T) {
@@ -273,18 +275,18 @@ func TestFieldShowKeepsTheMetadataOfOneProjectOutOfAnothers(t *testing.T) {
 		"DEV":  {id: "180-1", metadata: projectMetadata(projectField("180-1", "Type", "Тип")), field: oneField("Type", "Тип", false)},
 		"DOCS": {id: "181-1", metadata: projectMetadata(projectField("181-1", "Срок", "")), field: oneField("Срок", "", true)},
 	}
-	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
+	server := fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		code, id, isOneField := strings.Cut(strings.TrimPrefix(r.URL.Path, "/api/admin/projects/"), "/customFields/")
 		project, known := held[code]
 		if !assert.True(t, known, "path %s", r.URL.Path) {
 			return
 		}
 		if !isOneField {
-			respondWith(http.StatusOK, project.metadata)(w, r)
+			fake.JSON(http.StatusOK, project.metadata)(w, r)
 			return
 		}
 		assert.Equal(t, project.id, id)
-		respondWith(http.StatusOK, project.field)(w, r)
+		fake.JSON(http.StatusOK, project.field)(w, r)
 	})
 	home := t.TempDir()
 	runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
@@ -294,7 +296,7 @@ func TestFieldShowKeepsTheMetadataOfOneProjectOutOfAnothers(t *testing.T) {
 
 	assert.Equal(t, outcome{stdout: printedEnumType}, got)
 	assert.Equal(t, []string{metadataPath, firstFieldPath, "/api/admin/projects/DOCS",
-		"/api/admin/projects/DOCS/customFields/181-1", firstFieldPath}, server.sentPaths())
+		"/api/admin/projects/DOCS/customFields/181-1", firstFieldPath}, server.Paths())
 }
 
 const (
@@ -320,9 +322,9 @@ canBeEmpty: false
 func TestFieldShowAsksAgainWhenTheResponseToACachedRequestIsInvalid(t *testing.T) {
 	t.Parallel()
 	held := typeOnlyInstance()
-	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
+	server := fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/customFields/") && !strings.Contains(r.URL.Query().Get("fields"), "bundle") {
-			respondWith(http.StatusOK, typeAsAGroupAnswered)(w, r)
+			fake.JSON(http.StatusOK, typeAsAGroupAnswered)(w, r)
 			return
 		}
 		held.handle(w, r)
@@ -334,7 +336,7 @@ func TestFieldShowAsksAgainWhenTheResponseToACachedRequestIsInvalid(t *testing.T
 	got := runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
 
 	assert.Equal(t, outcome{stdout: printedGroupType}, got)
-	assert.Equal(t, []string{metadataPath, firstFieldPath, firstFieldPath, metadataPath, firstFieldPath}, server.sentPaths())
+	assert.Equal(t, []string{metadataPath, firstFieldPath, firstFieldPath, metadataPath, firstFieldPath}, server.Paths())
 }
 
 const (
@@ -366,43 +368,43 @@ func TestFieldShowReadsTheMetadataAgainForACachedTypeOutsideTheCatalogue(t *test
 	got := runWith(t, atHome(server, home), "field", "show", "DEV", "State")
 
 	assert.Equal(t, outcome{stdout: printedStateType}, got)
-	assert.Equal(t, []string{metadataPath, metadataPath, firstFieldPath}, server.sentPaths())
+	assert.Equal(t, []string{metadataPath, metadataPath, firstFieldPath}, server.Paths())
 }
 
 func TestFieldShowKeepsTheMetadataOfOneIdentityOutOfAnothers(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
-		again   func(first, second *upstream, home string) []string
-		reached func(first, second *upstream) *upstream
+		again   func(first, second *fake.Server, home string) []string
+		reached func(first, second *fake.Server) *fake.Server
 	}{
 		{
 			name: "another token",
-			again: func(first, _ *upstream, home string) []string {
-				return []string{"YTRACK_URL=" + first.url, "YTRACK_TOKEN=" + token + "-of-another-user", "HOME=" + home}
+			again: func(first, _ *fake.Server, home string) []string {
+				return []string{"YTRACK_URL=" + first.URL, "YTRACK_TOKEN=" + fake.Token + "-of-another-user", "HOME=" + home}
 			},
-			reached: func(first, _ *upstream) *upstream { return first },
+			reached: func(first, _ *fake.Server) *fake.Server { return first },
 		},
 		{
 			name:    "another address",
-			again:   func(_, second *upstream, home string) []string { return atHome(second, home) },
-			reached: func(_, second *upstream) *upstream { return second },
+			again:   func(_, second *fake.Server, home string) []string { return atHome(second, home) },
+			reached: func(_, second *fake.Server) *fake.Server { return second },
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			held := typeOnlyInstance()
-			first, second := serve(t, held.handle), serve(t, held.handle)
+			first, second := fake.Serve(t, held.handle), fake.Serve(t, held.handle)
 			home := t.TempDir()
 			runWith(t, atHome(first, home), "field", "show", "DEV", "Type")
 			reached := tc.reached(first, second)
-			already := len(reached.requests())
+			already := len(reached.Requests())
 
 			got := runWith(t, tc.again(first, second, home), "field", "show", "DEV", "Type")
 
 			assert.Equal(t, outcome{stdout: printedEnumType}, got)
-			assert.Equal(t, []string{metadataPath, firstFieldPath}, reached.sentPaths()[already:])
+			assert.Equal(t, []string{metadataPath, firstFieldPath}, reached.Paths()[already:])
 		})
 	}
 }
@@ -420,14 +422,14 @@ func TestFieldShowKeepsNoCacheWithoutAnAbsoluteHome(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server, _ := aProject(t, typeOnlyInstance())
-			env := append(server.env(), tc.home...)
+			env := append(server.Env(), tc.home...)
 
 			first := runWith(t, env, "field", "show", "DEV", "Type")
 			second := runWith(t, env, "field", "show", "DEV", "Type")
 
 			assert.Equal(t, outcome{stdout: printedEnumType}, first)
 			assert.Equal(t, first, second)
-			assert.Equal(t, []string{metadataPath, firstFieldPath, metadataPath, firstFieldPath}, server.sentPaths())
+			assert.Equal(t, []string{metadataPath, firstFieldPath, metadataPath, firstFieldPath}, server.Paths())
 		})
 	}
 }
@@ -458,7 +460,7 @@ func TestFieldShowWritesTheCacheUnderOneDirectoryOfItsOwn(t *testing.T) {
 		files = append(files, relative)
 		content, err := os.ReadFile(path)
 		require.NoError(t, err)
-		assert.NotContains(t, string(content), token, "file %s", relative)
+		assert.NotContains(t, string(content), fake.Token, "file %s", relative)
 		return nil
 	}))
 	cache := filepath.Join(".ytrack", "cache")
@@ -505,7 +507,7 @@ func TestFieldShowSaysNothingOfACacheItCannotWrite(t *testing.T) {
 
 			assert.Equal(t, outcome{stdout: printedEnumType}, first)
 			assert.Equal(t, first, second)
-			assert.Equal(t, []string{metadataPath, firstFieldPath, metadataPath, firstFieldPath}, server.sentPaths())
+			assert.Equal(t, []string{metadataPath, firstFieldPath, metadataPath, firstFieldPath}, server.Paths())
 		})
 	}
 }
@@ -524,5 +526,5 @@ func TestFieldShowReadsTheMetadataAgainWhenTheCacheDoesNotReadBack(t *testing.T)
 	got := runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
 
 	assert.Equal(t, outcome{stdout: printedEnumType}, got)
-	assert.Equal(t, []string{metadataPath, firstFieldPath, metadataPath, firstFieldPath}, server.sentPaths())
+	assert.Equal(t, []string{metadataPath, firstFieldPath, metadataPath, firstFieldPath}, server.Paths())
 }

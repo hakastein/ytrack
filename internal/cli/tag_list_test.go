@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const tagFields = "name,owner(login),readSharingSettings(permittedGroups(name),permittedUsers(login))"
@@ -39,12 +41,12 @@ func TestTagListRefusesFlagsItCannotSend(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), append([]string{"tag", "list"}, tc.argv...)...)
+			got := runWith(t, server.Env(), append([]string{"tag", "list"}, tc.argv...)...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -57,16 +59,16 @@ func TestTagListPrintsTheRecordsAsTheyWereAskedFor(t *testing.T) {
 		`{"$type":"RegisteredUsersGroup","name":"Зарегистрированные пользователи"}],` +
 		`"permittedUsers":[{"login":"dev.limited","$type":"User"}],"$type":"WatchFolderSharingSettings"},` +
 		`"name":"карта","$type":"Tag","owner":{"login":"dev.member","$type":"User"}}]`
-	server := serve(t, respondWith(http.StatusOK, records))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, records))
 
-	got := runWith(t, server.env(), "tag", "list")
+	got := runWith(t, server.Env(), "tag", "list")
 
 	want := "total: 2\nreturned: 2\ntruncated: false\ntags:\n" +
 		`  - {name: "[bug] fix login", owner: {login: "admin"}, readSharingSettings: {permittedGroups: [], permittedUsers: []}}` + "\n" +
 		`  - {name: "карта", owner: {login: "dev.member"}, readSharingSettings: {permittedGroups: [{name: "DEVELOPMENT Team"}, {name: "Зарегистрированные пользователи"}], permittedUsers: [{login: "dev.limited"}]}}` + "\n"
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []string{"/api/tags"}, server.sentPaths())
-	assert.Equal(t, []url.Values{{"fields": {tagFields}, "$top": {"50"}}}, server.sentQueries())
+	assert.Equal(t, []string{"/api/tags"}, server.Paths())
+	assert.Equal(t, []url.Values{{"fields": {tagFields}, "$top": {"50"}}}, server.Queries())
 }
 
 func TestTagListSendsTheLimitAsTop(t *testing.T) {
@@ -74,12 +76,12 @@ func TestTagListSendsTheLimitAsTop(t *testing.T) {
 	for _, limit := range []string{"1", strconv.Itoa(math.MaxInt32)} {
 		t.Run(limit, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(http.StatusOK, `[]`))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, `[]`))
 
-			got := runWith(t, server.env(), "tag", "list", "--limit", limit)
+			got := runWith(t, server.Env(), "tag", "list", "--limit", limit)
 
 			assert.Equal(t, outcome{stdout: "total: 0\nreturned: 0\ntruncated: false\ntags: []\n"}, got)
-			assert.Equal(t, []url.Values{{"fields": {tagFields}, "$top": {limit}}}, server.sentQueries(),
+			assert.Equal(t, []url.Values{{"fields": {tagFields}, "$top": {limit}}}, server.Queries(),
 				"without $top the server stops at 42 tags and does not say there are more")
 		})
 	}
@@ -108,9 +110,9 @@ func TestTagListPrintsTheSameShapeForAnyNumberOfRecords(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(http.StatusOK, tc.body))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, tc.body))
 
-			got := runWith(t, server.env(), "tag", "list")
+			got := runWith(t, server.Env(), "tag", "list")
 
 			assert.Equal(t, outcome{stdout: tc.want}, got)
 		})
@@ -144,13 +146,13 @@ func TestTagListCountsTheTagsWhenTheyFillTheLimit(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, countedBy(page, respondWith(http.StatusOK, tc.count)))
+			server := fake.Serve(t, countedBy(page, fake.JSON(http.StatusOK, tc.count)))
 
-			got := runWith(t, server.env(), "tag", "list", "--limit", "2")
+			got := runWith(t, server.Env(), "tag", "list", "--limit", "2")
 
 			assert.Equal(t, outcome{stdout: tc.head + printed}, got)
-			assert.Equal(t, countingTags("2"), server.sentQueries())
-			assert.Equal(t, []string{"/api/tags", "/api/tags"}, server.sentPaths())
+			assert.Equal(t, countingTags("2"), server.Queries())
+			assert.Equal(t, []string{"/api/tags", "/api/tags"}, server.Paths())
 		})
 	}
 }
@@ -159,14 +161,14 @@ func TestTagListRefusesACountTheServerWouldNotAnswer(t *testing.T) {
 	t.Parallel()
 	const page = `[{"$type":"Tag","name":"a","owner":{"$type":"User","login":"admin"},` +
 		`"readSharingSettings":{"$type":"WatchFolderSharingSettings","permittedGroups":[],"permittedUsers":[]}}]`
-	server := serve(t, countedBy(page, respondWith(http.StatusInternalServerError, `{"error":"Internal Server Error"}`)))
+	server := fake.Serve(t, countedBy(page, fake.JSON(http.StatusInternalServerError, `{"error":"Internal Server Error"}`)))
 
-	got := runWith(t, server.env(), "tag", "list", "--limit", "1")
+	got := runWith(t, server.Env(), "tag", "list", "--limit", "1")
 
 	found := requireFault(t, got)
 	assert.Equal(t, "upstream_failed", found.code)
-	assert.Equal(t, tagsRequest(server.url, "id", "-1"), detailNamed(t, found, "request"))
-	assert.Equal(t, countingTags("1"), server.sentQueries())
+	assert.Equal(t, tagsRequest(server.URL, "id", "-1"), detailNamed(t, found, "request"))
+	assert.Equal(t, countingTags("1"), server.Queries())
 	assert.Empty(t, got.stdout)
 }
 
@@ -193,18 +195,18 @@ func TestTagListRefusesWhatTheServerAnswered(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, func(w http.ResponseWriter, _ *http.Request) {
+			server := fake.Serve(t, func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", tc.contentType)
 				w.WriteHeader(tc.status)
 				_, _ = w.Write([]byte(tc.body))
 			})
 
-			got := runWith(t, server.env(), "tag", "list")
+			got := runWith(t, server.Env(), "tag", "list")
 
 			found := requireFault(t, got)
 			assert.Equal(t, tc.code, found.code)
-			assert.Equal(t, tagsRequest(server.url, tagFields, "50"), detailNamed(t, found, "request"))
-			assert.Len(t, server.requests(), 1)
+			assert.Equal(t, tagsRequest(server.URL, tagFields, "50"), detailNamed(t, found, "request"))
+			assert.Len(t, server.Requests(), 1)
 			assert.Empty(t, got.stdout)
 		})
 	}

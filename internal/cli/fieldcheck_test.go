@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func projectNames() []any {
@@ -130,13 +132,13 @@ func TestProjectShowRefusesAFieldMissingFromTheResponse(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(http.StatusOK, tc.body))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, tc.body))
 
-			got := runWith(t, server.env(), "project", "show", "DEV", "--fields", tc.fields)
+			got := runWith(t, server.Env(), "project", "show", "DEV", "--fields", tc.fields)
 
-			want := faultDocument{code: "upstream_invalid", details: missingFieldDetails(server.url, tc.fields, "missing", tc.missing...)}
+			want := faultDocument{code: "upstream_invalid", details: missingFieldDetails(server.URL, tc.fields, "missing", tc.missing...)}
 			assert.Equal(t, want, requireFault(t, got))
-			assert.Len(t, server.requests(), 1)
+			assert.Len(t, server.Requests(), 1)
 		})
 	}
 }
@@ -195,13 +197,13 @@ func TestProjectShowRefusesANameNoSchemaOfItsNodeDeclares(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(http.StatusOK, tc.body))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, tc.body))
 
-			got := runWith(t, server.env(), "project", "show", "DEV", "--fields", tc.fields)
+			got := runWith(t, server.Env(), "project", "show", "DEV", "--fields", tc.fields)
 
-			want := faultDocument{code: "unknown_name", details: missingFieldDetails(server.url, tc.fields, "unknown", tc.unknown...)}
+			want := faultDocument{code: "unknown_name", details: missingFieldDetails(server.URL, tc.fields, "unknown", tc.unknown...)}
 			assert.Equal(t, want, requireFault(t, got))
-			assert.Len(t, server.requests(), 1)
+			assert.Len(t, server.Requests(), 1)
 		})
 	}
 }
@@ -272,12 +274,12 @@ func TestProjectShowLeavesOutAFieldTheNamedTypeDoesNotDeclare(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(http.StatusOK, tc.body))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, tc.body))
 
-			got := runWith(t, server.env(), "project", "show", "DEV", "--fields", tc.fields)
+			got := runWith(t, server.Env(), "project", "show", "DEV", "--fields", tc.fields)
 
 			assert.Equal(t, outcome{stdout: tc.stdout}, got)
-			assert.Len(t, server.requests(), 1)
+			assert.Len(t, server.Requests(), 1)
 		})
 	}
 }

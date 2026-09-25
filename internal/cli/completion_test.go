@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func rootCommands() []string {
@@ -60,13 +62,13 @@ func TestCompleteOffersTheCommandsOfTheRoot(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			answered := requireCompleted(t, runWith(t, server.env(), tc.argv...))
+			answered := requireCompleted(t, runWith(t, server.Env(), tc.argv...))
 
 			assert.Equal(t, tc.names, answered.names())
 			assert.Equal(t, shellOffersNoFileNames, answered.directive)
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -84,13 +86,13 @@ func TestCompleteOffersTheSubcommandsOfACommand(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			answered := requireCompleted(t, runWith(t, server.env(), tc.argv...))
+			answered := requireCompleted(t, runWith(t, server.Env(), tc.argv...))
 
 			assert.Equal(t, tc.names, answered.names())
 			assert.Equal(t, shellOffersNoFileNames, answered.directive)
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -109,22 +111,22 @@ func TestCompleteOffersTheFlagsOfACommand(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			answered := requireCompleted(t, runWith(t, server.env(), tc.argv...))
+			answered := requireCompleted(t, runWith(t, server.Env(), tc.argv...))
 
 			assert.Equal(t, tc.names, answered.names())
 			assert.Equal(t, shellOffersNoFileNames, answered.directive)
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
 
 func TestCompleteOffersAFlagWithoutTheBackquotesOfPflag(t *testing.T) {
 	t.Parallel()
-	server := serveNothing(t)
+	server := fake.ServeNothing(t)
 
-	answered := requireCompleted(t, runWith(t, server.env(), "__complete", "project", "show", "--f"))
+	answered := requireCompleted(t, runWith(t, server.Env(), "__complete", "project", "show", "--f"))
 
 	require.Len(t, answered.suggestions, 1)
 	name, text, found := strings.Cut(answered.suggestions[0], "\t")
@@ -132,7 +134,7 @@ func TestCompleteOffersAFlagWithoutTheBackquotesOfPflag(t *testing.T) {
 	assert.True(t, found, "the flag came back with nothing beside it")
 	assert.NotEmpty(t, text)
 	assert.NotContains(t, text, "`")
-	assert.Empty(t, server.requests())
+	assert.Empty(t, server.Requests())
 }
 
 func TestCompleteNoDescPrintsNoTextBesideAName(t *testing.T) {
@@ -153,13 +155,13 @@ func TestCompleteNoDescPrintsNoTextBesideAName(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			answered := requireCompleted(t, runWith(t, server.env(), tc.argv...))
+			answered := requireCompleted(t, runWith(t, server.Env(), tc.argv...))
 
 			assert.Equal(t, tc.names, answered.names())
 			assert.Equal(t, tc.names, answered.suggestions, "a name came back with something beside it")
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -181,27 +183,27 @@ func TestCompleteFindsTheCommandPastTheFlagsAlreadyTyped(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			answered := requireCompleted(t, runWith(t, server.env(), tc.argv...))
+			answered := requireCompleted(t, runWith(t, server.Env(), tc.argv...))
 
 			assert.Equal(t, tc.names, answered.names())
 			assert.Equal(t, shellOffersNoFileNames, answered.directive)
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
 
 func TestCompleteOffersNothingForACommandLineThatNamesNoCommand(t *testing.T) {
 	t.Parallel()
-	server := serveNothing(t)
+	server := fake.ServeNothing(t)
 
-	got := runWith(t, server.env(), "__complete", "bogus", "")
+	got := runWith(t, server.Env(), "__complete", "bogus", "")
 
 	assert.Equal(t, 0, got.code)
 	assert.Equal(t, shellOffersNoFileNames+"\n", got.stdout)
 	assert.Empty(t, got.stderr)
-	assert.Empty(t, server.requests())
+	assert.Empty(t, server.Requests())
 }
 
 func TestCompleteWithNoCommandLineIsRefused(t *testing.T) {
@@ -209,12 +211,12 @@ func TestCompleteWithNoCommandLineIsRefused(t *testing.T) {
 	for _, protocol := range []string{"__complete", "__completeNoDesc"} {
 		t.Run(protocol, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), protocol)
+			got := runWith(t, server.Env(), protocol)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -222,27 +224,27 @@ func TestCompleteWithNoCommandLineIsRefused(t *testing.T) {
 func TestCompleteReadsNoEnvironmentOfTheProcess(t *testing.T) {
 	t.Setenv("COBRA_COMPLETION_DESCRIPTIONS", "false")
 	t.Setenv("YTRACK_COMPLETION_DESCRIPTIONS", "false")
-	server := serveNothing(t)
+	server := fake.ServeNothing(t)
 
-	answered := requireCompleted(t, runWith(t, server.env(), "__complete", "attachment", ""))
+	answered := requireCompleted(t, runWith(t, server.Env(), "__complete", "attachment", ""))
 
 	assert.Equal(t, []string{"create", "delete", "list"}, answered.names())
 	for _, suggestion := range answered.suggestions {
 		assert.Contains(t, suggestion, "\t", "the description was dropped, which only the process's environment does")
 	}
-	assert.Empty(t, server.requests())
+	assert.Empty(t, server.Requests())
 }
 
 func TestCompleteWritesNoFileNamedByTheEnvironment(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "completion.log")
 	t.Setenv("BASH_COMP_DEBUG_FILE", log)
-	server := serveNothing(t)
+	server := fake.ServeNothing(t)
 
-	got := runWith(t, server.env(), "__complete", "bogus", "")
+	got := runWith(t, server.Env(), "__complete", "bogus", "")
 
 	assert.Equal(t, 0, got.code)
 	assert.NoFileExists(t, log)
-	assert.Empty(t, server.requests())
+	assert.Empty(t, server.Requests())
 }
 
 func TestCompleteLeavesFileNamesToTheShellOnlyWhereTheArgumentIsAPath(t *testing.T) {
@@ -264,13 +266,13 @@ func TestCompleteLeavesFileNamesToTheShellOnlyWhereTheArgumentIsAPath(t *testing
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			answered := requireCompleted(t, runWith(t, server.env(), tc.argv...))
+			answered := requireCompleted(t, runWith(t, server.Env(), tc.argv...))
 
 			assert.Equal(t, tc.directive, answered.directive)
 			assert.Empty(t, answered.names())
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -297,13 +299,13 @@ func TestCompleteLeavesNoFileNamesWhereAFlagOrItsValueIsCompleted(t *testing.T) 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			answered := requireCompleted(t, runWith(t, server.env(), tc.argv...))
+			answered := requireCompleted(t, runWith(t, server.Env(), tc.argv...))
 
 			assert.Equal(t, tc.names, answered.names())
 			assert.Equal(t, tc.directive, answered.directive)
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -322,13 +324,13 @@ func TestCompleteOffersNothingWhereTheCommandWouldTakeNoWord(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			answered := requireCompleted(t, runWith(t, server.env(), tc.argv...))
+			answered := requireCompleted(t, runWith(t, server.Env(), tc.argv...))
 
 			assert.Equal(t, []string{}, answered.names())
 			assert.Equal(t, shellOffersNoFileNames, answered.directive)
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -345,19 +347,19 @@ func TestCompleteOffersNoCommandHiddenInTheTree(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			answered := requireCompleted(t, runWith(t, server.env(), tc.argv...))
+			answered := requireCompleted(t, runWith(t, server.Env(), tc.argv...))
 
 			assert.Equal(t, tc.names, answered.names())
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
 
 func theShellsYtrackHasAScriptFor(t *testing.T) []string {
 	t.Helper()
-	answered := requireCompleted(t, runWith(t, serveNothing(t).env(), "__complete", "completion", ""))
+	answered := requireCompleted(t, runWith(t, fake.ServeNothing(t).Env(), "__complete", "completion", ""))
 	require.NotEmpty(t, answered.names())
 	return answered.names()
 }
@@ -367,9 +369,9 @@ func TestCompletionPrintsAScriptForEveryShellItNames(t *testing.T) {
 	for _, shell := range theShellsYtrackHasAScriptFor(t) {
 		t.Run(shell, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "completion", shell)
+			got := runWith(t, server.Env(), "completion", shell)
 
 			assert.Equal(t, 0, got.code)
 			assert.Empty(t, got.stderr)
@@ -378,7 +380,7 @@ func TestCompletionPrintsAScriptForEveryShellItNames(t *testing.T) {
 			assert.Contains(t, first, "ytrack", "the script opens without naming the binary")
 			assert.Contains(t, got.stdout, "# "+shell, "the script names no shell of its own")
 			assert.Contains(t, got.stdout, "__complete", "the script asks nobody for its suggestions")
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -394,25 +396,25 @@ func TestCompletionRefusesAnythingButOneShellItNames(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
 
 func TestCompleteOffersTheShellsOfTheCompletionCommand(t *testing.T) {
 	t.Parallel()
-	server := serveNothing(t)
+	server := fake.ServeNothing(t)
 
-	answered := requireCompleted(t, runWith(t, server.env(), "__complete", "completion", ""))
+	answered := requireCompleted(t, runWith(t, server.Env(), "__complete", "completion", ""))
 
 	assert.Equal(t, []string{"bash", "zsh", "fish", "powershell"}, answered.names())
 	assert.Equal(t, shellOffersNoFileNames, answered.directive)
-	assert.Empty(t, server.requests())
+	assert.Empty(t, server.Requests())
 }
 
 func commandsWithSubcommands() []string {
@@ -440,9 +442,9 @@ func TestCompleteCarriesTheTextOfEveryCommandItOffers(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			answered := requireCompleted(t, runWith(t, server.env(), tc.argv...))
+			answered := requireCompleted(t, runWith(t, server.Env(), tc.argv...))
 
 			require.NotEmpty(t, answered.suggestions)
 			for _, suggestion := range answered.suggestions {
@@ -450,7 +452,7 @@ func TestCompleteCarriesTheTextOfEveryCommandItOffers(t *testing.T) {
 				assert.True(t, found, "%q is offered with nothing beside it", suggestion)
 				assert.NotEmpty(t, text, "%q is offered with an empty line beside it", suggestion)
 			}
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -479,13 +481,13 @@ func TestCompleteOffersTheCategoriesOfTheActivities(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			answered := requireCompleted(t, runWith(t, server.env(), tc.argv...))
+			answered := requireCompleted(t, runWith(t, server.Env(), tc.argv...))
 
 			assert.Equal(t, tc.names, answered.names())
 			assert.Equal(t, shellOffersNoFileNames, answered.directive)
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }

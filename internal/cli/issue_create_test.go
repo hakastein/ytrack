@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const projectWriteFields = "id,shortName,customFields(id,canBeEmpty,defaultValues(name)," +
@@ -101,9 +103,9 @@ func asJSON(text string) string {
 	return string(written)
 }
 
-func creating(t *testing.T, metadata, creation http.HandlerFunc) *upstream {
+func creating(t *testing.T, metadata, creation http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return serve(t, func(w http.ResponseWriter, r *http.Request) {
+	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			creation(w, r)
 			return
@@ -141,12 +143,12 @@ func TestIssueCreateRefusesBeforeAnyRequest(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -170,43 +172,43 @@ func TestIssueCreateRefusesTextTheServerWouldRewrite(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), append([]string{"issue", "create", "DEV"}, tc.argv...)...)
+			got := runWith(t, server.Env(), append([]string{"issue", "create", "DEV"}, tc.argv...)...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
 
 func TestIssueCreatePrintsNoComments(t *testing.T) {
 	t.Parallel()
-	server := serveNothing(t)
+	server := fake.ServeNothing(t)
 
-	got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--fields", "+comments(text)")
+	got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x", "--fields", "+comments(text)")
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.requests())
+	assert.Empty(t, server.Requests())
 }
 
 func TestIssueCreateReadsTheProjectAndFilesTheIssue(t *testing.T) {
 	t.Parallel()
 	const title = "[bug] fix login"
 	text := longDescription()
-	server := creating(t, respondWith(http.StatusOK, projectRequiringNothing()),
-		respondWith(http.StatusOK, createdIssue("DEV-7", title, asJSON(text))))
+	server := creating(t, fake.JSON(http.StatusOK, projectRequiringNothing()),
+		fake.JSON(http.StatusOK, createdIssue("DEV-7", title, asJSON(text))))
 
-	got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", title, "--description", text)
+	got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", title, "--description", text)
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
 	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
-	assert.Equal(t, []string{"/api/admin/projects/DEV", "/api/issues"}, server.sentPaths())
-	assert.Equal(t, []string{projectWriteFields, askedIssueFields}, server.sentFields())
+	assert.Equal(t, []string{"/api/admin/projects/DEV", "/api/issues"}, server.Paths())
+	assert.Equal(t, []string{projectWriteFields, askedIssueFields}, server.Fields())
 
 	var body map[string]any
-	require.NoError(t, json.Unmarshal([]byte(server.asks()[1]), &body))
+	require.NoError(t, json.Unmarshal([]byte(server.Bodies()[1]), &body))
 	assert.Equal(t, map[string]any{
 		"project":     map[string]any{"id": "0-1"},
 		"summary":     title,
@@ -236,14 +238,14 @@ func TestIssueCreateNamesEveryRequiredFieldAtOnce(t *testing.T) {
 		writableField{id: "180-18", name: "Клиент", valueType: "enum", isMultiValue: true},
 		writableField{id: "180-20", name: "Система", valueType: "enum", isMultiValue: true, canBeEmpty: true},
 	)
-	server := creating(t, respondWith(http.StatusOK, metadata), noCreation(t))
+	server := creating(t, fake.JSON(http.StatusOK, metadata), noCreation(t))
 
-	got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x")
+	got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x")
 
 	want := faultDocument{
 		code: "missing_required",
 		details: []detail{
-			{"request", writeMetadataRequest(server.url, "DEV")},
+			{"request", writeMetadataRequest(server.URL, "DEV")},
 			{"project", "DEV"},
 			{"missing", []any{"Type", "Клиент"}},
 		},
@@ -296,13 +298,13 @@ func TestIssueCreateRequiresNoFieldAConditionHides(t *testing.T) {
 			t.Parallel()
 			metadata := projectResponse(tc.state, writableField{id: "180-23", name: "Причина отклонения",
 				valueType: "enum", condition: tc.condition})
-			issue := respondWith(http.StatusOK, createdIssue("DEV-7", "x", "null"))
+			issue := fake.JSON(http.StatusOK, createdIssue("DEV-7", "x", "null"))
 			if tc.missing != nil {
 				issue = noCreation(t)
 			}
-			server := creating(t, respondWith(http.StatusOK, metadata), issue)
+			server := creating(t, fake.JSON(http.StatusOK, metadata), issue)
 
-			got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x")
+			got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x")
 
 			if tc.missing == nil {
 				require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
@@ -351,15 +353,15 @@ func TestIssueCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := creating(t, respondWith(http.StatusOK, projectRequiringNothing()),
-				respondWith(http.StatusOK, createdIssue("DEV-7", tc.summary, tc.description)))
+			server := creating(t, fake.JSON(http.StatusOK, projectRequiringNothing()),
+				fake.JSON(http.StatusOK, createdIssue("DEV-7", tc.summary, tc.description)))
 
-			got := runWith(t, server.env(), append([]string{"issue", "create", "DEV"}, tc.argv...)...)
+			got := runWith(t, server.Env(), append([]string{"issue", "create", "DEV"}, tc.argv...)...)
 
 			want := faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", creationRequest(server.url, askedIssueFields)},
+					{"request", creationRequest(server.URL, askedIssueFields)},
 					{"issue", "DEV-7"},
 					{"mismatch", tc.mismatch},
 				},
@@ -412,14 +414,14 @@ func TestIssueCreateRefusesMetadataOfTheProjectOfAnotherShape(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := creating(t, respondWith(http.StatusOK, tc.project), noCreation(t))
+			server := creating(t, fake.JSON(http.StatusOK, tc.project), noCreation(t))
 
-			got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x")
+			got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x")
 
 			want := faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", writeMetadataRequest(server.url, "DEV")},
+					{"request", writeMetadataRequest(server.URL, "DEV")},
 					{"upstream_status", 200},
 					{"upstream_body", tc.project},
 				},
@@ -438,10 +440,10 @@ func TestIssueCreateIsUncertainWhereTheAnswerCannotBePrinted(t *testing.T) {
 	t.Parallel()
 	unwrittenStringHoldingANumber := receivedFields(
 		receivedField{name: "Примечание", valueType: "string", binding: "187-10", value: "42"})
-	server := creating(t, respondWith(http.StatusOK, projectRequiringNothing()),
-		respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", unwrittenStringHoldingANumber)))
+	server := creating(t, fake.JSON(http.StatusOK, projectRequiringNothing()),
+		fake.JSON(http.StatusOK, createdIssueWith("DEV-7", "x", "null", unwrittenStringHoldingANumber)))
 
-	got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x")
+	got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x")
 
 	found := requireUncertainty(t, got)
 	assert.Equal(t, "upstream_invalid", found.code)
@@ -453,14 +455,14 @@ func TestIssueCreateRefusesWhatTheServerRefused(t *testing.T) {
 	t.Parallel()
 	const said = `{"error":"Field required","error_description":"Поле Тип обязательно","error_field":"Тип",` +
 		`"error_type":"workflow","error_workflow_type":"require"}`
-	server := creating(t, respondWith(http.StatusOK, projectRequiringNothing()), respondWith(http.StatusBadRequest, said))
+	server := creating(t, fake.JSON(http.StatusOK, projectRequiringNothing()), fake.JSON(http.StatusBadRequest, said))
 
-	got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x")
+	got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x")
 
 	want := faultDocument{
 		code: "rejected",
 		details: []detail{
-			{"request", creationRequest(server.url, askedIssueFields)},
+			{"request", creationRequest(server.URL, askedIssueFields)},
 			{"upstream_status", 400},
 			{"upstream_error", "Field required"},
 			{"upstream_message", "Поле Тип обязательно"},
@@ -476,14 +478,14 @@ func TestIssueCreateRefusesWhatTheTokenMayNotReachAt(t *testing.T) {
 	t.Run("a project the read does not find", func(t *testing.T) {
 		t.Parallel()
 		said := `{"error":"Not Found","error_description":"Entity with id NOPE not found"}`
-		server := creating(t, respondWith(http.StatusNotFound, said), noCreation(t))
+		server := creating(t, fake.JSON(http.StatusNotFound, said), noCreation(t))
 
-		got := runWith(t, server.env(), "issue", "create", "NOPE", "--summary", "x")
+		got := runWith(t, server.Env(), "issue", "create", "NOPE", "--summary", "x")
 
 		want := faultDocument{
 			code: "not_found",
 			details: []detail{
-				{"request", writeMetadataRequest(server.url, "NOPE")},
+				{"request", writeMetadataRequest(server.URL, "NOPE")},
 				{"upstream_status", 404},
 				{"upstream_error", "Not Found"},
 				{"upstream_message", "Entity with id NOPE not found"},
@@ -495,14 +497,14 @@ func TestIssueCreateRefusesWhatTheTokenMayNotReachAt(t *testing.T) {
 	t.Run("a token that may read the project and not write in it", func(t *testing.T) {
 		t.Parallel()
 		said := `{"error":"Forbidden","error_description":"HTTP 403 Forbidden"}`
-		server := creating(t, respondWith(http.StatusOK, projectRequiringNothing()), respondWith(http.StatusForbidden, said))
+		server := creating(t, fake.JSON(http.StatusOK, projectRequiringNothing()), fake.JSON(http.StatusForbidden, said))
 
-		got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x")
+		got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x")
 
 		want := faultDocument{
 			code: "denied",
 			details: []detail{
-				{"request", creationRequest(server.url, askedIssueFields)},
+				{"request", creationRequest(server.URL, askedIssueFields)},
 				{"upstream_status", 403},
 				{"upstream_error", "Forbidden"},
 				{"upstream_message", "HTTP 403 Forbidden"},
@@ -516,15 +518,15 @@ func TestIssueCreateRefusesWhatTheTokenMayNotReachAt(t *testing.T) {
 
 func TestIssueCreateChecksMoreThanItPrints(t *testing.T) {
 	t.Parallel()
-	server := creating(t, respondWith(http.StatusOK, projectRequiringNothing()),
-		respondWith(http.StatusOK, createdIssue("DEV-7", "x", `"первая"`)))
+	server := creating(t, fake.JSON(http.StatusOK, projectRequiringNothing()),
+		fake.JSON(http.StatusOK, createdIssue("DEV-7", "x", `"первая"`)))
 
-	got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--description", "первая",
+	got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x", "--description", "первая",
 		"--fields", "idReadable")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, "idReadable: \"DEV-7\"\n", got.stdout)
-	assert.Equal(t, []string{projectWriteFields, "idReadable,summary,description"}, server.sentFields())
+	assert.Equal(t, []string{projectWriteFields, "idReadable,summary,description"}, server.Fields())
 }
 
 func TestIssueCreatePrintsTheCustomFieldsItWasAskedFor(t *testing.T) {
@@ -535,24 +537,24 @@ func TestIssueCreatePrintsTheCustomFieldsItWasAskedFor(t *testing.T) {
 		receivedField{name: "Type", valueType: "enum", ordinal: "1", binding: "180-15",
 			value: bundleElement("Task")},
 	) + `}`
-	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
+	server := fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasPrefix(r.URL.Path, cataloguePath):
-			respondWith(http.StatusOK, devCatalogue())(w, r)
+			fake.JSON(http.StatusOK, devCatalogue())(w, r)
 		case r.Method == http.MethodPost:
-			respondWith(http.StatusOK, issue)(w, r)
+			fake.JSON(http.StatusOK, issue)(w, r)
 		default:
-			respondWith(http.StatusOK, projectRequiringNothing())(w, r)
+			fake.JSON(http.StatusOK, projectRequiringNothing())(w, r)
 		}
 	})
 
-	got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x",
+	got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x",
 		"--fields", `idReadable,customFields("приоритет")`)
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, "idReadable: \"DEV-7\"\ncustomFields:\n  \"Priority\": \"Low\"\n", got.stdout)
-	assert.Equal(t, []string{"/api/admin/projects/DEV", cataloguePath, "/api/issues"}, server.sentPaths())
-	for _, query := range server.sentQueries() {
+	assert.Equal(t, []string{"/api/admin/projects/DEV", cataloguePath, "/api/issues"}, server.Paths())
+	for _, query := range server.Queries() {
 		assert.Empty(t, query["customFields"], "a write never cuts the answer down by name")
 	}
 }

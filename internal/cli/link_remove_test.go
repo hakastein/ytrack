@@ -8,27 +8,29 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const removedIssueLink = "163-1t"
 
-func removing(t *testing.T, catalogue, target string, removal http.HandlerFunc) *upstream {
+func removing(t *testing.T, catalogue, target string, removal http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return serve(t, func(w http.ResponseWriter, r *http.Request) {
+	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodDelete:
 			removal(w, r)
 		case path.Base(r.URL.Path) == addedSource:
-			respondWith(http.StatusOK, catalogue)(w, r)
+			fake.JSON(http.StatusOK, catalogue)(w, r)
 		case path.Base(r.URL.Path) == addedTarget:
-			respondWith(http.StatusOK, target)(w, r)
+			fake.JSON(http.StatusOK, target)(w, r)
 		default:
 			assert.Fail(t, "a request reached the server", "%s %s", r.Method, r.URL)
 		}
 	})
 }
 
-func removingOnTheDevInstance(t *testing.T, removal http.HandlerFunc) *upstream {
+func removingOnTheDevInstance(t *testing.T, removal http.HandlerFunc) *fake.Server {
 	t.Helper()
 	return removing(t, devInstanceCatalogue(), addressedIssue(addedTargetID, addedTarget), removal)
 }
@@ -62,12 +64,12 @@ func TestLinkRemoveRefusesACallThatNamesNoOneLink(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -76,7 +78,7 @@ func TestLinkRemoveTakesTheLinkAwayBySlotAndInternalID(t *testing.T) {
 	t.Parallel()
 	server := removingOnTheDevInstance(t, deletionDone())
 
-	got := runWith(t, server.env(), "link", "remove", addedSource, "depends on", addedTarget)
+	got := runWith(t, server.Env(), "link", "remove", addedSource, "depends on", addedTarget)
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
@@ -87,10 +89,10 @@ func TestLinkRemoveTakesTheLinkAwayBySlotAndInternalID(t *testing.T) {
 		"/api/issues/" + addedSource,
 		"/api/issues/" + addedTarget,
 		"/api/issues/" + addedSource + "/links/" + removedIssueLink + "/issues/" + addedTargetID,
-	}, server.sentPaths())
-	assert.Equal(t, []string{"", "", ""}, server.asks(), "no request of a removal carries a body")
-	assert.Equal(t, []string{addSourceFields, addTargetFields, ""}, server.sentFields())
-	requests := server.requests()
+	}, server.Paths())
+	assert.Equal(t, []string{"", "", ""}, server.Bodies(), "no request of a removal carries a body")
+	assert.Equal(t, []string{addSourceFields, addTargetFields, ""}, server.Fields())
+	requests := server.Requests()
 	require.Len(t, requests, 3)
 	assert.Empty(t, requests[2].URL.RawQuery, "a removal asks for nothing")
 }
@@ -103,7 +105,7 @@ func TestLinkRemovePrintsThePhraseOfTheSlotRatherThanTheOneWritten(t *testing.T)
 		t.Parallel()
 		server := removingOnTheDevInstance(t, deletionDone())
 
-		got := runWith(t, server.env(), "link", "remove", addedSource, written, addedTarget)
+		got := runWith(t, server.Env(), "link", "remove", addedSource, written, addedTarget)
 
 		require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 		assert.Equal(t, []detail{
@@ -115,9 +117,9 @@ func TestLinkRemovePrintsThePhraseOfTheSlotRatherThanTheOneWritten(t *testing.T)
 
 	t.Run("the refusal about a link the issue holds none of", func(t *testing.T) {
 		t.Parallel()
-		server := removingOnTheDevInstance(t, respondWith(http.StatusNotFound, entityNotFound(addedTargetID)))
+		server := removingOnTheDevInstance(t, fake.JSON(http.StatusNotFound, entityNotFound(addedTargetID)))
 
-		got := runWith(t, server.env(), "link", "remove", addedSource, written, addedTarget)
+		got := runWith(t, server.Env(), "link", "remove", addedSource, written, addedTarget)
 
 		found := requireFault(t, got)
 		assert.Equal(t, "not_found", found.code)
@@ -127,13 +129,13 @@ func TestLinkRemovePrintsThePhraseOfTheSlotRatherThanTheOneWritten(t *testing.T)
 
 func TestLinkRemoveRefusesALinkTheIssueDoesNotHave(t *testing.T) {
 	t.Parallel()
-	server := removingOnTheDevInstance(t, respondWith(http.StatusNotFound, entityNotFound(addedTargetID)))
+	server := removingOnTheDevInstance(t, fake.JSON(http.StatusNotFound, entityNotFound(addedTargetID)))
 
-	got := runWith(t, server.env(), "link", "remove", addedSource, "depends on", addedTarget)
+	got := runWith(t, server.Env(), "link", "remove", addedSource, "depends on", addedTarget)
 
 	assert.Equal(t, faultDocument{
 		code: "not_found",
-		details: append([]detail{{"request", removalRequest(server.url)}},
+		details: append([]detail{{"request", removalRequest(server.URL)}},
 			append(removalNames("depends on"),
 				detail{"upstream_status", 404},
 				detail{"upstream_error", "Not Found"},
@@ -162,7 +164,7 @@ func TestLinkRemoveIsUncertainWhereTheAnswerIsNotTheServersOwn(t *testing.T) {
 			t.Parallel()
 			server := removingOnTheDevInstance(t, tc.removal)
 
-			got := runWith(t, server.env(), "link", "remove", addedSource, "depends on", addedTarget)
+			got := runWith(t, server.Env(), "link", "remove", addedSource, "depends on", addedTarget)
 
 			found := requireUncertainty(t, got)
 			assert.Equal(t, tc.code, found.code)
@@ -242,10 +244,10 @@ func TestLinkRemoveRefusesBeforeTheRemovalTheWayAddDoes(t *testing.T) {
 			t.Parallel()
 			server := removing(t, tc.catalogue, addressedIssue(addedTargetID, addedTarget), noRemoval(t))
 
-			got := runWith(t, server.env(), "link", "remove", addedSource, tc.phrase, tc.target)
+			got := runWith(t, server.Env(), "link", "remove", addedSource, tc.phrase, tc.target)
 
-			assert.Equal(t, tc.want(server.url), requireFault(t, got))
-			assert.Equal(t, tc.paths, server.sentPaths())
+			assert.Equal(t, tc.want(server.URL), requireFault(t, got))
+			assert.Equal(t, tc.paths, server.Paths())
 		})
 	}
 }

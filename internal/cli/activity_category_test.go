@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const cyrillicCapitalEs = "\u0421"
@@ -76,21 +78,21 @@ func TestActivityRefusesANameOfNoCategoryBeforeItAsksForAnything(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), slices.Concat([]string{"activity", "list", activityIssue}, tc.flags)...)
+			got := runWith(t, server.Env(), slices.Concat([]string{"activity", "list", activityIssue}, tc.flags)...)
 
 			assert.Equal(t, tc.want, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
 
 func TestActivityAsksForEachCategoryOnceInTheOrderOfTheList(t *testing.T) {
 	t.Parallel()
-	server := activityServer(t, respondWith(http.StatusOK, noActivities))
+	server := activityServer(t, fake.JSON(http.StatusOK, noActivities))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue,
+	got := runWith(t, server.Env(), "activity", "list", activityIssue,
 		"--category", "linkscategory", "--category", "LINKSCATEGORY", "--category", "CommentsCategory")
 
 	assert.Equal(t, outcome{stdout: "total: 0\nreturned: 0\ntruncated: false\nactivities: []\n"}, got)
@@ -129,9 +131,9 @@ func TestActivityRefusesAnActivityItCannotReadTheCategoryOf(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := activityServer(t, respondWith(http.StatusOK, `[`+tc.activity.sent()+`]`))
+			server := activityServer(t, fake.JSON(http.StatusOK, `[`+tc.activity.sent()+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", activityIssue)
+			got := runWith(t, server.Env(), "activity", "list", activityIssue)
 
 			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)

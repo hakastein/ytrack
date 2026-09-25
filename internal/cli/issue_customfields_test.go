@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const customFieldsFields = "customFields(name,value(name,login,minutes,text)," +
@@ -65,13 +67,13 @@ func issueWithFields(fields ...receivedField) string {
 
 func showCustomFields(t *testing.T, body string) (outcome, *yaml.Node) {
 	t.Helper()
-	server := serve(t, respondWith(http.StatusOK, body))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "customFields")
+	got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "customFields")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
-	assert.Equal(t, []string{customFieldsFields}, server.sentFields())
+	assert.Equal(t, []string{customFieldsFields}, server.Fields())
 	block := nodeAt(t, requireMapping(t, "stdout", got.stdout), "customFields")
 	require.Equal(t, yaml.MappingNode, block.Kind, "stdout: %q", got.stdout)
 	return got, block
@@ -369,14 +371,14 @@ func TestIssueShowRefusesCustomFieldsTheServerContradictsItselfAbout(t *testing.
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := issueWithFields(tc.received...)
-			server := serve(t, respondWith(http.StatusOK, body))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "customFields")
+			got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "customFields")
 
 			assert.Equal(t, faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", issueRequest(server.url, "DEV-1", customFieldsFields)},
+					{"request", issueRequest(server.URL, "DEV-1", customFieldsFields)},
 					{"upstream_status", 200},
 					{"upstream_body", body},
 				},
@@ -420,14 +422,14 @@ func TestIssueShowRefusesCustomFieldsOfAShapeTheSpecificationDoesNotGive(t *test
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := `{"$type":"Issue","idReadable":"DEV-1","customFields":` + tc.block + `}`
-			server := serve(t, respondWith(http.StatusOK, body))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "customFields")
+			got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "customFields")
 
 			assert.Equal(t, faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", issueRequest(server.url, "DEV-1", customFieldsFields)},
+					{"request", issueRequest(server.URL, "DEV-1", customFieldsFields)},
 					{"upstream_status", 200},
 					{"upstream_body", body},
 				},
@@ -448,12 +450,12 @@ func TestIssueShowRefusesNamesWrittenUnderTheCustomFieldsOfAnotherIssue(t *testi
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--fields", tc.expression)
+			got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--fields", tc.expression)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }

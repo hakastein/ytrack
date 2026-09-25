@@ -9,6 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const linkListTarget = "idReadable,summary"
@@ -80,12 +82,12 @@ func TestLinkListRefusesACallThatNamesNoOneIssue(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -103,12 +105,12 @@ func TestLinkListRefusesNamesThatExistOnlyOnTheIssueAskedFor(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "link", "list", "DEV-1", "--fields", tc.expression)
+			got := runWith(t, server.Env(), "link", "list", "DEV-1", "--fields", tc.expression)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -125,12 +127,12 @@ func TestLinkRefusesNamesWrittenUnderTheSlotOfATarget(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), append(tc.argv, "--fields", "+links(id)")...)
+			got := runWith(t, server.Env(), append(tc.argv, "--fields", "+links(id)")...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -144,9 +146,9 @@ func TestLinkListPrintsThePhrasesOfAnIssueInTheOrderReceived(t *testing.T) {
 	links[0].issues = []string{targetIssue("DEV-9", "Y"), targetIssue("DEV-2", "X")}
 	links[0], links[2] = links[2], links[0]
 	body := issueLinksResponse(links...)
-	server := serve(t, respondWith(http.StatusOK, body))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-	got := runWith(t, server.env(), "link", "list", "dev-1")
+	got := runWith(t, server.Env(), "link", "list", "dev-1")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
@@ -165,8 +167,8 @@ func TestLinkListPrintsThePhrasesOfAnIssueInTheOrderReceived(t *testing.T) {
 	for _, hidden := range []string{"$type", "42-1t", "42-0", "163-", "INWARD", "BOTH", "issuesSize"} {
 		assert.NotContains(t, got.stdout, hidden)
 	}
-	assert.Equal(t, []string{"/api/issues/dev-1"}, server.sentPaths())
-	assert.Equal(t, []string{linkListFields(linkListTarget)}, server.sentFields())
+	assert.Equal(t, []string{"/api/issues/dev-1"}, server.Paths())
+	assert.Equal(t, []string{linkListFields(linkListTarget)}, server.Fields())
 }
 
 func TestLinkListPrintsNothingOfTheIssueAskedFor(t *testing.T) {
@@ -175,23 +177,23 @@ func TestLinkListPrintsNothingOfTheIssueAskedFor(t *testing.T) {
 		direction: "BOTH", sourceToTarget: "relates to",
 		issues: []string{targetIssue("DEV-2", "Отклонённая задача")},
 	})
-	server := serve(t, respondWith(http.StatusOK, issueLinksResponse(link)))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, issueLinksResponse(link)))
 
-	got := runWith(t, server.env(), "link", "list", "dev-1")
+	got := runWith(t, server.Env(), "link", "list", "dev-1")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, []string{"total", "returned", "truncated", "links"},
 		keysOf(requireMapping(t, "stdout", got.stdout)))
 	assert.NotContains(t, got.stdout, "DEV-1")
-	assert.Equal(t, []string{"/api/issues/dev-1"}, server.sentPaths())
-	assert.Equal(t, []string{linkListFields(linkListTarget)}, server.sentFields())
+	assert.Equal(t, []string{"/api/issues/dev-1"}, server.Paths())
+	assert.Equal(t, []string{linkListFields(linkListTarget)}, server.Fields())
 }
 
 func TestLinkListPrintsAnIssueWithNoLinkAtAll(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, issueLinksResponse(issueLinkEntries()...)))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, issueLinksResponse(issueLinkEntries()...)))
 
-	got := runWith(t, server.env(), "link", "list", "DEV-1")
+	got := runWith(t, server.Env(), "link", "list", "DEV-1")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, []detail{
@@ -213,9 +215,9 @@ func TestLinkListCountsByWhatTheServerSaysAnIssueLinkHas(t *testing.T) {
 	t.Run("more than arrived", func(t *testing.T) {
 		t.Parallel()
 		link := issueLinkEntry{direction: "BOTH", sourceToTarget: "relates to", issues: targets, held: "5"}
-		server := serve(t, respondWith(http.StatusOK, issueLinksResponse(link)))
+		server := fake.Serve(t, fake.JSON(http.StatusOK, issueLinksResponse(link)))
 
-		got := runWith(t, server.env(), "link", "list", "DEV-1")
+		got := runWith(t, server.Env(), "link", "list", "DEV-1")
 
 		require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 		document := requireDocument(t, got.stdout)
@@ -226,9 +228,9 @@ func TestLinkListCountsByWhatTheServerSaysAnIssueLinkHas(t *testing.T) {
 		t.Parallel()
 		link := issueLinkEntry{direction: "BOTH", sourceToTarget: "relates to", issues: targets, held: "1"}
 		body := issueLinksResponse(link)
-		server := serve(t, respondWith(http.StatusOK, body))
+		server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-		got := runWith(t, server.env(), "link", "list", "DEV-1")
+		got := runWith(t, server.Env(), "link", "list", "DEV-1")
 
 		found := requireFault(t, got)
 		assert.Equal(t, "upstream_invalid", found.code)
@@ -238,9 +240,9 @@ func TestLinkListCountsByWhatTheServerSaysAnIssueLinkHas(t *testing.T) {
 	t.Run("no count at all", func(t *testing.T) {
 		t.Parallel()
 		link := issueLinkEntry{direction: "BOTH", sourceToTarget: "relates to", issues: targets, countless: true}
-		server := serve(t, respondWith(http.StatusOK, issueLinksResponse(link)))
+		server := fake.Serve(t, fake.JSON(http.StatusOK, issueLinksResponse(link)))
 
-		got := runWith(t, server.env(), "link", "list", "DEV-1")
+		got := runWith(t, server.Env(), "link", "list", "DEV-1")
 
 		found := requireFault(t, got)
 		assert.Equal(t, "upstream_invalid", found.code)
@@ -251,9 +253,9 @@ func TestLinkListCountsByWhatTheServerSaysAnIssueLinkHas(t *testing.T) {
 	t.Run("a count that is no whole number", func(t *testing.T) {
 		t.Parallel()
 		link := issueLinkEntry{direction: "BOTH", sourceToTarget: "relates to", issues: targets, held: "1.5"}
-		server := serve(t, respondWith(http.StatusOK, issueLinksResponse(link)))
+		server := fake.Serve(t, fake.JSON(http.StatusOK, issueLinksResponse(link)))
 
-		got := runWith(t, server.env(), "link", "list", "DEV-1")
+		got := runWith(t, server.Env(), "link", "list", "DEV-1")
 
 		found := requireFault(t, got)
 		assert.Equal(t, "upstream_invalid", found.code)
@@ -284,9 +286,9 @@ func TestLinkListRefusesLinksTheServerNamesBadly(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(http.StatusOK, issueLinksResponse(tc.links...)))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, issueLinksResponse(tc.links...)))
 
-			got := runWith(t, server.env(), "link", "list", "DEV-1")
+			got := runWith(t, server.Env(), "link", "list", "DEV-1")
 
 			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
@@ -300,12 +302,12 @@ func TestLinkListPrintsTheTextOfATargetOnItsLine(t *testing.T) {
 	target := `{"$type":"Issue","idReadable":"DEV-2","summary":"Отклонённая задача","description":` +
 		strconv.Quote(text) + `}`
 	link := issueLinkEntry{direction: "BOTH", sourceToTarget: "relates to", issues: []string{target}}
-	server := serve(t, respondWith(http.StatusOK, issueLinksResponse(link)))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, issueLinksResponse(link)))
 
-	got := runWith(t, server.env(), "link", "list", "DEV-1", "--fields", "+description")
+	got := runWith(t, server.Env(), "link", "list", "DEV-1", "--fields", "+description")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, []string{linkListFields(linkListTarget + ",description")}, server.sentFields())
+	assert.Equal(t, []string{linkListFields(linkListTarget + ",description")}, server.Fields())
 	record := nodeAt(t, requireMapping(t, "stdout", got.stdout), "links", "relates to")
 	require.Equal(t, yaml.SequenceNode, record.Kind, "stdout: %q", got.stdout)
 	assert.Equal(t, text, nodeAt(t, record.Content[0], "description").Value)

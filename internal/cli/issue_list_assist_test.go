@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const (
@@ -14,10 +16,10 @@ const (
 	greetingUTF16Length = 6
 )
 
-func marking(t *testing.T, assist, rest http.HandlerFunc) *upstream {
+func marking(t *testing.T, assist, rest http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return serve(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == assistPath {
+	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == fake.AssistPath {
 			assist(w, r)
 			return
 		}
@@ -45,10 +47,10 @@ func TestIssueListRefusesASearchThatCannotBeMarkedUp(t *testing.T) {
 		assist http.HandlerFunc
 		code   string
 	}{
-		{name: "a server that failed", assist: respondWith(http.StatusInternalServerError, said), code: "upstream_failed"},
+		{name: "a server that failed", assist: fake.JSON(http.StatusInternalServerError, said), code: "upstream_failed"},
 		{
 			name:   "a token the server will not take",
-			assist: respondWith(http.StatusUnauthorized, `{"error":"Unauthorized","error_description":"Not authorized"}`),
+			assist: fake.JSON(http.StatusUnauthorized, `{"error":"Unauthorized","error_description":"Not authorized"}`),
 			code:   "denied",
 		},
 		{name: "a page in place of an answer", assist: proxySignInPage, code: "upstream_invalid"},
@@ -59,7 +61,7 @@ func TestIssueListRefusesASearchThatCannotBeMarkedUp(t *testing.T) {
 			t.Parallel()
 			server := marking(t, tc.assist, notAsked(t))
 
-			got := runWith(t, server.env(), "issue", "list", "--query", "project: DEV")
+			got := runWith(t, server.Env(), "issue", "list", "--query", "project: DEV")
 
 			assert.Equal(t, tc.code, requireFault(t, got).code)
 			requireMarkedUpFirst(t, server, "project: DEV")
@@ -90,14 +92,14 @@ func TestIssueListRefusesAMarkupShortOfWhatItAskedFor(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := marking(t, respondWith(http.StatusOK, tc.marked), notAsked(t))
+			server := marking(t, fake.JSON(http.StatusOK, tc.marked), notAsked(t))
 
-			got := runWith(t, server.env(), "issue", "list", "--query", "project: DEV")
+			got := runWith(t, server.Env(), "issue", "list", "--query", "project: DEV")
 
 			want := faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", "POST " + server.url + assistPath + "?fields=" + markupFields},
+					{"request", "POST " + server.URL + fake.AssistPath + "?fields=" + markupFields},
 					{"fields", markupFields},
 					{"missing", []any{tc.missing}},
 				},
@@ -117,28 +119,28 @@ func TestIssueListRefusesAMarkupThatDoesNotFitTheSearch(t *testing.T) {
 	}{
 		{
 			name:   "a range that ends where the text ends",
-			marked: markup(t, markedSearch, styled(greetingUTF16Start, greetingUTF16Length, "text")),
+			marked: fake.Markup(t, markedSearch, fake.StyleRange(greetingUTF16Start, greetingUTF16Length, "text")),
 			fits:   true,
 		},
 		{
 			name:   "a range that runs past the end",
-			marked: markup(t, markedSearch, styled(greetingUTF16Start+1, greetingUTF16Length, "text")),
+			marked: fake.Markup(t, markedSearch, fake.StyleRange(greetingUTF16Start+1, greetingUTF16Length, "text")),
 		},
 		{
 			name:   "a range that begins before the start",
-			marked: markup(t, markedSearch, styled(-1, greetingUTF16Length, "text")),
+			marked: fake.Markup(t, markedSearch, fake.StyleRange(-1, greetingUTF16Length, "text")),
 		},
 		{
 			name:   "a search that came back with a space of its own",
-			marked: markup(t, markedSearch+" ", styled(greetingUTF16Start, greetingUTF16Length, "text")),
+			marked: fake.Markup(t, markedSearch+" ", fake.StyleRange(greetingUTF16Start, greetingUTF16Length, "text")),
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := marking(t, respondWith(http.StatusOK, tc.marked), respondWith(http.StatusOK, `[`+listedDEV1()+`]`))
+			server := marking(t, fake.JSON(http.StatusOK, tc.marked), fake.JSON(http.StatusOK, `[`+listedDEV1()+`]`))
 
-			got := runWith(t, server.env(), "issue", "list", "--query", markedSearch)
+			got := runWith(t, server.Env(), "issue", "list", "--query", markedSearch)
 
 			requireMarkedUpFirst(t, server, markedSearch)
 			if tc.fits {
@@ -168,23 +170,23 @@ func TestIssueListRefusesAMarkupOfAShapeItCannotRead(t *testing.T) {
 		{name: "a range that is no object at all", marked: `{"$type":"SearchSuggestions","query":"State: Opne","styleRanges":[null]}`},
 		{
 			name:   "where a range begins written as text",
-			marked: markup(t, search, `{"$type":"SearchStyleRange","start":"0","length":5,"style":"field-name"}`),
+			marked: fake.Markup(t, search, `{"$type":"SearchStyleRange","start":"0","length":5,"style":"field-name"}`),
 		},
 		{
 			name:   "how far a range runs on written as a fraction",
-			marked: markup(t, search, `{"$type":"SearchStyleRange","start":0,"length":1.5,"style":"field-name"}`),
+			marked: fake.Markup(t, search, `{"$type":"SearchStyleRange","start":0,"length":1.5,"style":"field-name"}`),
 		},
 		{
 			name:   "a range of no style",
-			marked: markup(t, search, `{"$type":"SearchStyleRange","start":0,"length":5,"style":null}`),
+			marked: fake.Markup(t, search, `{"$type":"SearchStyleRange","start":0,"length":5,"style":null}`),
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := marking(t, respondWith(http.StatusOK, tc.marked), notAsked(t))
+			server := marking(t, fake.JSON(http.StatusOK, tc.marked), notAsked(t))
 
-			got := runWith(t, server.env(), "issue", "list", "--query", search)
+			got := runWith(t, server.Env(), "issue", "list", "--query", search)
 
 			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)

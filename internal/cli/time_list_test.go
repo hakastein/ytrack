@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const sentWorkItemFields = "id,duration(minutes),type(name),attributes(id,name,value(id,name)),author(login),date,text"
@@ -53,7 +55,7 @@ func countedWorkItems(records string, count http.HandlerFunc) http.HandlerFunc {
 			count(w, r)
 			return
 		}
-		respondWith(http.StatusOK, records)(w, r)
+		fake.JSON(http.StatusOK, records)(w, r)
 	}
 }
 
@@ -89,25 +91,25 @@ func TestTimeListRefusesWhatItCannotSend(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
 
 func TestTimeListAsksTheWorkItemsOfTheIssueInOneRequest(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, "["+listedWorkItem+","+listedSecondWorkItem+"]"))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, "["+listedWorkItem+","+listedSecondWorkItem+"]"))
 
-	got := runWith(t, server.env(), "time", "list", "DEV-1")
+	got := runWith(t, server.Env(), "time", "list", "DEV-1")
 
 	want := "total: 2\nreturned: 2\ntruncated: false\nworkItems:\n" + printedWorkItemRow + printedSecondRow
 	assert.Equal(t, outcome{stdout: want}, got)
-	requests := server.requests()
+	requests := server.Requests()
 	require.Len(t, requests, 1)
 	assert.Equal(t, http.MethodGet, requests[0].Method)
 	assert.Equal(t, workItemsPath("DEV-1"), requests[0].URL.Path)
@@ -140,9 +142,9 @@ func TestTimeListPrintsTheTextOfAWorkItemOnOneLine(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := `[{"$type":"IssueWorkItem","id":"199-6","author":null,"text":` + tc.received + `}]`
-			server := serve(t, respondWith(http.StatusOK, body))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-			got := runWith(t, server.env(), "time", "list", "DEV-1", "--fields", "id,author(login),text")
+			got := runWith(t, server.Env(), "time", "list", "DEV-1", "--fields", "id,author(login),text")
 
 			want := "total: 1\nreturned: 1\ntruncated: false\nworkItems:\n" +
 				`  - {id: "199-6", author: null, text: ` + tc.want + "}\n"
@@ -155,9 +157,9 @@ func TestTimeListKeepsEveryByteOfTheTextOfAWorkItem(t *testing.T) {
 	t.Parallel()
 	const written = "первая\nвторая\rтретья\xe2\x80\xa8четвёртая"
 	body := "[{\"$type\":\"IssueWorkItem\",\"id\":\"199-6\",\"text\":\"первая\\nвторая\\rтретья\xe2\x80\xa8четвёртая\"}]"
-	server := serve(t, respondWith(http.StatusOK, body))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-	got := runWith(t, server.env(), "time", "list", "DEV-1", "--fields", "id,text")
+	got := runWith(t, server.Env(), "time", "list", "DEV-1", "--fields", "id,text")
 
 	printed := requireWorkItemListing(t, got)
 	require.Len(t, printed.WorkItems, 1)
@@ -169,25 +171,25 @@ func TestTimeListCountsTheWorkItemsWhenTheyFillTheLimit(t *testing.T) {
 	t.Parallel()
 	const found = `[{"id":"199-6","$type":"IssueWorkItem"},{"id":"199-7","$type":"IssueWorkItem"},` +
 		`{"id":"199-8","$type":"IssueWorkItem"}]`
-	server := serve(t, countedWorkItems("["+listedWorkItem+","+listedSecondWorkItem+"]", respondWith(http.StatusOK, found)))
+	server := fake.Serve(t, countedWorkItems("["+listedWorkItem+","+listedSecondWorkItem+"]", fake.JSON(http.StatusOK, found)))
 
-	got := runWith(t, server.env(), "time", "list", "DEV-1", "--limit", "2")
+	got := runWith(t, server.Env(), "time", "list", "DEV-1", "--limit", "2")
 
 	want := "total: 3\nreturned: 2\ntruncated: true\nworkItems:\n" + printedWorkItemRow + printedSecondRow
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, listingWorkItems("2"), server.sentQueries())
-	assert.Equal(t, []string{workItemsPath("DEV-1"), workItemsPath("DEV-1")}, server.sentPaths())
+	assert.Equal(t, listingWorkItems("2"), server.Queries())
+	assert.Equal(t, []string{workItemsPath("DEV-1"), workItemsPath("DEV-1")}, server.Paths())
 }
 
 func TestTimeListCountsNothingWhenThePageIsShortOfTheLimit(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, "["+listedWorkItem+"]"))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, "["+listedWorkItem+"]"))
 
-	got := runWith(t, server.env(), "time", "list", "DEV-1", "--limit", "2")
+	got := runWith(t, server.Env(), "time", "list", "DEV-1", "--limit", "2")
 
 	want := "total: 1\nreturned: 1\ntruncated: false\nworkItems:\n" + printedWorkItemRow
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Len(t, server.requests(), 1)
+	assert.Len(t, server.Requests(), 1)
 }
 
 func TestTimeListRefusesWhenTheCountDoesNotMatch(t *testing.T) {
@@ -199,7 +201,7 @@ func TestTimeListRefusesWhenTheCountDoesNotMatch(t *testing.T) {
 	}{
 		{
 			name:  "a count of none over a page of one",
-			count: respondWith(http.StatusOK, "[]"),
+			count: fake.JSON(http.StatusOK, "[]"),
 			want: faultDocument{
 				code:    "upstream_failed",
 				details: []detail{{"total", 0}, {"returned", 1}},
@@ -207,7 +209,7 @@ func TestTimeListRefusesWhenTheCountDoesNotMatch(t *testing.T) {
 		},
 		{
 			name:  "a server that failed the count",
-			count: respondWith(http.StatusInternalServerError, `{"error":"server_error","error_description":"java.lang.NullPointerException"}`),
+			count: fake.JSON(http.StatusInternalServerError, `{"error":"server_error","error_description":"java.lang.NullPointerException"}`),
 			want: faultDocument{
 				code: "upstream_failed",
 				details: []detail{
@@ -222,34 +224,34 @@ func TestTimeListRefusesWhenTheCountDoesNotMatch(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, countedWorkItems("["+listedWorkItem+"]", tc.count))
+			server := fake.Serve(t, countedWorkItems("["+listedWorkItem+"]", tc.count))
 
-			got := runWith(t, server.env(), "time", "list", "DEV-1", "--limit", "1")
+			got := runWith(t, server.Env(), "time", "list", "DEV-1", "--limit", "1")
 
 			want := tc.want
 			for i, printed := range want.details {
 				if printed.key == "request" {
-					want.details[i].value = "GET " + server.url + workItemsPath("DEV-1") + "?fields=id&$top=-1"
+					want.details[i].value = "GET " + server.URL + workItemsPath("DEV-1") + "?fields=id&$top=-1"
 				}
 			}
 			assert.Equal(t, want, requireFault(t, got))
-			assert.Len(t, server.requests(), 2)
+			assert.Len(t, server.Requests(), 2)
 		})
 	}
 }
 
 func TestTimeListRefusesMoreWorkItemsThanTheLimit(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, "["+listedWorkItem+","+listedSecondWorkItem+"]"))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, "["+listedWorkItem+","+listedSecondWorkItem+"]"))
 
-	got := runWith(t, server.env(), "time", "list", "DEV-1", "--limit", "1")
+	got := runWith(t, server.Env(), "time", "list", "DEV-1", "--limit", "1")
 
 	want := faultDocument{
 		code:    "upstream_invalid",
 		details: []detail{{"limit", 1}, {"returned", 2}},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, server.requests(), 1)
+	assert.Len(t, server.Requests(), 1)
 }
 
 func TestTimeListPrintsTheSameDocumentHoweverManyWereReceived(t *testing.T) {
@@ -288,13 +290,13 @@ func TestTimeListPrintsTheSameDocumentHoweverManyWereReceived(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, func(w http.ResponseWriter, _ *http.Request) {
+			server := fake.Serve(t, func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", tc.contentType)
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write([]byte(tc.body))
 			})
 
-			got := runWith(t, server.env(), "time", "list", "DEV-1")
+			got := runWith(t, server.Env(), "time", "list", "DEV-1")
 
 			if tc.refused {
 				found := requireFault(t, got)
@@ -329,12 +331,12 @@ func TestTimeRefusesTheNamesUnderABlockOfTheIssue(t *testing.T) {
 		for _, tc := range written {
 			t.Run(subcommand.name+", "+tc.name, func(t *testing.T) {
 				t.Parallel()
-				server := serveNothing(t)
+				server := fake.ServeNothing(t)
 
-				got := runWith(t, server.env(), slices.Concat(subcommand.argv, []string{"--fields", tc.expression})...)
+				got := runWith(t, server.Env(), slices.Concat(subcommand.argv, []string{"--fields", tc.expression})...)
 
 				assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-				assert.Empty(t, server.requests())
+				assert.Empty(t, server.Requests())
 			})
 		}
 	}
@@ -342,13 +344,13 @@ func TestTimeRefusesTheNamesUnderABlockOfTheIssue(t *testing.T) {
 
 func TestTimeListAsksTheIssuesOfALinkSlotOfTheIssue(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, "[]"))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, "[]"))
 
-	got := runWith(t, server.env(), "time", "list", "DEV-1", "--fields", "issue(links(issues(idReadable)))")
+	got := runWith(t, server.Env(), "time", "list", "DEV-1", "--fields", "issue(links(issues(idReadable)))")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, []string{"issue(links(issues(idReadable),direction,linkType(sourceToTarget,targetToSource)))"},
-		server.sentFields())
+		server.Fields())
 }
 
 func TestTimeListRefusesAnExpressionItCannotSend(t *testing.T) {
@@ -363,12 +365,12 @@ func TestTimeListRefusesAnExpressionItCannotSend(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), slices.Concat([]string{"time", "list", "DEV-1"}, tc.flags)...)
+			got := runWith(t, server.Env(), slices.Concat([]string{"time", "list", "DEV-1"}, tc.flags)...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }

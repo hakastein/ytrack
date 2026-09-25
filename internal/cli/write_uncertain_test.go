@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/hakastein/ytrack/internal/cli"
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const gatewayPage = "<html><head><title>Bad Gateway</title></head><body>The server is not answering</body></html>"
@@ -48,29 +49,29 @@ func runInContext(t *testing.T, ctx context.Context, env []string, argv ...strin
 
 func TestIssueDeleteIsUncertainWhereTheAnswerNeverCame(t *testing.T) {
 	t.Parallel()
-	server := deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), breakOff)
+	server := deleting(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), breakOff)
 
-	got := runWith(t, server.env(), "issue", "delete", "DEV-7")
+	got := runWith(t, server.Env(), "issue", "delete", "DEV-7")
 
 	found := requireUncertainty(t, got)
 	assert.Equal(t, "write_uncertain", found.code)
-	assert.Equal(t, []detail{{"request", deletionRequest(server.url)}}, found.details)
+	assert.Equal(t, []detail{{"request", deletionRequest(server.URL)}}, found.details)
 	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
 }
 
 func TestIssueDeleteFailsWhereTheDeletionNeverLeft(t *testing.T) {
 	t.Parallel()
-	var server *upstream
-	server = serveWithoutKeepAlive(t, readThenDeletion(func(w http.ResponseWriter, r *http.Request) {
-		server.stopListening(t)
-		respondWith(http.StatusOK, issueNamed("DEV-7"))(w, r)
+	var server *fake.Server
+	server = fake.ServeAlone(t, readThenDeletion(func(w http.ResponseWriter, r *http.Request) {
+		server.StopListening(t)
+		fake.JSON(http.StatusOK, issueNamed("DEV-7"))(w, r)
 	}, noDeletion(t)))
 
-	got := runWith(t, server.env(), "issue", "delete", "DEV-7")
+	got := runWith(t, server.Env(), "issue", "delete", "DEV-7")
 
 	found := requireFault(t, got)
 	assert.Equal(t, "upstream_failed", found.code)
-	assert.Equal(t, []detail{{"request", deletionRequest(server.url)}}, found.details)
+	assert.Equal(t, []detail{{"request", deletionRequest(server.URL)}}, found.details)
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 }
 
@@ -87,7 +88,7 @@ func TestIssueDeleteClassifiesACancelledCallByWhetherTheRequestWasSent(t *testin
 		{
 			name: "the deletion is held",
 			held: func(_ *testing.T, reached chan<- struct{}) (http.HandlerFunc, http.HandlerFunc) {
-				return respondWith(http.StatusOK, issueNamed("DEV-7")), blockingHandler(reached)
+				return fake.JSON(http.StatusOK, issueNamed("DEV-7")), blockingHandler(reached)
 			},
 			code:    "write_uncertain",
 			exit:    2,
@@ -115,11 +116,11 @@ func TestIssueDeleteClassifiesACancelledCallByWhetherTheRequestWasSent(t *testin
 			defer cancel()
 			go cancelOnceReached(reached, cancel)
 
-			got := runInContext(t, ctx, server.env(), "issue", "delete", "DEV-7")
+			got := runInContext(t, ctx, server.Env(), "issue", "delete", "DEV-7")
 
 			want := faultDocument{
 				code:    tc.code,
-				details: []detail{{"request", tc.request(server.url)}},
+				details: []detail{{"request", tc.request(server.URL)}},
 			}
 			assert.Equal(t, want, requireFaultDocument(t, got))
 			assert.Equal(t, tc.exit, got.code)
@@ -158,7 +159,7 @@ func TestIssueDeleteReadsA5xxByWhoWroteIt(t *testing.T) {
 		{
 			name:     "YouTrack itself",
 			status:   http.StatusInternalServerError,
-			deletion: respondWith(http.StatusInternalServerError, failed),
+			deletion: fake.JSON(http.StatusInternalServerError, failed),
 			code:     "upstream_failed",
 			exit:     1,
 			details: []detail{
@@ -170,15 +171,15 @@ func TestIssueDeleteReadsA5xxByWhoWroteIt(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), tc.deletion)
+			server := deleting(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), tc.deletion)
 
-			got := runWith(t, server.env(), "issue", "delete", "DEV-7")
+			got := runWith(t, server.Env(), "issue", "delete", "DEV-7")
 
 			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
 			want := append([]detail{
-				{"request", deletionRequest(server.url)},
+				{"request", deletionRequest(server.URL)},
 				{"upstream_status", tc.status},
 			}, tc.details...)
 			assert.Equal(t, want, found.details)
@@ -190,18 +191,18 @@ func TestIssueDeleteReadsA5xxByWhoWroteIt(t *testing.T) {
 func TestIssueDeleteIsUncertainWhereTheAnswerBreaksOff(t *testing.T) {
 	t.Parallel()
 	const sent = "abc"
-	server := deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), func(w http.ResponseWriter, _ *http.Request) {
+	server := deleting(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Length", strconv.Itoa(len(sent)+7))
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, sent)
 	})
 
-	got := runWith(t, server.env(), "issue", "delete", "DEV-7")
+	got := runWith(t, server.Env(), "issue", "delete", "DEV-7")
 
 	want := faultDocument{
 		code: "write_uncertain",
 		details: []detail{
-			{"request", deletionRequest(server.url)},
+			{"request", deletionRequest(server.URL)},
 			{"upstream_status", 200},
 			{"upstream_body", sent},
 		},
@@ -213,66 +214,66 @@ func TestIssueDeleteIsUncertainWhereTheAnswerBreaksOff(t *testing.T) {
 func TestIssueUpdateClassifiesALostResponseByWhetherTheWriteWasSent(t *testing.T) {
 	t.Parallel()
 	project := projectResponse(writableField{id: "180-15", name: "Type", valueType: "enum", canBeEmpty: true})
-	read := respondWith(http.StatusOK, issueToUpdate("DEV-7", project))
+	read := fake.JSON(http.StatusOK, issueToUpdate("DEV-7", project))
 
 	t.Run("the answer to the write never came", func(t *testing.T) {
 		t.Parallel()
 		server := updating(t, read, breakOff)
 
-		got := runWith(t, server.env(), "issue", "update", "DEV-7", "--field", "Type=Task")
+		got := runWith(t, server.Env(), "issue", "update", "DEV-7", "--field", "Type=Task")
 
 		found := requireUncertainty(t, got)
 		assert.Equal(t, "write_uncertain", found.code)
-		assert.Equal(t, detail{"request", updateRequest(server.url, "DEV-7", askedIssueFields)}, found.details[0])
+		assert.Equal(t, detail{"request", updateRequest(server.URL, "DEV-7", askedIssueFields)}, found.details[0])
 		assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
 	})
 	t.Run("the write never left", func(t *testing.T) {
 		t.Parallel()
-		var server *upstream
-		server = serveWithoutKeepAlive(t, readThenUpdate(func(w http.ResponseWriter, r *http.Request) {
-			server.stopListening(t)
+		var server *fake.Server
+		server = fake.ServeAlone(t, readThenUpdate(func(w http.ResponseWriter, r *http.Request) {
+			server.StopListening(t)
 			read(w, r)
 		}, noUpdate(t)))
 
-		got := runWith(t, server.env(), "issue", "update", "DEV-7", "--field", "Type=Task")
+		got := runWith(t, server.Env(), "issue", "update", "DEV-7", "--field", "Type=Task")
 
 		found := requireFault(t, got)
 		assert.Equal(t, "upstream_failed", found.code)
-		assert.Equal(t, []detail{{"request", updateRequest(server.url, "DEV-7", askedIssueFields)}}, found.details)
+		assert.Equal(t, []detail{{"request", updateRequest(server.URL, "DEV-7", askedIssueFields)}}, found.details)
 		assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 	})
 }
 
 func TestArticleDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 	t.Parallel()
-	read := respondWith(http.StatusOK, articleNamed("DEV-A-7"))
+	read := fake.JSON(http.StatusOK, articleNamed("DEV-A-7"))
 	tests := []struct {
 		name    string
-		server  func(t *testing.T) *upstream
+		server  func(t *testing.T) *fake.Server
 		code    string
 		exit    int
 		methods []string
 	}{
 		{
 			name:    "the answer never came",
-			server:  func(t *testing.T) *upstream { return deleting(t, read, breakOff) },
+			server:  func(t *testing.T) *fake.Server { return deleting(t, read, breakOff) },
 			code:    "write_uncertain",
 			exit:    2,
 			methods: []string{http.MethodGet, http.MethodDelete},
 		},
 		{
 			name:    "a gateway answered a page under a 502",
-			server:  func(t *testing.T) *upstream { return deleting(t, read, gateway(http.StatusBadGateway)) },
+			server:  func(t *testing.T) *fake.Server { return deleting(t, read, gateway(http.StatusBadGateway)) },
 			code:    "write_uncertain",
 			exit:    2,
 			methods: []string{http.MethodGet, http.MethodDelete},
 		},
 		{
 			name: "the deletion never left",
-			server: func(t *testing.T) *upstream {
-				var server *upstream
-				server = serveWithoutKeepAlive(t, readThenDeletion(func(w http.ResponseWriter, r *http.Request) {
-					server.stopListening(t)
+			server: func(t *testing.T) *fake.Server {
+				var server *fake.Server
+				server = fake.ServeAlone(t, readThenDeletion(func(w http.ResponseWriter, r *http.Request) {
+					server.StopListening(t)
 					read(w, r)
 				}, noDeletion(t)))
 				return server
@@ -287,12 +288,12 @@ func TestArticleDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 			t.Parallel()
 			server := tc.server(t)
 
-			got := runWith(t, server.env(), "article", "delete", "DEV-A-7")
+			got := runWith(t, server.Env(), "article", "delete", "DEV-A-7")
 
 			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
-			assert.Equal(t, detail{"request", articleDeletionRequest(server.url, "DEV-A-7")}, found.details[0])
+			assert.Equal(t, detail{"request", articleDeletionRequest(server.URL, "DEV-A-7")}, found.details[0])
 			assert.Equal(t, tc.methods, sentMethods(server))
 		})
 	}
@@ -302,36 +303,30 @@ func TestCommentCreateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
-		server  func(t *testing.T) *upstream
+		server  func(t *testing.T) *fake.Server
 		code    string
 		exit    int
 		methods []string
 	}{
 		{
 			name:    "the answer never came",
-			server:  func(t *testing.T) *upstream { return commenting(t, breakOff) },
+			server:  func(t *testing.T) *fake.Server { return commenting(t, breakOff) },
 			code:    "write_uncertain",
 			exit:    2,
 			methods: []string{http.MethodPost},
 		},
 		{
 			name:    "a gateway answered a page under a 502",
-			server:  func(t *testing.T) *upstream { return commenting(t, gateway(http.StatusBadGateway)) },
+			server:  func(t *testing.T) *fake.Server { return commenting(t, gateway(http.StatusBadGateway)) },
 			code:    "write_uncertain",
 			exit:    2,
 			methods: []string{http.MethodPost},
 		},
 		{
-			name: "the write never left",
-			server: func(t *testing.T) *upstream {
-				server := commenting(t, func(_ http.ResponseWriter, r *http.Request) {
-					assert.Fail(t, "a request reached the server", "%s %s", r.Method, r.URL)
-				})
-				server.stopListening(t)
-				return server
-			},
-			code: "upstream_failed",
-			exit: 1,
+			name:   "the write never left",
+			server: func(*testing.T) *fake.Server { return fake.Unreachable() },
+			code:   "upstream_failed",
+			exit:   1,
 		},
 	}
 	for _, tc := range tests {
@@ -339,12 +334,12 @@ func TestCommentCreateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 			t.Parallel()
 			server := tc.server(t)
 
-			got := runWith(t, server.env(), "comment", "create", "DEV-7", "--text", "x")
+			got := runWith(t, server.Env(), "comment", "create", "DEV-7", "--text", "x")
 
 			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
-			assert.Equal(t, detail{"request", issueCommentRequest(server.url, "DEV-7", writtenCommentFields)},
+			assert.Equal(t, detail{"request", issueCommentRequest(server.URL, "DEV-7", writtenCommentFields)},
 				found.details[0])
 			assert.Equal(t, tc.methods, sentMethods(server))
 		})
@@ -355,36 +350,30 @@ func TestTimeCreateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
-		server  func(t *testing.T) *upstream
+		server  func(t *testing.T) *fake.Server
 		code    string
 		exit    int
 		methods []string
 	}{
 		{
 			name:    "the answer never came",
-			server:  func(t *testing.T) *upstream { return writingTime(t, breakOff) },
+			server:  func(t *testing.T) *fake.Server { return writingTime(t, breakOff) },
 			code:    "write_uncertain",
 			exit:    2,
 			methods: []string{http.MethodPost},
 		},
 		{
 			name:    "a gateway answered a page under a 502",
-			server:  func(t *testing.T) *upstream { return writingTime(t, gateway(http.StatusBadGateway)) },
+			server:  func(t *testing.T) *fake.Server { return writingTime(t, gateway(http.StatusBadGateway)) },
 			code:    "write_uncertain",
 			exit:    2,
 			methods: []string{http.MethodPost},
 		},
 		{
-			name: "the write never left",
-			server: func(t *testing.T) *upstream {
-				server := writingTime(t, func(_ http.ResponseWriter, r *http.Request) {
-					assert.Fail(t, "a request reached the server", "%s %s", r.Method, r.URL)
-				})
-				server.stopListening(t)
-				return server
-			},
-			code: "upstream_failed",
-			exit: 1,
+			name:   "the write never left",
+			server: func(*testing.T) *fake.Server { return fake.Unreachable() },
+			code:   "upstream_failed",
+			exit:   1,
 		},
 	}
 	for _, tc := range tests {
@@ -392,12 +381,12 @@ func TestTimeCreateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 			t.Parallel()
 			server := tc.server(t)
 
-			got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M")
+			got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H30M")
 
 			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
-			assert.Equal(t, detail{"request", workItemWriteRequest(server.url, "DEV-1", sentWorkItemWriteFields)},
+			assert.Equal(t, detail{"request", workItemWriteRequest(server.URL, "DEV-1", sentWorkItemWriteFields)},
 				found.details[0])
 			assert.Equal(t, tc.methods, sentMethods(server))
 		})
@@ -408,36 +397,30 @@ func TestTimeUpdateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
-		server  func(t *testing.T) *upstream
+		server  func(t *testing.T) *fake.Server
 		code    string
 		exit    int
 		methods []string
 	}{
 		{
 			name:    "the answer never came",
-			server:  func(t *testing.T) *upstream { return writingTime(t, breakOff) },
+			server:  func(t *testing.T) *fake.Server { return writingTime(t, breakOff) },
 			code:    "write_uncertain",
 			exit:    2,
 			methods: []string{http.MethodPost},
 		},
 		{
 			name:    "a gateway answered a page under a 502",
-			server:  func(t *testing.T) *upstream { return writingTime(t, gateway(http.StatusBadGateway)) },
+			server:  func(t *testing.T) *fake.Server { return writingTime(t, gateway(http.StatusBadGateway)) },
 			code:    "write_uncertain",
 			exit:    2,
 			methods: []string{http.MethodPost},
 		},
 		{
-			name: "the write never left",
-			server: func(t *testing.T) *upstream {
-				server := writingTime(t, func(_ http.ResponseWriter, r *http.Request) {
-					assert.Fail(t, "a request reached the server", "%s %s", r.Method, r.URL)
-				})
-				server.stopListening(t)
-				return server
-			},
-			code: "upstream_failed",
-			exit: 1,
+			name:   "the write never left",
+			server: func(*testing.T) *fake.Server { return fake.Unreachable() },
+			code:   "upstream_failed",
+			exit:   1,
 		},
 	}
 	for _, tc := range tests {
@@ -445,13 +428,13 @@ func TestTimeUpdateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 			t.Parallel()
 			server := tc.server(t)
 
-			got := runWith(t, server.env(), "time", "update", "DEV-1", "199-6", "--text", "x")
+			got := runWith(t, server.Env(), "time", "update", "DEV-1", "199-6", "--text", "x")
 
 			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
 			assert.Equal(t, detail{"request",
-				workItemUpdateRequest(server.url, "DEV-1", "199-6", sentWorkItemWriteFields)}, found.details[0])
+				workItemUpdateRequest(server.URL, "DEV-1", "199-6", sentWorkItemWriteFields)}, found.details[0])
 			assert.Equal(t, tc.methods, sentMethods(server))
 		})
 	}
@@ -459,10 +442,10 @@ func TestTimeUpdateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 
 func TestTimeDeleteExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 	t.Parallel()
-	read := respondWith(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1"))
+	read := fake.JSON(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1"))
 	tests := []struct {
 		name    string
-		server  func(t *testing.T) *upstream
+		server  func(t *testing.T) *fake.Server
 		code    string
 		exit    int
 		request func(address string) string
@@ -470,7 +453,7 @@ func TestTimeDeleteExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 	}{
 		{
 			name:   "the answer to the removal never came",
-			server: func(t *testing.T) *upstream { return removingTime(t, read, breakOff) },
+			server: func(t *testing.T) *fake.Server { return removingTime(t, read, breakOff) },
 			code:   "write_uncertain",
 			exit:   2,
 			request: func(address string) string {
@@ -480,7 +463,7 @@ func TestTimeDeleteExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 		},
 		{
 			name:   "a gateway answered a page under a 502",
-			server: func(t *testing.T) *upstream { return removingTime(t, read, gateway(http.StatusBadGateway)) },
+			server: func(t *testing.T) *fake.Server { return removingTime(t, read, gateway(http.StatusBadGateway)) },
 			code:   "write_uncertain",
 			exit:   2,
 			request: func(address string) string {
@@ -490,10 +473,10 @@ func TestTimeDeleteExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 		},
 		{
 			name: "the removal never left",
-			server: func(t *testing.T) *upstream {
-				var server *upstream
-				server = serveWithoutKeepAlive(t, readThenDeletion(func(w http.ResponseWriter, r *http.Request) {
-					server.stopListening(t)
+			server: func(t *testing.T) *fake.Server {
+				var server *fake.Server
+				server = fake.ServeAlone(t, readThenDeletion(func(w http.ResponseWriter, r *http.Request) {
+					server.StopListening(t)
 					read(w, r)
 				}, noDeletion(t)))
 				return server
@@ -507,7 +490,7 @@ func TestTimeDeleteExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 		},
 		{
 			name:   "the answer to the read never came",
-			server: func(t *testing.T) *upstream { return removingTime(t, breakOff, noDeletion(t)) },
+			server: func(t *testing.T) *fake.Server { return removingTime(t, breakOff, noDeletion(t)) },
 			code:   "upstream_failed",
 			exit:   1,
 			request: func(address string) string {
@@ -521,12 +504,12 @@ func TestTimeDeleteExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 			t.Parallel()
 			server := tc.server(t)
 
-			got := runWith(t, server.env(), "time", "delete", "DEV-1", "199-7")
+			got := runWith(t, server.Env(), "time", "delete", "DEV-1", "199-7")
 
 			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
-			assert.Equal(t, detail{"request", tc.request(server.url)}, found.details[0])
+			assert.Equal(t, detail{"request", tc.request(server.URL)}, found.details[0])
 			assert.Equal(t, tc.methods, sentMethods(server))
 		})
 	}
@@ -534,10 +517,10 @@ func TestTimeDeleteExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 
 func TestCommentUpdateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 	t.Parallel()
-	read := respondWith(http.StatusOK, commentDeletedState(false))
+	read := fake.JSON(http.StatusOK, commentDeletedState(false))
 	tests := []struct {
 		name    string
-		server  func(t *testing.T) *upstream
+		server  func(t *testing.T) *fake.Server
 		code    string
 		exit    int
 		request func(address string) string
@@ -545,7 +528,7 @@ func TestCommentUpdateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 	}{
 		{
 			name:   "the answer to the write never came",
-			server: func(t *testing.T) *upstream { return updatingAComment(t, read, breakOff) },
+			server: func(t *testing.T) *fake.Server { return updatingAComment(t, read, breakOff) },
 			code:   "write_uncertain",
 			exit:   2,
 			request: func(address string) string {
@@ -555,10 +538,10 @@ func TestCommentUpdateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 		},
 		{
 			name: "the write never left",
-			server: func(t *testing.T) *upstream {
-				var server *upstream
-				server = serveWithoutKeepAlive(t, readThenUpdate(func(w http.ResponseWriter, r *http.Request) {
-					server.stopListening(t)
+			server: func(t *testing.T) *fake.Server {
+				var server *fake.Server
+				server = fake.ServeAlone(t, readThenUpdate(func(w http.ResponseWriter, r *http.Request) {
+					server.StopListening(t)
 					read(w, r)
 				}, noUpdate(t)))
 				return server
@@ -572,7 +555,7 @@ func TestCommentUpdateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 		},
 		{
 			name:    "the answer to the read never came",
-			server:  func(t *testing.T) *upstream { return updatingAComment(t, breakOff, noUpdate(t)) },
+			server:  func(t *testing.T) *fake.Server { return updatingAComment(t, breakOff, noUpdate(t)) },
 			code:    "upstream_failed",
 			exit:    1,
 			request: func(address string) string { return commentReadRequest(address, "DEV-7", "7-12") },
@@ -584,12 +567,12 @@ func TestCommentUpdateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 			t.Parallel()
 			server := tc.server(t)
 
-			got := runWith(t, server.env(), "comment", "update", "DEV-7", "7-12", "--text", "x")
+			got := runWith(t, server.Env(), "comment", "update", "DEV-7", "7-12", "--text", "x")
 
 			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
-			assert.Equal(t, detail{"request", tc.request(server.url)}, found.details[0])
+			assert.Equal(t, detail{"request", tc.request(server.URL)}, found.details[0])
 			assert.Equal(t, tc.methods, sentMethods(server))
 		})
 	}
@@ -599,36 +582,30 @@ func TestCommentDeleteExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
-		server  func(t *testing.T) *upstream
+		server  func(t *testing.T) *fake.Server
 		code    string
 		exit    int
 		methods []string
 	}{
 		{
 			name:    "the answer never came",
-			server:  func(t *testing.T) *upstream { return removingAComment(t, breakOff) },
+			server:  func(t *testing.T) *fake.Server { return removingAComment(t, breakOff) },
 			code:    "write_uncertain",
 			exit:    2,
 			methods: []string{http.MethodDelete},
 		},
 		{
 			name:    "a gateway answered a page under a 502",
-			server:  func(t *testing.T) *upstream { return removingAComment(t, gateway(http.StatusBadGateway)) },
+			server:  func(t *testing.T) *fake.Server { return removingAComment(t, gateway(http.StatusBadGateway)) },
 			code:    "write_uncertain",
 			exit:    2,
 			methods: []string{http.MethodDelete},
 		},
 		{
-			name: "the removal never left",
-			server: func(t *testing.T) *upstream {
-				server := removingAComment(t, func(_ http.ResponseWriter, r *http.Request) {
-					assert.Fail(t, "a request reached the server", "%s %s", r.Method, r.URL)
-				})
-				server.stopListening(t)
-				return server
-			},
-			code: "upstream_failed",
-			exit: 1,
+			name:   "the removal never left",
+			server: func(*testing.T) *fake.Server { return fake.Unreachable() },
+			code:   "upstream_failed",
+			exit:   1,
 		},
 	}
 	for _, tc := range tests {
@@ -636,12 +613,12 @@ func TestCommentDeleteExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 			t.Parallel()
 			server := tc.server(t)
 
-			got := runWith(t, server.env(), "comment", "delete", "DEV-7", "7-12")
+			got := runWith(t, server.Env(), "comment", "delete", "DEV-7", "7-12")
 
 			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
-			assert.Equal(t, detail{"request", commentDeletionRequest(server.url, "DEV-7", "7-12")},
+			assert.Equal(t, detail{"request", commentDeletionRequest(server.URL, "DEV-7", "7-12")},
 				found.details[0])
 			assert.Equal(t, tc.methods, sentMethods(server))
 		})
@@ -653,22 +630,22 @@ func TestIssueDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 	tests := []struct {
 		name   string
 		id     string
-		server func(t *testing.T) *upstream
+		server func(t *testing.T) *fake.Server
 		code   string
 		exit   int
 	}{
 		{
 			name:   "a call no server could answer",
 			id:     "..",
-			server: serveNothing,
+			server: fake.ServeNothing,
 			code:   "bad_usage",
 			exit:   1,
 		},
 		{
 			name: "an issue the read does not find",
 			id:   "DEV-7",
-			server: func(t *testing.T) *upstream {
-				return deleting(t, respondWith(http.StatusNotFound, entityNotFound("DEV-7")), noDeletion(t))
+			server: func(t *testing.T) *fake.Server {
+				return deleting(t, fake.JSON(http.StatusNotFound, entityNotFound("DEV-7")), noDeletion(t))
 			},
 			code: "not_found",
 			exit: 1,
@@ -676,8 +653,8 @@ func TestIssueDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 		{
 			name: "a readable id the deletion cannot be addressed by",
 			id:   "DEV-7",
-			server: func(t *testing.T) *upstream {
-				return deleting(t, respondWith(http.StatusOK, issueNamed("..")), noDeletion(t))
+			server: func(t *testing.T) *fake.Server {
+				return deleting(t, fake.JSON(http.StatusOK, issueNamed("..")), noDeletion(t))
 			},
 			code: "upstream_invalid",
 			exit: 1,
@@ -685,9 +662,9 @@ func TestIssueDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 		{
 			name: "a token that may read the issue and not delete it",
 			id:   "DEV-7",
-			server: func(t *testing.T) *upstream {
+			server: func(t *testing.T) *fake.Server {
 				said := `{"error":"Forbidden","error_description":"Insufficient rights"}`
-				return deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), respondWith(http.StatusForbidden, said))
+				return deleting(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), fake.JSON(http.StatusForbidden, said))
 			},
 			code: "denied",
 			exit: 1,
@@ -695,9 +672,9 @@ func TestIssueDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 		{
 			name: "a deletion the server refused",
 			id:   "DEV-7",
-			server: func(t *testing.T) *upstream {
+			server: func(t *testing.T) *fake.Server {
 				said := `{"error":"bad_request","error_description":"Bad Request"}`
-				return deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), respondWith(http.StatusBadRequest, said))
+				return deleting(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), fake.JSON(http.StatusBadRequest, said))
 			},
 			code: "rejected",
 			exit: 1,
@@ -705,9 +682,9 @@ func TestIssueDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 		{
 			name: "a server that failed over the deletion",
 			id:   "DEV-7",
-			server: func(t *testing.T) *upstream {
+			server: func(t *testing.T) *fake.Server {
 				said := `{"error":"server_error","error_description":"java.lang.NullPointerException"}`
-				return deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), respondWith(http.StatusInternalServerError, said))
+				return deleting(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), fake.JSON(http.StatusInternalServerError, said))
 			},
 			code: "upstream_failed",
 			exit: 1,
@@ -715,8 +692,8 @@ func TestIssueDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 		{
 			name: "an answer to the deletion that carries a body",
 			id:   "DEV-7",
-			server: func(t *testing.T) *upstream {
-				return deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), respondWith(http.StatusOK, `{"x":1}`))
+			server: func(t *testing.T) *fake.Server {
+				return deleting(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), fake.JSON(http.StatusOK, `{"x":1}`))
 			},
 			code: "upstream_invalid",
 			exit: 2,
@@ -724,8 +701,8 @@ func TestIssueDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 		{
 			name: "an answer to the deletion that never came",
 			id:   "DEV-7",
-			server: func(t *testing.T) *upstream {
-				return deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), breakOff)
+			server: func(t *testing.T) *fake.Server {
+				return deleting(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), breakOff)
 			},
 			code: "write_uncertain",
 			exit: 2,
@@ -735,7 +712,7 @@ func TestIssueDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := runWith(t, tc.server(t).env(), "issue", "delete", tc.id)
+			got := runWith(t, tc.server(t).Env(), "issue", "delete", tc.id)
 
 			assert.Equal(t, tc.code, requireFaultDocument(t, got).code)
 			assert.Equal(t, tc.exit, got.code)
@@ -745,34 +722,34 @@ func TestIssueDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 
 func TestAttachmentDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 	t.Parallel()
-	read := respondWith(http.StatusOK, attachmentOfDEV7())
+	read := fake.JSON(http.StatusOK, attachmentOfDEV7())
 	tests := []struct {
 		name    string
-		server  func(t *testing.T) *upstream
+		server  func(t *testing.T) *fake.Server
 		code    string
 		exit    int
 		methods []string
 	}{
 		{
 			name:    "the answer never came",
-			server:  func(t *testing.T) *upstream { return deleting(t, read, breakOff) },
+			server:  func(t *testing.T) *fake.Server { return deleting(t, read, breakOff) },
 			code:    "write_uncertain",
 			exit:    2,
 			methods: []string{http.MethodGet, http.MethodDelete},
 		},
 		{
 			name:    "a gateway answered a page under a 502",
-			server:  func(t *testing.T) *upstream { return deleting(t, read, gateway(http.StatusBadGateway)) },
+			server:  func(t *testing.T) *fake.Server { return deleting(t, read, gateway(http.StatusBadGateway)) },
 			code:    "write_uncertain",
 			exit:    2,
 			methods: []string{http.MethodGet, http.MethodDelete},
 		},
 		{
 			name: "the deletion never left",
-			server: func(t *testing.T) *upstream {
-				var server *upstream
-				server = serveWithoutKeepAlive(t, readThenDeletion(func(w http.ResponseWriter, r *http.Request) {
-					server.stopListening(t)
+			server: func(t *testing.T) *fake.Server {
+				var server *fake.Server
+				server = fake.ServeAlone(t, readThenDeletion(func(w http.ResponseWriter, r *http.Request) {
+					server.StopListening(t)
 					read(w, r)
 				}, noDeletion(t)))
 				return server
@@ -787,12 +764,12 @@ func TestAttachmentDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) 
 			t.Parallel()
 			server := tc.server(t)
 
-			got := runWith(t, server.env(), "attachment", "delete", "DEV-7", "12-5")
+			got := runWith(t, server.Env(), "attachment", "delete", "DEV-7", "12-5")
 
 			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
-			assert.Equal(t, detail{"request", attachmentDeletionRequest(server.url, "issues", "DEV-7", "12-5")},
+			assert.Equal(t, detail{"request", attachmentDeletionRequest(server.URL, "issues", "DEV-7", "12-5")},
 				found.details[0])
 			assert.Equal(t, tc.methods, sentMethods(server))
 		})
@@ -803,21 +780,21 @@ func TestTagDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
-		server  func(t *testing.T) *upstream
+		server  func(t *testing.T) *fake.Server
 		code    string
 		exit    int
 		methods []string
 	}{
 		{
 			name:    "the answer never came",
-			server:  func(t *testing.T) *upstream { return resolvingTags(t, tagsOfTwoOwners(), breakOff) },
+			server:  func(t *testing.T) *fake.Server { return resolvingTags(t, tagsOfTwoOwners(), breakOff) },
 			code:    "write_uncertain",
 			exit:    2,
 			methods: []string{http.MethodGet, http.MethodDelete},
 		},
 		{
 			name: "a gateway answered a page under a 502",
-			server: func(t *testing.T) *upstream {
+			server: func(t *testing.T) *fake.Server {
 				return resolvingTags(t, tagsOfTwoOwners(), gateway(http.StatusBadGateway))
 			},
 			code:    "write_uncertain",
@@ -826,11 +803,11 @@ func TestTagDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 		},
 		{
 			name: "the deletion never left",
-			server: func(t *testing.T) *upstream {
-				var server *upstream
-				server = serveWithoutKeepAlive(t, readThenDeletion(func(w http.ResponseWriter, r *http.Request) {
-					server.stopListening(t)
-					respondWith(http.StatusOK, tagsOfTwoOwners())(w, r)
+			server: func(t *testing.T) *fake.Server {
+				var server *fake.Server
+				server = fake.ServeAlone(t, readThenDeletion(func(w http.ResponseWriter, r *http.Request) {
+					server.StopListening(t)
+					fake.JSON(http.StatusOK, tagsOfTwoOwners())(w, r)
 				}, noDeletion(t)))
 				return server
 			},
@@ -844,12 +821,12 @@ func TestTagDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 			t.Parallel()
 			server := tc.server(t)
 
-			got := runWith(t, server.env(), "tag", "delete", "--name", "ready")
+			got := runWith(t, server.Env(), "tag", "delete", "--name", "ready")
 
 			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
-			assert.Equal(t, detail{"request", tagDeletionRequest(server.url, "10-5")}, found.details[0])
+			assert.Equal(t, detail{"request", tagDeletionRequest(server.URL, "10-5")}, found.details[0])
 			assert.Equal(t, tc.methods, sentMethods(server))
 		})
 	}
@@ -857,24 +834,24 @@ func TestTagDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 
 func TestTagAddExitsByWhetherTheTaggingMayHaveHappened(t *testing.T) {
 	t.Parallel()
-	owner := respondWith(http.StatusOK, issueNamed("DEV-7"))
+	owner := fake.JSON(http.StatusOK, issueNamed("DEV-7"))
 	tests := []struct {
 		name    string
-		server  func(t *testing.T) *upstream
+		server  func(t *testing.T) *fake.Server
 		code    string
 		exit    int
 		methods []string
 	}{
 		{
 			name:    "the answer never came",
-			server:  func(t *testing.T) *upstream { return addingATag(t, owner, shownTags(), breakOff) },
+			server:  func(t *testing.T) *fake.Server { return addingATag(t, owner, shownTags(), breakOff) },
 			code:    "write_uncertain",
 			exit:    2,
 			methods: []string{http.MethodGet, http.MethodGet, http.MethodPost},
 		},
 		{
 			name: "a gateway answered a page under a 502",
-			server: func(t *testing.T) *upstream {
+			server: func(t *testing.T) *fake.Server {
 				return addingATag(t, owner, shownTags(), gateway(http.StatusBadGateway))
 			},
 			code:    "write_uncertain",
@@ -883,11 +860,11 @@ func TestTagAddExitsByWhetherTheTaggingMayHaveHappened(t *testing.T) {
 		},
 		{
 			name: "the tagging never left",
-			server: func(t *testing.T) *upstream {
-				var server *upstream
-				server = serveWithoutKeepAlive(t, func(w http.ResponseWriter, r *http.Request) {
+			server: func(t *testing.T) *fake.Server {
+				var server *fake.Server
+				server = fake.ServeAlone(t, func(w http.ResponseWriter, r *http.Request) {
 					if r.URL.Path == tagsCollection {
-						server.stopListening(t)
+						server.StopListening(t)
 						shownTags()(w, r)
 						return
 					}
@@ -905,12 +882,12 @@ func TestTagAddExitsByWhetherTheTaggingMayHaveHappened(t *testing.T) {
 			t.Parallel()
 			server := tc.server(t)
 
-			got := runWith(t, server.env(), "tag", "add", "DEV-7", "--name", "ready")
+			got := runWith(t, server.Env(), "tag", "add", "DEV-7", "--name", "ready")
 
 			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
-			assert.Equal(t, taggingRequest(server.url, "issues", "DEV-7", resolvedTagFields),
+			assert.Equal(t, taggingRequest(server.URL, "issues", "DEV-7", resolvedTagFields),
 				detailNamed(t, found, "request"))
 			assert.Equal(t, []detail{{"issue", "DEV-7"}, {"tag", "ready"}}, found.details[1:3])
 			assert.Equal(t, tc.methods, sentMethods(server))
@@ -920,24 +897,24 @@ func TestTagAddExitsByWhetherTheTaggingMayHaveHappened(t *testing.T) {
 
 func TestTagRemoveExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 	t.Parallel()
-	owner := respondWith(http.StatusOK, issueNamed("DEV-7"))
+	owner := fake.JSON(http.StatusOK, issueNamed("DEV-7"))
 	tests := []struct {
 		name    string
-		server  func(t *testing.T) *upstream
+		server  func(t *testing.T) *fake.Server
 		code    string
 		exit    int
 		methods []string
 	}{
 		{
 			name:    "the answer never came",
-			server:  func(t *testing.T) *upstream { return takingATagOff(t, owner, shownTags(), breakOff) },
+			server:  func(t *testing.T) *fake.Server { return takingATagOff(t, owner, shownTags(), breakOff) },
 			code:    "write_uncertain",
 			exit:    2,
 			methods: []string{http.MethodGet, http.MethodGet, http.MethodDelete},
 		},
 		{
 			name: "a gateway answered a page under a 502",
-			server: func(t *testing.T) *upstream {
+			server: func(t *testing.T) *fake.Server {
 				return takingATagOff(t, owner, shownTags(), gateway(http.StatusBadGateway))
 			},
 			code:    "write_uncertain",
@@ -946,11 +923,11 @@ func TestTagRemoveExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 		},
 		{
 			name: "the removal never left",
-			server: func(t *testing.T) *upstream {
-				var server *upstream
-				server = serveWithoutKeepAlive(t, func(w http.ResponseWriter, r *http.Request) {
+			server: func(t *testing.T) *fake.Server {
+				var server *fake.Server
+				server = fake.ServeAlone(t, func(w http.ResponseWriter, r *http.Request) {
 					if r.URL.Path == tagsCollection {
-						server.stopListening(t)
+						server.StopListening(t)
 						shownTags()(w, r)
 						return
 					}
@@ -968,12 +945,12 @@ func TestTagRemoveExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 			t.Parallel()
 			server := tc.server(t)
 
-			got := runWith(t, server.env(), "tag", "remove", "DEV-7", "--name", "ready")
+			got := runWith(t, server.Env(), "tag", "remove", "DEV-7", "--name", "ready")
 
 			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
-			assert.Equal(t, tagRemovalRequest(server.url, "issues", "DEV-7", "10-5"), detailNamed(t, found, "request"))
+			assert.Equal(t, tagRemovalRequest(server.URL, "issues", "DEV-7", "10-5"), detailNamed(t, found, "request"))
 			assert.Equal(t, []detail{{"issue", "DEV-7"}, {"tag", "ready"}}, found.details[1:3])
 			assert.Equal(t, tc.methods, sentMethods(server))
 		})
@@ -984,36 +961,30 @@ func TestAttachmentCreateExitsByWhetherTheUploadMayHaveHappened(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
-		server  func(t *testing.T) *upstream
+		server  func(t *testing.T) *fake.Server
 		code    string
 		exit    int
 		methods []string
 	}{
 		{
 			name:    "the answer never came",
-			server:  func(t *testing.T) *upstream { return serve(t, breakOff) },
+			server:  func(t *testing.T) *fake.Server { return fake.Serve(t, breakOff) },
 			code:    "write_uncertain",
 			exit:    2,
 			methods: []string{http.MethodPost},
 		},
 		{
 			name:    "a gateway answered a page under a 502",
-			server:  func(t *testing.T) *upstream { return serve(t, gateway(http.StatusBadGateway)) },
+			server:  func(t *testing.T) *fake.Server { return fake.Serve(t, gateway(http.StatusBadGateway)) },
 			code:    "write_uncertain",
 			exit:    2,
 			methods: []string{http.MethodPost},
 		},
 		{
-			name: "the upload never left",
-			server: func(t *testing.T) *upstream {
-				server := serve(t, func(_ http.ResponseWriter, r *http.Request) {
-					assert.Fail(t, "a request reached the server", "%s %s", r.Method, r.URL)
-				})
-				server.stopListening(t)
-				return server
-			},
-			code: "upstream_failed",
-			exit: 1,
+			name:   "the upload never left",
+			server: func(*testing.T) *fake.Server { return fake.Unreachable() },
+			code:   "upstream_failed",
+			exit:   1,
 		},
 	}
 	for _, tc := range tests {
@@ -1022,12 +993,12 @@ func TestAttachmentCreateExitsByWhetherTheUploadMayHaveHappened(t *testing.T) {
 			server := tc.server(t)
 			path := aFileToAttach(t)
 
-			got := runWith(t, server.env(), "attachment", "create", "DEV-7", path)
+			got := runWith(t, server.Env(), "attachment", "create", "DEV-7", path)
 
 			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
-			assert.Equal(t, detail{"request", attachmentWriteRequest(server.url, "DEV-7", attachmentFields)},
+			assert.Equal(t, detail{"request", attachmentWriteRequest(server.URL, "DEV-7", attachmentFields)},
 				found.details[0])
 			assert.Equal(t, tc.methods, sentMethods(server))
 		})

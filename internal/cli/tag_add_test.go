@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const tagsCollection = "/api/tags"
@@ -22,9 +24,9 @@ func taggingRequest(address, collection, readable, fields string) string {
 	return "POST " + address + tagsOfOwnerPath(collection, readable) + "?fields=" + fields
 }
 
-func addingATag(t *testing.T, owner, catalogue, tagging http.HandlerFunc) *upstream {
+func addingATag(t *testing.T, owner, catalogue, tagging http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return serve(t, func(w http.ResponseWriter, r *http.Request) {
+	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost:
 			tagging(w, r)
@@ -37,7 +39,7 @@ func addingATag(t *testing.T, owner, catalogue, tagging http.HandlerFunc) *upstr
 }
 
 func shownTags() http.HandlerFunc {
-	return respondWith(http.StatusOK, tagsOfTwoOwners())
+	return fake.JSON(http.StatusOK, tagsOfTwoOwners())
 }
 
 func noTagging(t *testing.T) http.HandlerFunc {
@@ -60,12 +62,12 @@ func TestTagAddRefusesACallOfAnyOtherShape(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), append([]string{"tag", "add"}, tc.argv...)...)
+			got := runWith(t, server.Env(), append([]string{"tag", "add"}, tc.argv...)...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -100,10 +102,10 @@ func TestTagAddReadsTheOwnerThenResolvesTheNameThenWrites(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := addingATag(t, respondWith(http.StatusOK, tc.owner), shownTags(),
-				respondWith(http.StatusOK, catalogueTag("10-5", "Ready", "admin")))
+			server := addingATag(t, fake.JSON(http.StatusOK, tc.owner), shownTags(),
+				fake.JSON(http.StatusOK, catalogueTag("10-5", "Ready", "admin")))
 
-			got := runWith(t, server.env(), "tag", "add", tc.written, "--name", "ready")
+			got := runWith(t, server.Env(), "tag", "add", tc.written, "--name", "ready")
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Empty(t, got.stderr)
@@ -116,11 +118,11 @@ func TestTagAddReadsTheOwnerThenResolvesTheNameThenWrites(t *testing.T) {
 				"/api/" + tc.collection + "/" + tc.written,
 				tagsCollection,
 				tagsOfOwnerPath(tc.collection, tc.readable),
-			}, server.sentPaths())
-			assert.Equal(t, []string{taggedOwnerFields, resolvedTagFields, resolvedTagFields}, server.sentFields())
-			assert.Equal(t, []string{"", "", `{"id":"10-5"}`}, server.asks(),
+			}, server.Paths())
+			assert.Equal(t, []string{taggedOwnerFields, resolvedTagFields, resolvedTagFields}, server.Fields())
+			assert.Equal(t, []string{"", "", `{"id":"10-5"}`}, server.Bodies(),
 				"the server answers 400 to a body with the name")
-			assert.NotContains(t, strings.Join(server.sentPaths(), " "), tc.apart)
+			assert.NotContains(t, strings.Join(server.Paths(), " "), tc.apart)
 			requireResolvedWithoutTheServer(t, server, "ready")
 		})
 	}
@@ -128,10 +130,10 @@ func TestTagAddReadsTheOwnerThenResolvesTheNameThenWrites(t *testing.T) {
 
 func TestTagAddPrintsTheTagTheWriteAnsweredWith(t *testing.T) {
 	t.Parallel()
-	server := addingATag(t, respondWith(http.StatusOK, issueNamed("DEV-7")), shownTags(),
-		respondWith(http.StatusOK, catalogueTag("10-5", "Готово", "dev.limited")))
+	server := addingATag(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), shownTags(),
+		fake.JSON(http.StatusOK, catalogueTag("10-5", "Готово", "dev.limited")))
 
-	got := runWith(t, server.env(), "tag", "add", "DEV-7", "--name", "ready")
+	got := runWith(t, server.Env(), "tag", "add", "DEV-7", "--name", "ready")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	want := "idReadable: \"DEV-7\"\n" + "added:\n  name: \"Готово\"\n  owner:\n    login: \"dev.limited\"\n"
@@ -140,15 +142,15 @@ func TestTagAddPrintsTheTagTheWriteAnsweredWith(t *testing.T) {
 
 func TestTagAddRefusesATagOtherThanTheOneResolved(t *testing.T) {
 	t.Parallel()
-	server := addingATag(t, respondWith(http.StatusOK, issueNamed("DEV-7")), shownTags(),
-		respondWith(http.StatusOK, catalogueTag("10-6", "Ready", "admin")))
+	server := addingATag(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), shownTags(),
+		fake.JSON(http.StatusOK, catalogueTag("10-6", "Ready", "admin")))
 
-	got := runWith(t, server.env(), "tag", "add", "DEV-7", "--name", "ready")
+	got := runWith(t, server.Env(), "tag", "add", "DEV-7", "--name", "ready")
 
 	found := requireUncertainty(t, got)
 	assert.Equal(t, "upstream_invalid", found.code)
 	assert.Equal(t, []detail{
-		{"request", taggingRequest(server.url, "issues", "DEV-7", resolvedTagFields)},
+		{"request", taggingRequest(server.URL, "issues", "DEV-7", resolvedTagFields)},
 		{"issue", "DEV-7"},
 		{"tag", "ready"},
 		{"upstream_status", 200},
@@ -190,14 +192,14 @@ func TestTagAddReadsWhatTheServerAnsweredTheWriteWith(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := addingATag(t, respondWith(http.StatusOK, issueNamed("DEV-7")), shownTags(),
-				respondWith(tc.status, tc.said))
+			server := addingATag(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), shownTags(),
+				fake.JSON(tc.status, tc.said))
 
-			got := runWith(t, server.env(), "tag", "add", "DEV-7", "--name", "ready")
+			got := runWith(t, server.Env(), "tag", "add", "DEV-7", "--name", "ready")
 
 			found := requireFault(t, got)
 			assert.Equal(t, tc.code, found.code)
-			assert.Equal(t, detail{"request", taggingRequest(server.url, "issues", "DEV-7", resolvedTagFields)},
+			assert.Equal(t, detail{"request", taggingRequest(server.URL, "issues", "DEV-7", resolvedTagFields)},
 				found.details[0])
 			assert.Equal(t, []detail{{"issue", "DEV-7"}, {"tag", "ready"}}, found.details[1:3])
 			assert.Equal(t, tc.message, detailNamed(t, found, "upstream_message"))
@@ -217,7 +219,7 @@ func TestTagAddSendsNoWriteWhereAReadBeforeItRefused(t *testing.T) {
 	}{
 		{
 			name:    "an owner the read does not find",
-			owner:   respondWith(http.StatusNotFound, entityNotFound("DEV-7")),
+			owner:   fake.JSON(http.StatusNotFound, entityNotFound("DEV-7")),
 			written: "ready",
 			code:    "not_found",
 			methods: []string{http.MethodGet},
@@ -225,7 +227,7 @@ func TestTagAddSendsNoWriteWhereAReadBeforeItRefused(t *testing.T) {
 		},
 		{
 			name:    "a name no tag the token is shown carries",
-			owner:   respondWith(http.StatusOK, issueNamed("DEV-7")),
+			owner:   fake.JSON(http.StatusOK, issueNamed("DEV-7")),
 			written: "redy",
 			code:    "unknown_name",
 			methods: []string{http.MethodGet, http.MethodGet},
@@ -237,11 +239,11 @@ func TestTagAddSendsNoWriteWhereAReadBeforeItRefused(t *testing.T) {
 			t.Parallel()
 			server := addingATag(t, tc.owner, shownTags(), noTagging(t))
 
-			got := runWith(t, server.env(), "tag", "add", "DEV-7", "--name", tc.written)
+			got := runWith(t, server.Env(), "tag", "add", "DEV-7", "--name", tc.written)
 
 			assert.Equal(t, tc.code, requireFault(t, got).code)
 			assert.Equal(t, tc.methods, sentMethods(server))
-			assert.Equal(t, tc.paths, server.sentPaths())
+			assert.Equal(t, tc.paths, server.Paths())
 		})
 	}
 }

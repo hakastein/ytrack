@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const removedWorkItemFields = "id,issue(idReadable)"
@@ -24,9 +26,9 @@ func workItemOfAnIssue(id, issue string) string {
 		`,"issue":{"$type":"Issue","idReadable":` + strconv.Quote(issue) + `}}`
 }
 
-func removingTime(t *testing.T, read, deletion http.HandlerFunc) *upstream {
+func removingTime(t *testing.T, read, deletion http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return serve(t, readThenDeletion(read, deletion))
+	return fake.Serve(t, readThenDeletion(read, deletion))
 }
 
 func TestTimeDeleteRefusesBeforeAnyRequest(t *testing.T) {
@@ -41,21 +43,21 @@ func TestTimeDeleteRefusesBeforeAnyRequest(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
 
 func TestTimeDeleteReadsTheWorkItemAndThenRemovesIt(t *testing.T) {
 	t.Parallel()
-	server := removingTime(t, respondWith(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1")), deletionDone())
+	server := removingTime(t, fake.JSON(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1")), deletionDone())
 
-	got := runWith(t, server.env(), "time", "delete", "dev-1", "199-7")
+	got := runWith(t, server.Env(), "time", "delete", "dev-1", "199-7")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
@@ -64,8 +66,8 @@ func TestTimeDeleteReadsTheWorkItemAndThenRemovesIt(t *testing.T) {
 	assert.Equal(t, []string{
 		workItemPath("dev-1", "199-7") + "?fields=" + removedWorkItemFields,
 		workItemPath("DEV-1", "199-7") + "?",
-	}, server.sentTargets())
-	assert.Equal(t, []string{"", ""}, server.asks())
+	}, server.Targets())
+	assert.Equal(t, []string{"", ""}, server.Bodies())
 }
 
 func TestTimeDeleteReadsTheAnswerOfEachHalf(t *testing.T) {
@@ -79,25 +81,25 @@ func TestTimeDeleteReadsTheAnswerOfEachHalf(t *testing.T) {
 	}{
 		{
 			name:     "a work item the read does not find",
-			read:     respondWith(http.StatusNotFound, entityNotFound("199-7")),
+			read:     fake.JSON(http.StatusNotFound, entityNotFound("199-7")),
 			deletion: noDeletion,
 			code:     "not_found",
 			methods:  []string{http.MethodGet},
 		},
 		{
 			name: "a work item taken away between the read and the removal",
-			read: respondWith(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1")),
+			read: fake.JSON(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1")),
 			deletion: func(*testing.T) http.HandlerFunc {
-				return respondWith(http.StatusNotFound, entityNotFound("199-7"))
+				return fake.JSON(http.StatusNotFound, entityNotFound("199-7"))
 			},
 			code:    "not_found",
 			methods: []string{http.MethodGet, http.MethodDelete},
 		},
 		{
 			name: "a token that may read the work item and not remove it",
-			read: respondWith(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1")),
+			read: fake.JSON(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1")),
 			deletion: func(*testing.T) http.HandlerFunc {
-				return respondWith(http.StatusForbidden, `{"error":"Forbidden","error_description":"HTTP 403 Forbidden"}`)
+				return fake.JSON(http.StatusForbidden, `{"error":"Forbidden","error_description":"HTTP 403 Forbidden"}`)
 			},
 			code:    "denied",
 			methods: []string{http.MethodGet, http.MethodDelete},
@@ -108,7 +110,7 @@ func TestTimeDeleteReadsTheAnswerOfEachHalf(t *testing.T) {
 			t.Parallel()
 			server := removingTime(t, tc.read, tc.deletion(t))
 
-			got := runWith(t, server.env(), "time", "delete", "DEV-1", "199-7")
+			got := runWith(t, server.Env(), "time", "delete", "DEV-1", "199-7")
 
 			assert.Equal(t, tc.code, requireFault(t, got).code)
 			assert.Equal(t, tc.methods, sentMethods(server))
@@ -133,9 +135,9 @@ func TestTimeDeleteRemovesNothingAddressedByWhatTheReadGave(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := removingTime(t, respondWith(http.StatusOK, tc.read), noDeletion(t))
+			server := removingTime(t, fake.JSON(http.StatusOK, tc.read), noDeletion(t))
 
-			got := runWith(t, server.env(), "time", "delete", "DEV-1", "199-7")
+			got := runWith(t, server.Env(), "time", "delete", "DEV-1", "199-7")
 
 			assert.Equal(t, "upstream_invalid", requireFault(t, got).code)
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
@@ -145,13 +147,13 @@ func TestTimeDeleteRemovesNothingAddressedByWhatTheReadGave(t *testing.T) {
 
 func TestTimeDeleteRefusesAnAnswerToTheRemovalThatCarriesABody(t *testing.T) {
 	t.Parallel()
-	server := removingTime(t, respondWith(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1")),
-		respondWith(http.StatusOK, `{"x":1}`))
+	server := removingTime(t, fake.JSON(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1")),
+		fake.JSON(http.StatusOK, `{"x":1}`))
 
-	got := runWith(t, server.env(), "time", "delete", "DEV-1", "199-7")
+	got := runWith(t, server.Env(), "time", "delete", "DEV-1", "199-7")
 
 	found := requireUncertainty(t, got)
 	assert.Equal(t, "upstream_invalid", found.code)
-	assert.Equal(t, detail{"request", workItemDeletionRequest(server.url, "DEV-1", "199-7")}, found.details[0])
+	assert.Equal(t, detail{"request", workItemDeletionRequest(server.URL, "DEV-1", "199-7")}, found.details[0])
 	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
 }

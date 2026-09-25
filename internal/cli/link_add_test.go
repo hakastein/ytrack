@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const (
@@ -180,26 +182,26 @@ func linkWritten(link catalogueLink, held ...string) string {
 	return writeAnswerOfTheTarget(targetIssueLink(theOtherEnd(link.direction), link.kind.id, sourceUnder(held...)))
 }
 
-func linking(t *testing.T, catalogue, target string, write http.HandlerFunc) *upstream {
+func linking(t *testing.T, catalogue, target string, write http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return serve(t, func(w http.ResponseWriter, r *http.Request) {
+	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost:
 			write(w, r)
 		case path.Base(r.URL.Path) == addedSource:
-			respondWith(http.StatusOK, catalogue)(w, r)
+			fake.JSON(http.StatusOK, catalogue)(w, r)
 		case path.Base(r.URL.Path) == addedTarget:
-			respondWith(http.StatusOK, target)(w, r)
+			fake.JSON(http.StatusOK, target)(w, r)
 		default:
 			assert.Fail(t, "a request reached the server", "%s %s", r.Method, r.URL)
 		}
 	})
 }
 
-func linkingTheDevInstance(t *testing.T, link catalogueLink) *upstream {
+func linkingTheDevInstance(t *testing.T, link catalogueLink) *fake.Server {
 	t.Helper()
 	return linking(t, devInstanceCatalogue(), addressedIssue(addedTargetID, addedTarget),
-		respondWith(http.StatusOK, linkWritten(link)))
+		fake.JSON(http.StatusOK, linkWritten(link)))
 }
 
 func TestLinkAddRefusesACallThatNamesNoOneLink(t *testing.T) {
@@ -216,12 +218,12 @@ func TestLinkAddRefusesACallThatNamesNoOneLink(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -249,25 +251,25 @@ func TestLinkAddResolvesThePhraseAgainstTheSlotsOfTheIssue(t *testing.T) {
 			link := devIssueLink(t, tc.link)
 			server := linkingTheDevInstance(t, link)
 
-			got := runWith(t, server.env(), "link", "add", addedSource, tc.phrase, addedTarget)
+			got := runWith(t, server.Env(), "link", "add", addedSource, tc.phrase, addedTarget)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Equal(t, []string{
 				"/api/issues/" + addedSource,
 				"/api/issues/" + addedTarget,
 				"/api/issues/" + addedSource + "/links/" + tc.link + "/issues",
-			}, server.sentPaths())
-			assert.Equal(t, []string{"", "", `{"id":"` + addedTargetID + `"}`}, server.asks())
+			}, server.Paths())
+			assert.Equal(t, []string{"", "", `{"id":"` + addedTargetID + `"}`}, server.Bodies())
 			for _, written := range []string{tc.phrase, strings.ToLower(tc.phrase)} {
-				for _, target := range server.sentTargets() {
+				for _, target := range server.Targets() {
 					assert.NotContains(t, target, written)
 				}
-				for _, body := range server.asks() {
+				for _, body := range server.Bodies() {
 					assert.NotContains(t, body, written)
 				}
 			}
 			assert.Equal(t, []string{addSourceFields, addTargetFields, addWriteFields(linkListTarget)},
-				server.sentFields())
+				server.Fields())
 		})
 	}
 }
@@ -293,12 +295,12 @@ func TestLinkAddWritesToTheEndThePhraseNames(t *testing.T) {
 			t.Parallel()
 			link := links[tc.at]
 			server := linking(t, issueLinksOf(addedSourceID, addedSource, links...),
-				addressedIssue(addedTargetID, addedTarget), respondWith(http.StatusOK, linkWritten(link)))
+				addressedIssue(addedTargetID, addedTarget), fake.JSON(http.StatusOK, linkWritten(link)))
 
-			got := runWith(t, server.env(), "link", "add", addedSource, tc.phrase, addedTarget)
+			got := runWith(t, server.Env(), "link", "add", addedSource, tc.phrase, addedTarget)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			assert.Equal(t, "/api/issues/"+addedSource+"/links/"+link.id+"/issues", server.sentPaths()[2])
+			assert.Equal(t, "/api/issues/"+addedSource+"/links/"+link.id+"/issues", server.Paths()[2])
 			assert.Equal(t, tc.phrase, keysOf(nodeAt(t, requireMapping(t, "stdout", got.stdout), "links"))[0])
 		})
 	}
@@ -313,9 +315,9 @@ func TestLinkAddPrintsTheIssueTheWriteLeftBehind(t *testing.T) {
 		sourceIssueLink(subtask.direction, subtask.kind, linkedRecord(addedOtherID, addedOtherIssue, "Родительская задача")),
 	}
 	server := linking(t, devInstanceCatalogue(), addressedIssue(addedTargetID, addedTarget),
-		respondWith(http.StatusOK, linkWritten(depend, held...)))
+		fake.JSON(http.StatusOK, linkWritten(depend, held...)))
 
-	got := runWith(t, server.env(), "link", "add", addedSource, "depends on", addedTarget)
+	got := runWith(t, server.Env(), "link", "add", addedSource, "depends on", addedTarget)
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
@@ -361,15 +363,15 @@ func TestLinkAddRefusesAResponseWithoutTheLink(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := linking(t, devInstanceCatalogue(), addressedIssue(addedTargetID, addedTarget),
-				respondWith(http.StatusOK, tc.written))
+				fake.JSON(http.StatusOK, tc.written))
 
-			got := runWith(t, server.env(), "link", "add", addedSource, "depends on", addedTarget)
+			got := runWith(t, server.Env(), "link", "add", addedSource, "depends on", addedTarget)
 
 			found := requireUncertainty(t, got)
 			assert.Equal(t, faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", "POST " + server.url + "/api/issues/" + addedSource + "/links/" + link.id +
+					{"request", "POST " + server.URL + "/api/issues/" + addedSource + "/links/" + link.id +
 						"/issues?fields=" + addWriteFields(linkListTarget)},
 					{"issue", addedSource},
 					{"phrase", "depends on"},
@@ -404,9 +406,9 @@ func TestLinkAddRefusesAnAnswerAboutSomethingElse(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := linking(t, devInstanceCatalogue(), addressedIssue(addedTargetID, addedTarget),
-				respondWith(http.StatusOK, tc.written))
+				fake.JSON(http.StatusOK, tc.written))
 
-			got := runWith(t, server.env(), "link", "add", addedSource, "depends on", addedTarget)
+			got := runWith(t, server.Env(), "link", "add", addedSource, "depends on", addedTarget)
 
 			found := requireUncertainty(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
@@ -433,24 +435,24 @@ func TestLinkAddRefusesAnIssueTheServerDoesNotHave(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, func(w http.ResponseWriter, r *http.Request) {
+			server := fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.Method == http.MethodPost:
 					assert.Fail(t, "a write reached the server", "%s %s", r.Method, r.URL)
 				case path.Base(r.URL.Path) == tc.missing:
-					respondWith(http.StatusNotFound, `{"error":"Not Found","error_description":"Entity with id `+
+					fake.JSON(http.StatusNotFound, `{"error":"Not Found","error_description":"Entity with id `+
 						tc.missing+` not found"}`)(w, r)
 				default:
-					respondWith(http.StatusOK, devInstanceCatalogue())(w, r)
+					fake.JSON(http.StatusOK, devInstanceCatalogue())(w, r)
 				}
 			})
 
-			got := runWith(t, server.env(), "link", "add", addedSource, "depends on", addedTarget)
+			got := runWith(t, server.Env(), "link", "add", addedSource, "depends on", addedTarget)
 
 			found := requireFault(t, got)
 			assert.Equal(t, "not_found", found.code)
 			assert.Equal(t, "Entity with id "+tc.missing+" not found", detailNamed(t, found, "upstream_message"))
-			assert.Equal(t, tc.paths, server.sentPaths())
+			assert.Equal(t, tc.paths, server.Paths())
 		})
 	}
 }
@@ -466,7 +468,7 @@ func TestLinkAddCarriesWhatTheServerSaidAboutTheWrite(t *testing.T) {
 	}{
 		{
 			name: "a write the server refused",
-			write: respondWith(http.StatusBadRequest,
+			write: fake.JSON(http.StatusBadRequest,
 				`{"error":"invalid_properties","error_description":`+strconv.Quote(cycleWithHTMLEntities)+`}`),
 			code: "rejected",
 			exit: 1,
@@ -479,7 +481,7 @@ func TestLinkAddCarriesWhatTheServerSaidAboutTheWrite(t *testing.T) {
 			t.Parallel()
 			server := linking(t, devInstanceCatalogue(), addressedIssue(addedTargetID, addedTarget), tc.write)
 
-			got := runWith(t, server.env(), "link", "add", addedSource, "depends on", addedTarget)
+			got := runWith(t, server.Env(), "link", "add", addedSource, "depends on", addedTarget)
 
 			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.exit, got.code)
@@ -525,14 +527,14 @@ func TestLinkAddPrintsATargetByWhatWasAskedOfIt(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := linking(t, devInstanceCatalogue(), addressedIssue(addedTargetID, addedTarget),
-				respondWith(http.StatusOK, linkWritten(link, sourceIssueLink(link.direction, link.kind, tc.record))))
+				fake.JSON(http.StatusOK, linkWritten(link, sourceIssueLink(link.direction, link.kind, tc.record))))
 
-			got := runWith(t, server.env(), "link", "add", addedSource, "depends on", addedTarget,
+			got := runWith(t, server.Env(), "link", "add", addedSource, "depends on", addedTarget,
 				"--fields", tc.expression)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Equal(t, []detail{{"depends on", []any{tc.printed}}}, nodeValue(t, got.stdout, "links"))
-			assert.Equal(t, addWriteFields(tc.asked), server.sentFields()[2])
+			assert.Equal(t, addWriteFields(tc.asked), server.Fields()[2])
 		})
 	}
 }

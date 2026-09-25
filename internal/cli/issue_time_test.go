@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func TestIssueShowPrintsAnInstantOfTheIssueAndLeavesEveryOtherNumberAlone(t *testing.T) {
@@ -18,9 +20,9 @@ numberInProject: 1
 attachments:
   - {created: "1970-01-01T00:00:00Z", size: 75}
 `
-	server := serve(t, respondWith(http.StatusOK, body))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0",
+	got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0",
 		"--fields", "created,updated,resolved,numberInProject,attachments(created,size)")
 
 	assert.Equal(t, outcome{stdout: printed}, got)
@@ -41,9 +43,9 @@ func TestIssueShowPrintsAnInstantWithNoMillisecondsToSpare(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(http.StatusOK, `{"$type":"Issue","created":`+tc.received+`}`))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, `{"$type":"Issue","created":`+tc.received+`}`))
 
-			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "created")
+			got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "created")
 
 			assert.Equal(t, outcome{stdout: "created: \"" + tc.printed + "\"\n"}, got)
 		})
@@ -62,14 +64,14 @@ func TestIssueShowRefusesAnInstantThatIsNoWholeNumberOfMilliseconds(t *testing.T
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(http.StatusOK, tc.body))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, tc.body))
 
-			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "created")
+			got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "created")
 
 			assert.Equal(t, faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", issueRequest(server.url, "DEV-1", "created")},
+					{"request", issueRequest(server.URL, "DEV-1", "created")},
 					{"upstream_status", 200},
 					{"upstream_body", tc.body},
 				},

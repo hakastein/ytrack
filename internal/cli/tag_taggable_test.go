@@ -6,27 +6,29 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func TestTagCreateRefusesAGroupOfNoNameForTagging(t *testing.T) {
 	t.Parallel()
-	server := serveNothing(t)
+	server := fake.ServeNothing(t)
 
-	got := runWith(t, server.env(), "tag", "create", "--name", "карта", "--taggable-by", "")
+	got := runWith(t, server.Env(), "tag", "create", "--name", "карта", "--taggable-by", "")
 
 	want := faultDocument{code: "bad_usage"}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Empty(t, server.requests())
+	assert.Empty(t, server.Requests())
 }
 
 func TestTagCreateWritesTheGroupsThatMayAddTheTag(t *testing.T) {
 	t.Parallel()
 	const name = "карта"
-	server := sharingATag(t, groupsOfTheInstance(), respondWith(http.StatusOK, taggableTag(name,
+	server := sharingATag(t, groupsOfTheInstance(), fake.JSON(http.StatusOK, taggableTag(name,
 		[]sharedGroup{{id: "6-1", name: "DEVELOPMENT Team"}},
 		[]sharedGroup{{id: "6-1", name: "DEVELOPMENT Team"}, {id: "101-0", name: groupWithAComma}})))
 
-	got := runWith(t, server.env(), "tag", "create", "--name", name,
+	got := runWith(t, server.Env(), "tag", "create", "--name", name,
 		"--visible-for", "development team",
 		"--taggable-by", "DEVELOPMENT TEAM",
 		"--taggable-by", groupWithAComma,
@@ -45,20 +47,20 @@ func TestTagCreateWritesTheGroupsThatMayAddTheTag(t *testing.T) {
 	assert.Equal(t, []string{shownGroupFields,
 		"name,owner(login),readSharingSettings(permittedGroups(name,id),permittedUsers(login))," +
 			"updateSharingSettings(permittedGroups(name),permittedUsers(login))," +
-			"tagSharingSettings(permittedGroups(name,id),permittedUsers(login))"}, server.sentFields())
+			"tagSharingSettings(permittedGroups(name,id),permittedUsers(login))"}, server.Fields())
 }
 
 func TestTagCreateRefusesEveryGroupOfTheThreeFlagsAtOnce(t *testing.T) {
 	t.Parallel()
 	server := sharingATag(t, groupsOfTheInstance(), noCreation(t))
 
-	got := runWith(t, server.env(), "tag", "create", "--name", "карта",
+	got := runWith(t, server.Env(), "tag", "create", "--name", "карта",
 		"--visible-for", "Нет", "--taggable-by", "Тоже")
 
 	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{
-			{"request", groupsRequest(server.url)},
+			{"request", groupsRequest(server.URL)},
 			{"unknown", []any{
 				[]detail{{"group", "Нет"}, {"nearest", everyGroupName()}},
 				[]detail{{"group", "Тоже"}, {"nearest", everyGroupName()}},
@@ -95,9 +97,9 @@ func TestTagCreateChecksTheTagSharingItWroteAgainstTheOneThatCameBack(t *testing
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := sharingATag(t, groupsOfTheInstance(),
-				respondWith(http.StatusOK, taggableTag(name, nil, tc.kept)))
+				fake.JSON(http.StatusOK, taggableTag(name, nil, tc.kept)))
 
-			got := runWith(t, server.env(), "tag", "create", "--name", name,
+			got := runWith(t, server.Env(), "tag", "create", "--name", name,
 				"--taggable-by", "DEVELOPMENT Team", "--taggable-by", groupWithAComma)
 
 			if tc.mismatch == nil {

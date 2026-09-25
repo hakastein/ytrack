@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const userLimited = `{"banned":false,"$type":"User","email":"dev.limited@ytrack.local","id":"1-2",` +
@@ -36,39 +38,39 @@ func noSuchUser(address, login string) faultDocument {
 
 func TestUserShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, userLimited))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, userLimited))
 
-	got := runWith(t, server.env(), "user", "show", "dev.limited")
+	got := runWith(t, server.Env(), "user", "show", "dev.limited")
 
 	assert.Equal(t, outcome{stdout: printedLimited}, got)
-	requests := server.requests()
+	requests := server.Requests()
 	require.Len(t, requests, 1)
 	request := requests[0]
 	assert.Equal(t, http.MethodGet, request.Method)
 	assert.Equal(t, "/api/users/dev.limited", request.URL.Path)
 	assert.Equal(t, url.Values{"fields": {"login,fullName,email,banned"}}, request.URL.Query())
-	assert.Equal(t, "Bearer "+token, request.Header.Get("Authorization"))
+	assert.Equal(t, "Bearer "+fake.Token, request.Header.Get("Authorization"))
 	assert.Equal(t, "application/json", request.Header.Get("Accept"))
 }
 
 func TestUserShowAddsFieldsToTheDefaultOfTheCommand(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, userLimited))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, userLimited))
 
-	got := runWith(t, server.env(), "user", "show", "dev.limited", "--fields", "+id")
+	got := runWith(t, server.Env(), "user", "show", "dev.limited", "--fields", "+id")
 
 	assert.Equal(t, outcome{stdout: printedLimited + `id: "1-2"` + "\n"}, got)
-	assert.Equal(t, []url.Values{{"fields": {"login,fullName,email,banned,id"}}}, server.sentQueries())
+	assert.Equal(t, []url.Values{{"fields": {"login,fullName,email,banned,id"}}}, server.Queries())
 }
 
 func TestUserShowRefusesFieldsThatDoNotParse(t *testing.T) {
 	t.Parallel()
-	server := serveNothing(t)
+	server := fake.ServeNothing(t)
 
-	got := runWith(t, server.env(), "user", "show", "admin", "--fields", "+")
+	got := runWith(t, server.Env(), "user", "show", "admin", "--fields", "+")
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.requests())
+	assert.Empty(t, server.Requests())
 }
 
 func TestUserShowSendsALoginThatLooksLikeAPathAsOneSegment(t *testing.T) {
@@ -87,12 +89,12 @@ func TestUserShowSendsALoginThatLooksLikeAPathAsOneSegment(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(http.StatusOK, userLimited))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, userLimited))
 
-			got := runWith(t, server.env(), "user", "show", tc.login)
+			got := runWith(t, server.Env(), "user", "show", tc.login)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			requests := server.requests()
+			requests := server.Requests()
 			require.Len(t, requests, 1)
 			assert.Equal(t, "/api/users/"+tc.escaped, requests[0].URL.EscapedPath())
 			assert.Equal(t, "/api/users/"+tc.login, requests[0].URL.Path)
@@ -113,12 +115,12 @@ func TestUserShowRefusesALoginThatWouldReachAnotherEndpoint(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "user", "show", tc.login)
+			got := runWith(t, server.Env(), "user", "show", tc.login)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -143,12 +145,12 @@ func TestUserShowRefusesEveryFormTheServerReadsAsSomethingOtherThanALogin(t *tes
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "user", "show", tc.login)
+			got := runWith(t, server.Env(), "user", "show", tc.login)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -169,12 +171,12 @@ func TestUserShowSendsAFormThatOnlyLooksLikeOneOfTheRefused(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			said := "Entity with id " + tc.login + " not found"
-			server := serve(t, respondWith(http.StatusNotFound, `{"error":"Not Found","error_description":"`+said+`"}`))
+			server := fake.Serve(t, fake.JSON(http.StatusNotFound, `{"error":"Not Found","error_description":"`+said+`"}`))
 
-			got := runWith(t, server.env(), "user", "show", tc.login)
+			got := runWith(t, server.Env(), "user", "show", tc.login)
 
-			assert.Equal(t, noSuchUser(server.url, tc.login), requireFault(t, got))
-			requests := server.requests()
+			assert.Equal(t, noSuchUser(server.URL, tc.login), requireFault(t, got))
+			requests := server.Requests()
 			require.Len(t, requests, 1)
 			assert.Equal(t, "/api/users/"+tc.login, requests[0].URL.Path)
 		})
@@ -183,10 +185,10 @@ func TestUserShowSendsAFormThatOnlyLooksLikeOneOfTheRefused(t *testing.T) {
 
 func TestUserShowRefusesWithoutAToken(t *testing.T) {
 	t.Parallel()
-	server := serveNothing(t)
+	server := fake.ServeNothing(t)
 
-	got := runWith(t, []string{"YTRACK_URL=" + server.url}, "user", "show", "admin")
+	got := runWith(t, []string{"YTRACK_URL=" + server.URL}, "user", "show", "admin")
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.requests())
+	assert.Empty(t, server.Requests())
 }

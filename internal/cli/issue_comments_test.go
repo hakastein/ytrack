@@ -7,6 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const commentFields = "comments(id,author(login),created,text,deleted)"
@@ -62,12 +64,12 @@ func TestIssueShowRefusesACommentsFlagThatIsNeitherAllNorACount(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), append([]string{"issue", "show", "DEV-1"}, tc.argv...)...)
+			got := runWith(t, server.Env(), append([]string{"issue", "show", "DEV-1"}, tc.argv...)...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -85,12 +87,12 @@ func TestIssueShowRefusesCommentsAskedForInTheExpression(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--fields", tc.expression)
+			got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--fields", tc.expression)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -120,34 +122,34 @@ func TestIssueShowPrintsTheCommentsAskedForOldestFirst(t *testing.T) {
 				receivedComment("7-5", 1789035412000, "admin", "пятый"),
 				receivedComment("7-2", 1789035410500, "dev.member", "второй"),
 			)
-			server := serve(t, respondWith(http.StatusOK, body))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
 			argv := append([]string{"issue", "show", "DEV-1", "--fields", "idReadable"}, tc.argv...)
-			got := runWith(t, server.env(), argv...)
+			got := runWith(t, server.Env(), argv...)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Empty(t, got.stderr)
 			assert.Equal(t, []detail{{"idReadable", "DEV-1"}, {"comments", tc.printed}}, requireDocument(t, got.stdout))
-			assert.Equal(t, []string{"idReadable," + commentFields}, server.sentFields())
+			assert.Equal(t, []string{"idReadable," + commentFields}, server.Fields())
 		})
 	}
 }
 
 func TestIssueShowAsksForNoCommentsAtZero(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, `{"$type":"Issue","idReadable":"DEV-1"}`))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, `{"$type":"Issue","idReadable":"DEV-1"}`))
 
-	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--fields", "idReadable", "--comments=0")
+	got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--fields", "idReadable", "--comments=0")
 
 	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-1\"\n"}, got)
-	assert.Equal(t, []string{"idReadable"}, server.sentFields())
+	assert.Equal(t, []string{"idReadable"}, server.Fields())
 }
 
 func TestIssueShowPrintsTheIssueWithNoCommentsAsAnEmptyList(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, issueWithComments(t)))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, issueWithComments(t)))
 
-	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--fields", "idReadable")
+	got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--fields", "idReadable")
 
 	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-1\"\ncomments: []\n"}, got)
 }
@@ -162,9 +164,9 @@ func TestIssueShowPrintsTheTextOfACommentAsReceived(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := issueWithComments(t, receivedComment("7-1", 1789035410875, "admin", tc.text))
-			server := serve(t, respondWith(http.StatusOK, body))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--fields", "idReadable")
+			got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--fields", "idReadable")
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			root := requireMapping(t, "stdout", got.stdout)
@@ -198,14 +200,14 @@ func TestIssueShowRefusesCommentsTheServerShapedOtherwise(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := `{"$type":"Issue","idReadable":"DEV-1","comments":` + tc.comments + `}`
-			server := serve(t, respondWith(http.StatusOK, body))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--fields", "idReadable")
+			got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--fields", "idReadable")
 
 			assert.Equal(t, faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", issueRequest(server.url, "DEV-1", "idReadable,"+commentFields)},
+					{"request", issueRequest(server.URL, "DEV-1", "idReadable,"+commentFields)},
 					{"upstream_status", 200},
 					{"upstream_body", body},
 				},

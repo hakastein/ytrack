@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const (
@@ -118,9 +120,9 @@ func threeActivities() string {
 
 const noActivities = `[]`
 
-func activityServer(t *testing.T, handler http.HandlerFunc) *upstream {
+func activityServer(t *testing.T, handler http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return serve(t, linksKnown(handler))
+	return fake.Serve(t, linksKnown(handler))
 }
 
 func oneRecord(printed string) string {
@@ -132,9 +134,9 @@ func activityRequest(address, top string) string {
 		sentActivityFields + "&$top=" + top
 }
 
-func activitySent(t *testing.T, server *upstream) url.Values {
+func activitySent(t *testing.T, server *fake.Server) url.Values {
 	t.Helper()
-	for _, request := range server.requests() {
+	for _, request := range server.Requests() {
 		if strings.HasSuffix(request.URL.Path, "/activities") {
 			return request.URL.Query()
 		}
@@ -166,12 +168,12 @@ func TestActivityTakesTheIssueAsItsOneArgument(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -198,26 +200,26 @@ func TestActivityRefusesTheFlagsOfAListItCannotSend(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), slices.Concat([]string{"activity", "list", activityIssue}, tc.flags)...)
+			got := runWith(t, server.Env(), slices.Concat([]string{"activity", "list", activityIssue}, tc.flags)...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
 
 func TestActivitySendsTheActivitiesOfTheIssueItWasGiven(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, `[`+sentCreatedActivity(middle)+`]`))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, `[`+sentCreatedActivity(middle)+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue, "--category", "IssueCreatedCategory")
+	got := runWith(t, server.Env(), "activity", "list", activityIssue, "--category", "IssueCreatedCategory")
 
 	want := "total: 1\nreturned: 1\ntruncated: false\nactivities:\n" +
 		strings.Replace(printedCreatedRow, "50.875Z", "51Z", 1)
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []string{activitiesPath}, server.sentPaths())
+	assert.Equal(t, []string{activitiesPath}, server.Paths())
 	sent := activitySent(t, server)
 	assert.Equal(t, []string{"IssueCreatedCategory"}, sent["categories"])
 	assert.Equal(t, []string{"true"}, sent["reverse"])
@@ -229,9 +231,9 @@ func TestActivitySendsTheActivitiesOfTheIssueItWasGiven(t *testing.T) {
 
 func TestActivityPrintsAnActivityToALine(t *testing.T) {
 	t.Parallel()
-	server := activityServer(t, respondWith(http.StatusOK, threeActivities()))
+	server := activityServer(t, fake.JSON(http.StatusOK, threeActivities()))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue)
+	got := runWith(t, server.Env(), "activity", "list", activityIssue)
 
 	rows := printedFieldRow + printedLinkRow + printedCreatedRow
 	assert.Equal(t, outcome{stdout: "total: 3\nreturned: 3\ntruncated: false\nactivities:\n" + rows}, got)
@@ -264,9 +266,9 @@ func TestActivityPrintsAListWhateverTheCountOfActivities(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := activityServer(t, respondWith(http.StatusOK, tc.activities))
+			server := activityServer(t, fake.JSON(http.StatusOK, tc.activities))
 
-			got := runWith(t, server.env(), "activity", "list", activityIssue)
+			got := runWith(t, server.Env(), "activity", "list", activityIssue)
 
 			assert.Equal(t, outcome{stdout: tc.want}, got)
 		})
@@ -275,9 +277,9 @@ func TestActivityPrintsAListWhateverTheCountOfActivities(t *testing.T) {
 
 func TestActivityReadsTheCutOffTheActivityPastTheLimit(t *testing.T) {
 	t.Parallel()
-	server := activityServer(t, respondWith(http.StatusOK, threeActivities()))
+	server := activityServer(t, fake.JSON(http.StatusOK, threeActivities()))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue, "--limit", "2")
+	got := runWith(t, server.Env(), "activity", "list", activityIssue, "--limit", "2")
 
 	rows := printedFieldRow + printedLinkRow
 	assert.Equal(t, outcome{stdout: "total: null\nreturned: 2\ntruncated: true\nactivities:\n" + rows}, got)
@@ -300,9 +302,9 @@ func TestActivityChecksTheActivityPastTheLimitWithTheRest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			three := `[` + sentFieldActivity(newest) + `,` + sentLinkActivity(middle) + `,` + tc.past + `]`
-			server := activityServer(t, respondWith(http.StatusOK, three))
+			server := activityServer(t, fake.JSON(http.StatusOK, three))
 
-			got := runWith(t, server.env(), "activity", "list", activityIssue, "--limit", "2")
+			got := runWith(t, server.Env(), "activity", "list", activityIssue, "--limit", "2")
 
 			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
@@ -315,9 +317,9 @@ func TestActivityRefusesMoreActivitiesThanItAskedFor(t *testing.T) {
 	t.Parallel()
 	four := `[` + sentFieldActivity(newest) + `,` + sentLinkActivity(middle) + `,` +
 		sentCreatedActivity(oldest) + `,` + sentCreatedActivity(oldest) + `]`
-	server := activityServer(t, respondWith(http.StatusOK, four))
+	server := activityServer(t, fake.JSON(http.StatusOK, four))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue, "--limit", "2")
+	got := runWith(t, server.Env(), "activity", "list", activityIssue, "--limit", "2")
 
 	want := faultDocument{
 		code:    "upstream_invalid",
@@ -330,18 +332,18 @@ func TestActivityChecksTheServerKeepsTheRequestedOrder(t *testing.T) {
 	t.Parallel()
 	t.Run("an activity newer than the one before it", func(t *testing.T) {
 		t.Parallel()
-		server := activityServer(t, respondWith(http.StatusOK, `[`+sentCreatedActivity(oldest)+`,`+sentLinkActivity(middle)+`]`))
+		server := activityServer(t, fake.JSON(http.StatusOK, `[`+sentCreatedActivity(oldest)+`,`+sentLinkActivity(middle)+`]`))
 
-		got := runWith(t, server.env(), "activity", "list", activityIssue)
+		got := runWith(t, server.Env(), "activity", "list", activityIssue)
 
 		found := requireFault(t, got)
 		assert.Equal(t, "upstream_invalid", found.code)
 	})
 	t.Run("two activities of one moment", func(t *testing.T) {
 		t.Parallel()
-		server := activityServer(t, respondWith(http.StatusOK, `[`+sentLinkActivity(middle)+`,`+sentLinkActivity(middle)+`]`))
+		server := activityServer(t, fake.JSON(http.StatusOK, `[`+sentLinkActivity(middle)+`,`+sentLinkActivity(middle)+`]`))
 
-		got := runWith(t, server.env(), "activity", "list", activityIssue)
+		got := runWith(t, server.Env(), "activity", "list", activityIssue)
 
 		want := "total: 2\nreturned: 2\ntruncated: false\nactivities:\n" + printedLinkRow + printedLinkRow
 		assert.Equal(t, outcome{stdout: want}, got)
@@ -351,9 +353,9 @@ func TestActivityChecksTheServerKeepsTheRequestedOrder(t *testing.T) {
 func TestActivityRefusesAnActivityOfACategoryItDidNotAskFor(t *testing.T) {
 	t.Parallel()
 	voted := sentActivity{kind: "VotersActivityItem", category: "VotersCategory", timestamp: middle}.sent()
-	server := activityServer(t, respondWith(http.StatusOK, `[`+sentFieldActivity(newest)+`,`+voted+`]`))
+	server := activityServer(t, fake.JSON(http.StatusOK, `[`+sentFieldActivity(newest)+`,`+voted+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue)
+	got := runWith(t, server.Env(), "activity", "list", activityIssue)
 
 	found := requireFault(t, got)
 	assert.Equal(t, "upstream_invalid", found.code)
@@ -362,13 +364,13 @@ func TestActivityRefusesAnActivityOfACategoryItDidNotAskFor(t *testing.T) {
 func TestActivityPassesOnAnIssueTheServerDoesNotHave(t *testing.T) {
 	t.Parallel()
 	const said = `{"error":"Not Found","error_description":"Entity with id DEV-7 not found"}`
-	server := activityServer(t, respondWith(http.StatusNotFound, said))
+	server := activityServer(t, fake.JSON(http.StatusNotFound, said))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue)
+	got := runWith(t, server.Env(), "activity", "list", activityIssue)
 
 	found := requireFault(t, got)
 	assert.Equal(t, "not_found", found.code)
-	assert.Equal(t, activityRequest(server.url, "51"), detailNamed(t, found, "request"))
+	assert.Equal(t, activityRequest(server.URL, "51"), detailNamed(t, found, "request"))
 	assert.Equal(t, "Entity with id DEV-7 not found", detailNamed(t, found, "upstream_message"))
-	assert.Equal(t, []string{linkTypesPath, activitiesPath}, server.sentPaths())
+	assert.Equal(t, []string{linkTypesPath, activitiesPath}, server.Paths())
 }

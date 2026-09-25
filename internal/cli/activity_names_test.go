@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func sentAuthorWith(held string) string {
@@ -50,9 +52,9 @@ func TestActivityReadsTheNamesOfARecordAtTheRecordAndNowhereBelowIt(t *testing.T
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := activityServer(t, respondWith(http.StatusOK, `[`+tc.activity+`]`))
+			server := activityServer(t, fake.JSON(http.StatusOK, `[`+tc.activity+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", activityIssue,
+			got := runWith(t, server.Env(), "activity", "list", activityIssue,
 				"--fields", tc.expression)
 
 			assert.Equal(t, outcome{stdout: oneRecord(tc.want)}, got)
@@ -62,9 +64,9 @@ func TestActivityReadsTheNamesOfARecordAtTheRecordAndNowhereBelowIt(t *testing.T
 
 func TestActivityShowsTheNamesOfAnActivityToACallerNearNoneOfThem(t *testing.T) {
 	t.Parallel()
-	server := activityServer(t, respondWith(http.StatusOK, `[`+sentCreatedActivity(middle)+`]`))
+	server := activityServer(t, fake.JSON(http.StatusOK, `[`+sentCreatedActivity(middle)+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "timestamp,zzzzzz")
+	got := runWith(t, server.Env(), "activity", "list", activityIssue, "--fields", "timestamp,zzzzzz")
 
 	found := requireFault(t, got)
 	assert.Equal(t, "unknown_name", found.code)

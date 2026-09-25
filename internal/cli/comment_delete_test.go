@@ -6,15 +6,17 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func commentDeletionRequest(address, owner, comment string) string {
 	return "DELETE " + address + "/api/issues/" + owner + "/comments/" + comment
 }
 
-func removingAComment(t *testing.T, deletion http.HandlerFunc) *upstream {
+func removingAComment(t *testing.T, deletion http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return serve(t, func(w http.ResponseWriter, r *http.Request) {
+	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		if !assert.Equal(t, http.MethodDelete, r.Method, "a comment is removed by one DELETE and nothing else") {
 			return
 		}
@@ -47,12 +49,12 @@ func TestCommentDeleteRefusesAnIDThatIsNoInternalID(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "comment", "delete", "--", "DEV-1", tc.id)
+			got := runWith(t, server.Env(), "comment", "delete", "--", "DEV-1", tc.id)
 
 			assert.Equal(t, "bad_usage", requireFault(t, got).code)
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -61,25 +63,25 @@ func TestCommentDeleteRemovesACommentOfAnIssueInOneRequest(t *testing.T) {
 	t.Parallel()
 	server := removingAComment(t, deletionDone())
 
-	got := runWith(t, server.env(), "comment", "delete", "dev-7", "7-12")
+	got := runWith(t, server.Env(), "comment", "delete", "dev-7", "7-12")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
 	assert.Equal(t, "id: \"7-12\"\n", got.stdout)
-	assert.Equal(t, []string{"/api/issues/dev-7/comments/7-12"}, server.sentPaths())
-	assert.Empty(t, server.requests()[0].URL.RawQuery, "the specification declares no parameter for the removal")
-	assert.Equal(t, []string{""}, server.asks())
+	assert.Equal(t, []string{"/api/issues/dev-7/comments/7-12"}, server.Paths())
+	assert.Empty(t, server.Request(t, 0).URL.RawQuery, "the specification declares no parameter for the removal")
+	assert.Equal(t, []string{""}, server.Bodies())
 }
 
 func TestCommentDeleteRemovesACommentOfAnArticleInOneRequest(t *testing.T) {
 	t.Parallel()
 	server := removingAComment(t, deletionDone())
 
-	got := runWith(t, server.env(), "comment", "delete", "DEV-A-3", "8-5")
+	got := runWith(t, server.Env(), "comment", "delete", "DEV-A-3", "8-5")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, "id: \"8-5\"\n", got.stdout)
-	assert.Equal(t, []string{"/api/articles/DEV-A-3/comments/8-5"}, server.sentPaths())
+	assert.Equal(t, []string{"/api/articles/DEV-A-3/comments/8-5"}, server.Paths())
 }
 
 func TestCommentDeleteReadsTheAnswerOfTheRemoval(t *testing.T) {
@@ -92,20 +94,20 @@ func TestCommentDeleteReadsTheAnswerOfTheRemoval(t *testing.T) {
 	}{
 		{
 			name:     "a comment the server has none of",
-			deletion: respondWith(http.StatusNotFound, entityNotFound("7-12")),
+			deletion: fake.JSON(http.StatusNotFound, entityNotFound("7-12")),
 			code:     "not_found",
 			exit:     1,
 		},
 		{
 			name: "a token that may see the issue and not remove the comment",
-			deletion: respondWith(http.StatusForbidden,
+			deletion: fake.JSON(http.StatusForbidden,
 				`{"error":"Forbidden","error_description":"HTTP 403 Forbidden"}`),
 			code: "denied",
 			exit: 1,
 		},
 		{
 			name:     "an answer carrying an object",
-			deletion: respondWith(http.StatusOK, `{"x":1}`),
+			deletion: fake.JSON(http.StatusOK, `{"x":1}`),
 			code:     "upstream_invalid",
 			exit:     2,
 		},
@@ -121,12 +123,12 @@ func TestCommentDeleteReadsTheAnswerOfTheRemoval(t *testing.T) {
 			t.Parallel()
 			server := removingAComment(t, tc.deletion)
 
-			got := runWith(t, server.env(), "comment", "delete", "DEV-7", "7-12")
+			got := runWith(t, server.Env(), "comment", "delete", "DEV-7", "7-12")
 
 			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
-			assert.Equal(t, detail{"request", commentDeletionRequest(server.url, "DEV-7", "7-12")},
+			assert.Equal(t, detail{"request", commentDeletionRequest(server.URL, "DEV-7", "7-12")},
 				found.details[0])
 			assert.Equal(t, []string{http.MethodDelete}, sentMethods(server))
 		})

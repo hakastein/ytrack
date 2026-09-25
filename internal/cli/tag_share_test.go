@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const shownGroupFields = "id,name"
@@ -67,21 +69,21 @@ func sharedTag(name string, read, update []sharedGroup) string {
 		`,"tagSharingSettings":` + taggableBy(nil) + `}`
 }
 
-func sharingATag(t *testing.T, catalogue string, creation http.HandlerFunc) *upstream {
+func sharingATag(t *testing.T, catalogue string, creation http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return serve(t, func(w http.ResponseWriter, r *http.Request) {
+	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			creation(w, r)
 			return
 		}
-		respondWith(http.StatusOK, catalogue)(w, r)
+		fake.JSON(http.StatusOK, catalogue)(w, r)
 	})
 }
 
-func sentBody(t *testing.T, u *upstream) map[string]any {
+func sentBody(t *testing.T, u *fake.Server) map[string]any {
 	t.Helper()
 	var body map[string]any
-	require.NoError(t, json.Unmarshal([]byte(lastAsk(u)), &body))
+	require.NoError(t, json.Unmarshal([]byte(u.Last(t).Body), &body))
 	return body
 }
 
@@ -98,13 +100,13 @@ func TestTagCreateRefusesAGroupOfNoName(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), append([]string{"tag", "create", "--name", "карта"}, tc.argv...)...)
+			got := runWith(t, server.Env(), append([]string{"tag", "create", "--name", "карта"}, tc.argv...)...)
 
 			want := faultDocument{code: "bad_usage"}
 			assert.Equal(t, want, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -112,11 +114,11 @@ func TestTagCreateRefusesAGroupOfNoName(t *testing.T) {
 func TestTagCreateWritesTheNamedGroupsAsTheTwoSets(t *testing.T) {
 	t.Parallel()
 	const name = "карта"
-	server := sharingATag(t, groupsOfTheInstance(), respondWith(http.StatusOK, sharedTag(name,
+	server := sharingATag(t, groupsOfTheInstance(), fake.JSON(http.StatusOK, sharedTag(name,
 		[]sharedGroup{{id: "6-1", name: "DEVELOPMENT Team"}, {id: "101-0", name: groupWithAComma}},
 		[]sharedGroup{{id: "6-0", name: "Все пользователи"}})))
 
-	got := runWith(t, server.env(), "tag", "create", "--name", name,
+	got := runWith(t, server.Env(), "tag", "create", "--name", name,
 		"--visible-for", "development team",
 		"--visible-for", groupWithAComma,
 		"--visible-for", "DEVELOPMENT TEAM",
@@ -124,7 +126,7 @@ func TestTagCreateWritesTheNamedGroupsAsTheTwoSets(t *testing.T) {
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
-	assert.Equal(t, []string{"/api/groups", "/api/tags"}, server.sentPaths())
+	assert.Equal(t, []string{"/api/groups", "/api/tags"}, server.Paths())
 	assert.Equal(t, map[string]any{
 		"name": name,
 		"readSharingSettings": map[string]any{"permittedGroups": []any{
@@ -139,10 +141,10 @@ func TestTagCreateWritesTheNamedGroupsAsTheTwoSets(t *testing.T) {
 
 func TestTagCreateAsksForTheIDsItChecksAndPrintsTheNames(t *testing.T) {
 	t.Parallel()
-	server := sharingATag(t, groupsOfTheInstance(), respondWith(http.StatusOK, sharedTag("карта",
+	server := sharingATag(t, groupsOfTheInstance(), fake.JSON(http.StatusOK, sharedTag("карта",
 		[]sharedGroup{{id: "6-1", name: "DEVELOPMENT Team"}}, nil)))
 
-	got := runWith(t, server.env(), "tag", "create", "--name", "карта", "--visible-for", "DEVELOPMENT Team")
+	got := runWith(t, server.Env(), "tag", "create", "--name", "карта", "--visible-for", "DEVELOPMENT Team")
 
 	want := `name: "карта"` + "\n" +
 		"owner:\n  login: \"admin\"\n" +
@@ -153,20 +155,20 @@ func TestTagCreateAsksForTheIDsItChecksAndPrintsTheNames(t *testing.T) {
 	assert.Equal(t, []string{shownGroupFields,
 		"name,owner(login),readSharingSettings(permittedGroups(name,id),permittedUsers(login))," +
 			"updateSharingSettings(permittedGroups(name),permittedUsers(login))," +
-			"tagSharingSettings(permittedGroups(name),permittedUsers(login))"}, server.sentFields())
+			"tagSharingSettings(permittedGroups(name),permittedUsers(login))"}, server.Fields())
 }
 
 func TestTagCreateRefusesEveryGroupItCannotResolveAtOnce(t *testing.T) {
 	t.Parallel()
 	server := sharingATag(t, groupsOfTheInstance(), noCreation(t))
 
-	got := runWith(t, server.env(), "tag", "create", "--name", "карта",
+	got := runWith(t, server.Env(), "tag", "create", "--name", "карта",
 		"--visible-for", "Нет", "--updateable-by", "Тоже")
 
 	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{
-			{"request", groupsRequest(server.url)},
+			{"request", groupsRequest(server.URL)},
 			{"unknown", []any{
 				[]detail{{"group", "Нет"}, {"nearest", everyGroupName()}},
 				[]detail{{"group", "Тоже"}, {"nearest", everyGroupName()}},
@@ -183,12 +185,12 @@ func TestTagCreateRefusesAGroupNameMoreThanOneGroupAnswersTo(t *testing.T) {
 		`{"$type":"ProjectTeam","id":"6-2","name":"команда"}]`
 	server := sharingATag(t, catalogue, noCreation(t))
 
-	got := runWith(t, server.env(), "tag", "create", "--name", "карта", "--visible-for", "КОМАНДА")
+	got := runWith(t, server.Env(), "tag", "create", "--name", "карта", "--visible-for", "КОМАНДА")
 
 	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{
-			{"request", groupsRequest(server.url)},
+			{"request", groupsRequest(server.URL)},
 			{"ambiguous", []any{[]detail{
 				{"group", "КОМАНДА"},
 				{"candidates", []any{"Команда", "команда"}},
@@ -221,10 +223,10 @@ func TestTagCreateResolvesAGroupNameTwoGroupsAnswerToByWritingItExactly(t *testi
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := sharingATag(t, groupsNamedAlike(), respondWith(http.StatusOK, sharedTag("карта",
+			server := sharingATag(t, groupsNamedAlike(), fake.JSON(http.StatusOK, sharedTag("карта",
 				[]sharedGroup{{id: tc.id, name: tc.written}}, nil)))
 
-			got := runWith(t, server.env(), "tag", "create", "--name", "карта", "--visible-for", tc.written)
+			got := runWith(t, server.Env(), "tag", "create", "--name", "карта", "--visible-for", tc.written)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Equal(t, map[string]any{
@@ -241,13 +243,13 @@ func TestTagCreateRefusesTheUnknownGroupsAndTheAmbiguousOnesTogether(t *testing.
 	t.Parallel()
 	server := sharingATag(t, groupsNamedAlike(), noCreation(t))
 
-	got := runWith(t, server.env(), "tag", "create", "--name", "карта",
+	got := runWith(t, server.Env(), "tag", "create", "--name", "карта",
 		"--visible-for", "Нет", "--updateable-by", "КОМАНДА")
 
 	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{
-			{"request", groupsRequest(server.url)},
+			{"request", groupsRequest(server.URL)},
 			{"unknown", []any{
 				[]detail{{"group", "Нет"}, {"nearest", []any{"DEVELOPMENT Team", "Все пользователи", "Команда", "команда"}}},
 			}},
@@ -276,7 +278,7 @@ func TestTagCreateRefusesAGroupIDItCannotShareTheTagBy(t *testing.T) {
 			catalogue := "[" + catalogueGroup(tc.id, "Команда", "NestedGroup") + "]"
 			server := sharingATag(t, catalogue, noCreation(t))
 
-			got := runWith(t, server.env(), "tag", "create", "--name", "карта", "--visible-for", "Команда")
+			got := runWith(t, server.Env(), "tag", "create", "--name", "карта", "--visible-for", "Команда")
 
 			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
@@ -301,7 +303,7 @@ func TestTagCreateRefusesACatalogueOfGroupsItCannotRead(t *testing.T) {
 			t.Parallel()
 			server := sharingATag(t, "["+tc.group+"]", noCreation(t))
 
-			got := runWith(t, server.env(), "tag", "create", "--name", "карта", "--visible-for", "Команда")
+			got := runWith(t, server.Env(), "tag", "create", "--name", "карта", "--visible-for", "Команда")
 
 			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
@@ -320,7 +322,7 @@ func TestTagCreateNamesTheBrokenIDBeforeTheNamesItCouldNotResolve(t *testing.T) 
 	}, ",") + "]"
 	server := sharingATag(t, catalogue, noCreation(t))
 
-	got := runWith(t, server.env(), "tag", "create", "--name", "карта",
+	got := runWith(t, server.Env(), "tag", "create", "--name", "карта",
 		"--visible-for", "Своя", "--updateable-by", "Нет", "--taggable-by", "КОМАНДА")
 
 	found := requireFault(t, got)
@@ -367,9 +369,9 @@ func TestTagCreateChecksTheSetsItWroteAgainstTheOnesThatCameBack(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := sharingATag(t, groupsOfTheInstance(),
-				respondWith(http.StatusOK, sharedTag(name, tc.kept, nil)))
+				fake.JSON(http.StatusOK, sharedTag(name, tc.kept, nil)))
 
-			got := runWith(t, server.env(), "tag", "create", "--name", name,
+			got := runWith(t, server.Env(), "tag", "create", "--name", name,
 				"--visible-for", "DEVELOPMENT Team", "--visible-for", groupWithAComma)
 
 			if tc.mismatch == nil {
@@ -387,11 +389,11 @@ func TestTagCreateChecksTheSetsItWroteAgainstTheOnesThatCameBack(t *testing.T) {
 
 func TestTagCreateChecksOnlyTheSetsItWrote(t *testing.T) {
 	t.Parallel()
-	server := sharingATag(t, groupsOfTheInstance(), respondWith(http.StatusOK, sharedTag("карта",
+	server := sharingATag(t, groupsOfTheInstance(), fake.JSON(http.StatusOK, sharedTag("карта",
 		[]sharedGroup{{id: "6-1", name: "DEVELOPMENT Team"}},
 		[]sharedGroup{{id: "6-0", name: "Все пользователи"}})))
 
-	got := runWith(t, server.env(), "tag", "create", "--name", "карта", "--visible-for", "DEVELOPMENT Team")
+	got := runWith(t, server.Env(), "tag", "create", "--name", "карта", "--visible-for", "DEVELOPMENT Team")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, []string{"name", "readSharingSettings"}, slices.Sorted(maps.Keys(sentBody(t, server))))
@@ -399,18 +401,18 @@ func TestTagCreateChecksOnlyTheSetsItWrote(t *testing.T) {
 
 func TestTagCreateSendsNoWriteWhereTheGroupsWereRefused(t *testing.T) {
 	t.Parallel()
-	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
+	server := fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		if !assert.Equal(t, http.MethodGet, r.Method, "a creation reached the server") {
 			return
 		}
-		respondWith(http.StatusForbidden, `{"error":"Forbidden","error_description":"HTTP 403 Forbidden"}`)(w, r)
+		fake.JSON(http.StatusForbidden, `{"error":"Forbidden","error_description":"HTTP 403 Forbidden"}`)(w, r)
 	})
 
-	got := runWith(t, server.env(), "tag", "create", "--name", "карта", "--visible-for", everyoneRegistered)
+	got := runWith(t, server.Env(), "tag", "create", "--name", "карта", "--visible-for", everyoneRegistered)
 
 	found := requireFault(t, got)
 	assert.Equal(t, "denied", found.code)
-	assert.Equal(t, detail{"request", groupsRequest(server.url)}, found.details[0])
+	assert.Equal(t, detail{"request", groupsRequest(server.URL)}, found.details[0])
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 	assert.Empty(t, got.stdout)
 }

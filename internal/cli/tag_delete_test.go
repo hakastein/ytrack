@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const resolvedTagFields = "id,name,owner(login)"
@@ -41,18 +43,18 @@ func tagsOfTwoOwners() string {
 	)
 }
 
-func resolvingTags(t *testing.T, catalogue string, deletion http.HandlerFunc) *upstream {
+func resolvingTags(t *testing.T, catalogue string, deletion http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return serve(t, readThenDeletion(respondWith(http.StatusOK, catalogue), deletion))
+	return fake.Serve(t, readThenDeletion(fake.JSON(http.StatusOK, catalogue), deletion))
 }
 
-func requireResolvedWithoutTheServer(t *testing.T, server *upstream, name string) {
+func requireResolvedWithoutTheServer(t *testing.T, server *fake.Server, name string) {
 	t.Helper()
-	for _, target := range server.sentTargets() {
+	for _, target := range server.Targets() {
 		assert.NotContains(t, target, name, "the name reached the server")
 		assert.NotContains(t, target, strings.ToLower(name), "the lower case of the name reached the server")
 	}
-	for _, query := range server.sentQueries() {
+	for _, query := range server.Queries() {
 		assert.Empty(t, query["query"], "a request asked the server to search by name")
 	}
 }
@@ -70,12 +72,12 @@ func TestTagDeleteRefusesACallOfAnyOtherShape(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), append([]string{"tag", "delete"}, tc.argv...)...)
+			got := runWith(t, server.Env(), append([]string{"tag", "delete"}, tc.argv...)...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -98,12 +100,12 @@ func TestTagDeleteResolvesTheNameAgainstTheTagsItIsShown(t *testing.T) {
 			t.Parallel()
 			server := resolvingTags(t, tagsOfTwoOwners(), deletionDone())
 
-			got := runWith(t, server.env(), "tag", "delete", "--name", tc.written)
+			got := runWith(t, server.Env(), "tag", "delete", "--name", tc.written)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Empty(t, got.stderr)
 			assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
-			assert.Equal(t, []string{"/api/tags", tagDeletionPath(tc.id)}, server.sentPaths())
+			assert.Equal(t, []string{"/api/tags", tagDeletionPath(tc.id)}, server.Paths())
 			requireResolvedWithoutTheServer(t, server, tc.written)
 		})
 	}
@@ -160,11 +162,11 @@ func TestTagDeleteRefusesANameThatNamesNoOneTag(t *testing.T) {
 			t.Parallel()
 			server := resolvingTags(t, tagsOfTwoOwners(), noDeletion(t))
 
-			got := runWith(t, server.env(), "tag", "delete", "--name", tc.written)
+			got := runWith(t, server.Env(), "tag", "delete", "--name", tc.written)
 
 			want := faultDocument{
 				code:    "unknown_name",
-				details: append([]detail{{"request", tagsRequest(server.url, resolvedTagFields, "-1")}}, tc.details...),
+				details: append([]detail{{"request", tagsRequest(server.URL, resolvedTagFields, "-1")}}, tc.details...),
 			}
 			assert.Equal(t, want, requireFault(t, got))
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
@@ -177,21 +179,21 @@ func TestTagDeletePrintsWhatTheResolverFound(t *testing.T) {
 	t.Parallel()
 	server := resolvingTags(t, tagsOfTwoOwners(), deletionDone())
 
-	got := runWith(t, server.env(), "tag", "delete", "--name", "ready")
+	got := runWith(t, server.Env(), "tag", "delete", "--name", "ready")
 
 	want := `name: "Ready"` + "\n" + "owner:\n" + `  login: "admin"` + "\n"
 	assert.Equal(t, outcome{stdout: want}, got)
 
-	asked := server.requests()
+	asked := server.Requests()
 	require.Len(t, asked, 2)
 	assert.Equal(t, http.MethodGet, asked[0].Method)
 	assert.Equal(t, "/api/tags", asked[0].URL.Path)
-	assert.Equal(t, []string{resolvedTagFields, ""}, server.sentFields())
+	assert.Equal(t, []string{resolvedTagFields, ""}, server.Fields())
 	assert.Equal(t, "-1", asked[0].URL.Query().Get("$top"))
 	assert.Equal(t, http.MethodDelete, asked[1].Method)
 	assert.Equal(t, tagDeletionPath("10-5"), asked[1].URL.Path)
 	assert.Empty(t, asked[1].URL.RawQuery)
-	assert.Equal(t, []string{"", ""}, server.asks())
+	assert.Equal(t, []string{"", ""}, server.Bodies())
 }
 
 func TestTagDeleteRefusesAnIDItCannotAddressTheDeletionBy(t *testing.T) {
@@ -208,7 +210,7 @@ func TestTagDeleteRefusesAnIDItCannotAddressTheDeletionBy(t *testing.T) {
 			t.Parallel()
 			server := resolvingTags(t, tagCatalogue(catalogueTag(tc.id, "Ready", "admin")), noDeletion(t))
 
-			got := runWith(t, server.env(), "tag", "delete", "--name", "Ready")
+			got := runWith(t, server.Env(), "tag", "delete", "--name", "Ready")
 
 			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
@@ -233,7 +235,7 @@ func TestTagDeleteRefusesACatalogueItCannotTellTagsApartBy(t *testing.T) {
 			t.Parallel()
 			server := resolvingTags(t, tagCatalogue(tc.tag), noDeletion(t))
 
-			got := runWith(t, server.env(), "tag", "delete", "--name", "Ready")
+			got := runWith(t, server.Env(), "tag", "delete", "--name", "Ready")
 
 			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
@@ -253,19 +255,19 @@ func TestTagDeleteReadsWhatTheServerAnsweredTheDeletionWith(t *testing.T) {
 	}{
 		{
 			name:     "a token that may see the tag and not destroy it",
-			deletion: respondWith(http.StatusForbidden, `{"error":"Forbidden","error_description":"Insufficient rights"}`),
+			deletion: fake.JSON(http.StatusForbidden, `{"error":"Forbidden","error_description":"Insufficient rights"}`),
 			code:     "denied",
 			exit:     1,
 		},
 		{
 			name:     "a tag that went away between the two requests",
-			deletion: respondWith(http.StatusNotFound, `{"error":"Not Found","error_description":"Entity with id 10-5 not found"}`),
+			deletion: fake.JSON(http.StatusNotFound, `{"error":"Not Found","error_description":"Entity with id 10-5 not found"}`),
 			code:     "not_found",
 			exit:     1,
 		},
 		{
 			name:     "an answer carrying a body where the call is answered with none",
-			deletion: respondWith(http.StatusOK, `{"x":1}`),
+			deletion: fake.JSON(http.StatusOK, `{"x":1}`),
 			code:     "upstream_invalid",
 			exit:     2,
 		},
@@ -275,12 +277,12 @@ func TestTagDeleteReadsWhatTheServerAnsweredTheDeletionWith(t *testing.T) {
 			t.Parallel()
 			server := resolvingTags(t, tagsOfTwoOwners(), tc.deletion)
 
-			got := runWith(t, server.env(), "tag", "delete", "--name", "ready")
+			got := runWith(t, server.Env(), "tag", "delete", "--name", "ready")
 
 			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
-			assert.Equal(t, detail{"request", tagDeletionRequest(server.url, "10-5")}, found.details[0])
+			assert.Equal(t, detail{"request", tagDeletionRequest(server.URL, "10-5")}, found.details[0])
 			assert.Equal(t, detail{"tag", "ready"}, found.details[1])
 			assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
 		})
@@ -289,13 +291,13 @@ func TestTagDeleteReadsWhatTheServerAnsweredTheDeletionWith(t *testing.T) {
 
 func TestTagDeleteSendsNoDeletionWhereTheCatalogueWasNotReceived(t *testing.T) {
 	t.Parallel()
-	server := serve(t, readThenDeletion(
-		respondWith(http.StatusInternalServerError, `{"error":"Internal Server Error"}`), noDeletion(t)))
+	server := fake.Serve(t, readThenDeletion(
+		fake.JSON(http.StatusInternalServerError, `{"error":"Internal Server Error"}`), noDeletion(t)))
 
-	got := runWith(t, server.env(), "tag", "delete", "--name", "Ready")
+	got := runWith(t, server.Env(), "tag", "delete", "--name", "Ready")
 
 	found := requireFault(t, got)
 	assert.Equal(t, "upstream_failed", found.code)
-	assert.Equal(t, tagsRequest(server.url, resolvedTagFields, "-1"), detailNamed(t, found, "request"))
+	assert.Equal(t, tagsRequest(server.URL, resolvedTagFields, "-1"), detailNamed(t, found, "request"))
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 }

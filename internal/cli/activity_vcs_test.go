@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const capturedCommits = `[` +
@@ -17,9 +19,9 @@ const capturedCommits = `[` +
 
 func TestActivityPrintsTheCommitsOfAnIssueByTheirLinks(t *testing.T) {
 	t.Parallel()
-	server := activityServer(t, respondWith(http.StatusOK, capturedCommits))
+	server := activityServer(t, fake.JSON(http.StatusOK, capturedCommits))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue, "--category", "vcschangecategory")
+	got := runWith(t, server.Env(), "activity", "list", activityIssue, "--category", "vcschangecategory")
 
 	want := "total: 3\nreturned: 3\ntruncated: false\nactivities:\n" +
 		`  - {timestamp: "2025-10-31T02:31:39Z", author: {login: "Петров.Пётр"}, category: "VcsChangeCategory", ` +
@@ -40,9 +42,9 @@ func TestActivityPrintsTheCommitsOfAnIssueByTheirLinks(t *testing.T) {
 
 func TestActivityAsksForTheCommitsWithEveryOtherCategory(t *testing.T) {
 	t.Parallel()
-	server := activityServer(t, respondWith(http.StatusOK, capturedCommits))
+	server := activityServer(t, fake.JSON(http.StatusOK, capturedCommits))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue)
+	got := runWith(t, server.Env(), "activity", "list", activityIssue)
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Contains(t, strings.Split(activitySent(t, server).Get("categories"), ","), "VcsChangeCategory")
@@ -52,9 +54,9 @@ func TestActivityAsksForTheCommitsWithEveryOtherCategory(t *testing.T) {
 
 func TestActivityPrintsTheMessageAndTheHashOfACommitAskedFor(t *testing.T) {
 	t.Parallel()
-	server := activityServer(t, respondWith(http.StatusOK, capturedCommits))
+	server := activityServer(t, fake.JSON(http.StatusOK, capturedCommits))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue, "--category", "VcsChangeCategory",
+	got := runWith(t, server.Env(), "activity", "list", activityIssue, "--category", "VcsChangeCategory",
 		"--limit", "2", "--fields", "+added(text,version,date)")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)

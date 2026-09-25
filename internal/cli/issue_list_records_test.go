@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func listedRecord(id string, fields []receivedField, keys ...string) string {
@@ -61,12 +63,12 @@ func TestIssueListRefusesABlockOfARecordWrittenInAShapeItDoesNotTake(t *testing.
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "issue", "list", "--query", "", "--fields", tc.expression)
+			got := runWith(t, server.Env(), "issue", "list", "--query", "", "--fields", tc.expression)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -84,9 +86,9 @@ func TestIssueListPrintsTheCustomFieldsOfEachRecordInTheOrderOfItsProject(t *tes
 		{name: "Priority", valueType: "enum", ordinal: "5", binding: "190-9", value: bundleElement("High")},
 	}
 	body := `[` + listedRecord("DEV-1", development) + `,` + listedRecord("OPS-1", operationsTiedOnOrdinal) + `]`
-	server := searching(t, respondWith(http.StatusOK, body))
+	server := fake.Serve(t, fake.Searching(t, fake.JSON(http.StatusOK, body)))
 
-	got := runWith(t, server.env(), "issue", "list", "--query", "", "--fields", "+customFields")
+	got := runWith(t, server.Env(), "issue", "list", "--query", "", "--fields", "+customFields")
 
 	requireRecordsOnLines(t, got, 2)
 	found := records(t, got)
@@ -96,7 +98,7 @@ func TestIssueListPrintsTheCustomFieldsOfEachRecordInTheOrderOfItsProject(t *tes
 	for _, hidden := range []string{"$type", "presentation", "1ч 30м"} {
 		assert.NotContains(t, got.stdout, hidden)
 	}
-	assert.Empty(t, server.sentQueries()[1]["customFields"])
+	assert.Empty(t, server.Queries()[1]["customFields"])
 }
 
 func TestIssueListPrintsTheTextOfARecordAsAStringOnItsLine(t *testing.T) {
@@ -127,9 +129,9 @@ func TestIssueListPrintsTheTextOfARecordAsAStringOnItsLine(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := searching(t, respondWith(http.StatusOK, `[`+tc.body+`]`))
+			server := fake.Serve(t, fake.Searching(t, fake.JSON(http.StatusOK, `[`+tc.body+`]`)))
 
-			got := runWith(t, server.env(), "issue", "list", "--query", "", "--fields", tc.expression)
+			got := runWith(t, server.Env(), "issue", "list", "--query", "", "--fields", tc.expression)
 
 			requireRecordsOnLines(t, got, 2)
 			printed := nodeAt(t, records(t, got)[0], tc.path...)
@@ -147,9 +149,9 @@ func TestIssueListPrintsTheLinksOfARecord(t *testing.T) {
 	}})...)
 	body := `[` + listedRecord("DEV-1", namedFieldsOfTheDefault(), `"links":`+linked) + `,` +
 		listedRecord("DEV-2", namedFieldsOfTheDefault(), `"links":`+receivedLinks(emptyIssueLinks()...)) + `]`
-	server := searching(t, respondWith(http.StatusOK, body))
+	server := fake.Serve(t, fake.Searching(t, fake.JSON(http.StatusOK, body)))
 
-	got := runWith(t, server.env(), "issue", "list", "--query", "", "--fields", "+links(issues(idReadable))")
+	got := runWith(t, server.Env(), "issue", "list", "--query", "", "--fields", "+links(issues(idReadable))")
 
 	requireRecordsOnLines(t, got, 2)
 	found := records(t, got)
@@ -173,9 +175,9 @@ func TestIssueListPrintsTheNamedCustomFieldsOfTheDefault(t *testing.T) {
 		{name: namedState, valueType: "state", ordinal: "3", binding: "190-14", value: bundleElement("To do")},
 	}
 	body := `[` + listedRecord("DEV-1", development) + `,` + listedRecord("DOCS-1", documentation) + `]`
-	server := searching(t, respondWith(http.StatusOK, body))
+	server := fake.Serve(t, fake.Searching(t, fake.JSON(http.StatusOK, body)))
 
-	got := runWith(t, server.env(), "issue", "list", "--query", "")
+	got := runWith(t, server.Env(), "issue", "list", "--query", "")
 
 	requireRecordsOnLines(t, got, 2)
 	found := records(t, got)
@@ -196,27 +198,27 @@ func TestIssueListPicksOutTheNamesOfTheDefaultWhereALinkAsksForCustomFieldsToo(t
 		issues: []string{target},
 	})
 	body := `[` + listedRecord("DEV-1", whole, `"links":`+linked) + `]`
-	server := searching(t, respondWith(http.StatusOK, body))
+	server := fake.Serve(t, fake.Searching(t, fake.JSON(http.StatusOK, body)))
 
-	got := runWith(t, server.env(), "issue", "list", "--query", "", "--fields", "+links(issues(customFields))")
+	got := runWith(t, server.Env(), "issue", "list", "--query", "", "--fields", "+links(issues(customFields))")
 
 	requireRecordsOnLines(t, got, 1)
 	record := records(t, got)[0]
 	assert.Equal(t, []string{namedState, namedType}, keysOf(nodeAt(t, record, "customFields")))
 	assert.Equal(t, []string{namedType, "Priority", namedState},
 		keysOf(nodeAt(t, record, "links", "depends on", "customFields")))
-	assert.Empty(t, server.sentQueries()[1]["customFields"])
+	assert.Empty(t, server.Queries()[1]["customFields"])
 }
 
-func selectingNamedFields(t *testing.T, catalogue string, page http.HandlerFunc) *upstream {
+func selectingNamedFields(t *testing.T, catalogue string, page http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return searching(t, func(w http.ResponseWriter, r *http.Request) {
+	return fake.Serve(t, fake.Searching(t, func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, cataloguePath) {
-			respondWith(http.StatusOK, catalogue)(w, r)
+			fake.JSON(http.StatusOK, catalogue)(w, r)
 			return
 		}
 		page(w, r)
-	})
+	}))
 }
 
 func TestIssueListChecksAgainstTheCatalogueOnlyTheNamesTheCallerWrote(t *testing.T) {
@@ -225,13 +227,13 @@ func TestIssueListChecksAgainstTheCatalogueOnlyTheNamesTheCallerWrote(t *testing
 		ordinal: "2", binding: "180-16", value: bundleElement("High")})
 	catalogueLackingTheDefault := catalogueOf(cataloguedField{name: "Priority", translate: "Приоритет"})
 	server := selectingNamedFields(t, catalogueLackingTheDefault,
-		respondWith(http.StatusOK, `[`+listedRecord("DEV-1", received)+`]`))
+		fake.JSON(http.StatusOK, `[`+listedRecord("DEV-1", received)+`]`))
 
-	got := runWith(t, server.env(), "issue", "list", "--query", "x", "--fields", "+customFields(Priority)")
+	got := runWith(t, server.Env(), "issue", "list", "--query", "x", "--fields", "+customFields(Priority)")
 
 	requireRecordsOnLines(t, got, 1)
-	assert.Equal(t, []string{assistPath, cataloguePath, issuesPath}, server.sentPaths())
-	assert.Equal(t, []string{namedState, namedType, "Priority"}, server.sentQueries()[2]["customFields"])
+	assert.Equal(t, []string{fake.AssistPath, cataloguePath, issuesPath}, server.Paths())
+	assert.Equal(t, []string{namedState, namedType, "Priority"}, server.Queries()[2]["customFields"])
 	assert.Equal(t, []string{namedState, namedType, "Priority"},
 		keysOf(nodeAt(t, records(t, got)[0], "customFields")))
 }
@@ -267,9 +269,9 @@ func TestIssueListPrintsAFieldOfTheDefaultTheInstanceSpellsAnotherWay(t *testing
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := searching(t, respondWith(http.StatusOK, `[`+listedRecord("DEV-1", tc.received)+`]`))
+			server := fake.Serve(t, fake.Searching(t, fake.JSON(http.StatusOK, `[`+listedRecord("DEV-1", tc.received)+`]`)))
 
-			got := runWith(t, server.env(), "issue", "list", "--query", "")
+			got := runWith(t, server.Env(), "issue", "list", "--query", "")
 
 			requireRecordsOnLines(t, got, 1)
 			record := records(t, got)[0]
@@ -283,13 +285,13 @@ func TestIssueListPrintsACustomFieldNamedOnTopOfTheDefault(t *testing.T) {
 	t.Parallel()
 	received := append(namedFieldsOfTheDefault(), receivedField{name: "Priority", translate: "Приоритет",
 		valueType: "enum", ordinal: "2", binding: "180-16", value: bundleElement("Critical")})
-	server := selectingNamedFields(t, devCatalogue(), respondWith(http.StatusOK, `[`+listedRecord("DEV-1", received)+`]`))
+	server := selectingNamedFields(t, devCatalogue(), fake.JSON(http.StatusOK, `[`+listedRecord("DEV-1", received)+`]`))
 
-	got := runWith(t, server.env(), "issue", "list", "--query", "", "--fields", `+customFields("приоритет")`)
+	got := runWith(t, server.Env(), "issue", "list", "--query", "", "--fields", `+customFields("приоритет")`)
 
 	requireRecordsOnLines(t, got, 1)
-	assert.Equal(t, []string{assistPath, cataloguePath, issuesPath}, server.sentPaths())
-	assert.Equal(t, []string{namedState, namedType, "Priority"}, server.sentQueries()[2]["customFields"])
+	assert.Equal(t, []string{fake.AssistPath, cataloguePath, issuesPath}, server.Paths())
+	assert.Equal(t, []string{namedState, namedType, "Priority"}, server.Queries()[2]["customFields"])
 	record := records(t, got)[0]
 	assert.Equal(t, []string{namedState, namedType, "Priority"}, keysOf(nodeAt(t, record, "customFields")))
 	assert.Equal(t, "Critical", nodeAt(t, record, "customFields", "Priority").Value)

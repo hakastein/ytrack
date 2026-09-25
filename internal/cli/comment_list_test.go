@@ -9,6 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const (
@@ -74,41 +76,41 @@ func TestCommentListRefusesACallThatNamesNoOneOwner(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			assert.Equal(t, "bad_usage", requireFault(t, got).code)
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
 
 func TestCommentListPrintsTheCommentsOfAnIssueWithDeletedOnesAmongThem(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, "["+listedIssueComment+","+listedDeletedComment+"]"))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, "["+listedIssueComment+","+listedDeletedComment+"]"))
 
-	got := runWith(t, server.env(), "comment", "list", "DEV-7")
+	got := runWith(t, server.Env(), "comment", "list", "DEV-7")
 
 	want := "total: 2\nreturned: 2\ntruncated: false\ncomments:\n" +
 		`  - {id: "7-2", author: {login: "admin"}, created: "2026-09-14T14:23:09.677Z", text: "первая\nвторая", deleted: false}` + "\n" +
 		`  - {id: "7-3", author: {login: "dev.member"}, created: "2026-09-14T14:23:10Z", text: null, deleted: true}` + "\n"
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []string{"/api/issues/DEV-7/comments"}, server.sentPaths())
-	assert.Equal(t, []url.Values{{"fields": {issueCommentListFields}, "$top": {"50"}}}, server.sentQueries())
+	assert.Equal(t, []string{"/api/issues/DEV-7/comments"}, server.Paths())
+	assert.Equal(t, []url.Values{{"fields": {issueCommentListFields}, "$top": {"50"}}}, server.Queries())
 }
 
 func TestCommentListPrintsTheCommentsOfAnArticleWithoutDeleted(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, "["+listedArticleComment+"]"))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, "["+listedArticleComment+"]"))
 
-	got := runWith(t, server.env(), "comment", "list", "DEV-A-1")
+	got := runWith(t, server.Env(), "comment", "list", "DEV-A-1")
 
 	want := "total: 1\nreturned: 1\ntruncated: false\ncomments:\n" +
 		`  - {id: "8-4", author: {login: "admin"}, created: "2026-09-14T14:23:09.747Z", text: "к статье"}` + "\n"
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []string{"/api/articles/DEV-A-1/comments"}, server.sentPaths())
-	assert.Equal(t, []url.Values{{"fields": {articleCommentListFields}, "$top": {"50"}}}, server.sentQueries())
+	assert.Equal(t, []string{"/api/articles/DEV-A-1/comments"}, server.Paths())
+	assert.Equal(t, []url.Values{{"fields": {articleCommentListFields}, "$top": {"50"}}}, server.Queries())
 }
 
 func TestCommentListAddsToTheDefaultOfTheOwnerItNamed(t *testing.T) {
@@ -116,23 +118,23 @@ func TestCommentListAddsToTheDefaultOfTheOwnerItNamed(t *testing.T) {
 
 	t.Run("an addition on an article", func(t *testing.T) {
 		t.Parallel()
-		server := serve(t, respondWith(http.StatusOK, `[]`))
+		server := fake.Serve(t, fake.JSON(http.StatusOK, `[]`))
 
-		got := runWith(t, server.env(), "comment", "list", "DEV-A-1", "--fields", "+updated")
+		got := runWith(t, server.Env(), "comment", "list", "DEV-A-1", "--fields", "+updated")
 
 		assert.Equal(t, outcome{stdout: "total: 0\nreturned: 0\ntruncated: false\ncomments: []\n"}, got)
-		assert.Equal(t, []string{articleCommentListFields + ",updated"}, server.sentFields())
+		assert.Equal(t, []string{articleCommentListFields + ",updated"}, server.Fields())
 	})
 
 	t.Run("deleted on an article", func(t *testing.T) {
 		t.Parallel()
-		server := serve(t, respondWith(http.StatusOK, "["+listedArticleComment+"]"))
+		server := fake.Serve(t, fake.JSON(http.StatusOK, "["+listedArticleComment+"]"))
 
-		got := runWith(t, server.env(), "comment", "list", "DEV-A-1", "--fields", "+deleted")
+		got := runWith(t, server.Env(), "comment", "list", "DEV-A-1", "--fields", "+deleted")
 
 		found := requireFault(t, got)
 		assert.Equal(t, "unknown_name", found.code)
-		assert.Equal(t, []string{articleCommentListFields + ",deleted"}, server.sentFields())
+		assert.Equal(t, []string{articleCommentListFields + ",deleted"}, server.Fields())
 	})
 }
 
@@ -142,9 +144,9 @@ func TestCommentListCountsTheCommentsWhenTheyFillTheLimit(t *testing.T) {
 	t.Run("more counted than arrived", func(t *testing.T) {
 		t.Parallel()
 		count := `[{"$type":"IssueComment","id":"7-2"},{"$type":"IssueComment","id":"7-3"},{"$type":"IssueComment","id":"7-4"}]`
-		server := serve(t, countedBy("["+listedIssueComment+"]", respondWith(http.StatusOK, count)))
+		server := fake.Serve(t, countedBy("["+listedIssueComment+"]", fake.JSON(http.StatusOK, count)))
 
-		got := runWith(t, server.env(), "comment", "list", "DEV-7", "--limit", "1")
+		got := runWith(t, server.Env(), "comment", "list", "DEV-7", "--limit", "1")
 
 		printed := requireCommentListing(t, got)
 		assert.Equal(t, 3, printed.Total)
@@ -152,15 +154,15 @@ func TestCommentListCountsTheCommentsWhenTheyFillTheLimit(t *testing.T) {
 		assert.Equal(t, []url.Values{
 			{"fields": {issueCommentListFields}, "$top": {"1"}},
 			{"fields": {"id"}, "$top": {"-1"}},
-		}, server.sentQueries())
-		assert.Equal(t, []string{"/api/issues/DEV-7/comments", "/api/issues/DEV-7/comments"}, server.sentPaths())
+		}, server.Queries())
+		assert.Equal(t, []string{"/api/issues/DEV-7/comments", "/api/issues/DEV-7/comments"}, server.Paths())
 	})
 
 	t.Run("fewer counted than arrived", func(t *testing.T) {
 		t.Parallel()
-		server := serve(t, countedBy("["+listedIssueComment+"]", respondWith(http.StatusOK, `[]`)))
+		server := fake.Serve(t, countedBy("["+listedIssueComment+"]", fake.JSON(http.StatusOK, `[]`)))
 
-		got := runWith(t, server.env(), "comment", "list", "DEV-7", "--limit", "1")
+		got := runWith(t, server.Env(), "comment", "list", "DEV-7", "--limit", "1")
 
 		assert.Equal(t, faultDocument{
 			code:    "upstream_failed",
@@ -170,14 +172,14 @@ func TestCommentListCountsTheCommentsWhenTheyFillTheLimit(t *testing.T) {
 
 	t.Run("more arrived than the limit", func(t *testing.T) {
 		t.Parallel()
-		server := serve(t, respondWith(http.StatusOK, "["+listedIssueComment+","+listedDeletedComment+"]"))
+		server := fake.Serve(t, fake.JSON(http.StatusOK, "["+listedIssueComment+","+listedDeletedComment+"]"))
 
-		got := runWith(t, server.env(), "comment", "list", "DEV-7", "--limit", "1")
+		got := runWith(t, server.Env(), "comment", "list", "DEV-7", "--limit", "1")
 
 		assert.Equal(t, faultDocument{
 			code:    "upstream_invalid",
 			details: []detail{{"limit", 1}, {"returned", 2}},
 		}, requireFault(t, got))
-		assert.Len(t, server.requests(), 1)
+		assert.Len(t, server.Requests(), 1)
 	})
 }

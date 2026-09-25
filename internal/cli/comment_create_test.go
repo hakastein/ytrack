@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const writtenCommentFields = "id,author(login),created,updated,text"
@@ -52,9 +54,9 @@ func articleCommentNames() []any {
 		"updated", "visibility"}
 }
 
-func commenting(t *testing.T, write http.HandlerFunc) *upstream {
+func commenting(t *testing.T, write http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return serve(t, func(w http.ResponseWriter, r *http.Request) {
+	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		if !assert.Equal(t, http.MethodPost, r.Method, "a comment is written by one POST and nothing else") {
 			return
 		}
@@ -62,9 +64,9 @@ func commenting(t *testing.T, write http.HandlerFunc) *upstream {
 	})
 }
 
-func sentComment(t *testing.T, u *upstream) map[string]any {
+func sentComment(t *testing.T, u *fake.Server) map[string]any {
 	t.Helper()
-	asks := u.asks()
+	asks := u.Bodies()
 	require.Len(t, asks, 1)
 	var body map[string]any
 	require.NoError(t, json.Unmarshal([]byte(asks[0]), &body))
@@ -86,12 +88,12 @@ func TestCommentCreateRefusesBeforeAnyRequest(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			assert.Equal(t, "bad_usage", requireFault(t, got).code)
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -115,12 +117,12 @@ func TestCommentCreateRefusesAnOwnerOrATextItWillNotSend(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			assert.Equal(t, "bad_usage", requireFault(t, got).code)
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -139,12 +141,12 @@ func TestCommentCreateRefusesAnExpressionItCannotRead(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "comment", "create", "DEV-7", "--text", "x", "--fields", tc.expression)
+			got := runWith(t, server.Env(), "comment", "create", "DEV-7", "--text", "x", "--fields", tc.expression)
 
 			assert.Equal(t, "bad_usage", requireFault(t, got).code)
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -156,14 +158,14 @@ const longestLinuxArgument = 131_071
 func TestCommentCreateWritesOnAnIssueInOneRequest(t *testing.T) {
 	t.Parallel()
 	text := textOfSize(hostileComment, longestLinuxArgument)
-	server := commenting(t, respondWith(http.StatusOK, createdComment("7-12", text)))
+	server := commenting(t, fake.JSON(http.StatusOK, createdComment("7-12", text)))
 
-	got := runWith(t, server.env(), "comment", "create", "DEV-7", "--text", text)
+	got := runWith(t, server.Env(), "comment", "create", "DEV-7", "--text", text)
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
-	assert.Equal(t, []string{"/api/issues/DEV-7/comments"}, server.sentPaths())
-	assert.Equal(t, []string{writtenCommentFields}, server.sentFields())
+	assert.Equal(t, []string{"/api/issues/DEV-7/comments"}, server.Paths())
+	assert.Equal(t, []string{writtenCommentFields}, server.Fields())
 	assert.Equal(t, map[string]any{"text": text}, sentComment(t, server))
 
 	mapping := requireMapping(t, "stdout", got.stdout)
@@ -180,14 +182,14 @@ func TestCommentCreateWritesOnAnIssueInOneRequest(t *testing.T) {
 func TestCommentCreateWritesOnAnArticleInOneRequest(t *testing.T) {
 	t.Parallel()
 	const text = "первая\n  вторая   \n"
-	server := commenting(t, respondWith(http.StatusOK, writtenArticleComment("8-5", text)))
+	server := commenting(t, fake.JSON(http.StatusOK, writtenArticleComment("8-5", text)))
 
-	got := runWith(t, server.env(), "comment", "create", "dev-A-3", "--text", text)
+	got := runWith(t, server.Env(), "comment", "create", "dev-A-3", "--text", text)
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
-	assert.Equal(t, []string{"/api/articles/dev-A-3/comments"}, server.sentPaths())
-	assert.NotContains(t, strings.Join(server.sentPaths(), " "), "/api/issues")
+	assert.Equal(t, []string{"/api/articles/dev-A-3/comments"}, server.Paths())
+	assert.NotContains(t, strings.Join(server.Paths(), " "), "/api/issues")
 	assert.Equal(t, map[string]any{"text": text}, sentComment(t, server))
 
 	written := nodeAt(t, requireMapping(t, "stdout", got.stdout), "text")
@@ -211,9 +213,9 @@ func TestCommentCreateWritesTheTextItWasGiven(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := commenting(t, respondWith(http.StatusOK, createdComment("7-12", tc.want)))
+			server := commenting(t, fake.JSON(http.StatusOK, createdComment("7-12", tc.want)))
 
-			got := runWith(t, server.env(), append([]string{"comment", "create", "DEV-7"}, tc.argv...)...)
+			got := runWith(t, server.Env(), append([]string{"comment", "create", "DEV-7"}, tc.argv...)...)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Equal(t, map[string]any{"text": tc.want}, sentComment(t, server))
@@ -242,14 +244,14 @@ func TestCommentCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := commenting(t, respondWith(http.StatusOK, tc.written))
+			server := commenting(t, fake.JSON(http.StatusOK, tc.written))
 
-			got := runWith(t, server.env(), "comment", "create", "DEV-7", "--text", "первая")
+			got := runWith(t, server.Env(), "comment", "create", "DEV-7", "--text", "первая")
 
 			want := faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", issueCommentRequest(server.url, "DEV-7", writtenCommentFields)},
+					{"request", issueCommentRequest(server.URL, "DEV-7", writtenCommentFields)},
 					{"comment", "7-12"},
 					{"mismatch", tc.mismatch},
 				},
@@ -263,13 +265,13 @@ func TestCommentCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 
 func TestCommentCreateChecksMoreThanItPrints(t *testing.T) {
 	t.Parallel()
-	server := commenting(t, respondWith(http.StatusOK, createdComment("7-12", "первая")))
+	server := commenting(t, fake.JSON(http.StatusOK, createdComment("7-12", "первая")))
 
-	got := runWith(t, server.env(), "comment", "create", "DEV-7", "--text", "первая", "--fields", "author(login)")
+	got := runWith(t, server.Env(), "comment", "create", "DEV-7", "--text", "первая", "--fields", "author(login)")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, "author:\n  login: \"admin\"\n", got.stdout)
-	assert.Equal(t, []string{"author(login),id,text"}, server.sentFields())
+	assert.Equal(t, []string{"author(login),id,text"}, server.Fields())
 }
 
 func TestCommentCreatePrintsTheOwnerWhereItWasAskedFor(t *testing.T) {
@@ -290,13 +292,13 @@ func TestCommentCreatePrintsTheOwnerWhereItWasAskedFor(t *testing.T) {
 			written := `{"$type":"` + tc.schema + `","id":"7-12","author":{"$type":"User","login":"admin"},` +
 				`"created":1789035410875,"updated":null,"text":"первая",` +
 				`"` + tc.key + `":{"$type":"` + tc.stood + `","idReadable":"` + tc.owner + `"}}`
-			server := commenting(t, respondWith(http.StatusOK, written))
+			server := commenting(t, fake.JSON(http.StatusOK, written))
 
-			got := runWith(t, server.env(), "comment", "create", tc.owner, "--text", "первая",
+			got := runWith(t, server.Env(), "comment", "create", tc.owner, "--text", "первая",
 				"--fields", "+"+tc.key+"(idReadable)")
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			assert.Equal(t, []string{writtenCommentFields + "," + tc.key + "(idReadable)"}, server.sentFields())
+			assert.Equal(t, []string{writtenCommentFields + "," + tc.key + "(idReadable)"}, server.Fields())
 			mapping := requireMapping(t, "stdout", got.stdout)
 			assert.Equal(t, []string{"id", "author", "created", "updated", "text", tc.key}, keysOf(mapping))
 			assert.Equal(t, tc.owner, nodeAt(t, mapping, tc.key, "idReadable").Value)
@@ -331,9 +333,9 @@ func TestCommentCreateChecksTheResponseAgainstTheSchemaOfTheOwner(t *testing.T) 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := commenting(t, respondWith(http.StatusOK, tc.written))
+			server := commenting(t, fake.JSON(http.StatusOK, tc.written))
 
-			got := runWith(t, server.env(), "comment", "create", tc.owner, "--text", "первая",
+			got := runWith(t, server.Env(), "comment", "create", tc.owner, "--text", "первая",
 				"--fields", tc.expression)
 
 			found := requireUncertainty(t, got)
@@ -381,14 +383,14 @@ func TestCommentCreateRefusesWhatTheServerRefused(t *testing.T) {
 			t.Parallel()
 			said := `{"error":` + strconv.Quote(tc.upstreamError) + `,"error_description":` +
 				strconv.Quote(tc.upstreamMessage) + `}`
-			server := commenting(t, respondWith(tc.status, said))
+			server := commenting(t, fake.JSON(tc.status, said))
 
-			got := runWith(t, server.env(), "comment", "create", "DEV-7", "--text", "x")
+			got := runWith(t, server.Env(), "comment", "create", "DEV-7", "--text", "x")
 
 			want := faultDocument{
 				code: tc.code,
 				details: append([]detail{
-					{"request", issueCommentRequest(server.url, "DEV-7", writtenCommentFields)},
+					{"request", issueCommentRequest(server.URL, "DEV-7", writtenCommentFields)},
 					{"upstream_status", tc.status},
 					{"upstream_error", tc.upstreamError},
 					{"upstream_message", tc.upstreamMessage},

@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 type namedRow struct {
@@ -174,12 +176,12 @@ func TestIssueCreateRefusesAFieldItCannotRead(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--field", tc.written)
+			got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x", "--field", tc.written)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -187,10 +189,10 @@ func TestIssueCreateRefusesAFieldItCannotRead(t *testing.T) {
 func TestIssueCreateWritesEveryTypeNamedByAName(t *testing.T) {
 	t.Parallel()
 	rows := namedRows()
-	server := creating(t, respondWith(http.StatusOK, projectOfRows(rows)),
-		respondWith(http.StatusOK, issueOfRows("DEV-7", "x", rows)))
+	server := creating(t, fake.JSON(http.StatusOK, projectOfRows(rows)),
+		fake.JSON(http.StatusOK, issueOfRows("DEV-7", "x", rows)))
 
-	got := runWith(t, server.env(), append([]string{"issue", "create", "DEV", "--summary", "x"}, shuffledFlagsOfRows(rows)...)...)
+	got := runWith(t, server.Env(), append([]string{"issue", "create", "DEV", "--summary", "x"}, shuffledFlagsOfRows(rows)...)...)
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
@@ -201,7 +203,7 @@ func TestIssueCreateWritesEveryTypeNamedByAName(t *testing.T) {
 		elements = append(elements, row.element())
 	}
 	want := `{"project":{"id":"0-1"},"summary":"x","customFields":[` + strings.Join(elements, ",") + `]}`
-	assert.JSONEq(t, want, server.asks()[1])
+	assert.JSONEq(t, want, server.Bodies()[1])
 }
 
 func TestIssueCreateSplitsAFieldAtTheFirstEquals(t *testing.T) {
@@ -225,15 +227,15 @@ func TestIssueCreateSplitsAFieldAtTheFirstEquals(t *testing.T) {
 			)
 			held := receivedFields(receivedField{name: tc.field, valueType: "enum", binding: "180-18",
 				value: bundleElement(tc.value)})
-			server := creating(t, respondWith(http.StatusOK, metadata),
-				respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
+			server := creating(t, fake.JSON(http.StatusOK, metadata),
+				fake.JSON(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
 
-			got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--field", tc.written)
+			got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x", "--field", tc.written)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			want := `{"project":{"id":"0-1"},"summary":"x","customFields":[{"$type":"SingleEnumIssueCustomField",` +
 				`"name":` + strconv.Quote(tc.field) + `,"value":{"name":` + strconv.Quote(tc.value) + `}}]}`
-			assert.JSONEq(t, want, server.asks()[1])
+			assert.JSONEq(t, want, server.Bodies()[1])
 		})
 	}
 }
@@ -242,16 +244,16 @@ func TestIssueCreateAsksForTheFieldsItChecks(t *testing.T) {
 	t.Parallel()
 	metadata := projectResponse(writableField{id: "180-15", name: "Type", valueType: "enum", canBeEmpty: true})
 	held := receivedFields(receivedField{name: "Type", valueType: "enum", binding: "180-15", value: bundleElement("Task")})
-	server := creating(t, respondWith(http.StatusOK, metadata),
-		respondWith(http.StatusOK, `{"$type":"Issue","idReadable":"DEV-7","summary":"x","customFields":`+held+`}`))
+	server := creating(t, fake.JSON(http.StatusOK, metadata),
+		fake.JSON(http.StatusOK, `{"$type":"Issue","idReadable":"DEV-7","summary":"x","customFields":`+held+`}`))
 
-	got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--field", "Type=Task",
+	got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x", "--field", "Type=Task",
 		"--fields", "idReadable")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, "idReadable: \"DEV-7\"\n", got.stdout)
-	assert.Equal(t, []string{projectWriteFields, "idReadable,summary," + customFieldsFields}, server.sentFields())
-	for _, query := range server.sentQueries() {
+	assert.Equal(t, []string{projectWriteFields, "idReadable,summary," + customFieldsFields}, server.Fields())
+	for _, query := range server.Queries() {
 		assert.Empty(t, query["customFields"], "a write never cuts the answer down by name")
 	}
 }
@@ -277,10 +279,10 @@ func TestIssueCreateChecksTheResponseAgainstTheValuesItWrote(t *testing.T) {
 			receivedField{name: "Assignee", valueType: "user", binding: "180-21",
 				value: `{"$type":"User","login":"admin"}`},
 		)
-		server := creating(t, respondWith(http.StatusOK, metadata),
-			respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
+		server := creating(t, fake.JSON(http.StatusOK, metadata),
+			fake.JSON(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
 
-		got := runWith(t, server.env(), append([]string{"issue", "create", "DEV", "--summary", "x"}, written...)...)
+		got := runWith(t, server.Env(), append([]string{"issue", "create", "DEV", "--summary", "x"}, written...)...)
 
 		require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 		assert.Empty(t, got.stderr)
@@ -294,10 +296,10 @@ func TestIssueCreateChecksTheResponseAgainstTheValuesItWrote(t *testing.T) {
 			receivedField{name: "Assignee", valueType: "user", binding: "180-21",
 				value: `{"$type":"User","login":"admin"}`},
 		)
-		server := creating(t, respondWith(http.StatusOK, metadata),
-			respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
+		server := creating(t, fake.JSON(http.StatusOK, metadata),
+			fake.JSON(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
 
-		got := runWith(t, server.env(), append([]string{"issue", "create", "DEV", "--summary", "x"}, written...)...)
+		got := runWith(t, server.Env(), append([]string{"issue", "create", "DEV", "--summary", "x"}, written...)...)
 
 		found := requireUncertainty(t, got)
 		assert.Equal(t, "upstream_invalid", found.code)
@@ -315,15 +317,15 @@ func TestIssueCreateChecksTheResponseAgainstTheValuesItWrote(t *testing.T) {
 			receivedField{name: "Assignee", valueType: "user", binding: "180-21",
 				value: `{"$type":"User","login":"admin"}`},
 		)
-		server := creating(t, respondWith(http.StatusOK, metadata),
-			respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
+		server := creating(t, fake.JSON(http.StatusOK, metadata),
+			fake.JSON(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
 
-		got := runWith(t, server.env(), append([]string{"issue", "create", "DEV", "--summary", "x"}, written...)...)
+		got := runWith(t, server.Env(), append([]string{"issue", "create", "DEV", "--summary", "x"}, written...)...)
 
 		want := faultDocument{
 			code: "upstream_invalid",
 			details: []detail{
-				{"request", creationRequest(server.url, askedIssueFields)},
+				{"request", creationRequest(server.URL, askedIssueFields)},
 				{"issue", "DEV-7"},
 				{"mismatch", []any{[]detail{{"field", "Type"}, {"expected", "task"}, {"actual", "Bug"}}}},
 			},
@@ -370,10 +372,10 @@ func TestIssueCreateRefusesAnEmptyResponseValueWhereTheWriteSetOne(t *testing.T)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := creating(t, respondWith(http.StatusOK, metadata),
-				respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", tc.held)))
+			server := creating(t, fake.JSON(http.StatusOK, metadata),
+				fake.JSON(http.StatusOK, createdIssueWith("DEV-7", "x", "null", tc.held)))
 
-			got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x",
+			got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x",
 				"--field", "Type=Task", "--field", "Клиент=ACME")
 
 			found := requireUncertainty(t, got)
@@ -402,9 +404,9 @@ func TestIssueCreateRefusesAValueItCannotSend(t *testing.T) {
 	t.Run("a type the catalogue of ytrack does not model", func(t *testing.T) {
 		t.Parallel()
 		metadata := projectResponse(writableField{id: "180-15", name: "Type", valueType: "quantum", canBeEmpty: true})
-		server := creating(t, respondWith(http.StatusOK, metadata), noCreation(t))
+		server := creating(t, fake.JSON(http.StatusOK, metadata), noCreation(t))
 
-		got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--field", "Type=Task")
+		got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x", "--field", "Type=Task")
 
 		found := requireFault(t, got)
 		assert.Equal(t, "upstream_invalid", found.code)
@@ -420,15 +422,15 @@ func TestIssueCreateRefusesNamesAndRepeatsAfterTheMetadata(t *testing.T) {
 	)
 	t.Run("one field named twice", func(t *testing.T) {
 		t.Parallel()
-		server := creating(t, respondWith(http.StatusOK, metadata), noCreation(t))
+		server := creating(t, fake.JSON(http.StatusOK, metadata), noCreation(t))
 
-		got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x",
+		got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x",
 			"--field", "Type=Bug", "--field", "тип=Task")
 
 		found := requireFault(t, got)
 		assert.Equal(t, "bad_usage", found.code)
 		assert.Equal(t, []detail{
-			{"request", writeMetadataRequest(server.url, "DEV")},
+			{"request", writeMetadataRequest(server.URL, "DEV")},
 			{"project", "DEV"},
 		}, found.details[:2])
 		invalidRow(t, found, 0, "Type", "Task")
@@ -436,15 +438,15 @@ func TestIssueCreateRefusesNamesAndRepeatsAfterTheMetadata(t *testing.T) {
 	})
 	t.Run("names no field of the project answers to", func(t *testing.T) {
 		t.Parallel()
-		server := creating(t, respondWith(http.StatusOK, metadata), noCreation(t))
+		server := creating(t, fake.JSON(http.StatusOK, metadata), noCreation(t))
 
-		got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x",
+		got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x",
 			"--field", "Типп=x", "--field", "Нет=y")
 
 		want := faultDocument{
 			code: "unknown_name",
 			details: []detail{
-				{"request", writeMetadataRequest(server.url, "DEV")},
+				{"request", writeMetadataRequest(server.URL, "DEV")},
 				{"project", "DEV"},
 				{"unknown", []any{
 					[]detail{{"field", "Типп"}, {"nearest", []any{"Type"}}},
@@ -461,14 +463,14 @@ func TestIssueCreateRefusesNamesAndRepeatsAfterTheMetadata(t *testing.T) {
 			writableField{id: "180-15", name: "Type", translate: "Общее", valueType: "enum", canBeEmpty: true},
 			writableField{id: "180-18", name: "Клиент", translate: "Общее", valueType: "enum", canBeEmpty: true},
 		)
-		server := creating(t, respondWith(http.StatusOK, twice), noCreation(t))
+		server := creating(t, fake.JSON(http.StatusOK, twice), noCreation(t))
 
-		got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--field", "общее=x")
+		got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x", "--field", "общее=x")
 
 		want := faultDocument{
 			code: "unknown_name",
 			details: []detail{
-				{"request", writeMetadataRequest(server.url, "DEV")},
+				{"request", writeMetadataRequest(server.URL, "DEV")},
 				{"project", "DEV"},
 				{"ambiguous", []any{[]detail{{"field", "общее"}, {"candidates", []any{"Type", "Клиент"}}}}},
 			},
@@ -526,13 +528,13 @@ func TestIssueWriteNamesAnUnresolvedNameOnce(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			read := respondWith(http.StatusOK, tc.project)
+			read := fake.JSON(http.StatusOK, tc.project)
 			if tc.argv[1] == "update" {
-				read = respondWith(http.StatusOK, issueToUpdate("DEV-1", tc.project))
+				read = fake.JSON(http.StatusOK, issueToUpdate("DEV-1", tc.project))
 			}
-			server := serve(t, readThenUpdate(read, noUpdate(t)))
+			server := fake.Serve(t, readThenUpdate(read, noUpdate(t)))
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			found := requireFault(t, got)
 			assert.Equal(t, "unknown_name", found.code)
@@ -552,15 +554,15 @@ func TestIssueCreateWritesAUserByLoginAlone(t *testing.T) {
 			t.Parallel()
 			held := receivedFields(receivedField{name: "Assignee", valueType: "user", binding: "180-21",
 				value: `{"$type":"User","login":` + strconv.Quote(login) + `}`})
-			server := creating(t, respondWith(http.StatusOK, metadata),
-				respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
+			server := creating(t, fake.JSON(http.StatusOK, metadata),
+				fake.JSON(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
 
-			got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--field", "Assignee="+login)
+			got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x", "--field", "Assignee="+login)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			want := `{"project":{"id":"0-1"},"summary":"x","customFields":[{"$type":"SingleUserIssueCustomField",` +
 				`"name":"Assignee","value":{"login":` + strconv.Quote(login) + `}}]}`
-			assert.JSONEq(t, want, server.asks()[1])
+			assert.JSONEq(t, want, server.Bodies()[1])
 		})
 	}
 }

@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const commentDeletedFields = "deleted"
@@ -26,16 +28,16 @@ func commentDeletedState(gone bool) string {
 	return `{"$type":"IssueComment","deleted":` + strconv.FormatBool(gone) + `}`
 }
 
-func sentText(t *testing.T, u *upstream) map[string]any {
+func sentText(t *testing.T, u *fake.Server) map[string]any {
 	t.Helper()
 	var body map[string]any
-	require.NoError(t, json.Unmarshal([]byte(lastAsk(u)), &body))
+	require.NoError(t, json.Unmarshal([]byte(u.Last(t).Body), &body))
 	return body
 }
 
-func updatingAComment(t *testing.T, read, write http.HandlerFunc) *upstream {
+func updatingAComment(t *testing.T, read, write http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return serve(t, func(w http.ResponseWriter, r *http.Request) {
+	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			read(w, r)
 			return
@@ -59,12 +61,12 @@ func TestCommentUpdateRefusesBeforeAnyRequest(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			assert.Equal(t, "bad_usage", requireFault(t, got).code)
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -94,12 +96,12 @@ func TestCommentUpdateRefusesAnIDThatIsNoInternalID(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "comment", "update", "DEV-1", "--text", "x", "--", tc.id)
+			got := runWith(t, server.Env(), "comment", "update", "DEV-1", "--text", "x", "--", tc.id)
 
 			assert.Equal(t, "bad_usage", requireFault(t, got).code)
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -116,12 +118,12 @@ func TestCommentUpdateRefusesATextItWillNotSend(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "comment", "update", "DEV-1", "7-1", "--text", tc.text)
+			got := runWith(t, server.Env(), "comment", "update", "DEV-1", "7-1", "--text", tc.text)
 
 			assert.Equal(t, "bad_usage", requireFault(t, got).code)
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -140,13 +142,13 @@ func TestCommentUpdateRefusesAnExpressionItCannotRead(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "comment", "update", "DEV-7", "7-12", "--text", "x",
+			got := runWith(t, server.Env(), "comment", "update", "DEV-7", "7-12", "--text", "x",
 				"--fields", tc.expression)
 
 			assert.Equal(t, "bad_usage", requireFault(t, got).code)
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -154,16 +156,16 @@ func TestCommentUpdateRefusesAnExpressionItCannotRead(t *testing.T) {
 func TestCommentUpdateReadsAnIssueCommentBeforeWritingIt(t *testing.T) {
 	t.Parallel()
 	text := textOfSize(hostileComment, longestLinuxArgument)
-	server := updatingAComment(t, respondWith(http.StatusOK, commentDeletedState(false)),
-		respondWith(http.StatusOK, createdComment("7-12", text)))
+	server := updatingAComment(t, fake.JSON(http.StatusOK, commentDeletedState(false)),
+		fake.JSON(http.StatusOK, createdComment("7-12", text)))
 
-	got := runWith(t, server.env(), "comment", "update", "dev-7", "7-12", "--text", text)
+	got := runWith(t, server.Env(), "comment", "update", "dev-7", "7-12", "--text", text)
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
 	assert.Equal(t, []string{"/api/issues/dev-7/comments/7-12", "/api/issues/dev-7/comments/7-12"},
-		server.sentPaths())
-	assert.Equal(t, []string{commentDeletedFields, writtenCommentFields}, server.sentFields())
+		server.Paths())
+	assert.Equal(t, []string{commentDeletedFields, writtenCommentFields}, server.Fields())
 	assert.Equal(t, map[string]any{"text": text}, sentText(t, server))
 
 	mapping := requireMapping(t, "stdout", got.stdout)
@@ -175,26 +177,26 @@ func TestCommentUpdateReadsAnIssueCommentBeforeWritingIt(t *testing.T) {
 
 func TestCommentUpdateWritesOnAnArticleInOneRequest(t *testing.T) {
 	t.Parallel()
-	server := commenting(t, respondWith(http.StatusOK, writtenArticleComment("8-5", "x")))
+	server := commenting(t, fake.JSON(http.StatusOK, writtenArticleComment("8-5", "x")))
 
-	got := runWith(t, server.env(), "comment", "update", "DEV-A-3", "8-5", "--text", "x")
+	got := runWith(t, server.Env(), "comment", "update", "DEV-A-3", "8-5", "--text", "x")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, []string{"/api/articles/DEV-A-3/comments/8-5"}, server.sentPaths())
-	assert.NotContains(t, strings.Join(server.sentPaths(), " "), "/api/issues")
+	assert.Equal(t, []string{"/api/articles/DEV-A-3/comments/8-5"}, server.Paths())
+	assert.NotContains(t, strings.Join(server.Paths(), " "), "/api/issues")
 	assert.Equal(t, map[string]any{"text": "x"}, sentText(t, server))
 }
 
 func TestCommentUpdateRefusesADeletedComment(t *testing.T) {
 	t.Parallel()
-	server := updatingAComment(t, respondWith(http.StatusOK, commentDeletedState(true)), noUpdate(t))
+	server := updatingAComment(t, fake.JSON(http.StatusOK, commentDeletedState(true)), noUpdate(t))
 
-	got := runWith(t, server.env(), "comment", "update", "DEV-7", "7-12", "--text", "x")
+	got := runWith(t, server.Env(), "comment", "update", "DEV-7", "7-12", "--text", "x")
 
 	want := faultDocument{
 		code: "bad_usage",
 		details: []detail{
-			{"request", commentReadRequest(server.url, "DEV-7", "7-12")},
+			{"request", commentReadRequest(server.URL, "DEV-7", "7-12")},
 			{"comment", "7-12"},
 		},
 	}
@@ -215,14 +217,14 @@ func TestCommentUpdateRefusesAReadThatSaysNothingOfDeleted(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := updatingAComment(t, respondWith(http.StatusOK, tc.read), noUpdate(t))
+			server := updatingAComment(t, fake.JSON(http.StatusOK, tc.read), noUpdate(t))
 
-			got := runWith(t, server.env(), "comment", "update", "DEV-7", "7-12", "--text", "x")
+			got := runWith(t, server.Env(), "comment", "update", "DEV-7", "7-12", "--text", "x")
 
 			want := faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", commentReadRequest(server.url, "DEV-7", "7-12")},
+					{"request", commentReadRequest(server.URL, "DEV-7", "7-12")},
 					{"upstream_status", 200},
 					{"upstream_body", tc.read},
 				},
@@ -240,15 +242,15 @@ func TestCommentUpdateRefusesWhatTheServerRefused(t *testing.T) {
 	}
 	tests := []struct {
 		name    string
-		server  func(t *testing.T) *upstream
+		server  func(t *testing.T) *fake.Server
 		argv    []string
 		code    string
 		methods []string
 	}{
 		{
 			name: "a comment the read does not find",
-			server: func(t *testing.T) *upstream {
-				return updatingAComment(t, respondWith(http.StatusNotFound, entityNotFound("7-12")), noUpdate(t))
+			server: func(t *testing.T) *fake.Server {
+				return updatingAComment(t, fake.JSON(http.StatusNotFound, entityNotFound("7-12")), noUpdate(t))
 			},
 			argv:    []string{"comment", "update", "DEV-7", "7-12", "--text", "x"},
 			code:    "not_found",
@@ -256,8 +258,8 @@ func TestCommentUpdateRefusesWhatTheServerRefused(t *testing.T) {
 		},
 		{
 			name: "a comment of an article the server has none of",
-			server: func(t *testing.T) *upstream {
-				return commenting(t, respondWith(http.StatusNotFound, entityNotFound("8-5")))
+			server: func(t *testing.T) *fake.Server {
+				return commenting(t, fake.JSON(http.StatusNotFound, entityNotFound("8-5")))
 			},
 			argv:    []string{"comment", "update", "DEV-A-3", "8-5", "--text", "x"},
 			code:    "not_found",
@@ -265,9 +267,9 @@ func TestCommentUpdateRefusesWhatTheServerRefused(t *testing.T) {
 		},
 		{
 			name: "a token that may read the comment and not write it",
-			server: func(t *testing.T) *upstream {
-				return updatingAComment(t, respondWith(http.StatusOK, commentDeletedState(false)),
-					respondWith(http.StatusForbidden, said("Forbidden", "HTTP 403 Forbidden")))
+			server: func(t *testing.T) *fake.Server {
+				return updatingAComment(t, fake.JSON(http.StatusOK, commentDeletedState(false)),
+					fake.JSON(http.StatusForbidden, said("Forbidden", "HTTP 403 Forbidden")))
 			},
 			argv:    []string{"comment", "update", "DEV-7", "7-12", "--text", "x"},
 			code:    "denied",
@@ -275,9 +277,9 @@ func TestCommentUpdateRefusesWhatTheServerRefused(t *testing.T) {
 		},
 		{
 			name: "a body the server disagreed with",
-			server: func(t *testing.T) *upstream {
-				return updatingAComment(t, respondWith(http.StatusOK, commentDeletedState(false)),
-					respondWith(http.StatusBadRequest, said("bad_request", "Comment can't be empty.")))
+			server: func(t *testing.T) *fake.Server {
+				return updatingAComment(t, fake.JSON(http.StatusOK, commentDeletedState(false)),
+					fake.JSON(http.StatusBadRequest, said("bad_request", "Comment can't be empty.")))
 			},
 			argv:    []string{"comment", "update", "DEV-7", "7-12", "--text", "x"},
 			code:    "rejected",
@@ -289,7 +291,7 @@ func TestCommentUpdateRefusesWhatTheServerRefused(t *testing.T) {
 			t.Parallel()
 			server := tc.server(t)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			assert.Equal(t, tc.code, requireFault(t, got).code)
 			assert.Equal(t, tc.methods, sentMethods(server))
@@ -331,16 +333,16 @@ func TestCommentUpdateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := updatingAComment(t, respondWith(http.StatusOK, commentDeletedState(false)),
-				respondWith(http.StatusOK, tc.written))
+			server := updatingAComment(t, fake.JSON(http.StatusOK, commentDeletedState(false)),
+				fake.JSON(http.StatusOK, tc.written))
 
 			argv := append([]string{"comment", "update", "DEV-7", "7-12", "--text", "первая"}, tc.asked...)
-			got := runWith(t, server.env(), argv...)
+			got := runWith(t, server.Env(), argv...)
 
 			want := faultDocument{
 				code: "upstream_invalid",
 				details: []detail{
-					{"request", commentWriteRequest(server.url, "DEV-7", "7-12", tc.fields)},
+					{"request", commentWriteRequest(server.URL, "DEV-7", "7-12", tc.fields)},
 					{"comment", "7-12"},
 					{"mismatch", []any{[]detail{{"field", "text"}, {"expected", "первая"}, {"actual", tc.received}}}},
 				},
@@ -355,23 +357,23 @@ func TestCommentUpdateChecksTheResponseAgainstTheSchemaOfTheOwner(t *testing.T) 
 	t.Parallel()
 	tests := []struct {
 		name    string
-		server  func(t *testing.T) *upstream
+		server  func(t *testing.T) *fake.Server
 		argv    []string
 		unknown []detail
 	}{
 		{
 			name: "a flag only a comment of an issue carries, asked of an article",
-			server: func(t *testing.T) *upstream {
-				return commenting(t, respondWith(http.StatusOK, writtenArticleComment("8-5", "первая")))
+			server: func(t *testing.T) *fake.Server {
+				return commenting(t, fake.JSON(http.StatusOK, writtenArticleComment("8-5", "первая")))
 			},
 			argv:    []string{"comment", "update", "DEV-A-3", "8-5", "--text", "первая", "--fields", "+deleted"},
 			unknown: unknownEntry("deleted", articleCommentNames()...),
 		},
 		{
 			name: "the owner of a comment of an article, asked of an issue",
-			server: func(t *testing.T) *upstream {
-				return updatingAComment(t, respondWith(http.StatusOK, commentDeletedState(false)),
-					respondWith(http.StatusOK, createdComment("7-12", "первая")))
+			server: func(t *testing.T) *fake.Server {
+				return updatingAComment(t, fake.JSON(http.StatusOK, commentDeletedState(false)),
+					fake.JSON(http.StatusOK, createdComment("7-12", "первая")))
 			},
 			argv: []string{"comment", "update", "DEV-7", "7-12", "--text", "первая",
 				"--fields", "+article(idReadable)"},
@@ -383,7 +385,7 @@ func TestCommentUpdateChecksTheResponseAgainstTheSchemaOfTheOwner(t *testing.T) 
 			t.Parallel()
 			server := tc.server(t)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			found := requireUncertainty(t, got)
 			assert.Equal(t, "unknown_name", found.code)
@@ -394,13 +396,13 @@ func TestCommentUpdateChecksTheResponseAgainstTheSchemaOfTheOwner(t *testing.T) 
 
 func TestCommentUpdateChecksMoreThanItPrints(t *testing.T) {
 	t.Parallel()
-	server := updatingAComment(t, respondWith(http.StatusOK, commentDeletedState(false)),
-		respondWith(http.StatusOK, createdComment("7-12", "первая")))
+	server := updatingAComment(t, fake.JSON(http.StatusOK, commentDeletedState(false)),
+		fake.JSON(http.StatusOK, createdComment("7-12", "первая")))
 
-	got := runWith(t, server.env(), "comment", "update", "DEV-7", "7-12", "--text", "первая",
+	got := runWith(t, server.Env(), "comment", "update", "DEV-7", "7-12", "--text", "первая",
 		"--fields", "author(login)")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, "author:\n  login: \"admin\"\n", got.stdout)
-	assert.Equal(t, []string{commentDeletedFields, "author(login),text"}, server.sentFields())
+	assert.Equal(t, []string{commentDeletedFields, "author(login),text"}, server.Fields())
 }

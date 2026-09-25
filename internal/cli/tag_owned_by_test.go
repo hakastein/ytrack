@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func TestTagRefusesAnOwnerOfNoLogin(t *testing.T) {
@@ -25,12 +27,12 @@ func TestTagRefusesAnOwnerOfNoLogin(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -57,13 +59,13 @@ func TestTagDeleteNarrowsTheNameByTheOwnerOfTheTag(t *testing.T) {
 			t.Parallel()
 			server := resolvingTags(t, tagsOfTwoOwners(), deletionDone())
 
-			got := runWith(t, server.env(), "tag", "delete", "--name", tc.written, "--owned-by", tc.owner)
+			got := runWith(t, server.Env(), "tag", "delete", "--name", tc.written, "--owned-by", tc.owner)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
-			assert.Equal(t, []string{tagsCollection, tagDeletionPath(tc.id)}, server.sentPaths())
+			assert.Equal(t, []string{tagsCollection, tagDeletionPath(tc.id)}, server.Paths())
 			requireResolvedWithoutTheServer(t, server, tc.written)
-			for _, target := range server.sentTargets() {
+			for _, target := range server.Targets() {
 				assert.NotContains(t, target, tc.owner, "the login reached the server")
 			}
 		})
@@ -99,12 +101,12 @@ func TestTagDeleteRefusesANameNoTagOfThatOwnerCarries(t *testing.T) {
 			t.Parallel()
 			server := resolvingTags(t, tagsOfTwoOwners(), noDeletion(t))
 
-			got := runWith(t, server.env(), "tag", "delete", "--name", tc.written, "--owned-by", tc.owner)
+			got := runWith(t, server.Env(), "tag", "delete", "--name", tc.written, "--owned-by", tc.owner)
 
 			want := faultDocument{
 				code: "unknown_name",
 				details: []detail{
-					{"request", tagsRequest(server.url, resolvedTagFields, "-1")},
+					{"request", tagsRequest(server.URL, resolvedTagFields, "-1")},
 					{"unknown", []any{[]detail{
 						{"tag", tc.written},
 						{"owned_by", tc.owner},
@@ -123,7 +125,7 @@ func TestTagAddAndRemoveNarrowTheNameByTheOwnerOfTheTag(t *testing.T) {
 	tests := []struct {
 		name    string
 		argv    []string
-		serving func(*testing.T, http.HandlerFunc, http.HandlerFunc, http.HandlerFunc) *upstream
+		serving func(*testing.T, http.HandlerFunc, http.HandlerFunc, http.HandlerFunc) *fake.Server
 		write   http.HandlerFunc
 		method  string
 		path    string
@@ -132,7 +134,7 @@ func TestTagAddAndRemoveNarrowTheNameByTheOwnerOfTheTag(t *testing.T) {
 			name:    "a tagging",
 			argv:    []string{"tag", "add", "DEV-7", "--name", "amb", "--owned-by", "dev.limited"},
 			serving: addingATag,
-			write:   respondWith(http.StatusOK, catalogueTag("10-23", "amb", "dev.limited")),
+			write:   fake.JSON(http.StatusOK, catalogueTag("10-23", "amb", "dev.limited")),
 			method:  http.MethodPost,
 			path:    tagsOfOwnerPath("issues", "DEV-7"),
 		},
@@ -148,13 +150,13 @@ func TestTagAddAndRemoveNarrowTheNameByTheOwnerOfTheTag(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := tc.serving(t, respondWith(http.StatusOK, issueNamed("DEV-7")), shownTags(), tc.write)
+			server := tc.serving(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), shownTags(), tc.write)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Equal(t, []string{http.MethodGet, http.MethodGet, tc.method}, sentMethods(server))
-			assert.Equal(t, []string{"/api/issues/DEV-7", tagsCollection, tc.path}, server.sentPaths())
+			assert.Equal(t, []string{"/api/issues/DEV-7", tagsCollection, tc.path}, server.Paths())
 		})
 	}
 }

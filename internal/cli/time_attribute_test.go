@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const sentWorkItemSettingsFields = "idReadable,project(shortName,plugins(timeTrackingSettings(workItemTypes(id,name)," +
@@ -22,35 +24,35 @@ func devIssueWithAttributes() string {
 	return strings.TrimSuffix(withTypes, "}}}}") + attributes + "}}}}"
 }
 
-func sentAttributes(t *testing.T, u *upstream) any {
+func sentAttributes(t *testing.T, u *fake.Server) any {
 	t.Helper()
 	var body map[string]any
-	require.NoError(t, json.Unmarshal([]byte(lastAsk(u)), &body), "the body that went out: %s", lastAsk(u))
+	require.NoError(t, json.Unmarshal([]byte(u.Last(t).Body), &body), "the body that went out: %s", u.Last(t).Body)
 	return body["attributes"]
 }
 
 func TestTimeCreateWritesAnAttributeByTheIDsOfTheProject(t *testing.T) {
 	t.Parallel()
-	server := writingTimeOfAType(t, respondWith(http.StatusOK, devIssueWithAttributes()),
-		respondWith(http.StatusOK, answeredWorkItem{attributes: sentAgentAttribute}.json()))
+	server := writingTimeOfAType(t, fake.JSON(http.StatusOK, devIssueWithAttributes()),
+		fake.JSON(http.StatusOK, answeredWorkItem{attributes: sentAgentAttribute}.json()))
 
-	got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M", "--attribute", "формат работы=ииагент",
+	got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H30M", "--attribute", "формат работы=ииагент",
 		"--fields", "id,attributes")
 
 	assert.Equal(t, outcome{stdout: "id: \"199-7\"\nattributes:\n  \"Формат работы\": \"ИИагент\"\n"}, got)
 	assert.Equal(t, []any{map[string]any{"id": "309-0", "value": map[string]any{"id": "506-1"}}}, sentAttributes(t, server))
-	queries := server.sentQueries()
+	queries := server.Queries()
 	require.Len(t, queries, 2)
 	assert.Equal(t, sentWorkItemSettingsFields, queries[0].Get("fields"))
 }
 
 func TestTimeCreateReadsTheTypeAndTheAttributeInOneRequest(t *testing.T) {
 	t.Parallel()
-	server := writingTimeOfAType(t, respondWith(http.StatusOK, devIssueWithAttributes()),
-		respondWith(http.StatusOK, answeredWorkItem{workType: `{"$type":"WorkItemType","id":"178-0","name":"Разработка"}`,
+	server := writingTimeOfAType(t, fake.JSON(http.StatusOK, devIssueWithAttributes()),
+		fake.JSON(http.StatusOK, answeredWorkItem{workType: `{"$type":"WorkItemType","id":"178-0","name":"Разработка"}`,
 			attributes: sentAgentAttribute}.json()))
 
-	got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M", "--type", "Разработка",
+	got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H30M", "--type", "Разработка",
 		"--attribute", "Формат работы=ИИагент")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
@@ -59,10 +61,10 @@ func TestTimeCreateReadsTheTypeAndTheAttributeInOneRequest(t *testing.T) {
 
 func TestTimeUpdateRefusesAnAttributeTheProjectHasNot(t *testing.T) {
 	t.Parallel()
-	server := writingTimeOfAType(t, respondWith(http.StatusOK, devIssueWithAttributes()),
+	server := writingTimeOfAType(t, fake.JSON(http.StatusOK, devIssueWithAttributes()),
 		func(http.ResponseWriter, *http.Request) { t.Error("a work item was written") })
 
-	got := runWith(t, server.env(), "time", "update", "DEV-1", "199-6", "--attribute", "Формат работы=ИИ",
+	got := runWith(t, server.Env(), "time", "update", "DEV-1", "199-6", "--attribute", "Формат работы=ИИ",
 		"--clear", "Формат")
 
 	found := requireFault(t, got)
@@ -77,10 +79,10 @@ func TestTimeUpdateRefusesAnAttributeTheProjectHasNot(t *testing.T) {
 
 func TestTimeUpdateTakesAnAttributeAway(t *testing.T) {
 	t.Parallel()
-	server := writingTimeOfAType(t, respondWith(http.StatusOK, devIssueWithAttributes()),
-		respondWith(http.StatusOK, answeredWorkItem{}.json()))
+	server := writingTimeOfAType(t, fake.JSON(http.StatusOK, devIssueWithAttributes()),
+		fake.JSON(http.StatusOK, answeredWorkItem{}.json()))
 
-	got := runWith(t, server.env(), "time", "update", "DEV-1", "199-7", "--clear", "Формат работы")
+	got := runWith(t, server.Env(), "time", "update", "DEV-1", "199-7", "--clear", "Формат работы")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, []any{map[string]any{"id": "309-0", "value": nil}}, sentAttributes(t, server))
@@ -88,21 +90,21 @@ func TestTimeUpdateTakesAnAttributeAway(t *testing.T) {
 
 func TestTimeUpdateRefusesAnAttributeSetAndRemoved(t *testing.T) {
 	t.Parallel()
-	server := serveNothing(t)
+	server := fake.ServeNothing(t)
 
-	got := runWith(t, server.env(), "time", "update", "DEV-1", "199-7", "--attribute", "Формат работы=Сам",
+	got := runWith(t, server.Env(), "time", "update", "DEV-1", "199-7", "--attribute", "Формат работы=Сам",
 		"--clear", "ФОРМАТ РАБОТЫ")
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.requests())
+	assert.Empty(t, server.Requests())
 }
 
 func TestTimeCreateRefusesAnAttributeTheServerKeptOtherwise(t *testing.T) {
 	t.Parallel()
-	server := writingTimeOfAType(t, respondWith(http.StatusOK, devIssueWithAttributes()),
-		respondWith(http.StatusOK, answeredWorkItem{attributes: sentNoAttribute}.json()))
+	server := writingTimeOfAType(t, fake.JSON(http.StatusOK, devIssueWithAttributes()),
+		fake.JSON(http.StatusOK, answeredWorkItem{attributes: sentNoAttribute}.json()))
 
-	got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M", "--attribute", "Формат работы=ИИагент")
+	got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H30M", "--attribute", "Формат работы=ИИагент")
 
 	found := requireUncertainty(t, got)
 	assert.Equal(t, "upstream_invalid", found.code)
@@ -112,12 +114,12 @@ func TestTimeCreateRefusesAnAttributeTheServerKeptOtherwise(t *testing.T) {
 
 func TestTimeListRefusesANameUnderTheAttributes(t *testing.T) {
 	t.Parallel()
-	server := serveNothing(t)
+	server := fake.ServeNothing(t)
 
-	got := runWith(t, server.env(), "time", "list", "DEV-1", "--fields", "id,attributes(id)")
+	got := runWith(t, server.Env(), "time", "list", "DEV-1", "--fields", "id,attributes(id)")
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.requests())
+	assert.Empty(t, server.Requests())
 }
 
 func TestTimeCreateRefusesAnAttributeItCannotSend(t *testing.T) {
@@ -131,19 +133,19 @@ func TestTimeCreateRefusesAnAttributeItCannotSend(t *testing.T) {
 	for _, argv := range tests {
 		t.Run(strings.Join(argv, " "), func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), slices.Concat([]string{"time", "create", "DEV-1", "PT1H"}, argv)...)
+			got := runWith(t, server.Env(), slices.Concat([]string{"time", "create", "DEV-1", "PT1H"}, argv)...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
 
-func methodsOf(u *upstream) []string {
+func methodsOf(u *fake.Server) []string {
 	var methods []string
-	for _, request := range u.requests() {
+	for _, request := range u.Requests() {
 		methods = append(methods, request.Method)
 	}
 	return methods

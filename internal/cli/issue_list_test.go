@@ -13,6 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const (
@@ -77,7 +79,7 @@ func countRequest(address string) string {
 }
 
 func countHandler(count string) http.HandlerFunc {
-	return respondWith(http.StatusOK, `{"$type":"IssueCountResponse","count":`+count+`}`)
+	return fake.JSON(http.StatusOK, `{"$type":"IssueCountResponse","count":`+count+`}`)
 }
 
 func countedIssues(records string, count http.HandlerFunc) http.HandlerFunc {
@@ -86,7 +88,7 @@ func countedIssues(records string, count http.HandlerFunc) http.HandlerFunc {
 			count(w, r)
 			return
 		}
-		respondWith(http.StatusOK, records)(w, r)
+		fake.JSON(http.StatusOK, records)(w, r)
 	}
 }
 
@@ -97,9 +99,9 @@ func breakOff(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func sentTo(server *upstream, path string) int {
+func sentTo(server *fake.Server, path string) int {
 	sent := 0
-	for _, p := range server.sentPaths() {
+	for _, p := range server.Paths() {
 		if p == path {
 			sent++
 		}
@@ -154,12 +156,12 @@ func TestIssueListTakesItsSearchFromTheQueryFlagAlone(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -178,12 +180,12 @@ func TestIssueListRefusesTheFlagsOfAListItCannotSend(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), slices.Concat([]string{"issue", "list", "--query", ""}, tc.flags)...)
+			got := runWith(t, server.Env(), slices.Concat([]string{"issue", "list", "--query", ""}, tc.flags)...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -200,12 +202,12 @@ func TestIssueListRefusesWhatOnlyIssueShowPrints(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.env(), "issue", "list", "--query", "", "--fields", tc.expression)
+			got := runWith(t, server.Env(), "issue", "list", "--query", "", "--fields", tc.expression)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -234,13 +236,13 @@ func TestIssueListSendsASearchItReadsNoWordOf(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := searching(t, respondWith(http.StatusOK, `[`+listedDEV1()+`]`))
+			server := fake.Serve(t, fake.Searching(t, fake.JSON(http.StatusOK, `[`+listedDEV1()+`]`)))
 
-			got := runWith(t, server.env(), "issue", "list", "--query", tc.query)
+			got := runWith(t, server.Env(), "issue", "list", "--query", tc.query)
 
 			assert.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			requireMarkedUpFirst(t, server, tc.query)
-			requests := server.requests()
+			requests := server.Requests()
 			require.Len(t, requests, 2)
 			search := requests[1]
 			assert.Equal(t, issuesPath, search.URL.Path)
@@ -254,9 +256,9 @@ func TestIssueListSendsASearchItReadsNoWordOf(t *testing.T) {
 
 func TestIssueListPrintsARecordToALine(t *testing.T) {
 	t.Parallel()
-	server := searching(t, respondWith(http.StatusOK, `[`+listedDEV1()+`,`+listedDEV2()+`]`))
+	server := fake.Serve(t, fake.Searching(t, fake.JSON(http.StatusOK, `[`+listedDEV1()+`,`+listedDEV2()+`]`)))
 
-	got := runWith(t, server.env(), "issue", "list", "--query", "project: DEV")
+	got := runWith(t, server.Env(), "issue", "list", "--query", "project: DEV")
 
 	want := "total: 2\nreturned: 2\ntruncated: false\nissues:\n" + printedDEV1Row + printedDEV2Row
 	assert.Equal(t, outcome{stdout: want}, got)
@@ -282,9 +284,9 @@ func TestIssueListPrintsAListWhateverTheCountOfRecords(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := searching(t, respondWith(http.StatusOK, tc.records))
+			server := fake.Serve(t, fake.Searching(t, fake.JSON(http.StatusOK, tc.records)))
 
-			got := runWith(t, server.env(), "issue", "list", "--query", "")
+			got := runWith(t, server.Env(), "issue", "list", "--query", "")
 
 			assert.Equal(t, outcome{stdout: tc.want}, got)
 			requireMarkedUpFirst(t, server, "")
@@ -294,9 +296,9 @@ func TestIssueListPrintsAListWhateverTheCountOfRecords(t *testing.T) {
 
 func TestIssueListRefusesMoreIssuesThanTheLimit(t *testing.T) {
 	t.Parallel()
-	server := searching(t, respondWith(http.StatusOK, `[`+listedDEV1()+`,`+listedDEV2()+`,`+listedDEV3()+`]`))
+	server := fake.Serve(t, fake.Searching(t, fake.JSON(http.StatusOK, `[`+listedDEV1()+`,`+listedDEV2()+`,`+listedDEV3()+`]`)))
 
-	got := runWith(t, server.env(), "issue", "list", "--query", "", "--limit", "2")
+	got := runWith(t, server.Env(), "issue", "list", "--query", "", "--limit", "2")
 
 	want := faultDocument{
 		code:    "upstream_invalid",
@@ -313,14 +315,14 @@ func TestIssueListPassesOnWhatTheServerSaysOfASearchItRefuses(t *testing.T) {
 	const child = "Unexpected token: 'Opne' at position 12"
 	const said = `{"error":"invalid_query","error_description":"Invalid query",` +
 		`"error_children":[{"error":"invalid_query","error_description":"` + child + `"}]}`
-	server := searching(t, respondWith(http.StatusBadRequest, said))
+	server := fake.Serve(t, fake.Searching(t, fake.JSON(http.StatusBadRequest, said)))
 
-	got := runWith(t, server.env(), "issue", "list", "--query", "State: Opne")
+	got := runWith(t, server.Env(), "issue", "list", "--query", "State: Opne")
 
 	want := faultDocument{
 		code: "rejected",
 		details: []detail{
-			{"request", issueListRequest(server.url, "State%3A+Opne", sentIssueListFields, "50")},
+			{"request", issueListRequest(server.URL, "State%3A+Opne", sentIssueListFields, "50")},
 			{"upstream_status", 400},
 			{"upstream_error", "invalid_query"},
 			{"upstream_message", "Invalid query"},
@@ -359,9 +361,9 @@ func TestIssueListCountsOnlyAPageThatFillsTheLimit(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := searching(t, countedIssues(threeIssues, countHandler(tc.count)))
+			server := fake.Serve(t, fake.Searching(t, countedIssues(threeIssues, countHandler(tc.count))))
 
-			got := runWith(t, server.env(), "issue", "list", "--query", "", "--limit", tc.limit)
+			got := runWith(t, server.Env(), "issue", "list", "--query", "", "--limit", tc.limit)
 
 			assert.Equal(t, outcome{stdout: tc.want}, got)
 			requireMarkedUpFirst(t, server, "")
@@ -375,9 +377,9 @@ func TestIssueListAsksTheCounterTheSearchItAskedThePageFor(t *testing.T) {
 	t.Parallel()
 	const query = `project: DEV "exact phrase" \ "`
 	calls := &countCalls{}
-	server := searching(t, countedIssues(`[`+listedDEV1()+`]`, calls.recordingHandler(countHandler("7"))))
+	server := fake.Serve(t, fake.Searching(t, countedIssues(`[`+listedDEV1()+`]`, calls.recordingHandler(countHandler("7")))))
 
-	got := runWith(t, server.env(), "issue", "list", "--query", query, "--limit", "1")
+	got := runWith(t, server.Env(), "issue", "list", "--query", query, "--limit", "1")
 
 	want := "total: 7\nreturned: 1\ntruncated: true\nissues:\n" + printedDEV1Row
 	assert.Equal(t, outcome{stdout: want}, got)
@@ -390,7 +392,7 @@ func TestIssueListAsksTheCounterTheSearchItAskedThePageFor(t *testing.T) {
 	requireMarkedUpFirst(t, server, query)
 	counted := countedAt(server)
 	require.Len(t, counted, 1)
-	assert.Equal(t, url.Values{"fields": {"count"}}, server.sentQueries()[counted[0]])
+	assert.Equal(t, url.Values{"fields": {"count"}}, server.Queries()[counted[0]])
 }
 
 func TestIssueListRefusesWhenTheCountFails(t *testing.T) {
@@ -403,7 +405,7 @@ func TestIssueListRefusesWhenTheCountFails(t *testing.T) {
 	}{
 		{
 			name:  "a server that failed",
-			count: respondWith(http.StatusInternalServerError, said),
+			count: fake.JSON(http.StatusInternalServerError, said),
 			want: faultDocument{
 				code: "upstream_failed",
 				details: []detail{
@@ -416,7 +418,7 @@ func TestIssueListRefusesWhenTheCountFails(t *testing.T) {
 		},
 		{
 			name:  "a search the counter refuses",
-			count: respondWith(http.StatusBadRequest, `{"error":"invalid_query","error_description":"Invalid query"}`),
+			count: fake.JSON(http.StatusBadRequest, `{"error":"invalid_query","error_description":"Invalid query"}`),
 			want: faultDocument{
 				code: "rejected",
 				details: []detail{
@@ -431,12 +433,12 @@ func TestIssueListRefusesWhenTheCountFails(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := searching(t, countedIssues(`[`+listedDEV1()+`]`, tc.count))
+			server := fake.Serve(t, fake.Searching(t, countedIssues(`[`+listedDEV1()+`]`, tc.count)))
 
-			got := runWith(t, server.env(), "issue", "list", "--query", "a", "--limit", "1")
+			got := runWith(t, server.Env(), "issue", "list", "--query", "a", "--limit", "1")
 
 			want := tc.want
-			want.details[0].value = countRequest(server.url)
+			want.details[0].value = countRequest(server.URL)
 			assert.Equal(t, want, requireFault(t, got))
 			requireMarkedUpFirst(t, server, "a")
 			assert.Equal(t, 1, sentTo(server, countPath))
@@ -446,11 +448,11 @@ func TestIssueListRefusesWhenTheCountFails(t *testing.T) {
 
 func TestIssueListRefusesACountWhoseAnswerBreaksOff(t *testing.T) {
 	t.Parallel()
-	server := searching(t, countedIssues(`[`+listedDEV1()+`]`, breakOff))
+	server := fake.Serve(t, fake.Searching(t, countedIssues(`[`+listedDEV1()+`]`, breakOff)))
 
-	got := runWith(t, server.env(), "issue", "list", "--query", "a", "--limit", "1")
+	got := runWith(t, server.Env(), "issue", "list", "--query", "a", "--limit", "1")
 
-	got.stderr = strings.ReplaceAll(got.stderr, server.url, "<upstream>")
+	got.stderr = strings.ReplaceAll(got.stderr, server.URL, "<upstream>")
 	found := requireFault(t, got)
 	assert.Equal(t, "upstream_failed", found.code)
 	assert.Equal(t, []detail{{"request", countRequest("<upstream>")}}, found.details)
@@ -460,9 +462,9 @@ func TestIssueListRefusesACountWhoseAnswerBreaksOff(t *testing.T) {
 
 func TestIssueListRefusesACountBelowTheIssuesReceived(t *testing.T) {
 	t.Parallel()
-	server := searching(t, countedIssues(`[`+listedDEV1()+`,`+listedDEV2()+`,`+listedDEV3()+`]`, countHandler("2")))
+	server := fake.Serve(t, fake.Searching(t, countedIssues(`[`+listedDEV1()+`,`+listedDEV2()+`,`+listedDEV3()+`]`, countHandler("2"))))
 
-	got := runWith(t, server.env(), "issue", "list", "--query", "", "--limit", "3")
+	got := runWith(t, server.Env(), "issue", "list", "--query", "", "--limit", "3")
 
 	want := faultDocument{
 		code:    "upstream_failed",
@@ -483,14 +485,14 @@ func TestIssueListRefusesACountThatIsNoNumberOfIssues(t *testing.T) {
 		{name: "a fraction", count: countHandler("1.5")},
 		{name: "a number in quotes", count: countHandler(`"3"`)},
 		{name: "nothing at all", count: countHandler("null")},
-		{name: "no count in the answer", count: respondWith(http.StatusOK, `{"$type":"IssueCountResponse","id":"count"}`)},
+		{name: "no count in the answer", count: fake.JSON(http.StatusOK, `{"$type":"IssueCountResponse","id":"count"}`)},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := searching(t, countedIssues(`[`+listedDEV1()+`]`, tc.count))
+			server := fake.Serve(t, fake.Searching(t, countedIssues(`[`+listedDEV1()+`]`, tc.count)))
 
-			got := runWith(t, server.env(), "issue", "list", "--query", "a", "--limit", "1")
+			got := runWith(t, server.Env(), "issue", "list", "--query", "a", "--limit", "1")
 
 			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)

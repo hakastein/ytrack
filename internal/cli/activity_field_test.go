@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const linkTypesPath = "/api/issueLinkTypes"
@@ -45,12 +47,12 @@ func linkTypesOf(answering, handler http.HandlerFunc) http.HandlerFunc {
 }
 
 func linksKnown(rest http.HandlerFunc) http.HandlerFunc {
-	return linkTypesOf(respondWith(http.StatusOK, devInstanceLinkTypes()), rest)
+	return linkTypesOf(fake.JSON(http.StatusOK, devInstanceLinkTypes()), rest)
 }
 
-func linkingTypes(t *testing.T, types, handler http.HandlerFunc) *upstream {
+func linkingTypes(t *testing.T, types, handler http.HandlerFunc) *fake.Server {
 	t.Helper()
-	return serve(t, linkTypesOf(types, handler))
+	return fake.Serve(t, linkTypesOf(types, handler))
 }
 
 func sentLinkRecord(label string) string {
@@ -81,12 +83,12 @@ func TestActivityPrintsALinkByThePhraseOfItsType(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.label, func(t *testing.T) {
 			t.Parallel()
-			server := activityServer(t, respondWith(http.StatusOK, `[`+sentLinkRecord(tc.label)+`]`))
+			server := activityServer(t, fake.JSON(http.StatusOK, `[`+sentLinkRecord(tc.label)+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "field")
+			got := runWith(t, server.Env(), "activity", "list", activityIssue, "--fields", "field")
 
 			assert.Equal(t, outcome{stdout: oneRecord(`field: "` + tc.want + `"`)}, got)
-			assert.Equal(t, []string{linkTypesPath, activitiesPath}, server.sentPaths())
+			assert.Equal(t, []string{linkTypesPath, activitiesPath}, server.Paths())
 		})
 	}
 }
@@ -98,9 +100,9 @@ func TestActivityRefusesALinkThePhrasesOfTheInstanceDoNotResolve(t *testing.T) {
 		sentLinkType("is required for", "depends on", `"обязательна для"`, `"зависит от"`) + `]`
 	t.Run("a link of a phrase no type of the instance goes by", func(t *testing.T) {
 		t.Parallel()
-		server := activityServer(t, respondWith(http.StatusOK, `[`+sentLinkRecord("Блокирует")+`]`))
+		server := activityServer(t, fake.JSON(http.StatusOK, `[`+sentLinkRecord("Блокирует")+`]`))
 
-		got := runWith(t, server.env(), "activity", "list", activityIssue)
+		got := runWith(t, server.Env(), "activity", "list", activityIssue)
 
 		found := requireFault(t, got)
 		assert.Equal(t, "upstream_invalid", found.code)
@@ -108,18 +110,18 @@ func TestActivityRefusesALinkThePhrasesOfTheInstanceDoNotResolve(t *testing.T) {
 	})
 	t.Run("a link of a phrase two types of the instance go by", func(t *testing.T) {
 		t.Parallel()
-		server := linkingTypes(t, respondWith(http.StatusOK, ambiguous), respondWith(http.StatusOK, `[`+sentLinkRecord("Связана с")+`]`))
+		server := linkingTypes(t, fake.JSON(http.StatusOK, ambiguous), fake.JSON(http.StatusOK, `[`+sentLinkRecord("Связана с")+`]`))
 
-		got := runWith(t, server.env(), "activity", "list", activityIssue)
+		got := runWith(t, server.Env(), "activity", "list", activityIssue)
 
 		found := requireFault(t, got)
 		assert.Equal(t, "upstream_invalid", found.code)
 	})
 	t.Run("two types written alike and no record of either", func(t *testing.T) {
 		t.Parallel()
-		server := linkingTypes(t, respondWith(http.StatusOK, ambiguous), respondWith(http.StatusOK, `[`+sentLinkRecord("Зависит от")+`]`))
+		server := linkingTypes(t, fake.JSON(http.StatusOK, ambiguous), fake.JSON(http.StatusOK, `[`+sentLinkRecord("Зависит от")+`]`))
 
-		got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "field")
+		got := runWith(t, server.Env(), "activity", "list", activityIssue, "--fields", "field")
 
 		assert.Equal(t, outcome{stdout: oneRecord(`field: "depends on"`)}, got)
 	})
@@ -129,18 +131,18 @@ func TestActivityPrintsALinkOfATypeWrittenAlikeAtBothEnds(t *testing.T) {
 	t.Parallel()
 	symmetric := `[` + sentLinkType("relates to", "relates to", `"связана с"`, `"связана с"`) + `,` +
 		sentLinkType("is required for", "depends on", `"обязательна для"`, `"зависит от"`) + `]`
-	server := linkingTypes(t, respondWith(http.StatusOK, symmetric), respondWith(http.StatusOK, `[`+sentLinkRecord("Связана с")+`]`))
+	server := linkingTypes(t, fake.JSON(http.StatusOK, symmetric), fake.JSON(http.StatusOK, `[`+sentLinkRecord("Связана с")+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "field")
+	got := runWith(t, server.Env(), "activity", "list", activityIssue, "--fields", "field")
 
 	assert.Equal(t, outcome{stdout: oneRecord(`field: "relates to"`)}, got)
 }
 
 func TestActivityRefusesALinkNamedByNoPhraseAtAll(t *testing.T) {
 	t.Parallel()
-	server := activityServer(t, respondWith(http.StatusOK, `[`+sentLinkRecord("")+`]`))
+	server := activityServer(t, fake.JSON(http.StatusOK, `[`+sentLinkRecord("")+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "field")
+	got := runWith(t, server.Env(), "activity", "list", activityIssue, "--fields", "field")
 
 	found := requireFault(t, got)
 	assert.Equal(t, "upstream_invalid", found.code)
@@ -165,10 +167,10 @@ func TestActivityRefusesACatalogueOfLinkTypesOfAShapeItCannotRead(t *testing.T) 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := linkingTypes(t, respondWith(http.StatusOK, `[`+tc.kind+`]`),
-				respondWith(http.StatusOK, `[`+sentLinkRecord("Зависит от")+`]`))
+			server := linkingTypes(t, fake.JSON(http.StatusOK, `[`+tc.kind+`]`),
+				fake.JSON(http.StatusOK, `[`+sentLinkRecord("Зависит от")+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", activityIssue)
+			got := runWith(t, server.Env(), "activity", "list", activityIssue)
 
 			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
@@ -198,9 +200,9 @@ func TestActivityReadsTheLinkTypesOnlyForActivitiesThatPrintALink(t *testing.T) 
 			comment := sentActivity{
 				kind: "CommentActivityItem", category: "CommentsCategory", timestamp: middle,
 			}.sent()
-			server := activityServer(t, respondWith(http.StatusOK, `[`+comment+`]`))
+			server := activityServer(t, fake.JSON(http.StatusOK, `[`+comment+`]`))
 
-			got := runWith(t, server.env(), slices.Concat([]string{"activity", "list", activityIssue}, tc.flags)...)
+			got := runWith(t, server.Env(), slices.Concat([]string{"activity", "list", activityIssue}, tc.flags)...)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Equal(t, tc.sent, sentTo(server, linkTypesPath))
@@ -211,10 +213,10 @@ func TestActivityReadsTheLinkTypesOnlyForActivitiesThatPrintALink(t *testing.T) 
 
 func TestActivitySendsNoActivitiesWhereTheLinkTypesFail(t *testing.T) {
 	t.Parallel()
-	server := linkingTypes(t, respondWith(http.StatusInternalServerError, `{"error":"Internal Server Error"}`),
-		respondWith(http.StatusOK, `[`+sentLinkRecord("Зависит от")+`]`))
+	server := linkingTypes(t, fake.JSON(http.StatusInternalServerError, `{"error":"Internal Server Error"}`),
+		fake.JSON(http.StatusOK, `[`+sentLinkRecord("Зависит от")+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue)
+	got := runWith(t, server.Env(), "activity", "list", activityIssue)
 
 	assert.Equal(t, "upstream_failed", requireFault(t, got).code)
 	assert.Empty(t, got.stdout)
@@ -228,10 +230,10 @@ func TestActivityRefusesACatalogueOfLinkTypesAsLongAsItAskedFor(t *testing.T) {
 	for at := range linkTypesAskedFor {
 		types = append(types, sentLinkType("goes with "+strconv.Itoa(at), "", `""`, `""`))
 	}
-	server := linkingTypes(t, respondWith(http.StatusOK, `[`+strings.Join(types, ",")+`]`),
-		respondWith(http.StatusOK, `[`+sentLinkRecord("Зависит от")+`]`))
+	server := linkingTypes(t, fake.JSON(http.StatusOK, `[`+strings.Join(types, ",")+`]`),
+		fake.JSON(http.StatusOK, `[`+sentLinkRecord("Зависит от")+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue)
+	got := runWith(t, server.Env(), "activity", "list", activityIssue)
 
 	found := requireFault(t, got)
 	assert.Equal(t, "upstream_invalid", found.code)
@@ -262,9 +264,9 @@ func TestActivityPrintsTheFieldOfEveryOtherCategoryByItsCategory(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := activityServer(t, respondWith(http.StatusOK, `[`+tc.activity+`]`))
+			server := activityServer(t, fake.JSON(http.StatusOK, `[`+tc.activity+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "field")
+			got := runWith(t, server.Env(), "activity", "list", activityIssue, "--fields", "field")
 
 			assert.Equal(t, outcome{stdout: oneRecord("field: " + tc.want)}, got)
 			assert.NotContains(t, got.stdout, "Состояние")
@@ -278,9 +280,9 @@ func TestActivityRefusesAChangeOfACustomFieldThatNamesNoField(t *testing.T) {
 		kind: "CustomFieldActivityItem", category: "CustomFieldCategory", timestamp: middle,
 		field: `{"$type":"CustomFilterField","name":"Состояние"}`,
 	}.sent()
-	server := activityServer(t, respondWith(http.StatusOK, `[`+activity+`]`))
+	server := activityServer(t, fake.JSON(http.StatusOK, `[`+activity+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "field")
+	got := runWith(t, server.Env(), "activity", "list", activityIssue, "--fields", "field")
 
 	found := requireFault(t, got)
 	assert.Equal(t, "upstream_invalid", found.code)
@@ -308,9 +310,9 @@ func TestActivityRefusesAFieldOfARecordOfALinkTheRowDoesNotReferTo(t *testing.T)
 				kind: "LinksActivityItem", category: "LinksCategory", timestamp: middle,
 				field: tc.field, added: sentLinkedIssue,
 			}.sent()
-			server := activityServer(t, respondWith(http.StatusOK, `[`+activity+`]`))
+			server := activityServer(t, fake.JSON(http.StatusOK, `[`+activity+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "field")
+			got := runWith(t, server.Env(), "activity", "list", activityIssue, "--fields", "field")
 
 			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
@@ -338,9 +340,9 @@ func TestActivityNamesAFilterOfTheWrongSubtypeWhateverTheActivitiesPrint(t *test
 					`"name":"State","fieldType":{"$type":"FieldType","valueType":"state"}}}`,
 				added: sentStateValue,
 			}.sent()
-			server := activityServer(t, respondWith(http.StatusOK, `[`+activity+`]`))
+			server := activityServer(t, fake.JSON(http.StatusOK, `[`+activity+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", tc.fields)
+			got := runWith(t, server.Env(), "activity", "list", activityIssue, "--fields", tc.fields)
 
 			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)

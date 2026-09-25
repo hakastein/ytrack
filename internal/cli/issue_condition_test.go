@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const (
@@ -104,23 +106,23 @@ func TestIssueCreateSendsNoValueAConditionHides(t *testing.T) {
 					held = append(held, receivedField{name: "State", valueType: "state", binding: "180-14",
 						value: stateElement("Отклонена")})
 				}
-				creation = respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", receivedFields(held...)))
+				creation = fake.JSON(http.StatusOK, createdIssueWith("DEV-7", "x", "null", receivedFields(held...)))
 			}
-			server := creating(t, respondWith(http.StatusOK, metadata), creation)
+			server := creating(t, fake.JSON(http.StatusOK, metadata), creation)
 			argv := append([]string{"issue", "create", "DEV", "--summary", "x",
 				"--field", rejection + "=" + rejectionValue}, tc.writes...)
 
-			got := runWith(t, server.env(), argv...)
+			got := runWith(t, server.Env(), argv...)
 
 			if !tc.hidden {
 				require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 				assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
-				assert.Contains(t, sentFieldTypes(t, server.asks()[1]), rejection)
+				assert.Contains(t, sentFieldTypes(t, server.Bodies()[1]), rejection)
 				return
 			}
 			found := requireFault(t, got)
 			assert.Equal(t, "bad_usage", found.code)
-			assert.Equal(t, writeMetadataRequest(server.url, "DEV"), detailNamed(t, found, "request"))
+			assert.Equal(t, writeMetadataRequest(server.URL, "DEV"), detailNamed(t, found, "request"))
 			assert.Equal(t, "DEV", detailNamed(t, found, "project"))
 			requireInvalidFieldWithAnyReason(t, found, rejection, rejectionValue)
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
@@ -182,14 +184,14 @@ func TestIssueCreateRequiresTheFieldTheBodyUncovers(t *testing.T) {
 						binding: "180-23", value: bundleElement(rejectionValue)})
 				}
 			}
-			creation := respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", receivedFields(held...)))
+			creation := fake.JSON(http.StatusOK, createdIssueWith("DEV-7", "x", "null", receivedFields(held...)))
 			if tc.missing != nil {
 				creation = noCreation(t)
 			}
-			server := creating(t, respondWith(http.StatusOK, metadata), creation)
+			server := creating(t, fake.JSON(http.StatusOK, metadata), creation)
 			argv := append([]string{"issue", "create", "DEV", "--summary", "x"}, tc.writes...)
 
-			got := runWith(t, server.env(), argv...)
+			got := runWith(t, server.Env(), argv...)
 
 			if tc.missing == nil {
 				require.Equal(t, 0, got.code, "stderr: %s", got.stderr)

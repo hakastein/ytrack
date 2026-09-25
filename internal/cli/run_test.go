@@ -1,8 +1,10 @@
 package cli_test
 
 import (
+	"bytes"
 	"io"
 	"os"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -11,6 +13,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/hakastein/ytrack/internal/cli"
 )
 
 const unknownFlagOfEveryEscape = "--q\" b\\ n\n t\t r\r soh\x01 esc\x1b del\x7f nel\xc2\x85 csi\xc2\x9b ls\xe2\x80\xa8 ps\xe2\x80\xa9 bom\xef\xbb\xbf fffe\xef\xbf\xbe ffff\xef\xbf\xbf Статус 😀"
@@ -24,6 +28,23 @@ type outcome struct {
 func run(t *testing.T, argv []string) outcome {
 	t.Helper()
 	return runWith(t, nil, argv...)
+}
+
+func runWith(t *testing.T, env []string, argv ...string) outcome {
+	t.Helper()
+	return runOn(t, nil, env, argv...)
+}
+
+func runOn(t *testing.T, stdin *os.File, env []string, argv ...string) outcome {
+	t.Helper()
+	return runBuiltFrom(t, nil, stdin, env, argv...)
+}
+
+func runBuiltFrom(t *testing.T, build *debug.BuildInfo, stdin *os.File, env []string, argv ...string) outcome {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	code := cli.Run(t.Context(), argv, env, build, stdin, &stdout, &stderr)
+	return outcome{code: code, stdout: stdout.String(), stderr: stderr.String()}
 }
 
 func TestRunRefusesAnyCommand(t *testing.T) {

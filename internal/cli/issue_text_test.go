@@ -9,6 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 type textCase struct {
@@ -73,9 +75,9 @@ func TestIssueShowPrintsTextAsALiteralBlockWhereverItCan(t *testing.T) {
 	for _, tc := range textCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(http.StatusOK, issueWith(t, map[string]any{"description": tc.text})))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, issueWith(t, map[string]any{"description": tc.text})))
 
-			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "idReadable,description")
+			got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "idReadable,description")
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Empty(t, got.stderr)
@@ -120,9 +122,9 @@ func TestIssueShowPrintsTextUnderANestedKeyAndInsideARecord(t *testing.T) {
 			for _, tc := range textCases() {
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()
-					server := serve(t, respondWith(http.StatusOK, issueWith(t, position.wrap(tc.text))))
+					server := fake.Serve(t, fake.JSON(http.StatusOK, issueWith(t, position.wrap(tc.text))))
 
-					got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", position.fields)
+					got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", position.fields)
 
 					require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 					root := requireMapping(t, "stdout", got.stdout)
@@ -142,9 +144,9 @@ func TestIssueShowPrintsTextUnderANestedKeyAndInsideARecord(t *testing.T) {
 
 func TestIssueShowPrintsADescriptionThatIsNotThereAsNull(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, `{"$type":"Issue","idReadable":"DEV-1","description":null}`))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, `{"$type":"Issue","idReadable":"DEV-1","description":null}`))
 
-	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "idReadable,description")
+	got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "idReadable,description")
 
 	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-1\"\ndescription: null\n"}, got)
 }
