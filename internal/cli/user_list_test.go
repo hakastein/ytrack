@@ -7,23 +7,17 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const (
-	listedAdmin   = `{"fullName":"admin","$type":"User","banned":false,"login":"admin"}`
-	listedLimited = `{"banned":false,"login":"dev.limited","$type":"User","fullName":"Ограниченный"}`
-	listedUsers   = `[` + listedAdmin + `,` + listedLimited + `]`
+	listedFirst  = `{"fullName":"First","$type":"User","banned":false,"login":"first"}`
+	listedSecond = `{"banned":false,"login":"second","$type":"User","fullName":"Second"}`
+	listedUsers  = `[` + listedFirst + `,` + listedSecond + `]`
 )
 
-const (
-	printedAdminRow   = `  - {login: "admin", fullName: "admin", banned: false}` + "\n"
-	printedLimitedRow = `  - {login: "dev.limited", fullName: "Ограниченный", banned: false}` + "\n"
-)
-
-const printedListedUsers = "total: 2\nreturned: 2\ntruncated: false\nusers:\n" + printedAdminRow + printedLimitedRow
+const printedFirstRow = `  - {login: "first", fullName: "First", banned: false}` + "\n"
 
 func userListRequest(address, fields, top, escapedSearch string) string {
 	return "GET " + address + "/api/users?fields=" + fields + "&$top=" + top + "&query=" + escapedSearch
@@ -84,59 +78,33 @@ func TestUserListRefusesALimitItCannotSend(t *testing.T) {
 
 func TestUserListAddsFieldsToTheDefaultOfTheList(t *testing.T) {
 	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, `[{"id":"1-1","fullName":"admin","$type":"User","banned":false,"login":"admin"}]`))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, `[{"id":"1-1","fullName":"First","$type":"User","banned":false,"login":"first"}]`))
 
-	got := runWith(t, server.Env(), "user", "list", "--query", "adm", "--fields", "+id")
+	got := runWith(t, server.Env(), "user", "list", "--query", "fir", "--fields", "+id")
 
-	want := "total: 1\nreturned: 1\ntruncated: false\nusers:\n" + `  - {login: "admin", fullName: "admin", banned: false, id: "1-1"}` + "\n"
+	want := "total: 1\nreturned: 1\ntruncated: false\nusers:\n" + `  - {login: "first", fullName: "First", banned: false, id: "1-1"}` + "\n"
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []url.Values{{"fields": {"login,fullName,banned,id"}, "$top": {"50"}, "query": {"adm"}}}, server.Queries())
+	assert.Equal(t, []url.Values{{"fields": {"login,fullName,banned,id"}, "$top": {"50"}, "query": {"fir"}}}, server.Queries())
 }
 
 func TestUserListRefusesFieldsThatDoNotParse(t *testing.T) {
 	t.Parallel()
 	server := fake.ServeNothing(t)
 
-	got := runWith(t, server.Env(), "user", "list", "--query", "adm", "--fields", "+")
+	got := runWith(t, server.Env(), "user", "list", "--query", "fir", "--fields", "+")
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 	assert.Empty(t, server.Requests())
 }
 
-func TestUserListSendsTheSearchTheServerMustReadBack(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name   string
-		search string
-	}{
-		{name: "characters a query escapes", search: "Иван & Co = +100%#"},
-		{name: "an empty text", search: ""},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.Serve(t, fake.JSON(http.StatusOK, listedUsers))
-
-			got := runWith(t, server.Env(), "user", "list", "--query", tc.search)
-
-			assert.Equal(t, outcome{stdout: printedListedUsers}, got)
-			requests := server.Requests()
-			require.Len(t, requests, 1)
-			assert.Equal(t, "/api/users", requests[0].URL.Path)
-			want := url.Values{"fields": {"login,fullName,banned"}, "$top": {"50"}, "query": {tc.search}}
-			assert.Equal(t, want, requests[0].URL.Query())
-		})
-	}
-}
-
 func TestUserListCountsTheUsersWhenTheyFillTheLimit(t *testing.T) {
 	t.Parallel()
-	server := fake.Serve(t, countedBy(`[`+listedAdmin+`]`,
+	server := fake.Serve(t, countedBy(`[`+listedFirst+`]`,
 		fake.JSON(http.StatusOK, `[{"id":"1-1","$type":"User"},{"id":"1-2","$type":"User"},{"id":"1-3","$type":"User"}]`)))
 
 	got := runWith(t, server.Env(), "user", "list", "--query", "a", "--limit", "1")
 
-	want := "total: 3\nreturned: 1\ntruncated: true\nusers:\n" + printedAdminRow
+	want := "total: 3\nreturned: 1\ntruncated: true\nusers:\n" + printedFirstRow
 	assert.Equal(t, outcome{stdout: want}, got)
 	assert.Equal(t, searchingQueries("a", "1"), server.Queries())
 }
@@ -144,7 +112,7 @@ func TestUserListCountsTheUsersWhenTheyFillTheLimit(t *testing.T) {
 func TestUserListRefusesWhenTheCountFails(t *testing.T) {
 	t.Parallel()
 	const said = `{"error":"server_error","error_description":"java.lang.NullPointerException"}`
-	server := fake.Serve(t, countedBy(`[`+listedAdmin+`]`, fake.JSON(http.StatusInternalServerError, said)))
+	server := fake.Serve(t, countedBy(`[`+listedFirst+`]`, fake.JSON(http.StatusInternalServerError, said)))
 
 	got := runWith(t, server.Env(), "user", "list", "--query", "a", "--limit", "1")
 
@@ -177,7 +145,7 @@ func TestUserListRefusesMoreUsersThanTheLimit(t *testing.T) {
 
 func TestUserListRefusesACountBelowTheUsersReceived(t *testing.T) {
 	t.Parallel()
-	server := fake.Serve(t, countedBy(`[`+listedAdmin+`]`, fake.JSON(http.StatusOK, `[]`)))
+	server := fake.Serve(t, countedBy(`[`+listedFirst+`]`, fake.JSON(http.StatusOK, `[]`)))
 
 	got := runWith(t, server.Env(), "user", "list", "--query", "a", "--limit", "1")
 

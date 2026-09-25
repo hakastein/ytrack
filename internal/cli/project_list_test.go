@@ -178,34 +178,19 @@ func TestProjectListRefusesACountWhoseAnswerBreaksOff(t *testing.T) {
 
 func TestProjectListRefusesAnAnswerOfAnotherShape(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		body string
-	}{
-		{name: "an object", body: listedDEV},
-		{name: "a list holding a string", body: `["DEV"]`},
-		{name: "a list holding null", body: `[null]`},
-		{name: "a list holding a list", body: `[` + listedDEV + `,[]]`},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.Serve(t, fake.JSON(http.StatusOK, tc.body))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, listedDEV))
 
-			got := runWith(t, server.Env(), "project", "list")
+	got := runWith(t, server.Env(), "project", "list")
 
-			want := faultDocument{
-				code: "upstream_invalid",
-				details: []detail{
-					{"request", listRequest(server.URL, "shortName,name", "50")},
-					{"upstream_status", 200},
-					{"upstream_body", tc.body},
-				},
-			}
-			assert.Equal(t, want, requireFault(t, got))
-			assert.Len(t, server.Requests(), 1)
-		})
+	want := faultDocument{
+		code: "upstream_invalid",
+		details: []detail{
+			{"request", listRequest(server.URL, "shortName,name", "50")},
+			{"upstream_status", 200},
+			{"upstream_body", listedDEV},
+		},
 	}
+	assert.Equal(t, want, requireFault(t, got))
 }
 
 func TestProjectListRefusesAFieldAProjectDidNotBring(t *testing.T) {

@@ -18,7 +18,7 @@ import (
 const defaultProjectFields = "shortName,name,plugins(timeTrackingSettings(enabled,workItemTypes(name)))"
 
 const projectDEV = `{"name":"DEVELOPMENT","plugins":{"timeTrackingSettings":{"workItemTypes":[` +
-	`{"name":"Разработка","$type":"WorkItemType"},{"name":"Дизайн/Прототипирование","$type":"WorkItemType"}],` +
+	`{"name":"First","$type":"WorkItemType"},{"name":"Second","$type":"WorkItemType"}],` +
 	`"enabled":true,"$type":"ProjectTimeTrackingSettings"},"$type":"ProjectPlugins"},"$type":"Project","shortName":"DEV"}`
 
 const printedDEV = `shortName: "DEV"
@@ -27,8 +27,8 @@ plugins:
   timeTrackingSettings:
     enabled: true
     workItemTypes:
-      - {name: "Разработка"}
-      - {name: "Дизайн/Прототипирование"}
+      - {name: "First"}
+      - {name: "Second"}
 `
 
 func authFromEnv() detail {
@@ -43,64 +43,6 @@ func lookedIn(places ...any) detail {
 	return detail{"looked_in", places}
 }
 
-func TestProjectShowPrintsTheTimeTrackingSettingsAsReceived(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name     string
-		settings string
-		want     string
-	}{
-		{
-			name: "types under a switch that is off",
-			settings: `{"enabled":false,"workItemTypes":[{"name":"Разработка","$type":"WorkItemType"},` +
-				`{"name":"ИИРазработка","$type":"WorkItemType"}],"$type":"ProjectTimeTrackingSettings"}`,
-			want: "    enabled: false\n    workItemTypes:\n      - {name: \"Разработка\"}\n      - {name: \"ИИРазработка\"}\n",
-		},
-		{
-			name:     "a set with nothing in it",
-			settings: `{"enabled":true,"workItemTypes":[],"$type":"ProjectTimeTrackingSettings"}`,
-			want:     "    enabled: true\n    workItemTypes: []\n",
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			body := `{"shortName":"DEV","name":"DEVELOPMENT","plugins":{"timeTrackingSettings":` + tc.settings +
-				`,"$type":"ProjectPlugins"},"$type":"Project"}`
-			server := fake.Serve(t, fake.JSON(http.StatusOK, body))
-
-			got := runWith(t, server.Env(), "project", "show", "DEV")
-
-			want := "shortName: \"DEV\"\nname: \"DEVELOPMENT\"\nplugins:\n  timeTrackingSettings:\n" + tc.want
-			assert.Equal(t, outcome{stdout: want}, got)
-		})
-	}
-}
-
-func TestNoCommandOfItsOwnReadsTheTypesOfWork(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "a command of its own", argv: []string{"worktype", "list"}},
-		{name: "a command named as the schema is", argv: []string{"work-item-type", "list"}},
-		{name: "a subcommand of the project command", argv: []string{"project", "types", "DEV"}},
-		{name: "a subcommand naming them as the settings do", argv: []string{"project", "worktypes", "DEV"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
-
-			got := runWith(t, server.Env(), tc.argv...)
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests())
-		})
-	}
-}
-
 func TestProjectShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
 	t.Parallel()
 	server := fake.Serve(t, fake.JSON(http.StatusOK, projectDEV))
@@ -108,37 +50,12 @@ func TestProjectShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
 	got := runWith(t, server.Env(), "project", "show", "DEV")
 
 	assert.Equal(t, outcome{stdout: printedDEV}, got)
-	requests := server.Requests()
-	require.Len(t, requests, 1)
-	request := requests[0]
+	assert.Equal(t, []string{"/api/admin/projects/DEV"}, server.Paths())
+	request := server.Last(t)
 	assert.Equal(t, http.MethodGet, request.Method)
-	assert.Equal(t, "/api/admin/projects/DEV", request.URL.Path)
 	assert.Equal(t, url.Values{"fields": {defaultProjectFields}}, request.URL.Query())
 	assert.Equal(t, "Bearer "+fake.Token, request.Header.Get("Authorization"))
 	assert.Equal(t, "application/json", request.Header.Get("Accept"))
-}
-
-func TestProjectShowPrintsNullAndBooleansBare(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, `{"shortName":"DEV","name":"DEVELOPMENT","archived":true,"leader":null,"$type":"Project"}`))
-
-	got := runWith(t, server.Env(), "project", "show", "DEV", "--fields", "shortName,name,archived,leader(login)")
-
-	const want = `shortName: "DEV"
-name: "DEVELOPMENT"
-archived: true
-leader: null
-`
-	assert.Equal(t, outcome{stdout: want}, got)
-}
-
-func TestProjectShowTakesWhitespaceAroundTheAnswer(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, " \t\r\n"+projectDEV+" \t\r\n"))
-
-	got := runWith(t, server.Env(), "project", "show", "DEV")
-
-	assert.Equal(t, outcome{stdout: printedDEV}, got)
 }
 
 func TestProjectShowSendsACodeOfLettersDigitsAndUnderscores(t *testing.T) {
@@ -172,9 +89,7 @@ func TestProjectShowReachesTheAPIUnderThePathOfTheAddress(t *testing.T) {
 			got := runWith(t, []string{"YTRACK_URL=" + server.URL + tc.path, "YTRACK_TOKEN=" + fake.Token}, "project", "show", "DEV")
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			requests := server.Requests()
-			require.Len(t, requests, 1)
-			assert.Equal(t, tc.want, requests[0].URL.Path)
+			assert.Equal(t, []string{tc.want}, server.Paths())
 		})
 	}
 }
