@@ -64,7 +64,7 @@ type listedPackage struct {
 }
 
 func main() {
-	violations, err := judge()
+	violations, err := findViolations()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "cannot judge:", err)
 		os.Exit(2)
@@ -77,7 +77,7 @@ func main() {
 	}
 }
 
-func judge() ([]violation, error) {
+func findViolations() ([]violation, error) {
 	modules, err := goJSON[struct{ Path, Dir string }](nil, "list", "-m", "-json")
 	if err != nil {
 		return nil, err

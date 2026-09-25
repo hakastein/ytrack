@@ -1,14 +1,14 @@
 /** Пользователи полигона, кроме администратора: его заводит мастер настройки, а логин приходит из `.env`. */
 
-export type PolygonUser = { login: string; name: string; email: string };
+export type DevInstanceUser = { login: string; name: string; email: string };
 
-export type Member = PolygonUser & { group: string; role: string; timeZone: string };
+export type Member = DevInstanceUser & { group: string; role: string; timeZone: string };
 
 /**
  * Второй токен без прав: им меряется, фильтрует ли сервер выдачу правами
  * вызывающего и что он отвечает там, где прав нет.
  */
-export const LIMITED: PolygonUser = { login: "dev.limited", name: "Ограниченный", email: "dev.limited@ytrack.local" };
+export const LIMITED: DevInstanceUser = { login: "dev.limited", name: "Ограниченный", email: "dev.limited@ytrack.local" };
 
 export const MEMBER: Member = {
   login: "dev.member",

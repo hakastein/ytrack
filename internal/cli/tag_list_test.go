@@ -84,7 +84,7 @@ func TestTagRefusesACallThatNamesNoCommandOfIts(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -111,7 +111,7 @@ func TestTagListRefusesFlagsItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"tag", "list"}, tc.argv...)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -141,7 +141,7 @@ func TestTagListPrintsTheRecordsAsTheyWereAskedFor(t *testing.T) {
 		`{"$type":"RegisteredUsersGroup","name":"Зарегистрированные пользователи"}],` +
 		`"permittedUsers":[{"login":"dev.limited","$type":"User"}],"$type":"WatchFolderSharingSettings"},` +
 		`"name":"карта","$type":"Tag","owner":{"login":"dev.member","$type":"User"}}]`
-	server := serve(t, answer(http.StatusOK, records))
+	server := serve(t, respondWith(http.StatusOK, records))
 
 	got := runWith(t, server.env(), "tag", "list")
 
@@ -160,7 +160,7 @@ func TestTagListSendsTheLimitAsTop(t *testing.T) {
 	for _, limit := range []string{"1", "2147483647"} {
 		t.Run(limit, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, `[]`))
+			server := serve(t, respondWith(http.StatusOK, `[]`))
 
 			got := runWith(t, server.env(), "tag", "list", "--limit", limit)
 
@@ -195,7 +195,7 @@ func TestTagListPrintsTheSameShapeForAnyNumberOfRecords(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, tc.body))
+			server := serve(t, respondWith(http.StatusOK, tc.body))
 
 			got := runWith(t, server.env(), "tag", "list")
 
@@ -233,7 +233,7 @@ func TestTagListCountsTheTagsWhenTheyFillTheLimit(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, countedBy(page, answer(http.StatusOK, tc.count)))
+			server := serve(t, countedBy(page, respondWith(http.StatusOK, tc.count)))
 
 			got := runWith(t, server.env(), "tag", "list", "--limit", "2")
 
@@ -250,7 +250,7 @@ func TestTagListRefusesACountTheServerWouldNotAnswer(t *testing.T) {
 	t.Parallel()
 	const page = `[{"$type":"Tag","name":"a","owner":{"$type":"User","login":"admin"},` +
 		`"readSharingSettings":{"$type":"WatchFolderSharingSettings","permittedGroups":[],"permittedUsers":[]}}]`
-	server := serve(t, countedBy(page, answer(http.StatusInternalServerError, `{"error":"Internal Server Error"}`)))
+	server := serve(t, countedBy(page, respondWith(http.StatusInternalServerError, `{"error":"Internal Server Error"}`)))
 
 	got := runWith(t, server.env(), "tag", "list", "--limit", "1")
 
@@ -280,7 +280,7 @@ func TestTagListRefusesWhatTheServerAnswered(t *testing.T) {
 		{
 			name: "a page under a 200", status: http.StatusOK,
 			contentType: "text/html", body: "<html><body>Sign in</body></html>",
-			code: "upstream_lied",
+			code: "upstream_invalid",
 		},
 	}
 	for _, tc := range tests {
@@ -303,10 +303,7 @@ func TestTagListRefusesWhatTheServerAnswered(t *testing.T) {
 	}
 }
 
-// What the polygon shows its admin, read by the command that is about tags: every record carries the
-// three keys of the default and no fourth, the built-in star of that token stands among them, and no tag of
-// another user does — the polygon shares none.
-func TestTagListReadsThePolygonTagsOfTheAdmin(t *testing.T) {
+func TestTagListReadsTheDevInstanceTagsOfTheAdmin(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 

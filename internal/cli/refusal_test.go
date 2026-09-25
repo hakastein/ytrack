@@ -61,7 +61,7 @@ func TestARefusalNamesTheRequestThatWasSent(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusNotFound, `{"error":"Not Found","error_description":"none"}`))
+			server := serve(t, respondWith(http.StatusNotFound, `{"error":"Not Found","error_description":"none"}`))
 
 			got := runWith(t, server.env(), tc.argv...)
 
@@ -197,12 +197,12 @@ func TestProjectShowRefusesByTheStatusOfTheAnswer(t *testing.T) {
 			t.Parallel()
 			server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 				maps.Copy(w.Header(), tc.header)
-				answer(tc.status, tc.body)(w, r)
+				respondWith(tc.status, tc.body)(w, r)
 			})
 
 			got := runWith(t, server.env(), "project", "show", "DEV")
 
-			want := refusal{
+			want := faultDocument{
 				code:    tc.code,
 				details: slices.Concat([]detail{{"request", showRequest(server.url, "DEV")}}, tc.details),
 			}
@@ -218,7 +218,7 @@ func TestProjectShowRefusesACodeTheDevInstanceDoesNotHave(t *testing.T) {
 
 	got := runWith(t, dev.env(), "project", "show", "NOPE")
 
-	want := refusal{
+	want := faultDocument{
 		code: "not_found",
 		details: []detail{
 			{"request", showRequest(dev.url, "NOPE")},
@@ -237,7 +237,7 @@ func TestProjectShowRefusesATokenTheDevInstanceDoesNotKnow(t *testing.T) {
 
 	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + bogusToken}, "project", "show", "DEV")
 
-	want := refusal{
+	want := faultDocument{
 		code: "denied",
 		details: []detail{
 			{"request", showRequest(dev.url, "DEV")},
@@ -258,7 +258,7 @@ func TestProjectShowRefusesAProjectHiddenFromTheLimitedUser(t *testing.T) {
 
 	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}, "project", "show", "DEV")
 
-	want := refusal{
+	want := faultDocument{
 		code: "not_found",
 		details: []detail{
 			{"request", showRequest(dev.url, "DEV")},
@@ -285,41 +285,41 @@ func TestProjectShowRefusesAnAnswerOfAnotherShape(t *testing.T) {
 			status:      http.StatusOK,
 			contentType: "text/html",
 			body:        "<!doctype html>\n<html><body>Log in</body></html>",
-			code:        "upstream_lied",
+			code:        "upstream_invalid",
 		},
 		{
 			name:        "200 with no body",
 			status:      http.StatusOK,
 			contentType: "application/json",
-			code:        "upstream_lied",
+			code:        "upstream_invalid",
 		},
 		{
 			name:        "200 unfinished JSON",
 			status:      http.StatusOK,
 			contentType: "application/json",
 			body:        `{"shortName":"DEV","name":"DEVELOP`,
-			code:        "upstream_lied",
+			code:        "upstream_invalid",
 		},
 		{
 			name:        "200 JSON with more after it",
 			status:      http.StatusOK,
 			contentType: "application/json",
 			body:        `{} x`,
-			code:        "upstream_lied",
+			code:        "upstream_invalid",
 		},
 		{
 			name:        "200 list",
 			status:      http.StatusOK,
 			contentType: "application/json",
 			body:        `[]`,
-			code:        "upstream_lied",
+			code:        "upstream_invalid",
 		},
 		{
 			name:        "404 HTML",
 			status:      http.StatusNotFound,
 			contentType: "text/html",
 			body:        "<html><body><h1>404 Not Found</h1></body></html>",
-			code:        "upstream_lied",
+			code:        "upstream_invalid",
 		},
 		{
 			name:        "500 HTML",
@@ -340,7 +340,7 @@ func TestProjectShowRefusesAnAnswerOfAnotherShape(t *testing.T) {
 
 			got := runWith(t, server.env(), "project", "show", "DEV")
 
-			want := refusal{
+			want := faultDocument{
 				code: tc.code,
 				details: []detail{
 					{"request", showRequest(server.url, "DEV")},
@@ -359,7 +359,7 @@ func TestProjectShowDoesNotFollowARedirect(t *testing.T) {
 	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		// Followed, the redirect would print DEV as if nothing had happened.
 		if r.URL.Path == "/moved" {
-			answer(http.StatusOK, projectDEV)(w, r)
+			respondWith(http.StatusOK, projectDEV)(w, r)
 			return
 		}
 		w.Header().Set("Location", "/moved")
@@ -368,8 +368,8 @@ func TestProjectShowDoesNotFollowARedirect(t *testing.T) {
 
 	got := runWith(t, server.env(), "project", "show", "DEV")
 
-	want := refusal{
-		code: "upstream_lied",
+	want := faultDocument{
+		code: "upstream_invalid",
 		details: []detail{
 			{"request", showRequest(server.url, "DEV")},
 			{"upstream_status", 302},
@@ -389,7 +389,7 @@ func TestProjectShowRefusesTheWebPageTheDevInstanceServesOutsideTheAPI(t *testin
 	got := runWith(t, []string{"YTRACK_URL=" + address, "YTRACK_TOKEN=" + dev.token}, "project", "show", "DEV")
 
 	found := requireRefusal(t, got)
-	assert.Equal(t, "upstream_lied", found.code)
+	assert.Equal(t, "upstream_invalid", found.code)
 	require.Len(t, found.details, 3, "details: %v", found.details)
 	assert.Equal(t, []detail{{"request", showRequest(address, "DEV")}, {"upstream_status", 200}}, found.details[:2])
 	assert.Equal(t, "upstream_body", found.details[2].key)
@@ -407,7 +407,7 @@ func TestProjectShowRefusesAnAnswerCutShort(t *testing.T) {
 
 	got := runWith(t, server.env(), "project", "show", "DEV")
 
-	want := refusal{
+	want := faultDocument{
 		code: "upstream_failed",
 		details: []detail{
 			{"request", showRequest(server.url, "DEV")},
@@ -464,7 +464,7 @@ func TestProjectShowDoesNotOfferHTTP2ToAServerThatSpeaksIt(t *testing.T) {
 	assert.NotContains(t, offered[0], "h2")
 }
 
-func TestProjectShowRefusesWhenNoAnswerArrivesInTime(t *testing.T) {
+func TestProjectShowRefusesWhenNoResponseComesInTime(t *testing.T) {
 	t.Parallel()
 	server := serve(t, func(_ http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
@@ -476,7 +476,7 @@ func TestProjectShowRefusesWhenNoAnswerArrivesInTime(t *testing.T) {
 	code := cli.Run(ctx, []string{"project", "show", "DEV"}, server.env(), nil, nil, &stdout, &stderr)
 
 	got := outcome{code: code, stdout: stdout.String(), stderr: stderr.String()}
-	want := refusal{
+	want := faultDocument{
 		code:    "upstream_failed",
 		details: []detail{{"request", showRequest(server.url, "DEV")}},
 	}

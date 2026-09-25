@@ -78,14 +78,14 @@ check "ClientWithResponses в выхлопе нет" stub_applied
 check "ClientInterface не меньше $min_methods методов" interface_floor
 
 # go run сводит любой ненулевой код к 1, а код 2 у проверки шва — отказ судить, а не утечка.
-seam=2
-if go build -o "$work/ytapi-seam" scripts/ytapi-seam.go; then
-	seam=0
-	"$work/ytapi-seam" || seam=$?
+imports=2
+if go build -o "$work/ytapi-imports" scripts/ytapi-imports.go; then
+	imports=0
+	"$work/ytapi-imports" || imports=$?
 fi
-if ((seam > 1)); then
-	verdict "проверка шва не смогла судить" "$seam"
+if ((imports > 1)); then
+	verdict "проверка шва не смогла судить" "$imports"
 else
-	verdict "ytapi виден только из адаптера" "$seam"
+	verdict "ytapi виден только из адаптера" "$imports"
 fi
 exit "$failed"

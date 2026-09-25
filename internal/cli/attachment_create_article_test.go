@@ -31,8 +31,6 @@ func theArticleAttachment(name string, size int) string {
 		`"url":"/api/files/522-9?sign=s&updated=1"}`
 }
 
-// A PNG of one transparent pixel, 70 bytes as the file stands: the polygon works the type out from the content
-// and makes a preview only for a picture it can read, so nothing shorter would bring a thumbnailURL back.
 func onePixelPNG() []byte {
 	return []byte("\x89\x50\x4e\x47\x0d\x0a\x1a\x0a\x00\x00\x00\x0d\x49\x48\x44\x52" +
 		"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4" +
@@ -48,8 +46,8 @@ func TestAttachmentCreateSendsAnArticleTheSameMultipartAsAnIssue(t *testing.T) {
 	t.Parallel()
 	const name = "кот.png"
 	content := onePixelPNG()
-	server := serve(t, answer(http.StatusOK, filedByAnArticle(name, len(content))))
-	path := fileHolding(t, name, content)
+	server := serve(t, respondWith(http.StatusOK, filedByAnArticle(name, len(content))))
+	path := fileWith(t, name, content)
 
 	got := runWith(t, server.env(), "attachment", "create", "DEV-A-7", path)
 
@@ -81,28 +79,24 @@ func TestAttachmentCreateRefusesTheSingleObjectTheSpecificationDeclaresForAnArti
 	t.Parallel()
 	const name = "кот.png"
 	content := onePixelPNG()
-	server := serve(t, answer(http.StatusOK, theArticleAttachment(name, len(content))))
-	path := fileHolding(t, name, content)
+	server := serve(t, respondWith(http.StatusOK, theArticleAttachment(name, len(content))))
+	path := fileWith(t, name, content)
 
 	got := runWith(t, server.env(), "attachment", "create", "DEV-A-7", path)
 
 	found := requireUncertainty(t, got)
-	assert.Equal(t, "upstream_lied", found.code)
+	assert.Equal(t, "upstream_invalid", found.code)
 	assert.Equal(t, detail{"request", articleAttachmentWriteRequest(server.url, "DEV-A-7", attachmentFields)},
 		found.details[0])
 	assert.Len(t, server.requests(), 1)
 }
 
-// A picture attached to an article of the polygon for real: the knowledge base
-// takes the multipart the specification says it takes none of, works the type out itself, and sends a
-// thumbnailURL back although ArticleAttachment declares no such name. Both links are whole and signed, and
-// each hands its own bytes to whoever holds it.
 func TestAttachmentCreateAttachesAPictureToAnArticleOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 	article := attachedArticle(t, dev)
 	content := onePixelPNG()
-	path := fileHolding(t, "image.png", content)
+	path := fileWith(t, "image.png", content)
 
 	got := runWith(t, dev.env(), "attachment", "create", article, path, "--fields", "+thumbnailURL")
 
@@ -133,9 +127,6 @@ func TestAttachmentCreateAttachesAPictureToAnArticleOfTheDevInstance(t *testing.
 	require.Len(t, listed.Attachments, 1)
 	assert.Equal(t, written.ID, listed.Attachments[0].ID)
 
-	// Every key of the default arrives for a member of the project as it does for an administrator, so
-	// none of them costs such a reader their document. The polygon holds no article with a file of its own,
-	// so the one filed here is where that is read.
 	member := []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).member}
 	seen := requireAttachmentListing(t, runWith(t, member, "attachment", "list", article))
 	require.Len(t, seen.Attachments, 1)
@@ -157,10 +148,10 @@ func TestAttachmentCreateAttachesAPictureToAnArticleOfTheDevInstance(t *testing.
 // beforehand: one request is the whole call, and it went to the knowledge base and nowhere else. The words of
 // that 404 are the knowledge base's own — an issue is refused "Entity with id … not found" — and they pass on
 // as they came.
-func TestAttachmentCreateRefusesAnArticleThePolygonHasNoneOf(t *testing.T) {
+func TestAttachmentCreateRefusesAnArticleTheDevInstanceHasNoneOf(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
-	path := fileHolding(t, "заметка.bin", []byte("ytrack"))
+	path := fileWith(t, "заметка.bin", []byte("ytrack"))
 
 	got := runWith(t, dev.env(), "attachment", "create", "DEV-A-99999", path)
 

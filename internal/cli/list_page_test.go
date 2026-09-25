@@ -49,9 +49,9 @@ func pagedLists() []pagedList {
 	}
 }
 
-// holding is the server of a collection of that many records of schema: each request is answered the part of
+// pagedServer is the server of a collection of that many records of schema: each request is answered the part of
 // them its $top and $skip ask for, the way YouTrack pages a collection.
-func holding(t *testing.T, schema string, records int) *upstream {
+func pagedServer(t *testing.T, schema string, records int) *upstream {
 	t.Helper()
 	return serve(t, func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
@@ -74,7 +74,7 @@ func holding(t *testing.T, schema string, records int) *upstream {
 		for at := skip; at < end; at++ {
 			page = append(page, fmt.Sprintf(`{"$type":%q,"id":"1-%d"}`, schema, at))
 		}
-		answer(http.StatusOK, "["+strings.Join(page, ",")+"]")(w, r)
+		respondWith(http.StatusOK, "["+strings.Join(page, ",")+"]")(w, r)
 	})
 }
 
@@ -98,7 +98,7 @@ func TestListPrintsAPageInTheMiddleOfTheCollection(t *testing.T) {
 	for _, list := range pagedLists() {
 		t.Run(strings.Join(list.argv, " "), func(t *testing.T) {
 			t.Parallel()
-			server := holding(t, list.schema, 5)
+			server := pagedServer(t, list.schema, 5)
 
 			got := runWith(t, server.env(), slices.Concat(list.argv, []string{"--fields", "id", "--limit", "2", "--skip", "2"})...)
 
@@ -119,7 +119,7 @@ func TestListCountsNothingOnTheLastPage(t *testing.T) {
 	for _, list := range pagedLists() {
 		t.Run(strings.Join(list.argv, " "), func(t *testing.T) {
 			t.Parallel()
-			server := holding(t, list.schema, 5)
+			server := pagedServer(t, list.schema, 5)
 
 			got := runWith(t, server.env(), slices.Concat(list.argv, []string{"--fields", "id", "--limit", "2", "--skip", "4"})...)
 
@@ -136,7 +136,7 @@ func TestListPrintsAnEmptyPagePastTheEnd(t *testing.T) {
 	for _, list := range pagedLists() {
 		t.Run(strings.Join(list.argv, " "), func(t *testing.T) {
 			t.Parallel()
-			server := holding(t, list.schema, 5)
+			server := pagedServer(t, list.schema, 5)
 
 			got := runWith(t, server.env(), slices.Concat(list.argv, []string{"--fields", "id", "--limit", "2", "--skip", "9"})...)
 
@@ -152,10 +152,10 @@ func TestListRefusesACountBelowThePageItFollows(t *testing.T) {
 	t.Parallel()
 	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("$top") == "-1" {
-			answer(http.StatusOK, `[{"$type":"Tag","id":"1-0"},{"$type":"Tag","id":"1-1"},{"$type":"Tag","id":"1-2"}]`)(w, r)
+			respondWith(http.StatusOK, `[{"$type":"Tag","id":"1-0"},{"$type":"Tag","id":"1-1"},{"$type":"Tag","id":"1-2"}]`)(w, r)
 			return
 		}
-		answer(http.StatusOK, `[{"$type":"Tag","id":"1-2"},{"$type":"Tag","id":"1-3"}]`)(w, r)
+		respondWith(http.StatusOK, `[{"$type":"Tag","id":"1-2"},{"$type":"Tag","id":"1-3"}]`)(w, r)
 	})
 
 	got := runWith(t, server.env(), "tag", "list", "--fields", "id", "--limit", "2", "--skip", "2")
@@ -188,7 +188,7 @@ func TestListRefusesASkipItCannotSend(t *testing.T) {
 
 				got := runWith(t, server.env(), slices.Concat(list, tc.argv)...)
 
-				assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+				assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 				assert.Empty(t, server.requests())
 			})
 		}
@@ -198,7 +198,7 @@ func TestListRefusesASkipItCannotSend(t *testing.T) {
 // A skip of none is the first page, and the request is the one it always was.
 func TestListSendsNoSkipForTheFirstPage(t *testing.T) {
 	t.Parallel()
-	server := holding(t, "Project", 1)
+	server := pagedServer(t, "Project", 1)
 
 	got := runWith(t, server.env(), "project", "list", "--fields", "id", "--skip", "0")
 
@@ -210,7 +210,7 @@ func TestListSendsNoSkipForTheFirstPage(t *testing.T) {
 // nothing of the page: $skip goes out on the page alone.
 func TestIssueListPrintsAPageInTheMiddleOfTheSelection(t *testing.T) {
 	t.Parallel()
-	server := searching(t, countedIssues(`[`+listedDEV1()+`]`, counting("7")))
+	server := searching(t, countedIssues(`[`+listedDEV1()+`]`, countHandler("7")))
 
 	got := runWith(t, server.env(), "issue", "list", "--query", "project: DEV", "--limit", "1", "--skip", "3")
 
@@ -230,7 +230,7 @@ func TestIssueListPrintsAPageInTheMiddleOfTheSelection(t *testing.T) {
 // asks for one past the page.
 func TestActivityPrintsAPageOfTheJournal(t *testing.T) {
 	t.Parallel()
-	server := journal(t, answer(http.StatusOK, `[`+sentLinkActivity(middle)+`,`+sentCreatedActivity(oldest)+`]`))
+	server := journal(t, respondWith(http.StatusOK, `[`+sentLinkActivity(middle)+`,`+sentCreatedActivity(oldest)+`]`))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue, "--limit", "1", "--skip", "1")
 
@@ -244,7 +244,7 @@ func TestActivityPrintsAPageOfTheJournal(t *testing.T) {
 // ones printed are the whole of it.
 func TestActivityCountsTheLastPageOfTheJournal(t *testing.T) {
 	t.Parallel()
-	server := journal(t, answer(http.StatusOK, `[`+sentLinkActivity(middle)+`,`+sentCreatedActivity(oldest)+`]`))
+	server := journal(t, respondWith(http.StatusOK, `[`+sentLinkActivity(middle)+`,`+sentCreatedActivity(oldest)+`]`))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue, "--limit", "5", "--skip", "1")
 
@@ -255,36 +255,32 @@ func TestActivityCountsTheLastPageOfTheJournal(t *testing.T) {
 // An empty page after a skip says nothing of where the journal ended, and the journal is counted nowhere.
 func TestActivityPrintsNoTotalForAnEmptyPagePastTheEnd(t *testing.T) {
 	t.Parallel()
-	server := journal(t, answer(http.StatusOK, noActivities))
+	server := journal(t, respondWith(http.StatusOK, noActivities))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue, "--skip", "9")
 
 	assert.Equal(t, outcome{stdout: "total: null\nreturned: 0\ntruncated: false\nactivities: []\n"}, got)
 }
 
-// The second of the three issues of the polygon: the page carries $skip, the counter does not, and the count is
-// the whole of the selection.
 func TestIssueListPrintsTheSecondPageOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
-	got := runWith(t, dev.env(), "issue", "list", "--query", polygonIssues, "--fields", "idReadable", "--limit", "1", "--skip", "1")
+	got := runWith(t, dev.env(), "issue", "list", "--query", devInstanceIssues, "--fields", "idReadable", "--limit", "1", "--skip", "1")
 
 	assert.Equal(t, outcome{stdout: "total: 3\nreturned: 1\ntruncated: true\nissues:\n  - {idReadable: \"DEV-2\"}\n"}, got)
 	assert.Equal(t, []string{"1"}, dev.sentQueries()[1]["$skip"])
 }
 
-// The page past the last of the three issues of the polygon is empty, and the counter says how many there are.
 func TestIssueListPrintsAnEmptyPagePastTheIssuesOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
-	got := runWith(t, dev.env(), "issue", "list", "--query", polygonIssues, "--fields", "idReadable", "--skip", "5")
+	got := runWith(t, dev.env(), "issue", "list", "--query", devInstanceIssues, "--fields", "idReadable", "--skip", "5")
 
 	assert.Equal(t, outcome{stdout: "total: 3\nreturned: 0\ntruncated: false\nissues: []\n"}, got)
 }
 
-// The parent article of the polygon holds the one child, read off the path of its children.
 func TestArticleListPrintsTheChildOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -295,7 +291,6 @@ func TestArticleListPrintsTheChildOfTheDevInstance(t *testing.T) {
 	assert.Equal(t, []string{"/api/articles/DEV-A-1/childArticles"}, dev.sentPaths())
 }
 
-// A skip past the one child of the polygon is an empty page, and the pass over ids says there is one.
 func TestArticleListPrintsAnEmptyPagePastTheChildOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

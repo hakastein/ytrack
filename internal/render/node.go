@@ -6,8 +6,6 @@ import (
 	"strconv"
 )
 
-// Kind is what a renderer may not break: a Scalar prints its text quoted, or bare when the text
-// is a literal of the format such as a number or a boolean; Prose prints as a literal block.
 type Kind int
 
 const (
@@ -16,7 +14,7 @@ const (
 	noKind Kind = iota
 	Null
 	Scalar
-	Prose
+	Text
 	List
 	Map
 )
@@ -52,9 +50,9 @@ func NewString(s string) *Node {
 	return &Node{kind: Scalar, text: s}
 }
 
-// NewProse is text meant to be read as the lines it is, such as the description of an issue.
-func NewProse(s string) *Node {
-	return &Node{kind: Prose, text: s}
+// NewText is text meant to be read as the lines it is, such as the description of an issue.
+func NewText(s string) *Node {
+	return &Node{kind: Text, text: s}
 }
 
 func NewBool(b bool) *Node {

@@ -26,7 +26,7 @@ const translatedCustomFieldsFields = "customFields(name,value(name,login,minutes
 
 // A custom field as the server sends it, with $type on every object: the value and the ordinal are written as
 // JSON already, so a scenario may send a shape the specification does not allow.
-type arrivedField struct {
+type receivedField struct {
 	name         string
 	translate    string
 	valueType    string
@@ -36,7 +36,7 @@ type arrivedField struct {
 	value        string
 }
 
-func (f arrivedField) sent() string {
+func (f receivedField) sent() string {
 	ordinal, binding := f.ordinal, f.binding
 	if ordinal == "" {
 		ordinal = "1"
@@ -66,8 +66,8 @@ func bundleElement(name string) string {
 		`,"localizedName":null,"presentation":` + strconv.Quote(name+" (presentation)") + `}`
 }
 
-// arrivedFields is the array of custom fields of one answer, as JSON.
-func arrivedFields(fields ...arrivedField) string {
+// receivedFields is the array of custom fields of one answer, as JSON.
+func receivedFields(fields ...receivedField) string {
 	sent := make([]string, 0, len(fields))
 	for _, field := range fields {
 		sent = append(sent, field.sent())
@@ -75,14 +75,14 @@ func arrivedFields(fields ...arrivedField) string {
 	return "[" + strings.Join(sent, ",") + "]"
 }
 
-func issueWithFields(fields ...arrivedField) string {
-	return `{"$type":"Issue","idReadable":"DEV-1","customFields":` + arrivedFields(fields...) + `}`
+func issueWithFields(fields ...receivedField) string {
+	return `{"$type":"Issue","idReadable":"DEV-1","customFields":` + receivedFields(fields...) + `}`
 }
 
 // showCustomFields is the block one answer prints, as the mapping under customFields.
 func showCustomFields(t *testing.T, body string) (outcome, *yaml.Node) {
 	t.Helper()
-	server := serve(t, answer(http.StatusOK, body))
+	server := serve(t, respondWith(http.StatusOK, body))
 
 	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "customFields")
 
@@ -256,7 +256,7 @@ func TestIssueShowPrintsACustomFieldByTheIdentityOfItsType(t *testing.T) {
 	for _, tc := range identityCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			body := issueWithFields(arrivedField{
+			body := issueWithFields(receivedField{
 				name: named, valueType: tc.valueType, isMultiValue: tc.isMultiValue, value: tc.value,
 			})
 
@@ -286,19 +286,16 @@ func TestIssueShowPrintsACustomFieldByTheIdentityOfItsType(t *testing.T) {
 	}
 }
 
-// The order is the one the project put its fields in, which the server sends beside each of them and does not
-// arrange the array by: the array of an issue is ordered by the prototype of each field, and two installations
-// of one polygon need not agree on that.
 func TestIssueShowPrintsCustomFieldsInTheOrderOfTheProject(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		arrived []arrivedField
-		printed []string
+		name     string
+		received []receivedField
+		printed  []string
 	}{
 		{
 			name: "the order the project gave them",
-			arrived: []arrivedField{
+			received: []receivedField{
 				{name: "Priority", valueType: "enum", ordinal: "2", binding: "180-16", value: bundleElement("Medium")},
 				{name: "Type", valueType: "enum", ordinal: "1", binding: "180-15", value: bundleElement("Task")},
 				{name: "State", valueType: "state", ordinal: "8", binding: "180-14", value: bundleElement("In Progress")},
@@ -307,7 +304,7 @@ func TestIssueShowPrintsCustomFieldsInTheOrderOfTheProject(t *testing.T) {
 		},
 		{
 			name: "two fields of one place, by the number of the binding",
-			arrived: []arrivedField{
+			received: []receivedField{
 				{name: "Ten", valueType: "enum", ordinal: "3", binding: "180-10", value: bundleElement("ten")},
 				{name: "Nine", valueType: "enum", ordinal: "3", binding: "180-9", value: bundleElement("nine")},
 			},
@@ -318,7 +315,7 @@ func TestIssueShowPrintsCustomFieldsInTheOrderOfTheProject(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, block := showCustomFields(t, issueWithFields(tc.arrived...))
+			got, block := showCustomFields(t, issueWithFields(tc.received...))
 
 			keys := []string{}
 			for pair := range slices.Chunk(block.Content, 2) {
@@ -335,15 +332,15 @@ func TestIssueShowQuotesTheNameOfEveryCustomField(t *testing.T) {
 	t.Parallel()
 	names := []string{"Оценка (Back)", "Утв. начала работы", "_________________________",
 		"Внешний номер", `a: b #c "d"`, "State"}
-	arrived := make([]arrivedField, 0, len(names))
+	received := make([]receivedField, 0, len(names))
 	for i, name := range names {
-		arrived = append(arrived, arrivedField{
+		received = append(received, receivedField{
 			name: name, valueType: "enum", ordinal: strconv.Itoa(i), binding: "180-" + strconv.Itoa(i),
 			value: bundleElement("Medium"),
 		})
 	}
 
-	got, block := showCustomFields(t, issueWithFields(arrived...))
+	got, block := showCustomFields(t, issueWithFields(received...))
 
 	keys := []string{}
 	for pair := range slices.Chunk(block.Content, 2) {
@@ -358,43 +355,40 @@ func TestIssueShowQuotesTheNameOfEveryCustomField(t *testing.T) {
 func TestIssueShowRefusesCustomFieldsTheServerContradictsItselfAbout(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		arrived []arrivedField
+		name     string
+		received []receivedField
 	}{
 		{
-			name:    "a type the catalogue does not hold",
-			arrived: []arrivedField{{name: "Field", valueType: "bogus", value: bundleElement("Task")}},
+			name:     "a type the catalogue does not hold",
+			received: []receivedField{{name: "Field", valueType: "bogus", value: bundleElement("Task")}},
 		},
 		{
 			name: "one value by the type and a list in the answer",
-			arrived: []arrivedField{{
+			received: []receivedField{{
 				name: "Field", valueType: "enum", value: `[` + bundleElement("Task") + `]`,
 			}},
 		},
 		{
 			name: "more than one value by the type and one of them in the answer",
-			arrived: []arrivedField{{
+			received: []receivedField{{
 				name: "Field", valueType: "enum", isMultiValue: true, value: bundleElement("Task"),
 			}},
 		},
 		{
-			// The judgment of names lets this value through: the place holds values of many shapes, and a
-			// PeriodValue declaring no login is one of them; what the field's own type says it holds is
-			// ytrack's to check.
 			name: "a value carrying nothing the type names it by",
-			arrived: []arrivedField{{
+			received: []receivedField{{
 				name: "Field", valueType: "user", value: `{"$type":"PeriodValue","minutes":90}`,
 			}},
 		},
 		{
 			name: "no place among the fields of the project",
-			arrived: []arrivedField{{
+			received: []receivedField{{
 				name: "Field", valueType: "enum", ordinal: "null", value: bundleElement("Task"),
 			}},
 		},
 		{
 			name: "two fields of one name",
-			arrived: []arrivedField{
+			received: []receivedField{
 				{name: "Field", valueType: "enum", ordinal: "1", binding: "180-1", value: bundleElement("Task")},
 				{name: "Field", valueType: "state", ordinal: "2", binding: "180-2", value: bundleElement("Open")},
 			},
@@ -403,13 +397,13 @@ func TestIssueShowRefusesCustomFieldsTheServerContradictsItselfAbout(t *testing.
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			body := issueWithFields(tc.arrived...)
-			server := serve(t, answer(http.StatusOK, body))
+			body := issueWithFields(tc.received...)
+			server := serve(t, respondWith(http.StatusOK, body))
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "customFields")
 
-			assert.Equal(t, refusal{
-				code: "upstream_lied",
+			assert.Equal(t, faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", issueRequest(server.url, "DEV-1", customFieldsFields)},
 					{"upstream_status", 200},
@@ -426,10 +420,7 @@ func bindingOf(id, valueType string) string {
 		`"fieldType":{"$type":"FieldType","valueType":` + valueType + `,"isMultiValue":false}}}`
 }
 
-// One custom field with each member written as it stands, so that a scenario may send a shape the
-// specification does not allow while every name asked for is there: a name the answer lacks altogether is the
-// judgment's to refuse, and what is left for the block to hold against the specification is the shape.
-func fieldHolding(name, binding string) string {
+func fieldWith(name, binding string) string {
 	return `{"$type":"IssueCustomField","name":` + name + `,"value":null,"projectCustomField":` + binding + `}`
 }
 
@@ -444,30 +435,30 @@ func TestIssueShowRefusesCustomFieldsOfAShapeTheSpecificationDoesNotGive(t *test
 	}{
 		{name: "the block is no array", block: `null`},
 		{name: "a field is no object", block: `[null]`},
-		{name: "a name is no text", block: `[` + fieldHolding(`5`, bindingOf(`"180-1"`, `"enum"`)) + `]`},
+		{name: "a name is no text", block: `[` + fieldWith(`5`, bindingOf(`"180-1"`, `"enum"`)) + `]`},
 		{
 			name:  "the field of the project is no object",
-			block: `[` + fieldHolding(`"Field"`, `[`+bindingOf(`"180-1"`, `"enum"`)+`]`) + `]`,
+			block: `[` + fieldWith(`"Field"`, `[`+bindingOf(`"180-1"`, `"enum"`)+`]`) + `]`,
 		},
 		{
 			name:  "the binding to the project is named by no text",
-			block: `[` + fieldHolding(`"Field"`, bindingOf(`5`, `"enum"`)) + `]`,
+			block: `[` + fieldWith(`"Field"`, bindingOf(`5`, `"enum"`)) + `]`,
 		},
 		{
 			name:  "the type of the field of the project is no text",
-			block: `[` + fieldHolding(`"Field"`, bindingOf(`"180-1"`, `5`)) + `]`,
+			block: `[` + fieldWith(`"Field"`, bindingOf(`"180-1"`, `5`)) + `]`,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := `{"$type":"Issue","idReadable":"DEV-1","customFields":` + tc.block + `}`
-			server := serve(t, answer(http.StatusOK, body))
+			server := serve(t, respondWith(http.StatusOK, body))
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "customFields")
 
-			assert.Equal(t, refusal{
-				code: "upstream_lied",
+			assert.Equal(t, faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", issueRequest(server.url, "DEV-1", customFieldsFields)},
 					{"upstream_status", 200},
@@ -496,14 +487,12 @@ func TestIssueShowRefusesNamesWrittenUnderTheCustomFieldsOfAnotherIssue(t *testi
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--fields", tc.expression)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The seven fields DEV-1 of the polygon holds something in, out of twenty-seven bound to the project: an empty
-// one is no key at all, and the order is the project's, not the one the array arrived in.
 func TestIssueShowPrintsTheCustomFieldsOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	printed := []detail{

@@ -15,19 +15,12 @@ type schema struct {
 	properties map[string]string
 }
 
-// How a scalar is written where it is not written as it arrived. An instant arrives as a count of
-// milliseconds since the epoch and is printed in ISO 8601; prose is text meant to be read as the lines it
-// is, and is printed as a literal block. Both are written by scripts/catalogue.go, which holds the names
-// that end up in each class.
 const (
-	timeKind  = "!time"
-	proseKind = "!prose"
+	timeKind = "!time"
+	textKind = "!text"
 )
 
-// An element is what a property holds or an operation answers with, written "" for a scalar, "!" and a kind for
-// a scalar written apart, "X" for an object of schema X, "{}" for an object of no schema, and with "[]" before
-// any of them for a list.
-type element struct {
+type typeRef struct {
 	// "" where the specification names no schema.
 	schema string
 	list   bool
@@ -35,9 +28,9 @@ type element struct {
 	kind string
 }
 
-func readElement(written string) element {
+func parseTypeRef(written string) typeRef {
 	written, list := strings.CutPrefix(written, "[]")
-	e := element{list: list}
+	e := typeRef{list: list}
 	switch {
 	case written == "{}":
 	case strings.HasPrefix(written, "!"):
@@ -68,19 +61,19 @@ func loadSchemas() *schemas {
 }
 
 // declaration is what schema name declares property to hold, itself or through a schema it extends.
-func (c *schemas) declaration(name, property string) (element, bool) {
+func (c *schemas) declaration(name, property string) (typeRef, bool) {
 	for s, ok := c.byName[name]; ok; s, ok = c.byName[s.parent] {
 		if written, declared := s.properties[property]; declared {
-			return readElement(written), true
+			return parseTypeRef(written), true
 		}
 	}
-	return element{}, false
+	return typeRef{}, false
 }
 
-// descends is whether name is ancestor or extends it, however deep, and false for a name the catalogue does not
+// isSubtypeOf is whether name is ancestor or extends it, however deep, and false for a name the catalogue does not
 // have. A place read by one name alone would miss every subtype the server answers with: avatarUrl is declared
 // on User and arrives on Me and on VcsUnresolvedUser too.
-func (c *schemas) descends(name, ancestor string) bool {
+func (c *schemas) isSubtypeOf(name, ancestor string) bool {
 	for {
 		if name == ancestor {
 			return true
@@ -94,15 +87,13 @@ func (c *schemas) descends(name, ancestor string) bool {
 }
 
 func (c *schemas) subtree(name string) []string {
-	family := []string{name}
-	for i := 0; i < len(family); i++ {
-		family = append(family, c.children[family[i]]...)
+	set := []string{name}
+	for i := 0; i < len(set); i++ {
+		set = append(set, c.children[set[i]]...)
 	}
-	return family
+	return set
 }
 
-// hierarchies is every schema of each hierarchy the server named a schema of, a hierarchy being a schema that
-// extends none with all its descendants: whichever of its schemas arrived, the family is the same.
 func (c *schemas) hierarchies(named []string) []string {
 	var roots []string
 	for _, name := range named {
@@ -116,17 +107,16 @@ func (c *schemas) hierarchies(named []string) []string {
 			roots = append(roots, name)
 		}
 	}
-	var family []string
+	var set []string
 	for _, root := range roots {
-		family = append(family, c.subtree(root)...)
+		set = append(set, c.subtree(root)...)
 	}
-	return family
+	return set
 }
 
-// names is every property the schemas of family declare, themselves or through the schemas they extend.
-func (c *schemas) names(family []string) []string {
+func (c *schemas) names(set []string) []string {
 	var names []string
-	for _, name := range family {
+	for _, name := range set {
 		for s, ok := c.byName[name]; ok; s, ok = c.byName[s.parent] {
 			names = slices.AppendSeq(names, maps.Keys(s.properties))
 		}

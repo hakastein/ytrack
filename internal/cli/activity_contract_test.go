@@ -21,22 +21,15 @@ func paddedInstant(printed string) string {
 	return moment + "." + fraction + strings.Repeat("0", 3-len(fraction))
 }
 
-// The fixture whose journal mixes every kind of change the polygon carries but an edit: a link of each of the
-// five types, a comment, an attachment, a work item, the time spent it moved and the filing.
 const mixedFixture = "DEV-1"
 
 // The fixture whose journal carries an edit of the summary, of the description, of the text of a comment and a
 // tag put on and taken off again.
 const editedFixture = "DEV-7"
 
-// The fixture that was resolved, which is the one journal of the polygon holding a resolution and a change of a
-// state.
 const resolvedFixture = "DEV-5"
 
-// polygonCategories is the categories of the table held to the polygon, each by a scenario of its own.
-// VcsChangeCategory is not among them: the polygon files no commit, and the category is held to records
-// captured from a live instance instead.
-func polygonCategories() []string {
+func devInstanceCategories() []string {
 	return slices.DeleteFunc(strings.Split(activityCategories, ","), func(category string) bool {
 		return category == "VcsChangeCategory"
 	})
@@ -53,13 +46,10 @@ func fixtureCarrying(category string) string {
 	return mixedFixture
 }
 
-// journalPath is where the journal of an issue of the polygon is asked for.
 func journalPath(issue string) string {
 	return "/api/issues/" + issue + "/activities"
 }
 
-// editingJournal is the rewrite of a request on its way to the polygon, and it leaves every request but the
-// journal as it was: categories stands on the activities of an issue and nowhere else.
 func editingJournal(edit func(url.Values)) func(*url.URL) {
 	return func(u *url.URL) {
 		if !strings.HasSuffix(u.Path, "/activities") {
@@ -71,8 +61,6 @@ func editingJournal(edit func(url.Values)) func(*url.URL) {
 	}
 }
 
-// sentValues is what the answer of the journal held under name for each activity, as JSON read it: a text the
-// polygon sent is held against the document by the words that went over the wire and not by a copy of them.
 func sentValues(t *testing.T, dev *upstream, name string) []any {
 	t.Helper()
 	requests, answers := dev.requests(), dev.answers()
@@ -81,10 +69,10 @@ func sentValues(t *testing.T, dev *upstream, name string) []any {
 		if !strings.HasSuffix(request.URL.Path, "/activities") {
 			continue
 		}
-		var arrived []map[string]any
-		require.NoError(t, json.Unmarshal(answers[at], &arrived), "the answer of the journal: %s", answers[at])
-		held := make([]any, 0, len(arrived))
-		for _, activity := range arrived {
+		var received []map[string]any
+		require.NoError(t, json.Unmarshal(answers[at], &received), "the answer of the journal: %s", answers[at])
+		held := make([]any, 0, len(received))
+		for _, activity := range received {
 			held = append(held, activity[name])
 		}
 		return held
@@ -93,12 +81,9 @@ func sentValues(t *testing.T, dev *upstream, name string) []any {
 	return nil
 }
 
-// The specification marks categories optional and the server requires it, so a journal that forgot it would come
-// back a refusal rather than a journal of everything. ytrack sends it on every call, and what the server does
-// without it is held by taking it off between ytrack and the polygon.
 func TestActivityFindsTheDevInstanceAsksForTheCategories(t *testing.T) {
 	t.Parallel()
-	dev := devInstanceRewriting(t, editingJournal(func(asked url.Values) { asked.Del("categories") }))
+	dev := devInstanceWithRewrite(t, editingJournal(func(asked url.Values) { asked.Del("categories") }))
 
 	got := runWith(t, dev.env(), "activity", "list", mixedFixture)
 
@@ -111,9 +96,6 @@ func TestActivityFindsTheDevInstanceAsksForTheCategories(t *testing.T) {
 	assert.Equal(t, 1, sentTo(dev, journalPath(mixedFixture)))
 }
 
-// A category the server does not know is answered with a journal of nothing rather than with a refusal, and the
-// letter case is part of the name: both are why the name is resolved before the request and goes out as ytrack
-// keeps it. Neither request is one ytrack sends, so both are made between it and the polygon.
 func TestActivityFindsTheDevInstanceAnswersACategoryItDoesNotKnowWithNoActivity(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -126,7 +108,7 @@ func TestActivityFindsTheDevInstanceAnswersACategoryItDoesNotKnowWithNoActivity(
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			dev := devInstanceRewriting(t, editingJournal(func(asked url.Values) { asked.Set("categories", tc.categories) }))
+			dev := devInstanceWithRewrite(t, editingJournal(func(asked url.Values) { asked.Set("categories", tc.categories) }))
 
 			got := runWith(t, dev.env(), "activity", "list", mixedFixture)
 
@@ -136,12 +118,9 @@ func TestActivityFindsTheDevInstanceAnswersACategoryItDoesNotKnowWithNoActivity(
 	}
 }
 
-// Every row of the table held to the polygon is an assertion about the instance and not a copy of the
-// specification, which declares none of them: the polygon answers each row with activities, and with activities
-// of that row alone.
-func TestActivityHoldsEachCategoryOfTheListToTheDevInstance(t *testing.T) {
+func TestActivityChecksEachCategoryOfTheListAgainstTheDevInstance(t *testing.T) {
 	t.Parallel()
-	for _, category := range polygonCategories() {
+	for _, category := range devInstanceCategories() {
 		t.Run(category, func(t *testing.T) {
 			t.Parallel()
 			dev := devInstance(t)
@@ -160,16 +139,13 @@ func TestActivityHoldsEachCategoryOfTheListToTheDevInstance(t *testing.T) {
 	}
 }
 
-// The help is where a caller reads the list, so it is the list the contract holds and not a second one: every
-// row of it is held either to the polygon or, for the commits the polygon cannot file, to records of a live
-// instance.
-func TestActivityHelpNamesTheCategoriesHeldToTheDevInstance(t *testing.T) {
+func TestActivityHelpNamesTheCategoriesCheckedAgainstTheDevInstance(t *testing.T) {
 	t.Parallel()
 
 	got := run(t, []string{"activity", "list", "--help"})
 
 	require.Equal(t, 0, got.code)
-	for _, category := range append(polygonCategories(), "VcsChangeCategory") {
+	for _, category := range append(devInstanceCategories(), "VcsChangeCategory") {
 		assert.Contains(t, got.stdout, category)
 	}
 }
@@ -236,9 +212,6 @@ func TestActivityPrintsTheMixedJournalOfTheDevInstance(t *testing.T) {
 	assert.Equal(t, 1, sentTo(dev, journalPath(mixedFixture)))
 }
 
-// Both ends of every link of the mixed fixture, each named by the phrase of the end the fixture stands at and by
-// the issue at the other end: five links of five types, and the phrase of each is the untranslated one,
-// whatever language the polygon writes its records in.
 func TestActivityPrintsTheLinksOfTheDevInstanceByTheirPhrases(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -314,8 +287,6 @@ func TestActivityPrintsTheResolutionAndTheStateOfTheDevInstance(t *testing.T) {
 	assert.NotContains(t, got.stdout, "Состояние")
 }
 
-// An edit of the text of the edited fixture prints the text the polygon sent, both what the edit put there and
-// what it took away, byte for byte, as the one item of each list.
 func TestActivityPrintsTheEditsOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	for _, category := range []string{"DescriptionCategory", "SummaryCategory", "CommentTextCategory"} {
@@ -368,8 +339,6 @@ func TestActivityCutsTheJournalOfTheDevInstanceAtTheLimit(t *testing.T) {
 	assert.Equal(t, []string{"4"}, activitySent(t, dev)["$top"])
 }
 
-// The caller's own names are judged as they are everywhere else: a name no schema of its place declares is
-// theirs to fix, with the names of the place to fix it by.
 func TestActivityRefusesANameTheSchemasOfTheDevInstanceDoNotDeclare(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -384,8 +353,6 @@ func TestActivityRefusesANameTheSchemasOfTheDevInstanceDoNotDeclare(t *testing.T
 	assert.Equal(t, 1, sentTo(dev, journalPath(mixedFixture)))
 }
 
-// The limited token is on no project, so the polygon answers the journal of an issue it cannot see as it answers
-// an issue nobody has: 404.
 func TestActivityFindsNoIssueOfTheDevInstanceForTheLimitedToken(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

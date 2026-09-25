@@ -20,7 +20,6 @@ const sentWorkItemTypesFields = "idReadable,project(shortName,plugins(timeTracki
 const sentWorkItemWriteFieldsWithType = "id,duration(minutes),type(name,id),attributes(id,name,value(id,name)),author(login),date," +
 	"issue(idReadable," + customFieldsFields + "),text"
 
-// The types of work DEV writes work items against, in the order the polygon keeps them.
 func devWorkItemTypes() []string {
 	return []string{
 		"Разработка", "Тестирование", "Документирование", "Исследование", "Груминг", "Декомпозиция", "Кодревью",
@@ -29,8 +28,6 @@ func devWorkItemTypes() []string {
 	}
 }
 
-// The id the polygon numbers the type standing at that place of the global catalogue with; a scenario holds the
-// body of a write to it, so the name never has to be looked for in what went out.
 func workItemTypeID(at int) string {
 	return "178-" + strconv.Itoa(at)
 }
@@ -49,7 +46,6 @@ func issueWithWorkItemTypes(readable, project string, types ...string) string {
 		`,"workItemTypes":[` + strings.Join(items, ",") + `]}}}}`
 }
 
-// devIssueWithWorkItemTypes is the read of DEV-1 as the polygon answers it.
 func devIssueWithWorkItemTypes() string {
 	return issueWithWorkItemTypes("DEV-1", "DEV", devWorkItemTypes()...)
 }
@@ -127,8 +123,8 @@ func TestTimeCreateResolvesATypeOfTheProjectWithoutRegardToLetterCase(t *testing
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := writingTimeOfAType(t,
-				answer(http.StatusOK, devIssueWithWorkItemTypes()),
-				answer(http.StatusOK, answeredWorkItem{
+				respondWith(http.StatusOK, devIssueWithWorkItemTypes()),
+				respondWith(http.StatusOK, answeredWorkItem{
 					workType: `{"$type":"WorkItemType","id":"` + workItemTypeID(tc.at) + `","name":"` +
 						devWorkItemTypes()[tc.at] + `"}`,
 				}.json()))
@@ -183,12 +179,12 @@ func TestTimeCreateRefusesATypeTheProjectDoesNotWriteAgainst(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := writingTimeOfAType(t,
-				answer(http.StatusOK, issueWithWorkItemTypes("DEV-1", "DEV", tc.types...)),
-				answer(http.StatusOK, answeredWorkItem{}.json()))
+				respondWith(http.StatusOK, issueWithWorkItemTypes("DEV-1", "DEV", tc.types...)),
+				respondWith(http.StatusOK, answeredWorkItem{}.json()))
 
 			got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H", "--type", tc.named)
 
-			want := refusal{
+			want := faultDocument{
 				code: "unknown_name",
 				details: []detail{
 					{"request", issueRequest(server.url, "DEV-1", sentWorkItemTypesFields)},
@@ -207,8 +203,8 @@ func TestTimeCreateRefusesATypeTheProjectDoesNotWriteAgainst(t *testing.T) {
 func TestTimeCreateTakesTheTypeWrittenByteForByte(t *testing.T) {
 	t.Parallel()
 	server := writingTimeOfAType(t,
-		answer(http.StatusOK, issueWithWorkItemTypes("DEV-1", "DEV", "Test", "TEST")),
-		answer(http.StatusOK, answeredWorkItem{workType: `{"$type":"WorkItemType","id":"178-1","name":"TEST"}`}.json()))
+		respondWith(http.StatusOK, issueWithWorkItemTypes("DEV-1", "DEV", "Test", "TEST")),
+		respondWith(http.StatusOK, answeredWorkItem{workType: `{"$type":"WorkItemType","id":"178-1","name":"TEST"}`}.json()))
 
 	got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M", "--type", "TEST")
 
@@ -219,7 +215,7 @@ func TestTimeCreateTakesTheTypeWrittenByteForByte(t *testing.T) {
 // The settings a type is resolved against are what ytrack asked for on its own behalf, so an answer that
 // carries none of them is the server saying something other than what was asked, not a name the caller can fix.
 // Nothing is written in any of these.
-func TestTimeCreateWritesNothingWhereTheSettingsDidNotArrive(t *testing.T) {
+func TestTimeCreateWritesNothingWhereTheSettingsWereNotReceived(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name   string
@@ -230,19 +226,19 @@ func TestTimeCreateWritesNothingWhereTheSettingsDidNotArrive(t *testing.T) {
 		{
 			name: "no plugins at all",
 			read: `{"$type":"Issue","idReadable":"DEV-1","project":{"$type":"Project","shortName":"DEV"}}`,
-			code: "upstream_lied",
+			code: "upstream_invalid",
 		},
 		{
 			name: "plugins without the settings of time tracking",
 			read: `{"$type":"Issue","idReadable":"DEV-1","project":{"$type":"Project","shortName":"DEV",` +
 				`"plugins":{"$type":"ProjectPlugins"}}}`,
-			code: "upstream_lied",
+			code: "upstream_invalid",
 		},
 		{
 			name: "settings without the types of work",
 			read: `{"$type":"Issue","idReadable":"DEV-1","project":{"$type":"Project","shortName":"DEV",` +
 				`"plugins":{"$type":"ProjectPlugins","timeTrackingSettings":{"$type":"ProjectTimeTrackingSettings"}}}}`,
-			code: "upstream_lied",
+			code: "upstream_invalid",
 		},
 		{
 			// A type of work is addressed by the id and matched by the name, so neither is a number the
@@ -251,14 +247,14 @@ func TestTimeCreateWritesNothingWhereTheSettingsDidNotArrive(t *testing.T) {
 			read: `{"$type":"Issue","idReadable":"DEV-1","project":{"$type":"Project","shortName":"DEV",` +
 				`"plugins":{"$type":"ProjectPlugins","timeTrackingSettings":{"$type":"ProjectTimeTrackingSettings",` +
 				`"workItemTypes":[{"$type":"WorkItemType","id":178,"name":"Разработка"}]}}}}`,
-			code: "upstream_lied",
+			code: "upstream_invalid",
 		},
 		{
 			name: "a type whose name is no text",
 			read: `{"$type":"Issue","idReadable":"DEV-1","project":{"$type":"Project","shortName":"DEV",` +
 				`"plugins":{"$type":"ProjectPlugins","timeTrackingSettings":{"$type":"ProjectTimeTrackingSettings",` +
 				`"workItemTypes":[{"$type":"WorkItemType","id":"178-0","name":null}]}}}}`,
-			code: "upstream_lied",
+			code: "upstream_invalid",
 		},
 		{
 			name:   "an issue the instance has none of",
@@ -274,7 +270,7 @@ func TestTimeCreateWritesNothingWhereTheSettingsDidNotArrive(t *testing.T) {
 			if status == 0 {
 				status = http.StatusOK
 			}
-			server := writingTimeOfAType(t, answer(status, tc.read), answer(http.StatusOK, answeredWorkItem{}.json()))
+			server := writingTimeOfAType(t, respondWith(status, tc.read), respondWith(http.StatusOK, answeredWorkItem{}.json()))
 
 			got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H", "--type", "Разработка")
 
@@ -293,35 +289,35 @@ func TestTimeCreateRefusesATypeTheServerKeptOtherwise(t *testing.T) {
 	tests := []struct {
 		name     string
 		workType string
-		arrived  any
+		received any
 	}{
 		{
 			name:     "another type of the project",
 			workType: `{"$type":"WorkItemType","id":"178-6","name":"Кодревью"}`,
-			arrived:  "Кодревью",
+			received: "Кодревью",
 		},
 		{
 			name:     "no type at all",
 			workType: "null",
-			arrived:  nil,
+			received: nil,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := writingTimeOfAType(t,
-				answer(http.StatusOK, devIssueWithWorkItemTypes()),
-				answer(http.StatusOK, answeredWorkItem{workType: tc.workType}.json()))
+				respondWith(http.StatusOK, devIssueWithWorkItemTypes()),
+				respondWith(http.StatusOK, answeredWorkItem{workType: tc.workType}.json()))
 
 			got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M", "--type", "разработка")
 
 			found := requireUncertainty(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Equal(t, []string{"request", "issue", "id", "mismatch"}, detailKeys(found))
 			assert.Equal(t, []any{[]detail{
 				{"field", "type"},
-				{"written", "разработка"},
-				{"arrived", tc.arrived},
+				{"expected", "разработка"},
+				{"actual", tc.received},
 			}}, detailNamed(t, found, "mismatch"))
 		})
 	}
@@ -331,7 +327,7 @@ func TestTimeCreateRefusesATypeTheServerKeptOtherwise(t *testing.T) {
 // about a type, which is what leaves YouTrack to write the work item against none.
 func TestTimeCreateReadsNothingWhereNoTypeIsNamed(t *testing.T) {
 	t.Parallel()
-	server := writingTime(t, answer(http.StatusOK, answeredWorkItem{}.json()))
+	server := writingTime(t, respondWith(http.StatusOK, answeredWorkItem{}.json()))
 
 	got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M")
 

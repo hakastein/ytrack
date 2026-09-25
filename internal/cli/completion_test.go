@@ -249,7 +249,7 @@ func TestCompleteWithNoCommandLineIsRefused(t *testing.T) {
 
 			got := runWith(t, server.env(), protocol)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -444,8 +444,6 @@ func TestCompletionPrintsAScriptForEveryShellItNames(t *testing.T) {
 	}
 }
 
-// The argument is one shell of the list. A shell ytrack has no script for is refused, same as too few or
-// too many arguments, which cobra refuses on its own since the count is cobra's to judge.
 func TestCompletionRefusesAnythingButOneShellItNames(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -463,7 +461,7 @@ func TestCompletionRefusesAnythingButOneShellItNames(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -491,9 +489,6 @@ func TestCompletionHelpNamesEveryShellThereIsAScriptForAndHowToLoadIt(t *testing
 	assert.Empty(t, server.requests())
 }
 
-// loadingLinesOf is what the help says about loading a script, one shell to a line: the name of the shell, and
-// the line that loads its script into it. They are the indented lines of the help that name something, which
-// is the form installs() writes and nothing else in the help takes.
 func loadingLinesOf(t *testing.T, help string) map[string]string {
 	t.Helper()
 	lines := map[string]string{}

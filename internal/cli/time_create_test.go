@@ -133,7 +133,7 @@ func TestTimeCreateRefusesADurationLongerThanTheServerCounts(t *testing.T) {
 
 			got := runWith(t, server.env(), "time", "create", "DEV-1", tc.spent)
 
-			want := refusal{code: "bad_usage"}
+			want := faultDocument{code: "bad_usage"}
 			assert.Equal(t, want, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
@@ -178,7 +178,7 @@ func TestTimeCreateRefusesWhatItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -225,7 +225,7 @@ func TestTimeCreateRefusesMidnightUTCCarriedInAnOffset(t *testing.T) {
 
 	got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H", "--date", "2026-08-31T21:00:00-03:00")
 
-	assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 	assert.Empty(t, server.requests())
 }
 
@@ -258,7 +258,7 @@ func TestTimeCreateSendsTheMinutesOfTheDuration(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := writingTime(t, answer(http.StatusOK, answeredWorkItem{
+			server := writingTime(t, respondWith(http.StatusOK, answeredWorkItem{
 				duration: `{"$type":"DurationValue","minutes":` + strconv.FormatFloat(tc.minutes, 'f', -1, 64) + `}`,
 			}.json()))
 
@@ -286,7 +286,7 @@ func TestTimeCreateSendsTheDayAsNoonUTC(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := writingTime(t, answer(http.StatusOK, answeredWorkItem{}.json()))
+			server := writingTime(t, respondWith(http.StatusOK, answeredWorkItem{}.json()))
 
 			got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M", "--date", tc.day)
 
@@ -317,7 +317,7 @@ func TestTimeCreateSendsTheTextByteForByte(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := writingTime(t, answer(http.StatusOK, answeredWorkItem{text: asJSON(tc.text)}.json()))
+			server := writingTime(t, respondWith(http.StatusOK, answeredWorkItem{text: asJSON(tc.text)}.json()))
 
 			got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M", "--text", tc.text)
 
@@ -354,7 +354,7 @@ func TestTimeRefusesATextThatIsNoUTF8(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -364,14 +364,14 @@ func TestTimeRefusesATextThatIsNoUTF8(t *testing.T) {
 // day printed as midnight UTC and the time spent on the issue among its custom fields.
 func TestTimeCreatePrintsTheWorkItemTheServerKept(t *testing.T) {
 	t.Parallel()
-	spent := arrivedField{name: "Затраченное время", valueType: "period", value: `{"$type":"DurationValue","minutes":90}`}
-	estimation := arrivedField{name: "Оценка", valueType: "period", ordinal: "2", binding: "180-2"}
+	spent := receivedField{name: "Затраченное время", valueType: "period", value: `{"$type":"DurationValue","minutes":90}`}
+	estimation := receivedField{name: "Оценка", valueType: "period", ordinal: "2", binding: "180-2"}
 	written := answeredWorkItem{
 		workType: `{"$type":"WorkItemType","name":"Разработка"}`,
 		text:     asJSON("первая\nвторая"),
 		fields:   spent.sent() + "," + estimation.sent(),
 	}
-	server := writingTime(t, answer(http.StatusOK, written.json()))
+	server := writingTime(t, respondWith(http.StatusOK, written.json()))
 
 	got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M", "--date", "2026-09-01",
 		"--text", "первая\nвторая")
@@ -392,11 +392,9 @@ func TestTimeCreatePrintsTheWorkItemTheServerKept(t *testing.T) {
 	assert.Equal(t, yaml.LiteralStyle, text.Style)
 }
 
-// A text a literal block cannot carry is printed in double quotes, byte for byte, as it is wherever prose
-// of the instance is printed.
 func TestTimeCreatePrintsATextNoBlockCanCarryInQuotes(t *testing.T) {
 	t.Parallel()
-	server := writingTime(t, answer(http.StatusOK, answeredWorkItem{text: asJSON("первая\rвторая")}.json()))
+	server := writingTime(t, respondWith(http.StatusOK, answeredWorkItem{text: asJSON("первая\rвторая")}.json()))
 
 	got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M", "--text", "первая\rвторая")
 
@@ -421,13 +419,13 @@ func TestTimeCreateRefusesWhatTheServerKeptOtherwise(t *testing.T) {
 			name:     "a duration of another length",
 			argv:     []string{"time", "create", "DEV-1", "PT1H30M"},
 			answered: answeredWorkItem{duration: `{"$type":"DurationValue","minutes":60}`},
-			mismatch: []any{[]detail{{"field", "duration"}, {"written", "PT1H30M"}, {"arrived", "PT1H"}}},
+			mismatch: []any{[]detail{{"field", "duration"}, {"expected", "PT1H30M"}, {"actual", "PT1H"}}},
 		},
 		{
 			name:     "no duration at all",
 			argv:     []string{"time", "create", "DEV-1", "PT1H30M"},
 			answered: answeredWorkItem{duration: "null"},
-			mismatch: []any{[]detail{{"field", "duration"}, {"written", "PT1H30M"}, {"arrived", nil}}},
+			mismatch: []any{[]detail{{"field", "duration"}, {"expected", "PT1H30M"}, {"actual", nil}}},
 		},
 		{
 			name:     "a day after the one written",
@@ -435,8 +433,8 @@ func TestTimeCreateRefusesWhatTheServerKeptOtherwise(t *testing.T) {
 			answered: answeredWorkItem{date: "1788307200000"},
 			mismatch: []any{[]detail{
 				{"field", "date"},
-				{"written", "2026-09-01"},
-				{"arrived", "2026-09-02T00:00:00Z"},
+				{"expected", "2026-09-01"},
+				{"actual", "2026-09-02T00:00:00Z"},
 			}},
 		},
 		{
@@ -445,13 +443,13 @@ func TestTimeCreateRefusesWhatTheServerKeptOtherwise(t *testing.T) {
 			name:     "a day that came back as something other than a number of milliseconds",
 			argv:     []string{"time", "create", "DEV-1", "PT1H30M", "--date", "2026-09-01"},
 			answered: answeredWorkItem{date: asJSON("2026-09-01")},
-			mismatch: []any{[]detail{{"field", "date"}, {"written", "2026-09-01"}, {"arrived", nil}}},
+			mismatch: []any{[]detail{{"field", "date"}, {"expected", "2026-09-01"}, {"actual", nil}}},
 		},
 		{
 			name:     "no day at all",
 			argv:     []string{"time", "create", "DEV-1", "PT1H30M", "--date", "2026-09-01"},
 			answered: answeredWorkItem{date: "null"},
-			mismatch: []any{[]detail{{"field", "date"}, {"written", "2026-09-01"}, {"arrived", nil}}},
+			mismatch: []any{[]detail{{"field", "date"}, {"expected", "2026-09-01"}, {"actual", nil}}},
 		},
 		{
 			name:     "a text the server rewrote",
@@ -459,20 +457,20 @@ func TestTimeCreateRefusesWhatTheServerKeptOtherwise(t *testing.T) {
 			answered: answeredWorkItem{text: asJSON("первая\nвторая")},
 			mismatch: []any{[]detail{
 				{"field", "text"},
-				{"written", "первая\rвторая"},
-				{"arrived", "первая\nвторая"},
+				{"expected", "первая\rвторая"},
+				{"actual", "первая\nвторая"},
 			}},
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := writingTime(t, answer(http.StatusOK, tc.answered.json()))
+			server := writingTime(t, respondWith(http.StatusOK, tc.answered.json()))
 
 			got := runWith(t, server.env(), tc.argv...)
 
 			found := requireUncertainty(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Equal(t, []string{"request", "issue", "id", "mismatch"}, detailKeys(found))
 			assert.Equal(t, "DEV-1", detailNamed(t, found, "issue"))
 			assert.Equal(t, "199-7", detailNamed(t, found, "id"))
@@ -481,23 +479,20 @@ func TestTimeCreateRefusesWhatTheServerKeptOtherwise(t *testing.T) {
 	}
 }
 
-// A duration that came back without the minutes it holds is caught before the check of the write is: the
-// minutes were asked for and did not arrive, which is the judgment of names rather than a value the server
-// kept otherwise. The work item exists by then either way.
-func TestTimeCreateRefusesADurationThatArrivedWithoutItsMinutes(t *testing.T) {
+func TestTimeCreateRefusesADurationReceivedWithoutItsMinutes(t *testing.T) {
 	t.Parallel()
-	server := writingTime(t, answer(http.StatusOK, answeredWorkItem{duration: `{"$type":"DurationValue"}`}.json()))
+	server := writingTime(t, respondWith(http.StatusOK, answeredWorkItem{duration: `{"$type":"DurationValue"}`}.json()))
 
 	got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M")
 
 	found := requireUncertainty(t, got)
-	assert.Equal(t, "upstream_lied", found.code)
+	assert.Equal(t, "upstream_invalid", found.code)
 	assert.Equal(t, []any{[]detail{{"field", "duration(minutes)"}, {"type", "DurationValue"}}},
 		detailNamed(t, found, "missing"))
 }
 
 // detailKeys is the keys a refusal printed after the message, in order.
-func detailKeys(found refusal) []string {
+func detailKeys(found faultDocument) []string {
 	keys := make([]string, 0, len(found.details))
 	for _, printed := range found.details {
 		keys = append(keys, printed.key)
@@ -509,7 +504,7 @@ func detailKeys(found refusal) []string {
 // the server keeps midnight, so the two moments differ and the day does not.
 func TestTimeCreateTakesTheDayTheServerKeptForTheDayWritten(t *testing.T) {
 	t.Parallel()
-	server := writingTime(t, answer(http.StatusOK, answeredWorkItem{date: "1788220800000"}.json()))
+	server := writingTime(t, respondWith(http.StatusOK, answeredWorkItem{date: "1788220800000"}.json()))
 
 	got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M", "--date", "2026-09-01")
 
@@ -519,9 +514,9 @@ func TestTimeCreateTakesTheDayTheServerKeptForTheDayWritten(t *testing.T) {
 
 // What the call named nothing for is held to nothing: the day YouTrack chose itself and the text it left
 // empty are its answer about a work item, not a disagreement with a write that said neither.
-func TestTimeCreateHoldsNothingItNeverWrote(t *testing.T) {
+func TestTimeCreateChecksNothingItNeverWrote(t *testing.T) {
 	t.Parallel()
-	server := writingTime(t, answer(http.StatusOK, answeredWorkItem{date: "1788307200000", text: "null"}.json()))
+	server := writingTime(t, respondWith(http.StatusOK, answeredWorkItem{date: "1788307200000", text: "null"}.json()))
 
 	got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M")
 
@@ -571,11 +566,11 @@ func TestTimeCreateRefusesWhatTheServerRefused(t *testing.T) {
 			t.Parallel()
 			said := `{"error":` + strconv.Quote(tc.upstreamError) + `,"error_description":` +
 				strconv.Quote(tc.upstreamMessage) + `}`
-			server := writingTime(t, answer(tc.status, said))
+			server := writingTime(t, respondWith(tc.status, said))
 
 			got := runWith(t, server.env(), "time", "create", "DEV-1", "PT0M")
 
-			want := refusal{
+			want := faultDocument{
 				code: tc.code,
 				details: append([]detail{
 					{"request", workItemWriteRequest(server.url, "DEV-1", sentWorkItemWriteFields)},
@@ -594,7 +589,7 @@ func TestTimeCreateRefusesWhatTheServerRefused(t *testing.T) {
 // against what was written, and the pair a refusal names the work item by. The document is theirs alone.
 func TestTimeCreateAsksForWhatItChecksWhateverWasAskedToPrint(t *testing.T) {
 	t.Parallel()
-	server := writingTime(t, answer(http.StatusOK, answeredWorkItem{}.json()))
+	server := writingTime(t, respondWith(http.StatusOK, answeredWorkItem{}.json()))
 
 	got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M", "--fields", "id")
 
@@ -618,9 +613,6 @@ func contractWorkItemIssue(t *testing.T, dev *upstream, role string) string {
 	return readable
 }
 
-// A work item written on the polygon for real: the duration goes out as minutes and comes back the period
-// it was written as, the day is kept as the calendar day, the text byte for byte, and the time spent on the
-// issue is in the answer to the write itself — a second one goes out and the sum moves again.
 func TestTimeCreateWritesTimeAgainstAnIssueOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -674,9 +666,6 @@ func TestTimeCreateWritesTheDayNamedByTheMemberOfTheDevInstance(t *testing.T) {
 	assert.Equal(t, "dev.member", nodeAt(t, mapping, "author", "login").Value)
 }
 
-// atThreePM is the replacement of the body of a write: the noon UTC ytrack sends for a day becomes three in the
-// afternoon of it. ytrack has no way to send a moment — --date takes a day and refuses everything else — so the
-// only place to put one is the wire, which is how the scenario asks the polygon whose time zone decides.
 func atThreePM(_ *http.Request, body []byte) []byte {
 	var written struct {
 		Duration struct {
@@ -690,8 +679,6 @@ func atThreePM(_ *http.Request, body []byte) []byte {
 		`},"date":` + strconv.FormatInt(threePMUTC, 10) + `}`)
 }
 
-// Three in the afternoon of 1 September 2026, UTC: the moment DEV-7 is written against, kept by the polygon
-// under 2 September.
 const threePMUTC = 1788274800000
 
 // Whose time zone a moment is filed under: the profile of the token that writes, not the zone of the
@@ -715,11 +702,11 @@ func TestTimeCreateFindsTheDayOfAMomentComesFromTheProfileOfTheDevInstance(t *te
 		"time", "create", issue, "PT15M", "--date", "2026-09-01")
 
 	found := requireUncertainty(t, byTheMember)
-	assert.Equal(t, "upstream_lied", found.code)
+	assert.Equal(t, "upstream_invalid", found.code)
 	assert.Equal(t, []any{[]detail{
 		{"field", "date"},
-		{"written", "2026-09-01"},
-		{"arrived", "2026-09-02T00:00:00Z"},
+		{"expected", "2026-09-01"},
+		{"actual", "2026-09-02T00:00:00Z"},
 	}}, detailNamed(t, found, "mismatch"))
 }
 
@@ -811,9 +798,6 @@ func TestTimeCreateWritesNoWorkItemOfNoLength(t *testing.T) {
 	assert.Equal(t, 0, requireWorkItemListing(t, listed).Total)
 }
 
-// asDurationID is the replacement of the body of a write: the minutes ytrack sends become the ISO period the
-// server keeps as the id of a duration. It is how the scenario asks the polygon what it does with a duration
-// written that way, over the write ytrack really sends.
 func asDurationID(_ *http.Request, body []byte) []byte {
 	var written struct {
 		Duration struct {
@@ -826,15 +810,10 @@ func asDurationID(_ *http.Request, body []byte) []byte {
 	return []byte(`{"duration":{"id":"PT` + strconv.FormatInt(written.Duration.Minutes/60, 10) + `H"}}`)
 }
 
-// asPresentation is the same replacement with the length said the way the server shows one: a day, which is
-// what TestTimeCreateFindsADayOfTheDevInstanceIsEightHours asks the polygon about.
 func asPresentation(*http.Request, []byte) []byte {
 	return []byte(`{"duration":{"presentation":"1д"}}`)
 }
 
-// ytrack sends the minutes and has no way to send the ISO period as the id of a duration, so that body is put
-// on the wire between ytrack and the polygon: the server refuses it word for word rather than answering 200 and
-// keeping nothing, which is what it does at a period field of an issue.
 func TestTimeCreateIsRefusedTheDurationWrittenAsAnID(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -854,9 +833,6 @@ func TestTimeCreateIsRefusedTheDurationWrittenAsAnID(t *testing.T) {
 	assert.Equal(t, 0, requireWorkItemListing(t, listed).Total)
 }
 
-// Why neither a day nor a week is written here. The polygon is sent the length as the server shows one, a
-// day of it, and keeps eight hours: a day of YouTrack is the working day of the instance, so ytrack converting
-// P1D would be ytrack agreeing with an arithmetic that is the instance's own and not ISO 8601's.
 func TestTimeCreateFindsADayOfTheDevInstanceIsEightHours(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -870,8 +846,6 @@ func TestTimeCreateFindsADayOfTheDevInstanceIsEightHours(t *testing.T) {
 	assert.Equal(t, "PT8H", nodeAt(t, requireMapping(t, "stdout", got.stdout), "duration").Value)
 }
 
-// An issue the polygon has none of and one this token may not see are the same 404 of the server, in one
-// request, with nothing written: nothing of the issue is read before the write.
 func TestTimeCreateWritesNothingForAnIssueTheDevInstanceDoesNotShow(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -880,7 +854,7 @@ func TestTimeCreateWritesNothingForAnIssueTheDevInstanceDoesNotShow(t *testing.T
 		token func(*testing.T) string
 	}{
 		{
-			name:  "an issue the polygon has none of",
+			name:  "an issue the dev instance has none of",
 			issue: "DEV-99999",
 			token: func(t *testing.T) string { t.Helper(); return devTokens(t).admin },
 		},
@@ -913,6 +887,6 @@ func TestTimeCreateRefusesAnExpressionItCannotSend(t *testing.T) {
 
 	got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H", "--fields", "a,,b")
 
-	assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 	assert.Empty(t, server.requests())
 }

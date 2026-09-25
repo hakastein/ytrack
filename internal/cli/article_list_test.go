@@ -52,8 +52,6 @@ type articleListing struct {
 	Articles  []map[string]any `yaml:"articles"`
 }
 
-// requireArticleListing reads back what article list printed and holds the counts to the records, which is as
-// far as a test of the polygon can hold them.
 func requireArticleListing(t *testing.T, got outcome) articleListing {
 	t.Helper()
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
@@ -89,7 +87,7 @@ func countedArticles(records string, count http.HandlerFunc) http.HandlerFunc {
 			count(w, r)
 			return
 		}
-		answer(http.StatusOK, records)(w, r)
+		respondWith(http.StatusOK, records)(w, r)
 	}
 }
 
@@ -116,7 +114,7 @@ func TestArticleListTakesItsSearchFromTheQueryFlagAlone(t *testing.T) {
 
 			got := runWith(t, server.env(), slices.Concat([]string{"article", "list"}, tc.argv)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -141,7 +139,7 @@ func TestArticleListRefusesWhatItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), slices.Concat([]string{"article", "list", "--query", ""}, tc.flags)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -177,7 +175,7 @@ func TestArticleListSendsTheSearchWordForWordAndAsksForNoMarkup(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := selecting(t, answer(http.StatusOK, "["+listedParent+"]"))
+			server := selecting(t, respondWith(http.StatusOK, "["+listedParent+"]"))
 
 			got := runWith(t, server.env(), "article", "list", "--query", tc.search)
 
@@ -216,7 +214,7 @@ func TestArticleListPrintsTheSameDocumentHoweverManyWereFound(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := selecting(t, answer(http.StatusOK, tc.records))
+			server := selecting(t, respondWith(http.StatusOK, tc.records))
 
 			got := runWith(t, server.env(), "article", "list", "--query", "project: DEV")
 
@@ -241,7 +239,7 @@ func articleRecords(t *testing.T, got outcome) []*yaml.Node {
 func TestArticleListCountsTheArticlesWhenTheyFillTheLimit(t *testing.T) {
 	t.Parallel()
 	const found = `[{"id":"177-1","$type":"Article"},{"id":"177-2","$type":"Article"},{"id":"177-3","$type":"Article"}]`
-	server := selecting(t, countedArticles("["+listedParent+","+listedChild+"]", answer(http.StatusOK, found)))
+	server := selecting(t, countedArticles("["+listedParent+","+listedChild+"]", respondWith(http.StatusOK, found)))
 
 	got := runWith(t, server.env(), "article", "list", "--query", "project: DEV", "--limit", "2")
 
@@ -253,7 +251,7 @@ func TestArticleListCountsTheArticlesWhenTheyFillTheLimit(t *testing.T) {
 // A page shorter than the limit is the whole of what the search found, and nothing is asked twice.
 func TestArticleListCountsNothingWhenThePageIsShortOfTheLimit(t *testing.T) {
 	t.Parallel()
-	server := selecting(t, answer(http.StatusOK, "["+listedParent+"]"))
+	server := selecting(t, respondWith(http.StatusOK, "["+listedParent+"]"))
 
 	got := runWith(t, server.env(), "article", "list", "--query", "project: DEV", "--limit", "2")
 
@@ -264,26 +262,26 @@ func TestArticleListCountsNothingWhenThePageIsShortOfTheLimit(t *testing.T) {
 
 // A count that fails, or that comes back below what already arrived, takes the command with it: half a
 // document would say the rest were not cut off.
-func TestArticleListRefusesWhenTheCountDoesNotHold(t *testing.T) {
+func TestArticleListRefusesWhenTheCountDoesNotMatch(t *testing.T) {
 	t.Parallel()
 	const said = `{"error":"server_error","error_description":"java.lang.NullPointerException"}`
 	tests := []struct {
 		name  string
 		count http.HandlerFunc
-		want  refusal
+		want  faultDocument
 	}{
 		{
 			name:  "a count of none over a page of one",
-			count: answer(http.StatusOK, "[]"),
-			want: refusal{
+			count: respondWith(http.StatusOK, "[]"),
+			want: faultDocument{
 				code:    "upstream_failed",
 				details: []detail{{"total", 0}, {"returned", 1}},
 			},
 		},
 		{
 			name:  "a server that failed the count",
-			count: answer(http.StatusInternalServerError, said),
-			want: refusal{
+			count: respondWith(http.StatusInternalServerError, said),
+			want: faultDocument{
 				code: "upstream_failed",
 				details: []detail{
 					{"request", articleListRequest("", "id", "-1", "project%3A+DEV")},
@@ -317,12 +315,12 @@ func TestArticleListRefusesWhenTheCountDoesNotHold(t *testing.T) {
 // follow it would be of something else, so the refusal comes before it.
 func TestArticleListRefusesMoreArticlesThanTheLimit(t *testing.T) {
 	t.Parallel()
-	server := selecting(t, answer(http.StatusOK, "["+listedParent+","+listedChild+"]"))
+	server := selecting(t, respondWith(http.StatusOK, "["+listedParent+","+listedChild+"]"))
 
 	got := runWith(t, server.env(), "article", "list", "--query", "project: DEV", "--limit", "1")
 
-	want := refusal{
-		code:    "upstream_lied",
+	want := faultDocument{
+		code:    "upstream_invalid",
 		details: []detail{{"limit", 1}, {"returned", 2}},
 	}
 	assert.Equal(t, want, requireRefusal(t, got))
@@ -334,11 +332,11 @@ func TestArticleListRefusesMoreArticlesThanTheLimit(t *testing.T) {
 func TestArticleListPassesOnTheServerRefusingASearch(t *testing.T) {
 	t.Parallel()
 	const said = `{"error":"invalid_query","error_description":"Can't parse search query, please check and update query syntax"}`
-	server := selecting(t, answer(http.StatusBadRequest, said))
+	server := selecting(t, respondWith(http.StatusBadRequest, said))
 
 	got := runWith(t, server.env(), "article", "list", "--query", "has: parent")
 
-	want := refusal{
+	want := faultDocument{
 		code: "rejected",
 		details: []detail{
 			{"request", articleListRequest(server.url, articleListFields, "50", "has%3A+parent")},
@@ -364,8 +362,6 @@ func TestArticleListFindsTheArticleOfTheDemoProjectOfTheDevInstance(t *testing.T
 	assert.Equal(t, []string{"/api/articles"}, dev.sentPaths())
 }
 
-// The articles of the polygon's own project fill a limit of one, so they are counted, and the counting pass
-// carries the same search.
 func TestArticleListCountsTheArticlesOfTheDevInstanceBeyondTheLimit(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -375,13 +371,10 @@ func TestArticleListCountsTheArticlesOfTheDevInstanceBeyondTheLimit(t *testing.T
 	printed := requireArticleListing(t, got)
 	assert.Equal(t, 1, printed.Returned)
 	assert.True(t, printed.Truncated)
-	// DEV-A-1 and DEV-A-2 are the polygon's own; what a neighbouring test left behind is not.
 	assert.GreaterOrEqual(t, printed.Total, 2)
 	assert.Equal(t, searchingArticles("project: DEV", "1"), dev.sentQueries())
 }
 
-// Title reads the heading of an article, and it is the attribute a markup of the language of issues would
-// have called free text: the parent of the polygon is found by a word of its heading and the child is not.
 func TestArticleListFindsTheArticleOfTheDevInstanceByTheTitleAttribute(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -420,8 +413,6 @@ func TestArticleListPassesOnTheDevInstanceRefusingAProjectItDoesNotHave(t *testi
 	assert.Len(t, dev.requests(), 1)
 }
 
-// A token that may see no article of the polygon is answered with an empty selection rather than with a
-// refusal: the knowledge base holds articles, and none of them is this token's to read.
 func TestArticleListFindsNoArticleOfTheDevInstanceForTheLimitedToken(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

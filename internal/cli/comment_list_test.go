@@ -18,18 +18,17 @@ const (
 	articleCommentListFields = "id,author(login),created,text"
 )
 
-// The two comments DEV-7 of the polygon carries, which the contract scenarios only read.
 const (
-	polygonCommentedIssue = "DEV-7"
-	polygonFirstComment   = "7-2"
-	polygonSecondComment  = "7-3"
+	devInstanceCommentedIssue = "DEV-7"
+	devInstanceFirstComment   = "7-2"
+	devInstanceSecondComment  = "7-3"
 )
 
 // Comments of the server as a page of the list brings them, $type and all.
 const (
 	listedIssueComment = `{"deleted":false,"author":{"login":"admin","$type":"User"},"created":1789395789677,` +
 		`"text":"первая\nвторая","id":"7-2","$type":"IssueComment"}`
-	listedTakenBackComment = `{"deleted":true,"author":{"login":"dev.member","$type":"User"},` +
+	listedDeletedComment = `{"deleted":true,"author":{"login":"dev.member","$type":"User"},` +
 		`"created":1789395790000,"text":null,"id":"7-3","$type":"IssueComment"}`
 	listedArticleComment = `{"author":{"login":"admin","$type":"User"},"created":1789395789747,` +
 		`"text":"к статье","id":"8-4","$type":"ArticleComment"}`
@@ -112,9 +111,9 @@ func TestCommentListRefusesACallThatNamesNoOneOwner(t *testing.T) {
 // An issue goes to the API of issues with the limit as $top, and its records come one to a line in the order
 // they arrived. A comment its author took back is one of them, printed with its text null and deleted true,
 // where a show of the issue would leave it out.
-func TestCommentListPrintsTheCommentsOfAnIssueTakenBackAmongThem(t *testing.T) {
+func TestCommentListPrintsTheCommentsOfAnIssueWithDeletedOnesAmongThem(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, "["+listedIssueComment+","+listedTakenBackComment+"]"))
+	server := serve(t, respondWith(http.StatusOK, "["+listedIssueComment+","+listedDeletedComment+"]"))
 
 	got := runWith(t, server.env(), "comment", "list", "DEV-7")
 
@@ -130,7 +129,7 @@ func TestCommentListPrintsTheCommentsOfAnIssueTakenBackAmongThem(t *testing.T) {
 // name for a comment of an article, which it never keeps once taken back.
 func TestCommentListPrintsTheCommentsOfAnArticleWithoutDeleted(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, "["+listedArticleComment+"]"))
+	server := serve(t, respondWith(http.StatusOK, "["+listedArticleComment+"]"))
 
 	got := runWith(t, server.env(), "comment", "list", "DEV-A-1")
 
@@ -148,7 +147,7 @@ func TestCommentListAddsToTheDefaultOfTheOwnerItNamed(t *testing.T) {
 
 	t.Run("an addition on an article", func(t *testing.T) {
 		t.Parallel()
-		server := serve(t, answer(http.StatusOK, `[]`))
+		server := serve(t, respondWith(http.StatusOK, `[]`))
 
 		got := runWith(t, server.env(), "comment", "list", "DEV-A-1", "--fields", "+updated")
 
@@ -158,7 +157,7 @@ func TestCommentListAddsToTheDefaultOfTheOwnerItNamed(t *testing.T) {
 
 	t.Run("deleted on an article", func(t *testing.T) {
 		t.Parallel()
-		server := serve(t, answer(http.StatusOK, "["+listedArticleComment+"]"))
+		server := serve(t, respondWith(http.StatusOK, "["+listedArticleComment+"]"))
 
 		got := runWith(t, server.env(), "comment", "list", "DEV-A-1", "--fields", "+deleted")
 
@@ -176,7 +175,7 @@ func TestCommentListCountsTheCommentsWhenTheyFillTheLimit(t *testing.T) {
 	t.Run("more counted than arrived", func(t *testing.T) {
 		t.Parallel()
 		count := `[{"$type":"IssueComment","id":"7-2"},{"$type":"IssueComment","id":"7-3"},{"$type":"IssueComment","id":"7-4"}]`
-		server := serve(t, countedBy("["+listedIssueComment+"]", answer(http.StatusOK, count)))
+		server := serve(t, countedBy("["+listedIssueComment+"]", respondWith(http.StatusOK, count)))
 
 		got := runWith(t, server.env(), "comment", "list", "DEV-7", "--limit", "1")
 
@@ -192,11 +191,11 @@ func TestCommentListCountsTheCommentsWhenTheyFillTheLimit(t *testing.T) {
 
 	t.Run("fewer counted than arrived", func(t *testing.T) {
 		t.Parallel()
-		server := serve(t, countedBy("["+listedIssueComment+"]", answer(http.StatusOK, `[]`)))
+		server := serve(t, countedBy("["+listedIssueComment+"]", respondWith(http.StatusOK, `[]`)))
 
 		got := runWith(t, server.env(), "comment", "list", "DEV-7", "--limit", "1")
 
-		assert.Equal(t, refusal{
+		assert.Equal(t, faultDocument{
 			code:    "upstream_failed",
 			details: []detail{{"total", 0}, {"returned", 1}},
 		}, requireRefusal(t, got))
@@ -204,32 +203,30 @@ func TestCommentListCountsTheCommentsWhenTheyFillTheLimit(t *testing.T) {
 
 	t.Run("more arrived than the limit", func(t *testing.T) {
 		t.Parallel()
-		server := serve(t, answer(http.StatusOK, "["+listedIssueComment+","+listedTakenBackComment+"]"))
+		server := serve(t, respondWith(http.StatusOK, "["+listedIssueComment+","+listedDeletedComment+"]"))
 
 		got := runWith(t, server.env(), "comment", "list", "DEV-7", "--limit", "1")
 
-		assert.Equal(t, refusal{
-			code:    "upstream_lied",
+		assert.Equal(t, faultDocument{
+			code:    "upstream_invalid",
 			details: []detail{{"limit", 1}, {"returned", 2}},
 		}, requireRefusal(t, got))
 		assert.Len(t, server.requests(), 1)
 	})
 }
 
-// The two comments DEV-7 of the polygon carries, read by the list in the order they were written, each
-// with the author the polygon wrote it under and neither of them taken back.
 func TestCommentListReadsTheCommentsOfAnIssueOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
-	got := runWith(t, dev.env(), "comment", "list", polygonCommentedIssue)
+	got := runWith(t, dev.env(), "comment", "list", devInstanceCommentedIssue)
 
 	printed := requireCommentListing(t, got)
 	assert.Equal(t, 2, printed.Total)
 	require.Len(t, printed.Comments, 2)
-	assert.Equal(t, polygonFirstComment, printed.Comments[0].ID)
+	assert.Equal(t, devInstanceFirstComment, printed.Comments[0].ID)
 	assert.Equal(t, "admin", printed.Comments[0].Author.Login)
-	assert.Equal(t, polygonSecondComment, printed.Comments[1].ID)
+	assert.Equal(t, devInstanceSecondComment, printed.Comments[1].ID)
 	assert.Equal(t, "dev.member", printed.Comments[1].Author.Login)
 	for _, comment := range printed.Comments {
 		require.NotNil(t, comment.Deleted, comment.ID)
@@ -237,20 +234,17 @@ func TestCommentListReadsTheCommentsOfAnIssueOfTheDevInstance(t *testing.T) {
 		require.NotNil(t, comment.Text, comment.ID)
 		assert.NotEmpty(t, *comment.Text, comment.ID)
 	}
-	assert.Equal(t, []string{"/api/issues/" + polygonCommentedIssue + "/comments"}, dev.sentPaths())
+	assert.Equal(t, []string{"/api/issues/" + devInstanceCommentedIssue + "/comments"}, dev.sentPaths())
 	assert.Equal(t, []string{issueCommentListFields}, dev.sentFields())
 }
 
-// The claim the help makes about a comment taken back, held to the polygon: the polygon takes one back over
-// the write ytrack sends, and the list prints it beside the one left standing, text null and deleted true, and
-// counts it.
 func TestCommentListPrintsACommentTakenBackOnAnIssueOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 	issue := commentedIssue(t, dev, "issue")
 	standing := commentOn(t, dev, issue, "ytrack contract остаётся")
 	gone := commentOn(t, dev, issue, "ytrack contract забрана")
-	dev.replacing(takenBack)
+	dev.replacing(markDeleted)
 	requireUncertainty(t, runWith(t, dev.env(), "comment", "update", issue, gone, "--text", "ytrack contract x"))
 	dev.replacing(nil)
 
@@ -268,8 +262,6 @@ func TestCommentListPrintsACommentTakenBackOnAnIssueOfTheDevInstance(t *testing.
 	assert.Nil(t, printed.Comments[1].Text)
 }
 
-// An article of the polygon is asked of the API of articles, and a limit its comments fill is counted by
-// the second pass over the same path: two comments written, one printed, two counted.
 func TestCommentListReadsTheCommentsOfAnArticleOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

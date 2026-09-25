@@ -12,25 +12,20 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// What the tool asks of every link slot of an issue beside the issues at its other end: the end this issue
-// stands at and both phrases of the type, which together settle the one phrase the slot is printed under.
 const linkParts = "direction,linkType(sourceToTarget,targetToSource)"
 
-// linksFields is the fields= one slot goes out as, with what the caller asked of the partner issues.
-func linksFields(slot, partner string) string {
-	return slot + "(issues(" + partner + ")," + linkParts + ")"
+func linksFields(link, partner string) string {
+	return link + "(issues(" + partner + ")," + linkParts + ")"
 }
 
-// A link slot as the server sends it: one end of one type, with the issues standing at the other end.
-type arrivedLink struct {
+type receivedLink struct {
 	direction      string
 	sourceToTarget string
 	targetToSource string
-	// The issues at the other end, as JSON; none at all where the slot is empty.
-	issues []string
+	issues         []string
 }
 
-func (l arrivedLink) sent(id string) string {
+func (l receivedLink) sent(id string) string {
 	return `{"$type":"IssueLink","id":` + strconv.Quote(id) +
 		`,"direction":` + strconv.Quote(l.direction) +
 		`,"linkType":{"$type":"IssueLinkType","name":"Type","sourceToTarget":` + strconv.Quote(l.sourceToTarget) +
@@ -38,8 +33,7 @@ func (l arrivedLink) sent(id string) string {
 		`},"issues":[` + strings.Join(l.issues, ",") + `]}`
 }
 
-// arrivedLinks is the array of slots one answer holds, each under the id the instance generated for it.
-func arrivedLinks(links ...arrivedLink) string {
+func receivedLinks(links ...receivedLink) string {
 	sent := make([]string, 0, len(links))
 	for i, link := range links {
 		sent = append(sent, link.sent("163-"+strconv.Itoa(i)))
@@ -51,13 +45,12 @@ func partnerIssue(id, summary string) string {
 	return `{"$type":"Issue","idReadable":` + strconv.Quote(id) + `,"summary":` + strconv.Quote(summary) + `}`
 }
 
-func issueWithLinks(links ...arrivedLink) string {
-	return `{"$type":"Issue","idReadable":"DEV-1","links":` + arrivedLinks(links...) + `}`
+func issueWithLinks(links ...receivedLink) string {
+	return `{"$type":"Issue","idReadable":"DEV-1","links":` + receivedLinks(links...) + `}`
 }
 
-// The nine slots every issue of the polygon carries, all of them empty.
-func emptySlots() []arrivedLink {
-	return []arrivedLink{
+func emptyIssueLinks() []receivedLink {
+	return []receivedLink{
 		{direction: "BOTH", sourceToTarget: "relates to"},
 		{direction: "OUTWARD", sourceToTarget: "is required for", targetToSource: "depends on"},
 		{direction: "INWARD", sourceToTarget: "is required for", targetToSource: "depends on"},
@@ -73,7 +66,7 @@ func emptySlots() []arrivedLink {
 // showLinks is the block one answer prints under links, as the mapping of phrases.
 func showLinks(t *testing.T, body, expression string) (outcome, *yaml.Node) {
 	t.Helper()
-	server := serve(t, answer(http.StatusOK, body))
+	server := serve(t, respondWith(http.StatusOK, body))
 
 	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", expression)
 
@@ -94,29 +87,27 @@ func keysOf(node *yaml.Node) []string {
 	return keys
 }
 
-// A phrase is read from the end the issue stands at: the same type stands in two slots, and the issue at the
-// target of a directed link is the one the link points to, not the one it points from.
 func TestIssueShowPrintsALinkUnderThePhraseOfItsOwnEnd(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name   string
-		link   arrivedLink
+		link   receivedLink
 		phrase string
 	}{
 		{
 			name:   "at the source of a directed link",
-			link:   arrivedLink{direction: "OUTWARD", sourceToTarget: "is required for", targetToSource: "depends on"},
+			link:   receivedLink{direction: "OUTWARD", sourceToTarget: "is required for", targetToSource: "depends on"},
 			phrase: "is required for",
 		},
 		{
 			name:   "at the target of a directed link",
-			link:   arrivedLink{direction: "INWARD", sourceToTarget: "is required for", targetToSource: "depends on"},
+			link:   receivedLink{direction: "INWARD", sourceToTarget: "is required for", targetToSource: "depends on"},
 			phrase: "depends on",
 		},
 		{
 			// An undirected type reads the same from either end and leaves the phrase back empty.
 			name:   "at either end of an undirected link",
-			link:   arrivedLink{direction: "BOTH", sourceToTarget: "relates to"},
+			link:   receivedLink{direction: "BOTH", sourceToTarget: "relates to"},
 			phrase: "relates to",
 		},
 	}
@@ -133,12 +124,10 @@ func TestIssueShowPrintsALinkUnderThePhraseOfItsOwnEnd(t *testing.T) {
 	}
 }
 
-// Every issue carries a slot for each end of each type the instance has, and all but a few of them are empty:
-// an empty slot is no link, so it is left out, and an issue with no link at all prints the key empty.
 func TestIssueShowLeavesOutTheEmptyLinkSlots(t *testing.T) {
 	t.Parallel()
 
-	got, block := showLinks(t, issueWithLinks(emptySlots()...), "links")
+	got, block := showLinks(t, issueWithLinks(emptyIssueLinks()...), "links")
 
 	assert.Empty(t, block.Content, "stdout: %q", got.stdout)
 	assert.NotContains(t, got.stdout, "163-")
@@ -158,7 +147,7 @@ func TestIssueShowAsksForTheReadableIDOfEveryPartnerByDefault(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			body := issueWithLinks(arrivedLink{
+			body := issueWithLinks(receivedLink{
 				direction: "BOTH", sourceToTarget: "relates to",
 				issues: []string{partnerIssue("DEV-2", "Отклонённая задача")},
 			})
@@ -179,19 +168,19 @@ func TestIssueShowRefusesLinksTheServerNamesBadly(t *testing.T) {
 	t.Parallel()
 	partner := []string{partnerIssue("DEV-2", "Отклонённая задача")}
 	tests := []struct {
-		name    string
-		arrived []arrivedLink
+		name     string
+		received []receivedLink
 	}{
 		{
 			name: "two links of one phrase",
-			arrived: []arrivedLink{
+			received: []receivedLink{
 				{direction: "OUTWARD", sourceToTarget: "X", targetToSource: "Y", issues: partner},
 				{direction: "BOTH", sourceToTarget: "X", issues: partner},
 			},
 		},
 		{
 			name: "a link holding issues and going by no phrase",
-			arrived: []arrivedLink{
+			received: []receivedLink{
 				{direction: "INWARD", sourceToTarget: "is required for", targetToSource: "", issues: partner},
 			},
 		},
@@ -199,13 +188,13 @@ func TestIssueShowRefusesLinksTheServerNamesBadly(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			body := issueWithLinks(tc.arrived...)
-			server := serve(t, answer(http.StatusOK, body))
+			body := issueWithLinks(tc.received...)
+			server := serve(t, respondWith(http.StatusOK, body))
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "links")
 
-			assert.Equal(t, refusal{
-				code: "upstream_lied",
+			assert.Equal(t, faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", issueRequest(server.url, "DEV-1", linksFields("links", "idReadable"))},
 					{"upstream_status", 200},
@@ -216,16 +205,11 @@ func TestIssueShowRefusesLinksTheServerNamesBadly(t *testing.T) {
 	}
 }
 
-// A link slot with each member written as it stands, so that a scenario may send a shape the specification
-// does not allow while every name asked for is there: a name the answer lacks altogether is the judgment's to
-// refuse, and what is left for the block to hold against the specification is the shape.
-func slotHolding(issues, direction, linkType string) string {
+func issueLinkWith(issues, direction, linkType string) string {
 	return `{"$type":"IssueLink","id":"163-0","issues":` + issues + `,"direction":` + direction +
 		`,"linkType":` + linkType + `}`
 }
 
-// The slots are read whole before any of them is printed, so a part standing in a shape the specification does
-// not give it ends the call rather than printing a block with a link missing or under the wrong phrase.
 func TestIssueShowRefusesLinksOfAShapeTheSpecificationDoesNotGive(t *testing.T) {
 	t.Parallel()
 	const partners = `[{"$type":"Issue","idReadable":"DEV-2"}]`
@@ -233,24 +217,24 @@ func TestIssueShowRefusesLinksOfAShapeTheSpecificationDoesNotGive(t *testing.T) 
 	tests := []struct {
 		name string
 		// What stands under links, as JSON.
-		slots string
+		links string
 	}{
-		{name: "a slot is no object", slots: `[[` + slotHolding(partners, `"BOTH"`, linkType) + `]]`},
-		{name: "the issues of a slot are no array", slots: `[` + slotHolding(`null`, `"BOTH"`, linkType) + `]`},
-		{name: "an issue at the other end is no object", slots: `[` + slotHolding(`[null]`, `"BOTH"`, linkType) + `]`},
-		{name: "the end the issue stands at is no text", slots: `[` + slotHolding(partners, `null`, linkType) + `]`},
-		{name: "the type of a link is no object", slots: `[` + slotHolding(partners, `"BOTH"`, `null`) + `]`},
+		{name: "a slot is no object", links: `[[` + issueLinkWith(partners, `"BOTH"`, linkType) + `]]`},
+		{name: "the issues of a slot are no array", links: `[` + issueLinkWith(`null`, `"BOTH"`, linkType) + `]`},
+		{name: "an issue at the other end is no object", links: `[` + issueLinkWith(`[null]`, `"BOTH"`, linkType) + `]`},
+		{name: "the end the issue stands at is no text", links: `[` + issueLinkWith(partners, `null`, linkType) + `]`},
+		{name: "the type of a link is no object", links: `[` + issueLinkWith(partners, `"BOTH"`, `null`) + `]`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			body := `{"$type":"Issue","idReadable":"DEV-1","links":` + tc.slots + `}`
-			server := serve(t, answer(http.StatusOK, body))
+			body := `{"$type":"Issue","idReadable":"DEV-1","links":` + tc.links + `}`
+			server := serve(t, respondWith(http.StatusOK, body))
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "links")
 
-			assert.Equal(t, refusal{
-				code: "upstream_lied",
+			assert.Equal(t, faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", issueRequest(server.url, "DEV-1", linksFields("links", "idReadable"))},
 					{"upstream_status", 200},
@@ -261,8 +245,6 @@ func TestIssueShowRefusesLinksOfAShapeTheSpecificationDoesNotGive(t *testing.T) 
 	}
 }
 
-// A slot is printed as the phrase against the issues it reaches, so the issues are the only thing there is to
-// ask of it: its id, its direction and its type are how YouTrack holds a link, not what the link is.
 func TestIssueShowRefusesNamesWrittenUnderALinkSlot(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -283,15 +265,12 @@ func TestIssueShowRefusesNamesWrittenUnderALinkSlot(t *testing.T) {
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--fields", tc.expression)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// DEV-1 of the polygon stands at one end of each of the five types: the phrases read outwards from it, the
-// order is the one the server keeps the slots in, and the slots it shares no issue with are not printed. The
-// id of a slot and the end it stands at are the server's own way of holding a link and never leave ytrack.
 func TestIssueShowPrintsTheLinksOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -315,8 +294,6 @@ func TestIssueShowPrintsTheLinksOfTheDevInstance(t *testing.T) {
 	assert.Len(t, dev.requests(), 1)
 }
 
-// parent and subtasks are slots of the same type read from either end, so they print the same way links does:
-// DEV-4 is the parent of DEV-1, and the slot for a parent of its own is empty.
 func TestIssueShowPrintsTheParentAndSubtaskSlotsOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

@@ -93,7 +93,7 @@ func catalogue() map[string]schema {
 		"SingleValueIssueCustomField": {parent: "IssueCustomField"},
 		"User": {parent: "Member", properties: map[string]string{
 			"created":     "!time",
-			"description": "!prose",
+			"description": "!text",
 			"groups":      "[]Member",
 			"level":       "",
 			"login":       "",

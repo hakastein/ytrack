@@ -47,12 +47,12 @@ func TestIssueUpdateTellsOfTheWriteAWorkflowOfTheDevInstanceUndid(t *testing.T) 
 	got := runWith(t, dev.env(), "issue", "update", readable,
 		"--field", "State=Новая", "--field", "Fixed in build=13757")
 
-	want := refusal{
-		code: "upstream_lied",
+	want := faultDocument{
+		code: "upstream_invalid",
 		details: []detail{
 			{"request", updateRequest(dev.url, readable, askedIssueFields)},
 			{"issue", readable},
-			{"mismatch", []any{[]detail{{"field", "Fixed in build"}, {"written", "13757"}, {"arrived", nil}}}},
+			{"mismatch", []any{[]detail{{"field", "Fixed in build"}, {"expected", "13757"}, {"actual", nil}}}},
 		},
 	}
 	assert.Equal(t, want, requireUncertainty(t, got))

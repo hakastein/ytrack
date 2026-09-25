@@ -32,7 +32,7 @@ const (
 	workItemNoun = "work item"
 	// Where that refusal sends the caller to read the id off: time is written against an issue and against
 	// nothing else, so an article holds no work item to print one under.
-	workItemHangsFrom = "the issue"
+	workItemOwnerNoun = "the issue"
 	// Where a project keeps the types of work its issues are written against. Neither key is declared by the
 	// specification, and the server sends both all the same.
 	pluginsKey              = "plugins"
@@ -70,7 +70,7 @@ func CreateWorkItem(id, spent string, day, text, workType *string, attributes []
 	if fault != nil {
 		return nil, fault
 	}
-	written, fault := filedWorkItem(spent, day, text, workType, attributes)
+	written, fault := parseWorkItemCreate(spent, day, text, workType, attributes)
 	if fault != nil {
 		return nil, fault
 	}
@@ -80,7 +80,7 @@ func CreateWorkItem(id, spent string, day, text, workType *string, attributes []
 		return nil, fault
 	}
 	return func(ctx context.Context, c *Client) (*render.Node, *diag.Fault) {
-		return c.workItemCreated(ctx, spec, id, written, workType, requested)
+		return c.createWorkItem(ctx, spec, id, written, workType, requested)
 	}, nil
 }
 
@@ -90,25 +90,25 @@ func CreateWorkItem(id, spent string, day, text, workType *string, attributes []
 // is the whole command — an issue the instance has none of, and one the token may not see, are both answered 404 by the
 // server itself with nothing written, and the answer carries the work item that was added and the issue it
 // moved, so nothing is read back afterwards.
-func (c *Client) workItemCreated(ctx context.Context, spec *schemas, id string, written writtenWorkItem, named *string, requested []requestedField) (*render.Node, *diag.Fault) {
-	at, workType, attributes, fault := c.workItemSettled(ctx, spec, id, named, written.attributes, nil)
+func (c *Client) createWorkItem(ctx context.Context, spec *schemas, id string, written workItemCreateInput, named *string, requested []requestedField) (*render.Node, *diag.Fault) {
+	at, workType, attributes, fault := c.resolveWorkItemSettings(ctx, spec, id, named, written.attributes, nil)
 	if fault != nil {
 		return nil, fault
 	}
-	filed := workItemFiledWithType{written: written, workType: workType, attributes: attributes}
-	asked := asking(requested, filed.checked()...)
+	filed := workItemCreate{input: written, workType: workType, attributes: attributes}
+	asked := withFields(requested, filed.verifyFields()...)
 	fillInDurations(spec, workItemSchema, asked)
 	issueBlocks(spec, composedWorkItem(), asked)
 	body := filed.body()
 	return c.write(ctx, spec, workItemSchema, asked, func(ctx context.Context, fields string) (*http.Response, error) {
-		return c.createIssueWorkItem(ctx, at, body, fields)
-	}, filed.confirmedBy, writtenNode(requested))
+		return c.apiCreateIssueWorkItem(ctx, at, body, fields)
+	}, filed.verify, writeResultNode(requested))
 }
 
-// workItemSettled is the type of work and the attributes the call named, resolved against the settings of the
+// resolveWorkItemSettings is the type of work and the attributes the call named, resolved against the settings of the
 // project the issue is filed in, beside the issue the write is then addressed to: the readable id that read
 // gave, and the argument the caller wrote where nothing was read at all.
-func (c *Client) workItemSettled(ctx context.Context, spec *schemas, id string, named *string, set []namedValue, cleared []string) (string, *filedWorkItemType, []filedAttribute, *diag.Fault) {
+func (c *Client) resolveWorkItemSettings(ctx context.Context, spec *schemas, id string, named *string, set []namedValue, cleared []string) (string, *resolvedWorkType, []resolvedAttribute, *diag.Fault) {
 	withAttributes := len(set) > 0 || len(cleared) > 0
 	if named == nil && !withAttributes {
 		return id, nil, nil, nil
@@ -117,15 +117,15 @@ func (c *Client) workItemSettled(ctx context.Context, spec *schemas, id string, 
 	if fault != nil {
 		return "", nil, nil, fault
 	}
-	var workType *filedWorkItemType
+	var workType *resolvedWorkType
 	if named != nil {
-		resolved, fault := project.resolving(*named)
+		resolved, fault := project.resolve(*named)
 		if fault != nil {
 			return "", nil, nil, fault
 		}
 		workType = &resolved
 	}
-	attributes, fault := project.resolvingAttributes(set, cleared)
+	attributes, fault := project.resolveAttributes(set, cleared)
 	if fault != nil {
 		return "", nil, nil, fault
 	}
@@ -144,11 +144,11 @@ func UpdateWorkItem(id, item string, spent, day, text, workType *string, attribu
 	if fault != nil {
 		return nil, fault
 	}
-	at, fault := parseChildID(workItemNoun, workItemHangsFrom, item)
+	at, fault := parseChildID(workItemNoun, workItemOwnerNoun, item)
 	if fault != nil {
 		return nil, fault
 	}
-	written, fault := rewrittenWorkItem(spent, day, text, workType, attributes, cleared)
+	written, fault := parseWorkItemUpdate(spent, day, text, workType, attributes, cleared)
 	if fault != nil {
 		return nil, fault
 	}
@@ -158,7 +158,7 @@ func UpdateWorkItem(id, item string, spent, day, text, workType *string, attribu
 		return nil, fault
 	}
 	return func(ctx context.Context, c *Client) (*render.Node, *diag.Fault) {
-		return c.workItemUpdated(ctx, spec, id, at, written, workType, requested)
+		return c.updateWorkItem(ctx, spec, id, at, written, workType, requested)
 	}, nil
 }
 
@@ -167,19 +167,19 @@ func UpdateWorkItem(id, item string, spent, day, text, workType *string, attribu
 // issue the token may not see alike, with nothing written. So the only read there is stands here for the
 // same reason as in a creation — a type of work and an attribute are taken by id, and the id comes from the
 // project.
-func (c *Client) workItemUpdated(ctx context.Context, spec *schemas, id string, at childID, written changedWorkItem, named *string, requested []requestedField) (*render.Node, *diag.Fault) {
-	issue, workType, attributes, fault := c.workItemSettled(ctx, spec, id, named, written.attributes, written.clearsAttributes)
+func (c *Client) updateWorkItem(ctx context.Context, spec *schemas, id string, at childID, written workItemUpdateInput, named *string, requested []requestedField) (*render.Node, *diag.Fault) {
+	issue, workType, attributes, fault := c.resolveWorkItemSettings(ctx, spec, id, named, written.attributes, written.clearsAttributes)
 	if fault != nil {
 		return nil, fault
 	}
-	changed := workItemRewritten{written: written, issue: issue, at: at, workType: workType, attributes: attributes}
-	asked := asking(requested, changed.checked()...)
+	changed := workItemUpdate{input: written, issue: issue, at: at, workType: workType, attributes: attributes}
+	asked := withFields(requested, changed.verifyFields()...)
 	fillInDurations(spec, workItemSchema, asked)
 	issueBlocks(spec, composedWorkItem(), asked)
 	body := changed.body()
 	return c.write(ctx, spec, workItemSchema, asked, func(ctx context.Context, fields string) (*http.Response, error) {
-		return c.updateIssueWorkItem(ctx, issue, at, body, fields)
-	}, changed.confirmedBy, writtenNode(requested))
+		return c.apiUpdateIssueWorkItem(ctx, issue, at, body, fields)
+	}, changed.verify, writeResultNode(requested))
 }
 
 // DeleteWorkItem is the call that takes the work item of that id away from the issue of that readable id for
@@ -189,13 +189,13 @@ func DeleteWorkItem(id, item string) (Call, *diag.Fault) {
 	if fault != nil {
 		return nil, fault
 	}
-	at, fault := parseChildID(workItemNoun, workItemHangsFrom, item)
+	at, fault := parseChildID(workItemNoun, workItemOwnerNoun, item)
 	if fault != nil {
 		return nil, fault
 	}
 	spec := loadSchemas()
 	return func(ctx context.Context, c *Client) (*render.Node, *diag.Fault) {
-		return c.workItemRemoved(ctx, spec, id, at)
+		return c.deleteWorkItem(ctx, spec, id, at)
 	}, nil
 }
 
@@ -212,24 +212,24 @@ func removedWorkItemFields() []requestedField {
 // body, so what is printed has to be read while the work item is still there, and that read is what turns a
 // work item the issue has none of into a not_found before anything is destroyed. The server checks the pair
 // itself, on the read as on the removal, so nothing here holds the work item against the issue.
-func (c *Client) workItemRemoved(ctx context.Context, spec *schemas, id string, at childID) (*render.Node, *diag.Fault) {
+func (c *Client) deleteWorkItem(ctx context.Context, spec *schemas, id string, at childID) (*render.Node, *diag.Fault) {
 	requested := removedWorkItemFields()
 	a, fault := c.request(ctx, spec, workItemSchema, requested, func(ctx context.Context, fields string) (*http.Response, error) {
-		return c.getIssueWorkItem(ctx, id, at, fields)
+		return c.apiGetIssueWorkItem(ctx, id, at, fields)
 	})
 	if fault != nil {
 		return nil, fault
 	}
-	issue, fault := owningIssueAddressed(a)
+	issue, fault := owningIssueID(a)
 	if fault != nil {
 		return nil, fault
 	}
-	known, fault := workItemAddressed(a)
+	known, fault := workItemID(a)
 	if fault != nil {
 		return nil, fault
 	}
 	if fault := writeEmpty(ctx, func(ctx context.Context) (*http.Response, error) {
-		return c.deleteIssueWorkItem(ctx, issue, known)
+		return c.apiDeleteIssueWorkItem(ctx, issue, known)
 	}); fault != nil {
 		return nil, fault
 	}
@@ -239,26 +239,26 @@ func (c *Client) workItemRemoved(ctx context.Context, spec *schemas, id string, 
 // The issue the work item hangs from, as the read gave it and held to the form ytrack sends before the removal
 // goes out: what arrived becomes a path segment, and "..", a slash or an empty string would reach an endpoint
 // other than the work item that was read.
-func owningIssueAddressed(a answer) (addressed, *diag.Fault) {
+func owningIssueID(a decodedResponse) (readableID, *diag.Fault) {
 	issue, isObject := a.objects[0][issueOwner.String()].(map[string]any)
 	if !isObject {
-		return addressed{}, shapeFailure(a.response, a.body, "the issue the work item hangs from is not a JSON object")
+		return readableID{}, shapeFailure(a.httpResponse, a.body, "the issue the work item hangs from is not a JSON object")
 	}
-	return addressedIn(a, issue, issueOwner, "a removal")
+	return readableIDAt(a, issue, issueOwner, "a removal")
 }
 
 // The id the work item goes by, held to the same form the argument was held to: it is the other path segment of
 // the removal, and an empty one there would reach the work items of the issue whole.
-func workItemAddressed(a answer) (childID, *diag.Fault) {
+func workItemID(a decodedResponse) (childID, *diag.Fault) {
 	id, isText := a.objects[0][idKey].(string)
 	if !isText {
-		return childID{}, shapeFailure(a.response, a.body, "the id of the work item arrived as something other than a string")
+		return childID{}, shapeFailure(a.httpResponse, a.body, "the id of the work item arrived as something other than a string")
 	}
-	known, fault := parseChildID(workItemNoun, workItemHangsFrom, id)
+	known, fault := parseChildID(workItemNoun, workItemOwnerNoun, id)
 	if fault != nil {
 		message := fmt.Sprintf("the work item arrived with %s for an id, and a removal is addressed by the id the "+
 			"server gave", render.Quote(id))
-		return childID{}, shapeFailure(a.response, a.body, message)
+		return childID{}, shapeFailure(a.httpResponse, a.body, message)
 	}
 	return known, nil
 }
@@ -269,7 +269,7 @@ type projectWorkItemTypes struct {
 	project    string
 	types      []workItemType
 	attributes []projectAttribute
-	arrived    answer
+	response   decodedResponse
 }
 
 // One type of work: the id the body of a write carries and the name a caller addresses it by.
@@ -302,34 +302,32 @@ func workItemTypesFields(withAttributes bool) []requestedField {
 	}
 }
 
-func (c *Client) readWorkItemTypes(ctx context.Context, spec *schemas, id string, withAttributes bool) (addressed, projectWorkItemTypes, *diag.Fault) {
+func (c *Client) readWorkItemTypes(ctx context.Context, spec *schemas, id string, withAttributes bool) (readableID, projectWorkItemTypes, *diag.Fault) {
 	a, fault := c.request(ctx, spec, issueSchema, workItemTypesFields(withAttributes), func(ctx context.Context, fields string) (*http.Response, error) {
-		return c.getIssue(ctx, id, fields, nil)
+		return c.apiGetIssue(ctx, id, fields, nil)
 	})
 	if fault != nil {
-		return addressed{}, projectWorkItemTypes{}, fault
+		return readableID{}, projectWorkItemTypes{}, fault
 	}
-	readable, fault := addressedBy(a, issueOwner, "a creation")
+	readable, fault := readableIDOf(a, issueOwner, "a creation")
 	if fault != nil {
-		return addressed{}, projectWorkItemTypes{}, fault
+		return readableID{}, projectWorkItemTypes{}, fault
 	}
 	found, fault := workItemTypesOf(a, withAttributes)
 	if fault != nil {
-		return addressed{}, projectWorkItemTypes{}, fault
+		return readableID{}, projectWorkItemTypes{}, fault
 	}
 	return readable, found, nil
 }
 
-// The judgment of names says a member arrived, not what it holds, so everything the settings are read for is
-// held to its shape here.
-func workItemTypesOf(a answer, withAttributes bool) (projectWorkItemTypes, *diag.Fault) {
+func workItemTypesOf(a decodedResponse, withAttributes bool) (projectWorkItemTypes, *diag.Fault) {
 	project, isObject := a.objects[0][projectKey].(map[string]any)
 	if !isObject {
-		return projectWorkItemTypes{}, shapeFailure(a.response, a.body, "the project of the issue is not a JSON object")
+		return projectWorkItemTypes{}, shapeFailure(a.httpResponse, a.body, "the project of the issue is not a JSON object")
 	}
 	code, isText := project[shortNameKey].(string)
 	if !isText {
-		return projectWorkItemTypes{}, shapeFailure(a.response, a.body, "the short name of the project is not text")
+		return projectWorkItemTypes{}, shapeFailure(a.httpResponse, a.body, "the short name of the project is not text")
 	}
 	settings, fault := timeTrackingSettingsOf(a, project)
 	if fault != nil {
@@ -337,22 +335,22 @@ func workItemTypesOf(a answer, withAttributes bool) (projectWorkItemTypes, *diag
 	}
 	items, isList := settings[workItemTypesKey].([]any)
 	if !isList {
-		return projectWorkItemTypes{}, shapeFailure(a.response, a.body, "the types of work of the project are not a JSON array")
+		return projectWorkItemTypes{}, shapeFailure(a.httpResponse, a.body, "the types of work of the project are not a JSON array")
 	}
 	types := make([]workItemType, 0, len(items))
 	for _, item := range items {
 		object, isObject := item.(map[string]any)
 		if !isObject {
-			return projectWorkItemTypes{}, shapeFailure(a.response, a.body, brokenWorkItemType)
+			return projectWorkItemTypes{}, shapeFailure(a.httpResponse, a.body, brokenWorkItemType)
 		}
 		id, isText := object[idKey].(string)
 		name, isNamed := object[nameKey].(string)
 		if !isText || !isNamed {
-			return projectWorkItemTypes{}, shapeFailure(a.response, a.body, brokenWorkItemType)
+			return projectWorkItemTypes{}, shapeFailure(a.httpResponse, a.body, brokenWorkItemType)
 		}
 		types = append(types, workItemType{id: id, name: name})
 	}
-	found := projectWorkItemTypes{project: code, types: types, arrived: a}
+	found := projectWorkItemTypes{project: code, types: types, response: a}
 	if withAttributes {
 		if found.attributes, fault = attributesOf(a, settings); fault != nil {
 			return projectWorkItemTypes{}, fault
@@ -361,37 +359,37 @@ func workItemTypesOf(a answer, withAttributes bool) (projectWorkItemTypes, *diag
 	return found, nil
 }
 
-func timeTrackingSettingsOf(a answer, project map[string]any) (map[string]any, *diag.Fault) {
+func timeTrackingSettingsOf(a decodedResponse, project map[string]any) (map[string]any, *diag.Fault) {
 	plugins, isObject := project[pluginsKey].(map[string]any)
 	if !isObject {
-		return nil, shapeFailure(a.response, a.body, "the plugins of the project are not a JSON object")
+		return nil, shapeFailure(a.httpResponse, a.body, "the plugins of the project are not a JSON object")
 	}
 	settings, isObject := plugins[timeTrackingSettingsKey].(map[string]any)
 	if !isObject {
-		return nil, shapeFailure(a.response, a.body, "the time tracking settings of the project are not a JSON object")
+		return nil, shapeFailure(a.httpResponse, a.body, "the time tracking settings of the project are not a JSON object")
 	}
 	return settings, nil
 }
 
 const brokenWorkItemType = "the id or the name of a type of work of the project is not text"
 
-// resolving is the type of work a name answers to, by the rule every name a caller writes is resolved by:
+// resolve is the type of work a name answers to, by the rule every name a caller writes is resolved by:
 // letter case aside, and, where several answer, the one whose name was written byte for byte, so the name a
 // type is printed under stays the address.
-func (p projectWorkItemTypes) resolving(name string) (filedWorkItemType, *diag.Fault) {
+func (p projectWorkItemTypes) resolve(name string) (resolvedWorkType, *diag.Fault) {
 	catalogue := p.catalogue()
-	at, found := resolvedAmong(name, catalogue)
+	at, found := matchName(name, catalogue)
 	if !found {
-		return filedWorkItemType{}, p.refusing(name, catalogue)
+		return resolvedWorkType{}, p.fault(name, catalogue)
 	}
-	return filedWorkItemType{id: p.types[at].id, written: name}, nil
+	return resolvedWorkType{id: p.types[at].id, name: name}, nil
 }
 
 // A type of work is addressed by the one name it carries: a project translates none of them.
-func (p projectWorkItemTypes) catalogue() []naming {
-	catalogue := make([]naming, 0, len(p.types))
+func (p projectWorkItemTypes) catalogue() []fieldInfo {
+	catalogue := make([]fieldInfo, 0, len(p.types))
 	for _, found := range p.types {
-		catalogue = append(catalogue, naming{name: found.name})
+		catalogue = append(catalogue, fieldInfo{name: found.name})
 	}
 	return catalogue
 }
@@ -399,12 +397,12 @@ func (p projectWorkItemTypes) catalogue() []naming {
 // A name that answers to no one type is handed back with the names nearest it, which are every name the project
 // has where none is near. The request the refusal names is the read of the issue: it is the only one that went
 // out, and nothing is written.
-func (p projectWorkItemTypes) refusing(name string, catalogue []naming) *diag.Fault {
+func (p projectWorkItemTypes) fault(name string, catalogue []fieldInfo) *diag.Fault {
 	entry := render.NewMap(
 		render.Pair{Key: typeKey, Value: render.NewString(name)},
 		render.Pair{Key: "nearest", Value: render.NewList(names(nearestNamed(name, catalogue))...)})
 	message := "the name under unknown is not one type of work the project writes work items against"
-	return unknownNames(p.arrived.response, render.Pair{Key: projectKey, Value: render.NewString(p.project)},
+	return unknownNames(p.response.httpResponse, render.Pair{Key: projectKey, Value: render.NewString(p.project)},
 		"unknown", message, []*render.Node{entry})
 }
 
@@ -413,16 +411,16 @@ func (p projectWorkItemTypes) refusing(name string, catalogue []naming) *diag.Fa
 // the subresource cuts a page down to 42 where no $top goes out at all.
 func (c *Client) listWorkItems(ctx context.Context, spec *schemas, id string, requested []requestedField, page Page) (*render.Node, *diag.Fault) {
 	ask := func(ctx context.Context, fields string, w window) (*http.Response, error) {
-		return c.getIssueWorkItems(ctx, id, fields, w)
+		return c.apiGetIssueWorkItems(ctx, id, fields, w)
 	}
-	selection := c.countedByIDs(spec, workItemsPlural, workItemsListing, requested, askedOfAWorkItem(spec, requested), page, ask)
-	return selection.selected(ctx)
+	selection := c.newList(spec, workItemsPlural, workItemsListing, requested, workItemRequestFields(spec, requested), page, ask)
+	return selection.fetch(ctx)
 }
 
-// askedOfAWorkItem is what goes out for a record: the caller's expression with the minutes filled in under
+// workItemRequestFields is what goes out for a record: the caller's expression with the minutes filled in under
 // every duration they asked for, since a bare duration answers with its type and nothing else, and with the
 // blocks of any issue they reached through it composed the way a show of one composes them.
-func askedOfAWorkItem(spec *schemas, requested []requestedField) []requestedField {
+func workItemRequestFields(spec *schemas, requested []requestedField) []requestedField {
 	asked := cloneFields(requested)
 	fillInDurations(spec, workItemSchema, asked)
 	issueBlocks(spec, composedWorkItem(), asked)
@@ -433,7 +431,7 @@ func askedOfAWorkItem(spec *schemas, requested []requestedField) []requestedFiel
 // expression is the caller leaning on the default whole, and then nothing in the tree is theirs to answer for.
 func workItemFields(spec *schemas, expression *string, defaults string) ([]requestedField, *diag.Fault) {
 	written := defaults
-	requested, fault := theDefault(defaults, false)
+	requested, fault := parseDefault(defaults, false)
 	if expression != nil {
 		written = *expression
 		requested, fault = parseFields(written, defaults)
@@ -441,8 +439,8 @@ func workItemFields(spec *schemas, expression *string, defaults string) ([]reque
 	if fault != nil {
 		return nil, fault
 	}
-	if fault := refuseDurationParts(spec, workItemSchema, written, requested); fault != nil {
+	if fault := rejectDurationParts(spec, workItemSchema, written, requested); fault != nil {
 		return nil, fault
 	}
-	return requested, refuseIssueBlocks(spec, composedWorkItem(), written, requested)
+	return requested, rejectIssueBlocks(spec, composedWorkItem(), written, requested)
 }

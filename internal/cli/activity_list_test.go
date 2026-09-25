@@ -41,7 +41,7 @@ type sentActivity struct {
 	category string
 	// The whole of the category, for a scenario that sends one of another shape; the object naming the
 	// identifier above otherwise.
-	categoryHeld string
+	categoryRaw string
 	// Milliseconds since the epoch, as JSON holds them.
 	timestamp string
 	login     string
@@ -79,7 +79,7 @@ func (a sentActivity) sent() string {
 	if author == "" {
 		author = `{"$type":"User","login":` + strconv.Quote(login) + `}`
 	}
-	category := a.categoryHeld
+	category := a.categoryRaw
 	if category == "" {
 		category = `{"$type":"ActivityCategory","id":` + strconv.Quote(a.category) + `}`
 	}
@@ -98,7 +98,6 @@ func (a sentActivity) sent() string {
 		`,"added":` + added + `,"removed":` + removed + `,"field":` + field + `,"author":` + author + `}`
 }
 
-// Three activities of three categories, newest first, of the shapes the polygon answers with.
 func sentFieldActivity(timestamp string) string {
 	return sentActivity{
 		kind: "CustomFieldActivityItem", category: "CustomFieldCategory", timestamp: timestamp,
@@ -141,8 +140,6 @@ func threeActivities() string {
 // An empty journal, which is what the server answers an issue nothing of the categories asked for happened to.
 const noActivities = `[]`
 
-// journal is the server of a journal: it answers the link types with the five the polygon keeps and leaves
-// every other request to handler, so a scenario that says nothing of them runs against one that passes.
 func journal(t *testing.T, handler http.HandlerFunc) *upstream {
 	t.Helper()
 	return serve(t, linksKnown(handler))
@@ -230,7 +227,7 @@ func TestActivityTakesTheIssueAsItsOneArgument(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -264,7 +261,7 @@ func TestActivityRefusesTheFlagsOfAListItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), slices.Concat([]string{"activity", "list", journalIssue}, tc.flags)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -289,7 +286,7 @@ func TestActivityHelpNamesTheCategoriesAndTheDefaultFields(t *testing.T) {
 // is printed. The target is asked for by nobody.
 func TestActivitySendsTheJournalOfTheIssueItWasGiven(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, `[`+sentCreatedActivity(middle)+`]`))
+	server := serve(t, respondWith(http.StatusOK, `[`+sentCreatedActivity(middle)+`]`))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue, "--category", "IssueCreatedCategory")
 
@@ -311,7 +308,7 @@ func TestActivitySendsTheJournalOfTheIssueItWasGiven(t *testing.T) {
 // it, and neither the id of the activity nor the issue it belongs to is printed at all.
 func TestActivityPrintsAnActivityToALine(t *testing.T) {
 	t.Parallel()
-	server := journal(t, answer(http.StatusOK, threeActivities()))
+	server := journal(t, respondWith(http.StatusOK, threeActivities()))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue)
 
@@ -347,7 +344,7 @@ func TestActivityPrintsAListWhateverTheCountOfActivities(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := journal(t, answer(http.StatusOK, tc.activities))
+			server := journal(t, respondWith(http.StatusOK, tc.activities))
 
 			got := runWith(t, server.env(), "activity", "list", journalIssue)
 
@@ -360,7 +357,7 @@ func TestActivityPrintsAListWhateverTheCountOfActivities(t *testing.T) {
 // are, so the total is null while truncated is true.
 func TestActivityReadsTheCutOffTheActivityPastTheLimit(t *testing.T) {
 	t.Parallel()
-	server := journal(t, answer(http.StatusOK, threeActivities()))
+	server := journal(t, respondWith(http.StatusOK, threeActivities()))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue, "--limit", "2")
 
@@ -369,10 +366,7 @@ func TestActivityReadsTheCutOffTheActivityPastTheLimit(t *testing.T) {
 	assert.Equal(t, []string{"3"}, activitySent(t, server)["$top"])
 }
 
-// The activity past the limit came from the same answer as the rest and says as much about it, so it is judged
-// with them and thrown away only afterwards: a server that stops honouring reverse or the categories says so at
-// the boundary of the limit as readily as anywhere.
-func TestActivityJudgesTheActivityPastTheLimitWithTheRest(t *testing.T) {
+func TestActivityChecksTheActivityPastTheLimitWithTheRest(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
@@ -388,12 +382,12 @@ func TestActivityJudgesTheActivityPastTheLimitWithTheRest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			three := `[` + sentFieldActivity(newest) + `,` + sentLinkActivity(middle) + `,` + tc.past + `]`
-			server := journal(t, answer(http.StatusOK, three))
+			server := journal(t, respondWith(http.StatusOK, three))
 
 			got := runWith(t, server.env(), "activity", "list", journalIssue, "--limit", "2")
 
 			found := requireRefusal(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Empty(t, got.stdout)
 		})
 	}
@@ -405,12 +399,12 @@ func TestActivityRefusesMoreActivitiesThanItAskedFor(t *testing.T) {
 	t.Parallel()
 	four := `[` + sentFieldActivity(newest) + `,` + sentLinkActivity(middle) + `,` +
 		sentCreatedActivity(oldest) + `,` + sentCreatedActivity(oldest) + `]`
-	server := journal(t, answer(http.StatusOK, four))
+	server := journal(t, respondWith(http.StatusOK, four))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue, "--limit", "2")
 
-	want := refusal{
-		code:    "upstream_lied",
+	want := faultDocument{
+		code:    "upstream_invalid",
 		details: []detail{{"limit", 2}, {"returned", 4}},
 	}
 	assert.Equal(t, want, requireRefusal(t, got))
@@ -418,20 +412,20 @@ func TestActivityRefusesMoreActivitiesThanItAskedFor(t *testing.T) {
 
 // reverse=true is a parameter that could quietly stop being understood, and the order is checked by the data
 // rather than taken on the server's word; two activities of one moment are lawful.
-func TestActivityHoldsTheServerToTheOrderItAskedFor(t *testing.T) {
+func TestActivityChecksTheServerKeepsTheRequestedOrder(t *testing.T) {
 	t.Parallel()
 	t.Run("an activity newer than the one before it", func(t *testing.T) {
 		t.Parallel()
-		server := journal(t, answer(http.StatusOK, `[`+sentCreatedActivity(oldest)+`,`+sentLinkActivity(middle)+`]`))
+		server := journal(t, respondWith(http.StatusOK, `[`+sentCreatedActivity(oldest)+`,`+sentLinkActivity(middle)+`]`))
 
 		got := runWith(t, server.env(), "activity", "list", journalIssue)
 
 		found := requireRefusal(t, got)
-		assert.Equal(t, "upstream_lied", found.code)
+		assert.Equal(t, "upstream_invalid", found.code)
 	})
 	t.Run("two activities of one moment", func(t *testing.T) {
 		t.Parallel()
-		server := journal(t, answer(http.StatusOK, `[`+sentLinkActivity(middle)+`,`+sentLinkActivity(middle)+`]`))
+		server := journal(t, respondWith(http.StatusOK, `[`+sentLinkActivity(middle)+`,`+sentLinkActivity(middle)+`]`))
 
 		got := runWith(t, server.env(), "activity", "list", journalIssue)
 
@@ -446,12 +440,12 @@ func TestActivityHoldsTheServerToTheOrderItAskedFor(t *testing.T) {
 func TestActivityRefusesAnActivityOfACategoryItDidNotAskFor(t *testing.T) {
 	t.Parallel()
 	voted := sentActivity{kind: "VotersActivityItem", category: "VotersCategory", timestamp: middle}.sent()
-	server := journal(t, answer(http.StatusOK, `[`+sentFieldActivity(newest)+`,`+voted+`]`))
+	server := journal(t, respondWith(http.StatusOK, `[`+sentFieldActivity(newest)+`,`+voted+`]`))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue)
 
 	found := requireRefusal(t, got)
-	assert.Equal(t, "upstream_lied", found.code)
+	assert.Equal(t, "upstream_invalid", found.code)
 }
 
 // An issue the instance has none of and one the token may not see are both answered 404 by the server, and that
@@ -459,7 +453,7 @@ func TestActivityRefusesAnActivityOfACategoryItDidNotAskFor(t *testing.T) {
 func TestActivityPassesOnAnIssueTheServerDoesNotHave(t *testing.T) {
 	t.Parallel()
 	const said = `{"error":"Not Found","error_description":"Entity with id DEV-7 not found"}`
-	server := journal(t, answer(http.StatusNotFound, said))
+	server := journal(t, respondWith(http.StatusNotFound, said))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue)
 

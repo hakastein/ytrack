@@ -54,7 +54,7 @@ func TestAuthLoginRefusesAStdinThatIsNotATerminal(t *testing.T) {
 
 			got := runOn(t, tc.stdin(t), env, tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assertNoToken(t, got, token)
 			assert.NoFileExists(t, path)
 			assert.Empty(t, entries(t, home))
@@ -78,7 +78,7 @@ func TestAuthLoginReadsNothingOfThePipeItIsHanded(t *testing.T) {
 
 	got := runOn(t, read, env, "auth", "login")
 
-	assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 	assertNoToken(t, got, token)
 	unread, err := io.ReadAll(read)
 	require.NoError(t, err)
@@ -87,8 +87,6 @@ func TestAuthLoginReadsNothingOfThePipeItIsHanded(t *testing.T) {
 	assert.Empty(t, entries(t, home))
 }
 
-// A call is judged before the environment and before stdin, so these are refused by their own words rather than for
-// having no terminal — and the token of a flag nobody declared is never echoed back.
 func TestAuthLoginRefusesACallThatDoesNotAssemble(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -108,7 +106,7 @@ func TestAuthLoginRefusesACallThatDoesNotAssemble(t *testing.T) {
 
 			got := runWith(t, env, tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assertNoToken(t, got, token)
 			assert.NoFileExists(t, path)
 			assert.Empty(t, entries(t, home))

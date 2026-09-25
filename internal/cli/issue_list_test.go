@@ -47,9 +47,9 @@ type listedIssue struct {
 
 func (i listedIssue) sent() string {
 	return `{"summary":` + strconv.Quote(i.summary) + `,"$type":"Issue","id":` + strconv.Quote(i.internal) +
-		`,"customFields":` + arrivedFields(
-		arrivedField{name: namedType, valueType: "enum", ordinal: "1", binding: "180-15", value: bundleElement("Task")},
-		arrivedField{name: namedState, valueType: "state", ordinal: "8", binding: "180-14", value: bundleElement(i.state)},
+		`,"customFields":` + receivedFields(
+		receivedField{name: namedType, valueType: "enum", ordinal: "1", binding: "180-15", value: bundleElement("Task")},
+		receivedField{name: namedState, valueType: "state", ordinal: "8", binding: "180-14", value: bundleElement(i.state)},
 	) + `,"idReadable":` + strconv.Quote(i.id) + `,"created":` + i.created + `}`
 }
 
@@ -100,8 +100,6 @@ type issueListing struct {
 	Issues    []map[string]any `yaml:"issues"`
 }
 
-// requireIssueListing reads back what issue list printed and holds the counts to the records, which is as far
-// as a test of the polygon can hold them.
 func requireIssueListing(t *testing.T, got outcome) issueListing {
 	t.Helper()
 	assert.Empty(t, got.stderr)
@@ -124,9 +122,9 @@ func requireListingPrinted(t *testing.T, got outcome) issueListing {
 	return printed
 }
 
-// counting answers the counter with a body of the shape it answers with, whatever count reads as.
-func counting(count string) http.HandlerFunc {
-	return answer(http.StatusOK, `{"$type":"IssueCountResponse","count":`+count+`}`)
+// countHandler answers the counter with a body of the shape it answers with, whatever count reads as.
+func countHandler(count string) http.HandlerFunc {
+	return respondWith(http.StatusOK, `{"$type":"IssueCountResponse","count":`+count+`}`)
 }
 
 // countedIssues answers a selection with records and the request that counts them with count.
@@ -136,7 +134,7 @@ func countedIssues(records string, count http.HandlerFunc) http.HandlerFunc {
 			count(w, r)
 			return
 		}
-		answer(http.StatusOK, records)(w, r)
+		respondWith(http.StatusOK, records)(w, r)
 	}
 }
 
@@ -173,7 +171,7 @@ type countCall struct {
 	err         error
 }
 
-func (c *countCalls) answering(count http.HandlerFunc) http.HandlerFunc {
+func (c *countCalls) recordingHandler(count http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		c.mu.Lock()
@@ -215,7 +213,7 @@ func TestIssueListTakesItsSearchFromTheQueryFlagAlone(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -241,7 +239,7 @@ func TestIssueListRefusesTheFlagsOfAListItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), slices.Concat([]string{"issue", "list", "--query", ""}, tc.flags)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -265,7 +263,7 @@ func TestIssueListRefusesWhatOnlyIssueShowPrints(t *testing.T) {
 
 			got := runWith(t, server.env(), "issue", "list", "--query", "", "--fields", tc.expression)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -310,7 +308,7 @@ func TestIssueListSendsASearchItReadsNoWordOf(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := searching(t, answer(http.StatusOK, `[`+listedDEV1()+`]`))
+			server := searching(t, respondWith(http.StatusOK, `[`+listedDEV1()+`]`))
 
 			got := runWith(t, server.env(), "issue", "list", "--query", tc.query)
 
@@ -347,7 +345,7 @@ func TestIssueListSearchesForATextThatLooksLikeAFlag(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := searching(t, answer(http.StatusOK, `[`+listedDEV1()+`]`))
+			server := searching(t, respondWith(http.StatusOK, `[`+listedDEV1()+`]`))
 
 			got := runWith(t, server.env(), slices.Concat([]string{"issue", "list"}, tc.flag)...)
 
@@ -366,7 +364,7 @@ func TestIssueListSearchesForATextThatLooksLikeAFlag(t *testing.T) {
 // each one is a line of its own.
 func TestIssueListPrintsARecordToALine(t *testing.T) {
 	t.Parallel()
-	server := searching(t, answer(http.StatusOK, `[`+listedDEV1()+`,`+listedDEV2()+`]`))
+	server := searching(t, respondWith(http.StatusOK, `[`+listedDEV1()+`,`+listedDEV2()+`]`))
 
 	got := runWith(t, server.env(), "issue", "list", "--query", "project: DEV")
 
@@ -396,7 +394,7 @@ func TestIssueListPrintsAListWhateverTheCountOfRecords(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := searching(t, answer(http.StatusOK, tc.records))
+			server := searching(t, respondWith(http.StatusOK, tc.records))
 
 			got := runWith(t, server.env(), "issue", "list", "--query", "")
 
@@ -410,12 +408,12 @@ func TestIssueListPrintsAListWhateverTheCountOfRecords(t *testing.T) {
 // of something else.
 func TestIssueListRefusesMoreIssuesThanTheLimit(t *testing.T) {
 	t.Parallel()
-	server := searching(t, answer(http.StatusOK, `[`+listedDEV1()+`,`+listedDEV2()+`,`+listedDEV3()+`]`))
+	server := searching(t, respondWith(http.StatusOK, `[`+listedDEV1()+`,`+listedDEV2()+`,`+listedDEV3()+`]`))
 
 	got := runWith(t, server.env(), "issue", "list", "--query", "", "--limit", "2")
 
-	want := refusal{
-		code:    "upstream_lied",
+	want := faultDocument{
+		code:    "upstream_invalid",
 		details: []detail{{"limit", 2}, {"returned", 3}},
 	}
 	assert.Equal(t, want, requireRefusal(t, got))
@@ -431,11 +429,11 @@ func TestIssueListPassesOnWhatTheServerSaysOfASearchItRefuses(t *testing.T) {
 	const child = "Unexpected token: 'Opne' at position 12"
 	const said = `{"error":"invalid_query","error_description":"Invalid query",` +
 		`"error_children":[{"error":"invalid_query","error_description":"` + child + `"}]}`
-	server := searching(t, answer(http.StatusBadRequest, said))
+	server := searching(t, respondWith(http.StatusBadRequest, said))
 
 	got := runWith(t, server.env(), "issue", "list", "--query", "State: Opne")
 
-	want := refusal{
+	want := faultDocument{
 		code: "rejected",
 		details: []detail{
 			{"request", issueListRequest(server.url, "State%3A+Opne", sentIssueListFields, "50")},
@@ -479,7 +477,7 @@ func TestIssueListCountsOnlyAPageThatFillsTheLimit(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := searching(t, countedIssues(threeIssues, counting(tc.count)))
+			server := searching(t, countedIssues(threeIssues, countHandler(tc.count)))
 
 			got := runWith(t, server.env(), "issue", "list", "--query", "", "--limit", tc.limit)
 
@@ -497,7 +495,7 @@ func TestIssueListAsksTheCounterTheSearchItAskedThePageFor(t *testing.T) {
 	t.Parallel()
 	const query = `project: DEV "exact phrase" \ "`
 	calls := &countCalls{}
-	server := searching(t, countedIssues(`[`+listedDEV1()+`]`, calls.answering(counting("7"))))
+	server := searching(t, countedIssues(`[`+listedDEV1()+`]`, calls.recordingHandler(countHandler("7"))))
 
 	got := runWith(t, server.env(), "issue", "list", "--query", query, "--limit", "1")
 
@@ -523,12 +521,12 @@ func TestIssueListRefusesWhenTheCountFails(t *testing.T) {
 	tests := []struct {
 		name  string
 		count http.HandlerFunc
-		want  refusal
+		want  faultDocument
 	}{
 		{
 			name:  "a server that failed",
-			count: answer(http.StatusInternalServerError, said),
-			want: refusal{
+			count: respondWith(http.StatusInternalServerError, said),
+			want: faultDocument{
 				code: "upstream_failed",
 				details: []detail{
 					{"request", "POST %s?fields=count"},
@@ -540,8 +538,8 @@ func TestIssueListRefusesWhenTheCountFails(t *testing.T) {
 		},
 		{
 			name:  "a search the counter refuses",
-			count: answer(http.StatusBadRequest, `{"error":"invalid_query","error_description":"Invalid query"}`),
-			want: refusal{
+			count: respondWith(http.StatusBadRequest, `{"error":"invalid_query","error_description":"Invalid query"}`),
+			want: faultDocument{
 				code: "rejected",
 				details: []detail{
 					{"request", "POST %s?fields=count"},
@@ -586,13 +584,13 @@ func TestIssueListRefusesACountWhoseAnswerBreaksOff(t *testing.T) {
 
 // A count below the records that arrived is the selection changing between the two requests, and the document
 // has no way to say so: a total under returned would print truncated: false over a page that was cut.
-func TestIssueListRefusesACountBelowTheIssuesThatArrived(t *testing.T) {
+func TestIssueListRefusesACountBelowTheIssuesReceived(t *testing.T) {
 	t.Parallel()
-	server := searching(t, countedIssues(`[`+listedDEV1()+`,`+listedDEV2()+`,`+listedDEV3()+`]`, counting("2")))
+	server := searching(t, countedIssues(`[`+listedDEV1()+`,`+listedDEV2()+`,`+listedDEV3()+`]`, countHandler("2")))
 
 	got := runWith(t, server.env(), "issue", "list", "--query", "", "--limit", "3")
 
-	want := refusal{
+	want := faultDocument{
 		code:    "upstream_failed",
 		details: []detail{{"total", 2}, {"returned", 3}},
 	}
@@ -609,11 +607,11 @@ func TestIssueListRefusesACountThatIsNoNumberOfIssues(t *testing.T) {
 		name  string
 		count http.HandlerFunc
 	}{
-		{name: "a negative number other than -1", count: counting("-2")},
-		{name: "a fraction", count: counting("1.5")},
-		{name: "a number in quotes", count: counting(`"3"`)},
-		{name: "nothing at all", count: counting("null")},
-		{name: "no count in the answer", count: answer(http.StatusOK, `{"$type":"IssueCountResponse","id":"count"}`)},
+		{name: "a negative number other than -1", count: countHandler("-2")},
+		{name: "a fraction", count: countHandler("1.5")},
+		{name: "a number in quotes", count: countHandler(`"3"`)},
+		{name: "nothing at all", count: countHandler("null")},
+		{name: "no count in the answer", count: respondWith(http.StatusOK, `{"$type":"IssueCountResponse","id":"count"}`)},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -623,7 +621,7 @@ func TestIssueListRefusesACountThatIsNoNumberOfIssues(t *testing.T) {
 			got := runWith(t, server.env(), "issue", "list", "--query", "a", "--limit", "1")
 
 			found := requireRefusal(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 			requireMarkedUpFirst(t, server, "a")
 			assert.Equal(t, 1, sentTo(server, countPath))
 		})
@@ -632,7 +630,7 @@ func TestIssueListRefusesACountThatIsNoNumberOfIssues(t *testing.T) {
 
 // The selection the contract scenarios run names its fixtures, so neither the issues a neighbouring test
 // creates nor how many of them there are reaches the document; sort by settles the order the server keeps.
-const polygonIssues = "issue id: DEV-1, DEV-2, DEV-3 sort by: {issue id} asc"
+const devInstanceIssues = "issue id: DEV-1, DEV-2, DEV-3 sort by: {issue id} asc"
 
 // records is the records of a printed selection as they were printed, so a scenario can hold the keys to their
 // order and a value to the style it was written in.
@@ -649,10 +647,7 @@ func recordKeys(record *yaml.Node) []string {
 	return keys
 }
 
-// Every record of the selection carries the keys of the default and nothing besides, in the order the default
-// names them; the summary of a fixture and the two custom fields of it are text the polygon holds rather than
-// keys printed empty, and created is a moment of the instance, which no scenario can hold to a value of its own.
-func requireIssuesOfThePolygon(t *testing.T, got outcome, ids ...string) {
+func requireIssuesOfTheDevInstance(t *testing.T, got outcome, ids ...string) {
 	t.Helper()
 	printed := requireIssueListing(t, got)
 	assert.Equal(t, len(ids), *printed.Total)
@@ -679,11 +674,11 @@ func TestIssueListPrintsTheIssuesOfTheDevInstanceTheSearchNames(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
-	got := runWith(t, dev.env(), "issue", "list", "--query", polygonIssues)
+	got := runWith(t, dev.env(), "issue", "list", "--query", devInstanceIssues)
 
-	requireIssuesOfThePolygon(t, got, "DEV-1", "DEV-2", "DEV-3")
-	requireMarkedUpFirst(t, dev, polygonIssues)
-	assert.Equal(t, []url.Values{{"query": {polygonIssues}, "customFields": {namedState, namedType}, "fields": {sentIssueListFields}, "$top": {"50"}}}, dev.sentQueries()[1:])
+	requireIssuesOfTheDevInstance(t, got, "DEV-1", "DEV-2", "DEV-3")
+	requireMarkedUpFirst(t, dev, devInstanceIssues)
+	assert.Equal(t, []url.Values{{"query": {devInstanceIssues}, "customFields": {namedState, namedType}, "fields": {sentIssueListFields}, "$top": {"50"}}}, dev.sentQueries()[1:])
 }
 
 // A page short of the limit is the whole of what the search finds, so the counter is not asked at all.
@@ -691,16 +686,13 @@ func TestIssueListDoesNotCountTheIssuesOfTheDevInstanceThatFitTheLimit(t *testin
 	t.Parallel()
 	dev := devInstance(t)
 
-	got := runWith(t, dev.env(), "issue", "list", "--query", polygonIssues, "--limit", "4")
+	got := runWith(t, dev.env(), "issue", "list", "--query", devInstanceIssues, "--limit", "4")
 
-	requireIssuesOfThePolygon(t, got, "DEV-1", "DEV-2", "DEV-3")
-	requireMarkedUpFirst(t, dev, polygonIssues)
-	assert.Equal(t, []url.Values{{"query": {polygonIssues}, "customFields": {namedState, namedType}, "fields": {sentIssueListFields}, "$top": {"4"}}}, dev.sentQueries()[1:])
+	requireIssuesOfTheDevInstance(t, got, "DEV-1", "DEV-2", "DEV-3")
+	requireMarkedUpFirst(t, dev, devInstanceIssues)
+	assert.Equal(t, []url.Values{{"query": {devInstanceIssues}, "customFields": {namedState, namedType}, "fields": {sentIssueListFields}, "$top": {"4"}}}, dev.sentQueries()[1:])
 }
 
-// The polygon answers a value its field does not allow with a 400 naming the value, and that word is what the
-// caller fixes; ytrack reads none of it. The second word of the value is looked for as text, so the refusal
-// comes after a warning, and the two stand as two documents of one stream.
 func TestIssueListPassesOnTheDevInstanceRefusingAValueOfAField(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -725,8 +717,6 @@ func TestIssueListPassesOnTheDevInstanceRefusingAValueOfAField(t *testing.T) {
 	assert.Equal(t, 1, sentTo(dev, issuesPath))
 }
 
-// The limited token is the polygon's empty selection: it is on no project, so every search it runs finds
-// nothing, and an empty search is the one search it can run without the server refusing it.
 func TestIssueListFindsNoIssueOfTheDevInstanceForTheLimitedToken(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

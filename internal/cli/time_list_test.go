@@ -72,7 +72,7 @@ func countedWorkItems(records string, count http.HandlerFunc) http.HandlerFunc {
 			count(w, r)
 			return
 		}
-		answer(http.StatusOK, records)(w, r)
+		respondWith(http.StatusOK, records)(w, r)
 	}
 }
 
@@ -84,8 +84,6 @@ type workItemListing struct {
 	WorkItems []map[string]any `yaml:"workItems"`
 }
 
-// requireWorkItemListing reads back what time list printed and holds the counts to the records, which is as far
-// as a test of the polygon can hold them.
 func requireWorkItemListing(t *testing.T, got outcome) workItemListing {
 	t.Helper()
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
@@ -121,7 +119,7 @@ func TestTimeListRefusesWhatItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -167,7 +165,7 @@ func TestTimeGroupIsOfferedByTheWordsOfEveryOtherGroup(t *testing.T) {
 // order they arrived, each on the line of its own.
 func TestTimeListAsksTheWorkItemsOfTheIssueInOneRequest(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, "["+listedWorkItem+","+listedSecondWorkItem+"]"))
+	server := serve(t, respondWith(http.StatusOK, "["+listedWorkItem+","+listedSecondWorkItem+"]"))
 
 	got := runWith(t, server.env(), "time", "list", "DEV-1")
 
@@ -196,21 +194,21 @@ func workItemRecords(t *testing.T, got outcome) []*yaml.Node {
 func TestTimeListPrintsTheTextOfAWorkItemOnOneLine(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		arrived string
-		want    string
+		name     string
+		received string
+		want     string
 	}{
-		{name: "a line feed", arrived: `"a\nb"`, want: `"a\nb"`},
-		{name: "a carriage return", arrived: `"a\rb"`, want: `"a\rb"`},
-		{name: "a line separator", arrived: "\"a\xe2\x80\xa8b\"", want: `"a\Lb"`},
-		{name: "nothing at all", arrived: `""`, want: `""`},
-		{name: "no text", arrived: `null`, want: `null`},
+		{name: "a line feed", received: `"a\nb"`, want: `"a\nb"`},
+		{name: "a carriage return", received: `"a\rb"`, want: `"a\rb"`},
+		{name: "a line separator", received: "\"a\xe2\x80\xa8b\"", want: `"a\Lb"`},
+		{name: "nothing at all", received: `""`, want: `""`},
+		{name: "no text", received: `null`, want: `null`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			body := `[{"$type":"IssueWorkItem","id":"199-6","author":null,"text":` + tc.arrived + `}]`
-			server := serve(t, answer(http.StatusOK, body))
+			body := `[{"$type":"IssueWorkItem","id":"199-6","author":null,"text":` + tc.received + `}]`
+			server := serve(t, respondWith(http.StatusOK, body))
 
 			got := runWith(t, server.env(), "time", "list", "DEV-1", "--fields", "id,author(login),text")
 
@@ -227,7 +225,7 @@ func TestTimeListKeepsEveryByteOfTheTextOfAWorkItem(t *testing.T) {
 	t.Parallel()
 	const written = "первая\nвторая\rтретья\xe2\x80\xa8четвёртая"
 	body := "[{\"$type\":\"IssueWorkItem\",\"id\":\"199-6\",\"text\":\"первая\\nвторая\\rтретья\xe2\x80\xa8четвёртая\"}]"
-	server := serve(t, answer(http.StatusOK, body))
+	server := serve(t, respondWith(http.StatusOK, body))
 
 	got := runWith(t, server.env(), "time", "list", "DEV-1", "--fields", "id,text")
 
@@ -243,7 +241,7 @@ func TestTimeListCountsTheWorkItemsWhenTheyFillTheLimit(t *testing.T) {
 	t.Parallel()
 	const found = `[{"id":"199-6","$type":"IssueWorkItem"},{"id":"199-7","$type":"IssueWorkItem"},` +
 		`{"id":"199-8","$type":"IssueWorkItem"}]`
-	server := serve(t, countedWorkItems("["+listedWorkItem+","+listedSecondWorkItem+"]", answer(http.StatusOK, found)))
+	server := serve(t, countedWorkItems("["+listedWorkItem+","+listedSecondWorkItem+"]", respondWith(http.StatusOK, found)))
 
 	got := runWith(t, server.env(), "time", "list", "DEV-1", "--limit", "2")
 
@@ -256,7 +254,7 @@ func TestTimeListCountsTheWorkItemsWhenTheyFillTheLimit(t *testing.T) {
 // A page shorter than the limit is the whole of what the issue holds, and nothing is asked twice.
 func TestTimeListCountsNothingWhenThePageIsShortOfTheLimit(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, "["+listedWorkItem+"]"))
+	server := serve(t, respondWith(http.StatusOK, "["+listedWorkItem+"]"))
 
 	got := runWith(t, server.env(), "time", "list", "DEV-1", "--limit", "2")
 
@@ -267,25 +265,25 @@ func TestTimeListCountsNothingWhenThePageIsShortOfTheLimit(t *testing.T) {
 
 // A count that fails, or that comes back below what already arrived, takes the command with it: half a
 // document would say the rest were not cut off.
-func TestTimeListRefusesWhenTheCountDoesNotHold(t *testing.T) {
+func TestTimeListRefusesWhenTheCountDoesNotMatch(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
 		count http.HandlerFunc
-		want  refusal
+		want  faultDocument
 	}{
 		{
 			name:  "a count of none over a page of one",
-			count: answer(http.StatusOK, "[]"),
-			want: refusal{
+			count: respondWith(http.StatusOK, "[]"),
+			want: faultDocument{
 				code:    "upstream_failed",
 				details: []detail{{"total", 0}, {"returned", 1}},
 			},
 		},
 		{
 			name:  "a server that failed the count",
-			count: answer(http.StatusInternalServerError, `{"error":"server_error","error_description":"java.lang.NullPointerException"}`),
-			want: refusal{
+			count: respondWith(http.StatusInternalServerError, `{"error":"server_error","error_description":"java.lang.NullPointerException"}`),
+			want: faultDocument{
 				code: "upstream_failed",
 				details: []detail{
 					{"request", ""},
@@ -319,12 +317,12 @@ func TestTimeListRefusesWhenTheCountDoesNotHold(t *testing.T) {
 // would follow it would be of something else, so the refusal comes before it.
 func TestTimeListRefusesMoreWorkItemsThanTheLimit(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, "["+listedWorkItem+","+listedSecondWorkItem+"]"))
+	server := serve(t, respondWith(http.StatusOK, "["+listedWorkItem+","+listedSecondWorkItem+"]"))
 
 	got := runWith(t, server.env(), "time", "list", "DEV-1", "--limit", "1")
 
-	want := refusal{
-		code:    "upstream_lied",
+	want := faultDocument{
+		code:    "upstream_invalid",
 		details: []detail{{"limit", 1}, {"returned", 2}},
 	}
 	assert.Equal(t, want, requireRefusal(t, got))
@@ -333,7 +331,7 @@ func TestTimeListRefusesMoreWorkItemsThanTheLimit(t *testing.T) {
 
 // An issue that holds no work item prints the same keys as one that does, with an empty list under the
 // plural; a body that is no array of objects at all is a refusal rather than an empty list.
-func TestTimeListPrintsTheSameDocumentHoweverManyArrived(t *testing.T) {
+func TestTimeListPrintsTheSameDocumentHoweverManyWereReceived(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name        string
@@ -379,7 +377,7 @@ func TestTimeListPrintsTheSameDocumentHoweverManyArrived(t *testing.T) {
 
 			if tc.refused {
 				found := requireRefusal(t, got)
-				assert.Equal(t, "upstream_lied", found.code)
+				assert.Equal(t, "upstream_invalid", found.code)
 				return
 			}
 			assert.Equal(t, outcome{stdout: tc.want}, got)
@@ -387,8 +385,6 @@ func TestTimeListPrintsTheSameDocumentHoweverManyArrived(t *testing.T) {
 	}
 }
 
-// The one work item of DEV-1 on the polygon, read in one request: the id is held to the form of an internal
-// id, since the numbers of an instance are its own.
 func TestTimeListPrintsTheWorkItemOfDEV1OfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -435,7 +431,6 @@ func TestTimeListPrintsTheWorkItemOfDEV7OfTheDevInstance(t *testing.T) {
 	assert.Equal(t, []string{workItemsPath("DEV-7")}, dev.sentPaths())
 }
 
-// A page that fills the limit is counted against the polygon too, and the counting pass asks for ids alone.
 func TestTimeListCountsTheWorkItemsOfDEV1OfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -449,7 +444,6 @@ func TestTimeListCountsTheWorkItemsOfDEV1OfTheDevInstance(t *testing.T) {
 	assert.Equal(t, listingWorkItems("1"), dev.sentQueries())
 }
 
-// An issue of the polygon that nobody wrote time against prints an empty list rather than a refusal.
 func TestTimeListPrintsNoWorkItemOfDEV2OfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -460,8 +454,6 @@ func TestTimeListPrintsNoWorkItemOfDEV2OfTheDevInstance(t *testing.T) {
 	assert.Len(t, dev.requests(), 1)
 }
 
-// An issue the polygon has none of and one this token may not see are the same 404 of the server, in one
-// request: the work items of an issue are asked for under the issue, so its absence is the server's to answer.
 func TestTimeListRefusesAnIssueTheDevInstanceDoesNotShow(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -470,7 +462,7 @@ func TestTimeListRefusesAnIssueTheDevInstanceDoesNotShow(t *testing.T) {
 		token func(*testing.T) string
 	}{
 		{
-			name:  "an issue the polygon has none of",
+			name:  "an issue the dev instance has none of",
 			id:    "DEV-99999",
 			token: func(t *testing.T) string { t.Helper(); return devTokens(t).admin },
 		},
@@ -539,18 +531,16 @@ func TestTimeRefusesTheNamesUnderABlockOfTheIssue(t *testing.T) {
 
 				got := runWith(t, server.env(), slices.Concat(verb.argv, []string{"--fields", tc.expression})...)
 
-				assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+				assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 				assert.Empty(t, server.requests())
 			})
 		}
 	}
 }
 
-// What a link slot does hold is the issues at its other end, and an expression that asks for them alone
-// goes out with the parts the phrase is read from filled in beside them.
 func TestTimeListAsksTheIssuesOfALinkSlotOfTheIssue(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, "[]"))
+	server := serve(t, respondWith(http.StatusOK, "[]"))
 
 	got := runWith(t, server.env(), "time", "list", "DEV-1", "--fields", "issue(links(issues(idReadable)))")
 
@@ -577,7 +567,7 @@ func TestTimeListRefusesAnExpressionItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), slices.Concat([]string{"time", "list", "DEV-1"}, tc.flags)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}

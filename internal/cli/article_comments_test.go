@@ -19,7 +19,7 @@ const articleCommentFields = "comments(id,author(login),created,text)"
 const sentArticleFields = articleShowFields + "," + articleCommentFields
 
 // A comment of an article as the server sends it, $type and all.
-func arrivedArticleComment(id string, created int64, login, text string) map[string]any {
+func receivedArticleComment(id string, created int64, login, text string) map[string]any {
 	return map[string]any{
 		"$type":   "ArticleComment",
 		"id":      id,
@@ -31,11 +31,11 @@ func arrivedArticleComment(id string, created int64, login, text string) map[str
 
 func articleWithComments(t *testing.T, comments ...map[string]any) string {
 	t.Helper()
-	arrived := make([]any, 0, len(comments))
+	received := make([]any, 0, len(comments))
 	for _, comment := range comments {
-		arrived = append(arrived, comment)
+		received = append(received, comment)
 	}
-	return articleHolding(t, map[string]any{"comments": arrived})
+	return articleWith(t, map[string]any{"comments": received})
 }
 
 // The flag takes a word and a count and nothing else, and every mistake in it is caught before any request.
@@ -57,7 +57,7 @@ func TestArticleShowRefusesACommentsFlagThatIsNeitherAllNorACount(t *testing.T) 
 
 			got := runWith(t, server.env(), append([]string{"article", "show", "DEV-A-1"}, tc.argv...)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -82,7 +82,7 @@ func TestArticleShowRefusesCommentsAskedForInTheExpression(t *testing.T) {
 
 			got := runWith(t, server.env(), "article", "show", "DEV-A-1", "--fields", tc.expression)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -122,13 +122,13 @@ func TestArticleShowPrintsTheCommentsAskedForOldestFirst(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := articleWithComments(t,
-				arrivedArticleComment("8-2", 1789035410875, "admin", "третий"),
-				arrivedArticleComment("8-0", 1789035410000, "admin", "первый"),
-				arrivedArticleComment("8-4", 1789035412000, "admin", "пятый"),
-				arrivedArticleComment("8-3", 1789035411000, "admin", "четвёртый"),
-				arrivedArticleComment("8-1", 1789035410500, "dev.member", "второй"),
+				receivedArticleComment("8-2", 1789035410875, "admin", "третий"),
+				receivedArticleComment("8-0", 1789035410000, "admin", "первый"),
+				receivedArticleComment("8-4", 1789035412000, "admin", "пятый"),
+				receivedArticleComment("8-3", 1789035411000, "admin", "четвёртый"),
+				receivedArticleComment("8-1", 1789035410500, "dev.member", "второй"),
 			)
-			server := serve(t, answer(http.StatusOK, body))
+			server := serve(t, respondWith(http.StatusOK, body))
 
 			argv := append([]string{"article", "show", "DEV-A-1", "--fields", "idReadable"}, tc.argv...)
 			got := runWith(t, server.env(), argv...)
@@ -147,12 +147,9 @@ func TestArticleShowPrintsTheCommentsAskedForOldestFirst(t *testing.T) {
 	}
 }
 
-// The text of a comment is prose like the content of the article, and an article keeps every byte of it:
-// the record carrying it is a block mapping, so the author stands under a key of its own and the moment it was
-// written is an instant.
-func TestArticleShowPrintsTheProseOfACommentAsItArrived(t *testing.T) {
+func TestArticleShowPrintsTheTextOfACommentAsReceived(t *testing.T) {
 	t.Parallel()
-	tests := []proseCase{
+	tests := []textCase{
 		{name: "a line separator", text: "первая\xe2\x80\xa8вторая", quoted: true},
 		{name: "a lone carriage return", text: "первая\rвторая", quoted: true},
 		{name: "an empty line before a line beginning with a space", text: "\n первая"},
@@ -160,8 +157,8 @@ func TestArticleShowPrintsTheProseOfACommentAsItArrived(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			body := articleWithComments(t, arrivedArticleComment("8-0", 1789035410875, "admin", tc.text))
-			server := serve(t, answer(http.StatusOK, body))
+			body := articleWithComments(t, receivedArticleComment("8-0", 1789035410875, "admin", tc.text))
+			server := serve(t, respondWith(http.StatusOK, body))
 
 			got := runWith(t, server.env(), "article", "show", "DEV-A-1", "--fields", "idReadable")
 
@@ -176,7 +173,6 @@ func TestArticleShowPrintsTheProseOfACommentAsItArrived(t *testing.T) {
 	}
 }
 
-// The root article of the polygon carries no comment, and comments: [] is the last key of its document.
 func TestArticleShowPrintsTheArticleOfTheDevInstanceWithNoCommentsAsAnEmptyList(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -190,7 +186,6 @@ func TestArticleShowPrintsTheArticleOfTheDevInstanceWithNoCommentsAsAnEmptyList(
 	assert.Len(t, dev.requests(), 1)
 }
 
-// At zero the key is not there and neither is anything about comments in what went out to the polygon.
 func TestArticleShowAsksTheDevInstanceForNoCommentsAtZero(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

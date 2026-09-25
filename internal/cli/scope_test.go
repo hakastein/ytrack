@@ -180,7 +180,7 @@ func TestNoCommandChoosesARecordWithoutKnowingWhichDirectoryItIsIn(t *testing.T)
 
 			got := runWith(t, append([]string{"HOME=" + home}, tc.pwd(elsewhere)...), "auth", "status")
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assertNoRecordedToken(t, got)
 			assert.Empty(t, server.requests())
 		})
@@ -239,7 +239,7 @@ func TestNoCommandUsesAFileWhoseScopeItCannotMatch(t *testing.T) {
 
 			got := runWith(t, []string{"HOME=" + home}, "auth", "status")
 
-			want := refusal{code: "bad_usage", details: []detail{fileDetail(path)}}
+			want := faultDocument{code: "bad_usage", details: []detail{fileDetail(path)}}
 			assert.Equal(t, want, requireRefusal(t, got))
 			assertNoToken(t, got, "perm-x")
 			assertNoToken(t, got, "perm-y")

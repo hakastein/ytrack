@@ -74,7 +74,7 @@ func (c *Client) showField(ctx context.Context, spec *schemas, code, name string
 		}
 	}
 	metadata, fault := c.request(ctx, spec, "Project", metadataFields(), func(ctx context.Context, fields string) (*http.Response, error) {
-		return c.getProject(ctx, code, fields)
+		return c.apiGetProject(ctx, code, fields)
 	})
 	if fault != nil {
 		return nil, fault
@@ -84,134 +84,131 @@ func (c *Client) showField(ctx context.Context, spec *schemas, code, name string
 		return nil, fault
 	}
 	if len(fields) == 0 {
-		return nil, noFields(metadata.response, code)
+		return nil, noFields(metadata.httpResponse, code)
 	}
 	c.cache.store(target, fields)
 	node, fault, _ := c.showFieldFrom(ctx, spec, code, name, expression, fromServer(metadata, fields))
 	return node, fault
 }
 
-// A source is the metadata one showing of a field is built from, and what a step that does not carry through
+// A metadataSource is the metadata one showing of a field is built from, and what a step that does not carry through
 // means for it. Metadata off the disk may be older than the server, so such a step prints nothing and sends the
 // call back for the metadata; metadata the server has just sent is the last word, so the same step refuses over
 // the answer it arrived in (ADR-0002).
-type source struct {
-	fields []customField
-	// The answer the metadata arrived in, and nil for the disk, which has no request a refusal could name.
-	arrived *answer
+type metadataSource struct {
+	fields   []customField
+	response *decodedResponse
 }
 
-func fromServer(arrived answer, fields []customField) source {
-	return source{fields: fields, arrived: &arrived}
+func fromServer(decoded decodedResponse, fields []customField) metadataSource {
+	return metadataSource{fields: fields, response: &decoded}
 }
 
-func fromDisk(fields []customField) source {
-	return source{fields: fields}
+func fromDisk(fields []customField) metadataSource {
+	return metadataSource{fields: fields}
 }
 
-func (s source) mayBeBehind() bool {
-	return s.arrived == nil
+func (s metadataSource) fromCache() bool {
+	return s.response == nil
 }
 
-// stale disposes of a step that shows the metadata no longer describes the server, and asks refuse for the
-// refusal only where there is an answer to build one over.
-func (s source) stale(refuse func(answer) *diag.Fault) (*render.Node, *diag.Fault, bool) {
-	if s.mayBeBehind() {
+func (s metadataSource) handleStale(reject func(decodedResponse) *diag.Fault) (*render.Node, *diag.Fault, bool) {
+	if s.fromCache() {
 		return nil, nil, true
 	}
-	return nil, refuse(*s.arrived), false
+	return nil, reject(*s.response), false
 }
 
 // showFieldFrom is the whole of field show over one set of metadata: the name resolved, the id held to the form
 // a path takes, what to print settled against what the field holds, the field asked for by that id and the
 // answer confirmed against the naming the name resolved to. The steps are the same whichever metadata they run
 // over, and the source alone says what a step that does not carry through comes to.
-func (c *Client) showFieldFrom(ctx context.Context, spec *schemas, code, name string, expression *string, from source) (*render.Node, *diag.Fault, bool) {
+func (c *Client) showFieldFrom(ctx context.Context, spec *schemas, code, name string, expression *string, from metadataSource) (*render.Node, *diag.Fault, bool) {
 	found, ok := lookUp(name, from.fields)
 	if !ok {
-		return from.stale(func(a answer) *diag.Fault { return unresolved(a, code, name, from.fields) })
+		return from.handleStale(func(a decodedResponse) *diag.Fault { return unresolved(a, code, name, from.fields) })
 	}
-	if !found.addressable() {
-		return from.stale(func(a answer) *diag.Fault { return unaddressableID(found.id, a) })
+	if !found.hasValidID() {
+		return from.handleStale(func(a decodedResponse) *diag.Fault { return invalidFieldIDFault(found.id, a) })
 	}
-	requested, modelled, fault := fieldsToPrint(expression, found.naming)
+	requested, modelled, fault := fieldsToPrint(expression, found.info)
 	if fault != nil {
 		// The grammar of the expression is the caller's own, and reading the metadata again would not mend it.
 		return nil, fault, false
 	}
 	if !modelled {
-		return from.stale(func(a answer) *diag.Fault { return unmodelledType(found.naming, a) })
+		return from.handleStale(func(a decodedResponse) *diag.Fault { return unmodelledType(found.info, a) })
 	}
-	arrived, fault := c.askForField(ctx, spec, code, found.id, requested)
+	decoded, fault := c.getField(ctx, spec, code, found.id, requested)
 	if fault != nil {
-		return nil, fault, from.mayBeBehind() && outdated(fault)
+		return nil, fault, from.fromCache() && isStale(fault)
 	}
-	if fault := found.naming.confirmed(arrived, code); fault != nil {
-		return nil, fault, from.mayBeBehind()
+	if fault := found.info.verifyUnchanged(decoded, code); fault != nil {
+		return nil, fault, from.fromCache()
 	}
-	node, fault := objectNode(arrived, requested, arrived.objects[0], nil)
+	node, fault := objectNode(decoded, requested, decoded.objects[0], nil)
 	return node, fault, false
 }
 
-// outdated is whether what the server said about one field says the metadata the request was built from is
+// isStale is whether what the server said about one field says the metadata the request was built from is
 // older than the server: the id addresses nothing any more, or what arrived is not shaped as the type kept on
 // disk said it would be. Anything else stands, since reading the metadata again would not change it.
-func outdated(fault *diag.Fault) bool {
-	return fault.Code == diag.NotFound || fault.Code == diag.UpstreamLied
+func isStale(fault *diag.Fault) bool {
+	return fault.Code == diag.NotFound || fault.Code == diag.UpstreamInvalid
 }
 
-func (c *Client) askForField(ctx context.Context, spec *schemas, code, id string, requested []requestedField) (answer, *diag.Fault) {
+func (c *Client) getField(ctx context.Context, spec *schemas, code, id string, requested []requestedField) (decodedResponse, *diag.Fault) {
 	// The naming goes out beside what the caller asked for, and only what the caller asked for is printed.
-	asked := asking(requested, namingFields())
+	asked := withFields(requested, fieldInfoFields())
 	return c.request(ctx, spec, "ProjectCustomField", asked, func(ctx context.Context, fields string) (*http.Response, error) {
-		return c.getProjectCustomField(ctx, code, id, fields)
+		return c.apiGetProjectCustomField(ctx, code, id, fields)
 	})
 }
 
 // The whole project is read and ordered, and printed whole: $top and $skip count the fields of the array, which
 // is not the order of the project, so no page of it is a page of the list.
 func (c *Client) listFields(ctx context.Context, spec *schemas, code string, requested []requestedField) (*render.Node, *diag.Fault) {
-	asked := asking(requested, requestedField{name: ordinal})
-	answer, fault := c.request(ctx, spec, "[]ProjectCustomField", asked, func(ctx context.Context, fields string) (*http.Response, error) {
-		return c.getProjectCustomFields(ctx, code, fields, everything)
+	asked := withFields(requested, requestedField{name: ordinal})
+	decoded, fault := c.request(ctx, spec, "[]ProjectCustomField", asked, func(ctx context.Context, fields string) (*http.Response, error) {
+		return c.apiGetProjectCustomFields(ctx, code, fields, topAll)
 	})
 	if fault != nil {
 		return nil, fault
 	}
-	if len(answer.objects) == 0 {
-		return nil, noFields(answer.response, code)
+	if len(decoded.objects) == 0 {
+		return nil, noFields(decoded.httpResponse, code)
 	}
-	ordered, fault := inOrder(answer)
+	ordered, fault := inOrder(decoded)
 	if fault != nil {
 		return nil, fault
 	}
-	records, fault := printing(answer, onLinesOfItsOwn).objectsAt(answer.schema, requested, ordered)
+	records, fault := newConverter(decoded, blockLayout).objectsAt(decoded.schema, requested, ordered)
 	if fault != nil {
 		return nil, fault
 	}
-	return listing("fields", counted(len(ordered)), records), nil
+	return countedListDocument("fields", counted(len(ordered)), records), nil
 }
 
-type placedField struct {
-	place int64
-	field map[string]any
+type orderedField struct {
+	position int64
+	field    map[string]any
 }
 
-func inOrder(answer answer) ([]map[string]any, *diag.Fault) {
-	placed := make([]placedField, 0, len(answer.objects))
-	for _, field := range answer.objects {
+func inOrder(decoded decodedResponse) ([]map[string]any, *diag.Fault) {
+	placed := make([]orderedField, 0, len(decoded.objects))
+	for _, field := range decoded.objects {
 		number, isNumber := field[ordinal].(json.Number)
 		if !isNumber {
-			return nil, shapeFailure(answer.response, answer.body, "the ordinal of a custom field is not a number")
+			return nil, shapeFailure(decoded.httpResponse, decoded.body, "the ordinal of a custom field is not a number")
 		}
-		place, err := number.Int64()
+		position, err := number.Int64()
 		if err != nil {
-			return nil, shapeFailure(answer.response, answer.body, "the ordinal of a custom field is not a whole number")
+			return nil, shapeFailure(decoded.httpResponse, decoded.body, "the ordinal of a custom field is not a whole number")
 		}
-		placed = append(placed, placedField{place: place, field: field})
+		placed = append(placed, orderedField{position: position, field: field})
 	}
 	// Fields of one ordinal keep the order the server sent them in, which is the order of their attachment ids.
-	slices.SortStableFunc(placed, func(a, b placedField) int { return cmp.Compare(a.place, b.place) })
+	slices.SortStableFunc(placed, func(a, b orderedField) int { return cmp.Compare(a.position, b.position) })
 	ordered := make([]map[string]any, 0, len(placed))
 	for _, p := range placed {
 		ordered = append(ordered, p.field)

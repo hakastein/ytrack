@@ -10,8 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The slot of the polygon a scenario of link remove works on: the end an issue that waits stands at.
-const removedSlot = "163-1t"
+const removedIssueLink = "163-1t"
 
 // removing is the server of a link remove: each read answered by the id it goes out to, the removal itself by
 // the handler given.
@@ -22,19 +21,18 @@ func removing(t *testing.T, catalogue, partner string, removal http.HandlerFunc)
 		case r.Method == http.MethodDelete:
 			removal(w, r)
 		case path.Base(r.URL.Path) == addedSource:
-			answer(http.StatusOK, catalogue)(w, r)
+			respondWith(http.StatusOK, catalogue)(w, r)
 		case path.Base(r.URL.Path) == addedPartner:
-			answer(http.StatusOK, partner)(w, r)
+			respondWith(http.StatusOK, partner)(w, r)
 		default:
 			assert.Fail(t, "a request reached the server", "%s %s", r.Method, r.URL)
 		}
 	})
 }
 
-// removingOnThePolygon is that server with the catalogue of the polygon behind both reads.
-func removingOnThePolygon(t *testing.T, removal http.HandlerFunc) *upstream {
+func removingOnTheDevInstance(t *testing.T, removal http.HandlerFunc) *upstream {
 	t.Helper()
-	return removing(t, polygonCatalogue(), addressedIssue(addedPartnerID, addedPartner), removal)
+	return removing(t, devInstanceCatalogue(), addressedIssue(addedPartnerID, addedPartner), removal)
 }
 
 // noRemoval stands for the request a refusal before the removal must not send.
@@ -45,14 +43,10 @@ func noRemoval(t *testing.T) http.HandlerFunc {
 	}
 }
 
-// The request a removal goes out as: the issue by the readable id the read gave, the slot by the id the server
-// addresses it by, and the partner by the internal id, which is the one form YouTrack takes in that segment.
 func removalRequest(address string) string {
-	return "DELETE " + address + "/api/issues/" + addedSource + "/links/" + removedSlot + "/issues/" + addedPartnerID
+	return "DELETE " + address + "/api/issues/" + addedSource + "/links/" + removedIssueLink + "/issues/" + addedPartnerID
 }
 
-// The three names of the link every refusal about a removal carries: they mean the same on any instance, while
-// the id of the slot and the internal id of the partner stand in request and in upstream_* alone.
 func removalNames(phrase string) []detail {
 	return []detail{{"issue", addedSource}, {"phrase", phrase}, {"partner", addedPartner}}
 }
@@ -85,7 +79,7 @@ func TestLinkRemoveRefusesACallThatNamesNoOneLink(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -104,12 +98,9 @@ func TestLinkRemoveHelpPromisesNoExpression(t *testing.T) {
 	assert.NotContains(t, got.stdout, "--fields")
 }
 
-// The whole of the command: the phrase is resolved against the read of the issue, the removal goes out to
-// the slot that read gave with the partner addressed by its internal id, and it carries neither a body nor a
-// query. What it prints is the link that is gone, in the shape link list prints links in.
 func TestLinkRemoveTakesTheLinkAwayBySlotAndInternalID(t *testing.T) {
 	t.Parallel()
-	server := removingOnThePolygon(t, deletionDone())
+	server := removingOnTheDevInstance(t, deletionDone())
 
 	got := runWith(t, server.env(), "link", "remove", addedSource, "depends on", addedPartner)
 
@@ -121,7 +112,7 @@ func TestLinkRemoveTakesTheLinkAwayBySlotAndInternalID(t *testing.T) {
 	assert.Equal(t, []string{
 		"/api/issues/" + addedSource,
 		"/api/issues/" + addedPartner,
-		"/api/issues/" + addedSource + "/links/" + removedSlot + "/issues/" + addedPartnerID,
+		"/api/issues/" + addedSource + "/links/" + removedIssueLink + "/issues/" + addedPartnerID,
 	}, server.sentPaths())
 	assert.Equal(t, []string{"", "", ""}, server.asks(), "no request of a removal carries a body")
 	assert.Equal(t, []string{addSourceFields, addPartnerFields, ""}, server.sentFields())
@@ -130,10 +121,6 @@ func TestLinkRemoveTakesTheLinkAwayBySlotAndInternalID(t *testing.T) {
 	assert.Empty(t, requests[2].URL.RawQuery, "a removal asks for nothing")
 }
 
-// A phrase is resolved in any letter case and against the translation of the end as well, and what is
-// printed afterwards is the phrase of the slot rather than the spelling that reached it: the key of removed is
-// the key link list prints the link under, so a reader who looks the link up by it finds it, and the phrase of
-// a refusal is the one the link is addressed by rather than the one the caller happened to type.
 func TestLinkRemovePrintsThePhraseOfTheSlotRatherThanTheOneWritten(t *testing.T) {
 	t.Parallel()
 	// The translation of that end in upper case: neither the letter case nor the language of the canonical
@@ -142,7 +129,7 @@ func TestLinkRemovePrintsThePhraseOfTheSlotRatherThanTheOneWritten(t *testing.T)
 
 	t.Run("the document of the link that is gone", func(t *testing.T) {
 		t.Parallel()
-		server := removingOnThePolygon(t, deletionDone())
+		server := removingOnTheDevInstance(t, deletionDone())
 
 		got := runWith(t, server.env(), "link", "remove", addedSource, written, addedPartner)
 
@@ -156,7 +143,7 @@ func TestLinkRemovePrintsThePhraseOfTheSlotRatherThanTheOneWritten(t *testing.T)
 
 	t.Run("the refusal about a link the issue holds none of", func(t *testing.T) {
 		t.Parallel()
-		server := removingOnThePolygon(t, answer(http.StatusNotFound, entityNotFound(addedPartnerID)))
+		server := removingOnTheDevInstance(t, respondWith(http.StatusNotFound, entityNotFound(addedPartnerID)))
 
 		got := runWith(t, server.env(), "link", "remove", addedSource, written, addedPartner)
 
@@ -166,13 +153,13 @@ func TestLinkRemovePrintsThePhraseOfTheSlotRatherThanTheOneWritten(t *testing.T)
 	})
 }
 
-func TestLinkRemoveRefusesALinkTheIssueDoesNotHold(t *testing.T) {
+func TestLinkRemoveRefusesALinkTheIssueDoesNotHave(t *testing.T) {
 	t.Parallel()
-	server := removingOnThePolygon(t, answer(http.StatusNotFound, entityNotFound(addedPartnerID)))
+	server := removingOnTheDevInstance(t, respondWith(http.StatusNotFound, entityNotFound(addedPartnerID)))
 
 	got := runWith(t, server.env(), "link", "remove", addedSource, "depends on", addedPartner)
 
-	assert.Equal(t, refusal{
+	assert.Equal(t, faultDocument{
 		code: "not_found",
 		details: append([]detail{{"request", removalRequest(server.url)}},
 			append(removalNames("depends on"),
@@ -192,11 +179,11 @@ func TestLinkRemoveIsUncertainWhereTheAnswerIsNotTheServersOwn(t *testing.T) {
 		removal http.HandlerFunc
 		code    string
 	}{
-		{name: "a JSON object under a 200", removal: body("application/json", `{"x":1}`), code: "upstream_lied"},
+		{name: "a JSON object under a 200", removal: body("application/json", `{"x":1}`), code: "upstream_invalid"},
 		{
 			name:    "a web page under a 200",
 			removal: body("text/html", "<!doctype html>\n<html><body>Log in</body></html>"),
-			code:    "upstream_lied",
+			code:    "upstream_invalid",
 		},
 		{name: "an answer that never came", removal: breakOff, code: "write_uncertain"},
 		{name: "an answer from a gateway", removal: gateway(http.StatusBadGateway), code: "write_uncertain"},
@@ -204,7 +191,7 @@ func TestLinkRemoveIsUncertainWhereTheAnswerIsNotTheServersOwn(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := removingOnThePolygon(t, tc.removal)
+			server := removingOnTheDevInstance(t, tc.removal)
 
 			got := runWith(t, server.env(), "link", "remove", addedSource, "depends on", addedPartner)
 
@@ -236,28 +223,28 @@ func TestLinkRemoveRefusesBeforeTheRemovalTheWayAddDoes(t *testing.T) {
 		catalogue string
 		phrase    string
 		partner   string
-		want      func(address string) refusal
+		want      func(address string) faultDocument
 		paths     []string
 	}{
 		{
 			name:      "a phrase no link of the issue goes by",
-			catalogue: polygonCatalogue(),
+			catalogue: devInstanceCatalogue(),
 			phrase:    "depnds on",
 			partner:   addedPartner,
-			want: func(address string) refusal {
+			want: func(address string) faultDocument {
 				return unknownPhraseRefusal(address, "depnds on", []any{"depends on"})
 			},
 			paths: []string{"/api/issues/" + addedSource},
 		},
 		{
 			name: "a slot addressed against the end the answer put it at",
-			catalogue: slotsOf(addedSourceID, addedSource,
-				catalogueSlot{id: "42-1s", direction: "INWARD", kind: depend}),
+			catalogue: issueLinksOf(addedSourceID, addedSource,
+				catalogueLink{id: "42-1s", direction: "INWARD", kind: depend}),
 			phrase:  "depends on",
 			partner: addedPartner,
-			want: func(address string) refusal {
-				return refusal{
-					code: "upstream_lied",
+			want: func(address string) faultDocument {
+				return faultDocument{
+					code: "upstream_invalid",
 					details: []detail{
 						{"request", issueRequest(address, addedSource, addSourceFields)},
 						{"issue", addedSource},
@@ -269,11 +256,11 @@ func TestLinkRemoveRefusesBeforeTheRemovalTheWayAddDoes(t *testing.T) {
 		},
 		{
 			name:      "the issue and the partner being one issue",
-			catalogue: polygonCatalogue(),
+			catalogue: devInstanceCatalogue(),
 			phrase:    "relates to",
 			partner:   addedSource,
-			want: func(address string) refusal {
-				return refusal{
+			want: func(address string) faultDocument {
+				return faultDocument{
 					code: "bad_usage",
 					details: []detail{
 						{"request", issueRequest(address, addedSource, addPartnerFields)},
@@ -298,9 +285,6 @@ func TestLinkRemoveRefusesBeforeTheRemovalTheWayAddDoes(t *testing.T) {
 	}
 }
 
-// A link of two issues of the contract test's own, written and then taken away on the polygon: both ends
-// go together, the issue the call was made on is left holding nothing, and the same call sent again is
-// answered not_found, because by then there is no link to take away.
 func TestLinkRemoveOnTheDevInstanceUnlinksBothIssuesAndThenFindsNothing(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -320,7 +304,6 @@ func TestLinkRemoveOnTheDevInstanceUnlinksBothIssuesAndThenFindsNothing(t *testi
 		{"idReadable", source},
 		{"removed", []detail{{"depends on", []any{[]detail{{"idReadable", partner}}}}}},
 	}, requireDocument(t, got.stdout))
-	// The removal was addressed by the slot the read before it sent, at the end the phrase names.
 	assert.Equal(t, []string{http.MethodGet, http.MethodGet, http.MethodDelete}, sentMethods(dev)[sent:])
 	assert.Regexp(t, `^[0-9]+-[0-9]+t$`, path.Base(path.Dir(path.Dir(dev.sentPaths()[sent+2]))))
 

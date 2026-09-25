@@ -13,10 +13,10 @@ import (
 	"github.com/hakastein/ytrack/internal/render"
 )
 
-// aShell is one of the shells ytrack writes a script for: the name the argument is held to, the way cobra
+// shell is one of the shells ytrack writes a script for: the name the argument is held to, the way cobra
 // writes the script, and the line that loads it. Everything the command says about shells is read off this
 // one list, so a shell named here is named in the help and offered by the protocol without a second edit.
-type aShell struct {
+type shell struct {
 	name     string
 	generate func(root *cobra.Command, stdout io.Writer) error
 	install  string
@@ -24,8 +24,8 @@ type aShell struct {
 
 // Only the writer forms are called. Their …File counterparts are the one thing in cobra's generators that
 // touches the process: they create a file of their own, and nothing here may.
-func shells() []aShell {
-	return []aShell{{
+func shells() []shell {
+	return []shell{{
 		name:     "bash",
 		generate: func(root *cobra.Command, stdout io.Writer) error { return root.GenBashCompletionV2(stdout, true) },
 		install:  "source <(ytrack completion bash)",
@@ -52,8 +52,8 @@ func shellNames() []string {
 	return names
 }
 
-// installs is how the script is loaded, one shell to a line, and it is the only place the help names a shell.
-func installs() string {
+// installHelp is how the script is loaded, one shell to a line, and it is the only place the help names a shell.
+func installHelp() string {
 	var lines strings.Builder
 	for _, shell := range shells() {
 		fmt.Fprintf(&lines, "  %s: %s\n", shell.name, shell.install)
@@ -85,7 +85,7 @@ func newCompletion(stdout io.Writer) *cobra.Command {
 	completion.ValidArgs = shellNames()
 	completion.Short = "Print a shell completion script"
 	completion.Long = "Print a shell completion script. Load it:\n\n" +
-		installs() + "\nFor every new shell, put the same line in the file the shell reads at start. zsh needs " +
+		installHelp() + "\nFor every new shell, put the same line in the file the shell reads at start. zsh needs " +
 		"autoload -U compinit; compinit first, bash needs the bash-completion package."
 	return completion
 }
@@ -96,9 +96,9 @@ func newCompletion(stdout io.Writer) *cobra.Command {
 // and it is the one place a directive other than NoFileComp comes from.
 const completesPathAt = "ytrack.completesPathAt"
 
-// pathIsWrittenAt is the place the annotation names, counted from one, and none where the command takes no
+// pathArgPosition is the place the annotation names, counted from one, and none where the command takes no
 // path at all.
-func pathIsWrittenAt(cmd *cobra.Command) int {
+func pathArgPosition(cmd *cobra.Command) int {
 	place, err := strconv.Atoi(cmd.Annotations[completesPathAt])
 	if err != nil {
 		return 0
@@ -127,7 +127,7 @@ func complete(root *cobra.Command, stdout io.Writer, calledAs string, words []st
 		// --help is cobra's own and joins a command only as it is executed. It is put there first, so that
 		// the line is read with the flags the call itself would be read with.
 		cmd.InitDefaultHelpFlag()
-		written := wordsWritten(cmd, rest)
+		written := parseLine(cmd, rest)
 		switch {
 		case strings.HasPrefix(completing, "-"):
 			suggestions = append(flagsOf(cmd), joinedValues(cmd, completing)...)
@@ -137,7 +137,7 @@ func complete(root *cobra.Command, stdout io.Writer, calledAs string, words []st
 			suggestions = closedSetOf(written.valueOf)
 		default:
 			suggestions = argumentsOf(cmd, written)
-			if written.arguments+1 == pathIsWrittenAt(cmd) {
+			if written.arguments+1 == pathArgPosition(cmd) {
 				// A shell offers file names of its own under every directive but NoFileComp.
 				directive = cobra.ShellCompDirectiveDefault
 			}
@@ -146,9 +146,9 @@ func complete(root *cobra.Command, stdout io.Writer, calledAs string, words []st
 	return printCompletions(stdout, suggestions, completing, calledAs == cobra.ShellCompRequestCmd, directive)
 }
 
-// writtenWords is where the word being completed stands, read off the rest of the command line: the words
+// lineState is where the word being completed stands, read off the rest of the command line: the words
 // under the command found, flags and the values of flags among them.
-type writtenWords struct {
+type lineState struct {
 	// How many arguments stand written before the word being completed.
 	arguments int
 	// The word being completed is the value of the flag written before it, and not an argument.
@@ -160,11 +160,11 @@ type writtenWords struct {
 	ownFlag bool
 }
 
-// wordsWritten reads the line the way cobra reads it as it runs the call: a flag written as two words takes
+// parseLine reads the line the way cobra reads it as it runs the call: a flag written as two words takes
 // the word after it, one carrying an = takes none, and what is left over are the arguments.
-func wordsWritten(cmd *cobra.Command, words []string) writtenWords {
+func parseLine(cmd *cobra.Command, words []string) lineState {
 	ownFlags := cmd.LocalNonPersistentFlags()
-	var written writtenWords
+	var written lineState
 	for index := 0; index < len(words); index++ {
 		word := words[index]
 		if word == "--" {
@@ -172,7 +172,7 @@ func wordsWritten(cmd *cobra.Command, words []string) writtenWords {
 			written.arguments += len(words) - index - 1
 			return written
 		}
-		isFlag, flag, takesTheNextWord := aFlagWritten(cmd, word)
+		isFlag, flag, takesTheNextWord := parseFlagWord(cmd, word)
 		switch {
 		case !isFlag:
 			written.arguments++
@@ -191,11 +191,11 @@ func wordsWritten(cmd *cobra.Command, words []string) writtenWords {
 	return written
 }
 
-// aFlagWritten reads one word of the line as cobra's own Find reads it: whether the word is a flag, which flag
+// parseFlagWord reads one word of the line as cobra's own Find reads it: whether the word is a flag, which flag
 // of the command it names, and whether the value of that flag is the word after it. A word carrying an = carries
 // its value with it, a flag the command does not have is read as taking one, and a shorthand takes the word
 // after it only where it stands on its own.
-func aFlagWritten(cmd *cobra.Command, word string) (isFlag bool, flag *pflag.Flag, takesTheNextWord bool) {
+func parseFlagWord(cmd *cobra.Command, word string) (isFlag bool, flag *pflag.Flag, takesTheNextWord bool) {
 	switch {
 	case strings.HasPrefix(word, "--"):
 		name, _, carriesItsValue := strings.Cut(word[2:], "=")
@@ -267,7 +267,7 @@ func flagsOf(cmd *cobra.Command) []string {
 // argumentsOf is what may stand where the caller is completing: the values of a closed set, where the command
 // names one and takes an argument at that place, and the commands under it, which stand right after its own
 // name and nowhere else. An identifier is never among them — no TAB of a shell sends a request.
-func argumentsOf(cmd *cobra.Command, written writtenWords) []string {
+func argumentsOf(cmd *cobra.Command, written lineState) []string {
 	var suggestions []string
 	if takesAnArgumentAt(cmd, written.arguments) {
 		suggestions = append(suggestions, cmd.ValidArgs...)
@@ -286,9 +286,6 @@ func argumentsOf(cmd *cobra.Command, written writtenWords) []string {
 	return suggestions
 }
 
-// takesAnArgumentAt asks the very judge of the call whether a word may stand at that place. Every command of
-// ytrack counts its arguments and reads none of them — cobra.ExactArgs and nothing else — so words standing in
-// for the ones written answer the question.
 func takesAnArgumentAt(cmd *cobra.Command, place int) bool {
 	return cmd.ValidateArgs(make([]string, place+1)) == nil
 }

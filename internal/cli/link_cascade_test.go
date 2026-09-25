@@ -12,18 +12,15 @@ import (
 // of them is printed as; the order they stand in is the server's own and no scenario reads anything into it.
 func partnersUnder(t *testing.T, stdout, phrase string) []string {
 	t.Helper()
-	slot := nodeAt(t, requireMapping(t, "stdout", stdout), "links", phrase)
-	require.Equal(t, yaml.SequenceNode, slot.Kind, "stdout: %q", stdout)
-	readable := make([]string, 0, len(slot.Content))
-	for _, record := range slot.Content {
+	link := nodeAt(t, requireMapping(t, "stdout", stdout), "links", phrase)
+	require.Equal(t, yaml.SequenceNode, link.Kind, "stdout: %q", stdout)
+	readable := make([]string, 0, len(link.Content))
+	for _, record := range link.Content {
 		readable = append(readable, nodeAt(t, record, "idReadable").Value)
 	}
 	return readable
 }
 
-// An issue has one parent and no more, so writing a second one takes it away from the first rather than
-// standing beside it. Nothing in the call names the link that goes away, and the document says it went: what a
-// write is answered with is the whole of the issue's links afterwards, not the slot the call wrote in.
 func TestLinkAddOfTheDevInstanceTakesASubtaskFromItsFormerParent(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -131,8 +128,6 @@ func TestLinkRemoveOfTheDevInstanceLeavesTheDuplicateWhereTheWorkflowPutIt(t *te
 	assert.Equal(t, "Duplicate", stateOf(t, dev, duplicate))
 }
 
-// stateOf is the State the polygon holds the issue in, which is where a workflow's doing is read and where no
-// document of a link has it.
 func stateOf(t *testing.T, dev *upstream, issue string) string {
 	t.Helper()
 	got := runWith(t, dev.env(), "issue", "show", issue, "--fields", "customFields", "--comments=0")

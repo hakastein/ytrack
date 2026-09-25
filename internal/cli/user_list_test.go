@@ -52,8 +52,6 @@ type userListing struct {
 	Users     []map[string]any `yaml:"users"`
 }
 
-// requireUserListing reads back what user list printed and holds the counts to the records, which is as far as a
-// test of the polygon can hold them.
 func requireUserListing(t *testing.T, got outcome) userListing {
 	t.Helper()
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
@@ -85,7 +83,7 @@ func TestUserListTakesItsSearchFromTheQueryFlagAlone(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -110,7 +108,7 @@ func TestUserListRefusesALimitItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), slices.Concat([]string{"user", "list", "--query", ""}, tc.flags)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -131,7 +129,7 @@ func TestUserListHelpNamesTheDefaultFieldsAndTheQueryFlag(t *testing.T) {
 // stays in the row and email does not appear.
 func TestUserListAddsFieldsToTheDefaultOfTheList(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, `[{"id":"1-1","fullName":"admin","$type":"User","banned":false,"login":"admin"}]`))
+	server := serve(t, respondWith(http.StatusOK, `[{"id":"1-1","fullName":"admin","$type":"User","banned":false,"login":"admin"}]`))
 
 	got := runWith(t, server.env(), "user", "list", "--query", "adm", "--fields", "+id")
 
@@ -147,7 +145,7 @@ func TestUserListRefusesFieldsThatDoNotParse(t *testing.T) {
 
 	got := runWith(t, server.env(), "user", "list", "--query", "adm", "--fields", "+")
 
-	assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 	assert.Empty(t, server.requests())
 }
 
@@ -164,7 +162,7 @@ func TestUserListSendsTheSearchTheServerMustReadBack(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, listedUsers))
+			server := serve(t, respondWith(http.StatusOK, listedUsers))
 
 			got := runWith(t, server.env(), "user", "list", "--query", tc.search)
 
@@ -195,7 +193,7 @@ func TestUserListSearchesForATextThatLooksLikeAFlag(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, listedUsers))
+			server := serve(t, respondWith(http.StatusOK, listedUsers))
 
 			got := runWith(t, server.env(), slices.Concat([]string{"user", "list"}, tc.flag)...)
 
@@ -211,7 +209,7 @@ func TestUserListSearchesForATextThatLooksLikeAFlag(t *testing.T) {
 func TestUserListCountsTheUsersWhenTheyFillTheLimit(t *testing.T) {
 	t.Parallel()
 	server := serve(t, countedBy(`[`+listedAdmin+`]`,
-		answer(http.StatusOK, `[{"id":"1-1","$type":"User"},{"id":"1-2","$type":"User"},{"id":"1-3","$type":"User"}]`)))
+		respondWith(http.StatusOK, `[{"id":"1-1","$type":"User"},{"id":"1-2","$type":"User"},{"id":"1-3","$type":"User"}]`)))
 
 	got := runWith(t, server.env(), "user", "list", "--query", "a", "--limit", "1")
 
@@ -224,11 +222,11 @@ func TestUserListCountsTheUsersWhenTheyFillTheLimit(t *testing.T) {
 func TestUserListRefusesWhenTheCountFails(t *testing.T) {
 	t.Parallel()
 	const said = `{"error":"server_error","error_description":"java.lang.NullPointerException"}`
-	server := serve(t, countedBy(`[`+listedAdmin+`]`, answer(http.StatusInternalServerError, said)))
+	server := serve(t, countedBy(`[`+listedAdmin+`]`, respondWith(http.StatusInternalServerError, said)))
 
 	got := runWith(t, server.env(), "user", "list", "--query", "a", "--limit", "1")
 
-	want := refusal{
+	want := faultDocument{
 		code: "upstream_failed",
 		details: []detail{
 			{"request", userListRequest(server.url, "id", "-1", "a")},
@@ -245,12 +243,12 @@ func TestUserListRefusesWhenTheCountFails(t *testing.T) {
 // would be of something else, so the refusal is of the users it names.
 func TestUserListRefusesMoreUsersThanTheLimit(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, listedUsers))
+	server := serve(t, respondWith(http.StatusOK, listedUsers))
 
 	got := runWith(t, server.env(), "user", "list", "--query", "a", "--limit", "1")
 
-	want := refusal{
-		code:    "upstream_lied",
+	want := faultDocument{
+		code:    "upstream_invalid",
 		details: []detail{{"limit", 1}, {"returned", 2}},
 	}
 	assert.Equal(t, want, requireRefusal(t, got))
@@ -259,13 +257,13 @@ func TestUserListRefusesMoreUsersThanTheLimit(t *testing.T) {
 
 // Fewer users counted than arrived is the selection changing between the two requests, and the document has no
 // way to say so: total below returned would print truncated: false over a page that was cut.
-func TestUserListRefusesACountBelowTheUsersThatArrived(t *testing.T) {
+func TestUserListRefusesACountBelowTheUsersReceived(t *testing.T) {
 	t.Parallel()
-	server := serve(t, countedBy(`[`+listedAdmin+`]`, answer(http.StatusOK, `[]`)))
+	server := serve(t, countedBy(`[`+listedAdmin+`]`, respondWith(http.StatusOK, `[]`)))
 
 	got := runWith(t, server.env(), "user", "list", "--query", "a", "--limit", "1")
 
-	want := refusal{
+	want := faultDocument{
 		code:    "upstream_failed",
 		details: []detail{{"total", 0}, {"returned", 1}},
 	}
@@ -296,8 +294,6 @@ func TestUserListFindsTheLimitedUserOfTheDevInstanceByTheStartOfTheFullName(t *t
 	assert.Len(t, dev.requests(), 1)
 }
 
-// An email address is no way to a login here either, and an empty answer is the proof that the server read the
-// query at all: without it every user of the polygon would have arrived.
 func TestUserListFindsNoUserOfTheDevInstanceByTheDomainOfAnEmail(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -345,7 +341,6 @@ func TestUserListCountsTheUsersOfTheDevInstanceBeyondTheLimit(t *testing.T) {
 	printed := requireUserListing(t, got)
 	assert.Equal(t, 1, printed.Returned)
 	assert.True(t, printed.Truncated)
-	// admin, dev.limited, dev.member and guest are the polygon's own; whom else it holds is not.
 	assert.GreaterOrEqual(t, printed.Total, 4)
 	assert.Equal(t, searchingQueries("", "1"), dev.sentQueries())
 }
@@ -371,7 +366,7 @@ func TestUserListRefusesANameTheSchemasOfTheDevInstanceDoNotDeclare(t *testing.T
 
 	got := runWith(t, dev.env(), "user", "list", "--query", "adm", "--fields", "login,bogus")
 
-	want := refusal{
+	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{
 			{"request", userListRequest(dev.url, "login,bogus", "50", "adm")},

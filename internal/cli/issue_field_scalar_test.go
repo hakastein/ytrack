@@ -48,12 +48,12 @@ func scalarProject() string {
 		fields = append(fields, writableField{id: row.binding(), kind: kindOfBinding(row.valueType),
 			name: row.name, valueType: row.valueType, canBeEmpty: true})
 	}
-	return projectToWrite(fields...)
+	return projectResponse(fields...)
 }
 
 // The field as the new issue comes back holding it, with the value written as the server sends it.
-func (r scalarRow) arrived(value string) arrivedField {
-	return arrivedField{name: r.name, valueType: r.valueType, ordinal: strconv.Itoa(len(r.name)),
+func (r scalarRow) received(value string) receivedField {
+	return receivedField{name: r.name, valueType: r.valueType, ordinal: strconv.Itoa(len(r.name)),
 		binding: r.binding(), value: value}
 }
 
@@ -93,7 +93,7 @@ type invalidField struct {
 
 // requireInvalidFields holds a refusal's invalid detail to the fields and values it names, in the order they
 // were given, without holding the reason named beside each to its own wording.
-func requireInvalidFields(t *testing.T, found refusal, want []invalidField) {
+func requireInvalidFields(t *testing.T, found faultDocument, want []invalidField) {
 	t.Helper()
 	entries, ok := detailNamed(t, found, "invalid").([]any)
 	require.True(t, ok, "invalid: %v", found.details)
@@ -157,7 +157,7 @@ func TestIssueCreateRefusesAScalarValueTheServerWouldRewrite(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := creating(t, answer(http.StatusOK, scalarProject()), noCreation(t))
+			server := creating(t, respondWith(http.StatusOK, scalarProject()), noCreation(t))
 
 			got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x",
 				"--field", tc.field+"="+tc.given)
@@ -194,7 +194,7 @@ func TestIssueCreateNamesEveryValueItCannotSendAtOnce(t *testing.T) {
 	for at := len(refused) - 1; at >= 0; at-- {
 		argv = append(argv, "--field", refused[at].field+"="+refused[at].given)
 	}
-	server := creating(t, answer(http.StatusOK, scalarProject()), noCreation(t))
+	server := creating(t, respondWith(http.StatusOK, scalarProject()), noCreation(t))
 
 	got := runWith(t, server.env(), argv...)
 
@@ -211,7 +211,7 @@ func TestIssueCreateNamesEveryValueItCannotSendAtOnce(t *testing.T) {
 // What the body carries for a value ytrack read itself: the minutes of a period and nothing beside them,
 // the milliseconds of a day at noon UTC and of a moment in the offset it was written in, the number the digits
 // stand for, and text byte for byte.
-func TestIssueCreateWritesAScalarValueAsTheFieldHoldsIt(t *testing.T) {
+func TestIssueCreateWritesAScalarValueAsItsFieldTypeExpects(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
@@ -220,36 +220,36 @@ func TestIssueCreateWritesAScalarValueAsTheFieldHoldsIt(t *testing.T) {
 		// The value the body carries for the field, as JSON.
 		value string
 		// The value the new issue comes back holding, as the server sends it.
-		arrived string
+		received string
 	}{
 		{name: "a period of hours and minutes", field: "Оценка", given: "PT1H30M", value: `{"minutes":90}`,
-			arrived: periodValue(90, "PT1H30M")},
+			received: periodValue(90, "PT1H30M")},
 		{name: "a period of no time at all", field: "Оценка", given: "PT0M", value: `{"minutes":0}`,
-			arrived: periodValue(0, "PT0S")},
+			received: periodValue(0, "PT0S")},
 		{name: "a period of minutes alone", field: "Оценка", given: "PT90M", value: `{"minutes":90}`,
-			arrived: periodValue(90, "PT1H30M")},
+			received: periodValue(90, "PT1H30M")},
 		{name: "a day, which the server keeps at noon UTC", field: "Плановая дата решения", given: "2026-09-16",
-			value: "1789560000000", arrived: "1789560000000"},
+			value: "1789560000000", received: "1789560000000"},
 		{name: "a moment in an offset of its own", field: "Дата начала работы",
-			given: "2026-08-31T03:00:00.123+03:00", value: "1788134400123", arrived: "1788134400123"},
+			given: "2026-08-31T03:00:00.123+03:00", value: "1788134400123", received: "1788134400123"},
 		{name: "a whole number written with leading zeroes", field: "Порядок реализации", given: "007",
-			value: "7", arrived: "7"},
+			value: "7", received: "7"},
 		{name: "a number written with an exponent", field: "Коэффициент", given: "1e3", value: "1000",
-			arrived: "1000"},
-		{name: "a string", field: "Внешний номер", given: "EXT-1", value: `"EXT-1"`, arrived: `"EXT-1"`},
+			received: "1000"},
+		{name: "a string", field: "Внешний номер", given: "EXT-1", value: `"EXT-1"`, received: `"EXT-1"`},
 		{name: "a text holding a carriage return and a CRLF", field: "Примечание",
 			given: "первая\r\nвторая\rтретья", value: `{"text":"первая\r\nвторая\rтретья"}`,
-			arrived: textValue("первая\r\nвторая\rтретья")},
+			received: textValue("первая\r\nвторая\rтретья")},
 		{name: "a text of two lines", field: "Примечание", given: "a\nb", value: `{"text":"a\nb"}`,
-			arrived: textValue("a\nb")},
+			received: textValue("a\nb")},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			row := scalarRowNamed(t, tc.field)
-			held := arrivedFields(row.arrived(tc.arrived))
-			server := creating(t, answer(http.StatusOK, scalarProject()),
-				answer(http.StatusOK, filedIssueHolding("DEV-7", "x", "null", held)))
+			held := receivedFields(row.received(tc.received))
+			server := creating(t, respondWith(http.StatusOK, scalarProject()),
+				respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
 
 			got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x",
 				"--field", tc.field+"="+tc.given)
@@ -265,60 +265,60 @@ func TestIssueCreateWritesAScalarValueAsTheFieldHoldsIt(t *testing.T) {
 // A value ytrack read itself is held against the answer by what the value is rather than by what it was
 // written as: a day is a day whatever moment of it comes back, a number is the number its digits stand for,
 // and a field the write filled and the answer holds nothing in is the write disagreeing with itself.
-func TestIssueCreateHoldsAScalarAnswerAgainstTheValueItWrote(t *testing.T) {
+func TestIssueCreateChecksAScalarResponseAgainstTheValueItWrote(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		field   string
-		given   string
-		arrived string
+		name     string
+		field    string
+		given    string
+		received string
 		// What the refusal names, empty where the answer agrees with the write.
 		mismatch []detail
 	}{
 		{
 			name: "a day the server keeps at noon of that day", field: "Плановая дата решения",
-			given: "2026-09-16", arrived: "1789560000000",
+			given: "2026-09-16", received: "1789560000000",
 		},
 		{
 			name: "a day the server keeps at another day", field: "Плановая дата решения", given: "2026-09-16",
-			arrived:  "1789646400000",
-			mismatch: []detail{{"field", "Плановая дата решения"}, {"written", "2026-09-16"}, {"arrived", "2026-09-17"}},
+			received: "1789646400000",
+			mismatch: []detail{{"field", "Плановая дата решения"}, {"expected", "2026-09-16"}, {"actual", "2026-09-17"}},
 		},
 		{
 			name: "a moment the server keeps in UTC", field: "Дата начала работы",
-			given: "2026-08-31T03:00:00.123+03:00", arrived: "1788134400123",
+			given: "2026-08-31T03:00:00.123+03:00", received: "1788134400123",
 		},
 		{
 			name: "a moment the server keeps a millisecond off", field: "Дата начала работы",
-			given: "2026-08-31T03:00:00.123+03:00", arrived: "1788134400124",
+			given: "2026-08-31T03:00:00.123+03:00", received: "1788134400124",
 			mismatch: []detail{{"field", "Дата начала работы"},
-				{"written", "2026-08-31T03:00:00.123+03:00"}, {"arrived", "2026-08-31T00:00:00.124Z"}},
+				{"expected", "2026-08-31T03:00:00.123+03:00"}, {"actual", "2026-08-31T00:00:00.124Z"}},
 		},
 		{
 			name: "a number the server keeps to the digits a float64 holds", field: "Коэффициент",
-			given: "123456789.123456789", arrived: "123456789.12345679",
+			given: "123456789.123456789", received: "123456789.12345679",
 		},
 		{
-			name: "a number the server keeps as another", field: "Коэффициент", given: "1.5", arrived: "1.75",
-			mismatch: []detail{{"field", "Коэффициент"}, {"written", "1.5"}, {"arrived", "1.75"}},
+			name: "a number the server keeps as another", field: "Коэффициент", given: "1.5", received: "1.75",
+			mismatch: []detail{{"field", "Коэффициент"}, {"expected", "1.5"}, {"actual", "1.75"}},
 		},
 		{
-			name: "a period the server kept nothing of", field: "Оценка", given: "PT1H30M", arrived: "null",
-			mismatch: []detail{{"field", "Оценка"}, {"written", "PT1H30M"}, {"arrived", nil}},
+			name: "a period the server kept nothing of", field: "Оценка", given: "PT1H30M", received: "null",
+			mismatch: []detail{{"field", "Оценка"}, {"expected", "PT1H30M"}, {"actual", nil}},
 		},
 		{
 			name: "a period the server rounded to the hour", field: "Оценка", given: "PT1H30M",
-			arrived:  periodValue(60, "PT1H"),
-			mismatch: []detail{{"field", "Оценка"}, {"written", "PT1H30M"}, {"arrived", "PT1H"}},
+			received: periodValue(60, "PT1H"),
+			mismatch: []detail{{"field", "Оценка"}, {"expected", "PT1H30M"}, {"actual", "PT1H"}},
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			row := scalarRowNamed(t, tc.field)
-			held := arrivedFields(row.arrived(tc.arrived))
-			server := creating(t, answer(http.StatusOK, scalarProject()),
-				answer(http.StatusOK, filedIssueHolding("DEV-7", "x", "null", held)))
+			held := receivedFields(row.received(tc.received))
+			server := creating(t, respondWith(http.StatusOK, scalarProject()),
+				respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
 
 			got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x",
 				"--field", tc.field+"="+tc.given)
@@ -328,8 +328,8 @@ func TestIssueCreateHoldsAScalarAnswerAgainstTheValueItWrote(t *testing.T) {
 				assert.Empty(t, got.stderr)
 				return
 			}
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", creationRequest(server.url, askedIssueFields)},
 					{"issue", "DEV-7"},
@@ -360,13 +360,13 @@ func TestIssueShowRefusesAScalarOfAnotherShape(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			body := issueWithFields(arrivedField{name: "Field", valueType: tc.valueType, value: tc.value})
-			server := serve(t, answer(http.StatusOK, body))
+			body := issueWithFields(receivedField{name: "Field", valueType: tc.valueType, value: tc.value})
+			server := serve(t, respondWith(http.StatusOK, body))
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "customFields")
 
 			found := requireRefusal(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 		})
 	}
 }

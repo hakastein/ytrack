@@ -10,9 +10,6 @@ import (
 	"unicode/utf8"
 )
 
-// YAML quotes every string value, with no heuristic for when quoting is needed: that
-// is what keeps null, "" and [] apart. A key is bare, so it has to be ytrack's own name.
-// Prose is the one value written otherwise, and what is prose was settled before the node was built.
 type YAML struct{}
 
 func (YAML) Render(w io.Writer, n *Node) error {
@@ -57,8 +54,8 @@ func writePairs(doc *strings.Builder, pairs []Pair, indent string, indentFirst b
 // grep takes a record whole; anything else stays on the line of its key.
 func writeValue(doc *strings.Builder, key string, n *Node, indent string) error {
 	switch {
-	case n != nil && n.kind == Prose:
-		writeProse(doc, n.text, indent)
+	case n != nil && n.kind == Text:
+		writeTextBlock(doc, n.text, indent)
 		return nil
 	case n != nil && n.kind == Map && len(n.pairs) > 0:
 		doc.WriteByte('\n')
@@ -67,10 +64,8 @@ func writeValue(doc *strings.Builder, key string, n *Node, indent string) error 
 		doc.WriteByte('\n')
 		for _, item := range n.items {
 			doc.WriteString(indent + "- ")
-			// A literal block stands on lines of its own, so an item holding prose anywhere under it is
-			// written as a block mapping instead of as one flow record on a line.
-			if holdsProse(item) {
-				if err := writeRecord(doc, key, item, indent+"  "); err != nil {
+			if containsText(item) {
+				if err := writeListItem(doc, key, item, indent+"  "); err != nil {
 					return err
 				}
 				continue
@@ -88,29 +83,26 @@ func writeValue(doc *strings.Builder, key string, n *Node, indent string) error 
 	return err
 }
 
-// writeRecord is a list item as a block mapping: its first key stands after the dash, the rest under it.
-// Prose is produced under a key and never as an item of its own, so an item that is prose itself is a
-// mistake of the caller rather than a shape to print.
-func writeRecord(doc *strings.Builder, key string, n *Node, indent string) error {
+func writeListItem(doc *strings.Builder, key string, n *Node, indent string) error {
 	if n.kind != Map || len(n.pairs) == 0 {
 		return fmt.Errorf("render: an item under %s is prose rather than a record holding it", Quote(key))
 	}
 	return writePairs(doc, n.pairs, indent, false)
 }
 
-func holdsProse(n *Node) bool {
+func containsText(n *Node) bool {
 	if n == nil {
 		return false
 	}
-	if n.kind == Prose {
+	if n.kind == Text {
 		return true
 	}
 	for _, pair := range n.pairs {
-		if holdsProse(pair.Value) {
+		if containsText(pair.Value) {
 			return true
 		}
 	}
-	return slices.ContainsFunc(n.items, holdsProse)
+	return slices.ContainsFunc(n.items, containsText)
 }
 
 // key names the pair the value stands under in an error.
@@ -206,11 +198,8 @@ func checkMappingKey(pair Pair, seen map[string]bool) error {
 	return nil
 }
 
-// A literal block carries prose byte for byte and reads as the lines it is. Text a block cannot carry goes
-// to the writer of double-quoted strings, which carries it without loss too: written raw it would break the
-// document or change the text in silence (ADR-0003).
-func writeProse(doc *strings.Builder, text, indent string) {
-	if !blockCanCarry(text) {
+func writeTextBlock(doc *strings.Builder, text, indent string) {
+	if !canUseLiteralBlock(text) {
 		doc.WriteByte(' ')
 		writeQuoted(doc, text)
 		doc.WriteByte('\n')
@@ -266,7 +255,7 @@ func chomping(text string) string {
 // A literal block carries every rune raw, so it may hold only what a reader reads back as that rune: tab,
 // line feed and the printable runes, less NEL, LS and PS, which a YAML 1.1 reader takes for line breaks,
 // and less the BOM, which may not stand inside a document. A byte that is no UTF-8 is no rune at all.
-func blockCanCarry(text string) bool {
+func canUseLiteralBlock(text string) bool {
 	for at := 0; at < len(text); {
 		r, size := utf8.DecodeRuneInString(text[at:])
 		at += size

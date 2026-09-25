@@ -10,9 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The group of the polygon the one user who is neither an administrator nor shut out of every project stands
-// in, which is the group a scenario shares a tag with when it wants that token to hang it.
-const polygonMembers = "Участники полигона"
+const devInstanceMembers = "Участники полигона"
 
 // The third flag is refused an empty value where the other two are, and for the same reason: YouTrack keeps
 // no group under an empty name, so nothing is sent.
@@ -22,7 +20,7 @@ func TestTagCreateRefusesAGroupOfNoNameForTagging(t *testing.T) {
 
 	got := runWith(t, server.env(), "tag", "create", "--name", "карта", "--taggable-by", "")
 
-	want := refusal{code: "bad_usage"}
+	want := faultDocument{code: "bad_usage"}
 	assert.Equal(t, want, requireRefusal(t, got))
 	assert.Empty(t, server.requests())
 }
@@ -30,10 +28,10 @@ func TestTagCreateRefusesAGroupOfNoNameForTagging(t *testing.T) {
 // The names of the groups become the third set of the body, which is the one YouTrack reads the right to
 // hang a tag out of. A group that may hang the tag and one that is shown it are written apart, since the two
 // rights are apart on the server.
-func TestTagCreateWritesTheGroupsThatMayHangTheTag(t *testing.T) {
+func TestTagCreateWritesTheGroupsThatMayAddTheTag(t *testing.T) {
 	t.Parallel()
 	const name = "карта"
-	server := sharingATag(t, groupsOfTheInstance(), answer(http.StatusOK, taggableTag(name,
+	server := sharingATag(t, groupsOfTheInstance(), respondWith(http.StatusOK, taggableTag(name,
 		[]sharedGroup{{id: "6-1", name: "DEVELOPMENT Team"}},
 		[]sharedGroup{{id: "6-1", name: "DEVELOPMENT Team"}, {id: "101-0", name: `ООО "РОМАШКА", Москва`}})))
 
@@ -61,9 +59,9 @@ func TestTagCreateWritesTheGroupsThatMayHangTheTag(t *testing.T) {
 
 // A tag nobody may hang is the tag the flag was never written for: the set stays out of the body, and
 // YouTrack is left to settle it, exactly as the other two are.
-func TestTagCreateWritesNoTagSharingWhereNobodyMayHangIt(t *testing.T) {
+func TestTagCreateWritesNoTagSharingWhereNobodyMayAddIt(t *testing.T) {
 	t.Parallel()
-	server := sharingATag(t, groupsOfTheInstance(), answer(http.StatusOK, sharedTag("карта",
+	server := sharingATag(t, groupsOfTheInstance(), respondWith(http.StatusOK, sharedTag("карта",
 		[]sharedGroup{{id: "6-1", name: "DEVELOPMENT Team"}}, nil)))
 
 	got := runWith(t, server.env(), "tag", "create", "--name", "карта", "--visible-for", "DEVELOPMENT Team")
@@ -81,7 +79,7 @@ func TestTagCreateRefusesEveryGroupOfTheThreeFlagsAtOnce(t *testing.T) {
 	got := runWith(t, server.env(), "tag", "create", "--name", "карта",
 		"--visible-for", "Нет", "--taggable-by", "Тоже")
 
-	want := refusal{
+	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{
 			{"request", groupsRequest(server.url)},
@@ -98,7 +96,7 @@ func TestTagCreateRefusesEveryGroupOfTheThreeFlagsAtOnce(t *testing.T) {
 // The third set is held against what went out the way the other two are: a 200 says the server took the
 // body, not that the groups it kept are the groups that were written, and a tag anyone may hang where the call
 // named one group is a refusal over a tag that by then exists.
-func TestTagCreateHoldsTheTagSharingItWroteAgainstTheOneThatCameBack(t *testing.T) {
+func TestTagCreateChecksTheTagSharingItWroteAgainstTheOneThatCameBack(t *testing.T) {
 	t.Parallel()
 	const name = "карта"
 	tests := []struct {
@@ -115,8 +113,8 @@ func TestTagCreateHoldsTheTagSharingItWroteAgainstTheOneThatCameBack(t *testing.
 			kept: []sharedGroup{{id: "6-1", name: "DEVELOPMENT Team"}},
 			mismatch: []any{[]detail{
 				{"field", "tagSharingSettings.permittedGroups"},
-				{"written", []any{"6-1", "101-0"}},
-				{"arrived", []any{"6-1"}},
+				{"expected", []any{"6-1", "101-0"}},
+				{"actual", []any{"6-1"}},
 			}},
 		},
 	}
@@ -124,7 +122,7 @@ func TestTagCreateHoldsTheTagSharingItWroteAgainstTheOneThatCameBack(t *testing.
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := sharingATag(t, groupsOfTheInstance(),
-				answer(http.StatusOK, taggableTag(name, nil, tc.kept)))
+				respondWith(http.StatusOK, taggableTag(name, nil, tc.kept)))
 
 			got := runWith(t, server.env(), "tag", "create", "--name", name,
 				"--taggable-by", "DEVELOPMENT Team", "--taggable-by", `ООО "РОМАШКА", Москва`)
@@ -134,7 +132,7 @@ func TestTagCreateHoldsTheTagSharingItWroteAgainstTheOneThatCameBack(t *testing.
 				return
 			}
 			found := requireUncertainty(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Equal(t, tc.mismatch, detailNamed(t, found, "mismatch"))
 			assert.Empty(t, got.stdout)
 		})
@@ -146,27 +144,22 @@ func TestTagCreateHoldsTheTagSharingItWroteAgainstTheOneThatCameBack(t *testing.
 func taggableTag(name string, read, hang []sharedGroup) string {
 	return `{"$type":"Tag","name":` + asJSON(name) + `,"owner":{"$type":"User","login":"admin"},` +
 		`"readSharingSettings":` + sharingOf(read) + `,"updateSharingSettings":` + sharingOf(nil) +
-		`,"tagSharingSettings":` + taggingOf(hang) + `}`
+		`,"tagSharingSettings":` + taggableBy(hang) + `}`
 }
 
-// The right to hang a tag against the polygon, with the one token that is neither an
-// administrator nor shut out of the projects: a tag shared with the group that token stands in is one it is
-// shown either way, and whether it may hang the tag turns on --taggable-by and on nothing else. The same
-// listing answers what a token is shown of a tag it does not own — the one place on the polygon where that can
-// be read at all.
 func TestTagAddHangsTheTagAMemberOfThePolygonMayHang(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 	member := []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).member}
-	issue := taggedIssue(t, dev)
+	issue := issueToTag(t, dev)
 	hangs := contractTagName(t) + " hangs"
 	shown := contractTagName(t) + " shown"
 
 	made := runWith(t, dev.env(), "tag", "create", "--name", hangs,
-		"--visible-for", polygonMembers, "--taggable-by", polygonMembers)
+		"--visible-for", devInstanceMembers, "--taggable-by", devInstanceMembers)
 	require.Equal(t, 0, made.code, "stderr: %s", made.stderr)
 	t.Cleanup(func() { removeTag(t, dev.env(), hangs, "admin") })
-	readOnly := runWith(t, dev.env(), "tag", "create", "--name", shown, "--visible-for", polygonMembers)
+	readOnly := runWith(t, dev.env(), "tag", "create", "--name", shown, "--visible-for", devInstanceMembers)
 	require.Equal(t, 0, readOnly.code, "stderr: %s", readOnly.stderr)
 	t.Cleanup(func() { removeTag(t, dev.env(), shown, "admin") })
 
@@ -190,15 +183,12 @@ func TestTagAddHangsTheTagAMemberOfThePolygonMayHang(t *testing.T) {
 	assert.Equal(t, []string{hangs}, tagsOfTheIssue(t, dev, issue), "a tag the token may not hang was hung")
 }
 
-// The member of the polygon may not read the groups at all — group-read is a right of the
-// administrator — so the third flag is out of that token's reach exactly as the other two are, and no tag is
-// made.
-func TestTagCreateRefusesTheMemberTheGroupsOfThePolygon(t *testing.T) {
+func TestTagCreateRefusesTheMemberTheGroupsOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 	member := []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).member}
 
-	got := runWith(t, member, "tag", "create", "--name", contractTagName(t), "--taggable-by", polygonMembers)
+	got := runWith(t, member, "tag", "create", "--name", contractTagName(t), "--taggable-by", devInstanceMembers)
 
 	found := requireRefusal(t, got)
 	assert.Equal(t, "denied", found.code)

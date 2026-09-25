@@ -120,7 +120,7 @@ func parseOwner(arg string) (owner, *diag.Fault) {
 	case articleForm:
 		return owner{kind: articleOwner, id: arg}, nil
 	default:
-		return owner{}, refusedID(arg, shape)
+		return owner{}, invalidIDFault(arg, shape)
 	}
 }
 
@@ -133,7 +133,7 @@ func parseIssueID(arg string) (string, *diag.Fault) {
 		return "", fault
 	}
 	if found.kind != issueOwner {
-		return "", refusedID(arg, articleForm)
+		return "", invalidIDFault(arg, articleForm)
 	}
 	return found.id, nil
 }
@@ -147,7 +147,7 @@ func parseArticleID(arg string) (string, *diag.Fault) {
 		return "", fault
 	}
 	if found.kind != articleOwner {
-		return "", refusedID(arg, issueForm)
+		return "", invalidIDFault(arg, issueForm)
 	}
 	return found.id, nil
 }
@@ -164,64 +164,49 @@ func (c childID) String() string {
 	return c.id
 }
 
-// parseChildID is where a command that works on one child of an issue or an article settles the form of the id
-// it was given, before anything is sent. The generated client resolves the segment against the server, so a
-// string of another form would reach another endpoint altogether: an empty one turns a write into the
-// collection, which adds a second comment rather than changing the one that was named, and ".." turns it into
-// the owner itself. noun is what the child is called and hangsFrom what it hangs from, which are the two
-// words the refusal sends the caller back to: a comment hangs from either entity that carries a readable id,
-// a work item from an issue and from nothing else.
-//
-// Leading zeros pass: the server matches the id of a child exactly and answers 404 for 7-02 where 7-2 stands,
-// so nothing here has to guess at what the instance numbers its entities with.
-func parseChildID(noun, hangsFrom, arg string) (childID, *diag.Fault) {
+func parseChildID(noun, ownerNoun, arg string) (childID, *diag.Fault) {
 	if !isInternalID(arg) {
 		message := fmt.Sprintf("%s id %s is not an internal id, which is digits, a dash and digits, as in "+
 			"7-12: the %s is addressed by the one ytrack prints for it under the %ss of %s it hangs from",
-			noun, render.Quote(arg), noun, noun, hangsFrom)
+			noun, render.Quote(arg), noun, noun, ownerNoun)
 		return childID{}, &diag.Fault{Code: diag.BadUsage, Message: message}
 	}
 	return childID{id: arg}, nil
 }
 
-// addressed is a readable id an answer gave, already held to the form ytrack sends. Every request that carries
-// a readable id in its path takes one of these in place of a string, so no such request can be built out of an
-// id nothing held to a form: addressedBy is the one place that makes one.
-type addressed struct {
+type readableID struct {
 	readable string
 }
 
 // The id as a document prints it and as a refusal names the entity by.
-func (a addressed) String() string {
+func (a readableID) String() string {
 	return a.readable
 }
 
-// addressedBy is the readable id a read gave, held to the form ytrack sends before the write that follows goes
+// readableIDOf is the readable id a read gave, held to the form ytrack sends before the write that follows goes
 // out: what arrived becomes a path segment, and "..", a slash or an empty string would reach an endpoint other
 // than the entity that was read. what names the write in the refusal.
-func addressedBy(a answer, kind ownerKind, what string) (addressed, *diag.Fault) {
-	return addressedIn(a, a.objects[0], kind, what)
+func readableIDOf(a decodedResponse, kind ownerKind, what string) (readableID, *diag.Fault) {
+	return readableIDAt(a, a.objects[0], kind, what)
 }
 
-// addressedIn is addressedBy for a readable id that stands under a name of the answer rather than at its root:
-// a work item carries none of its own, and the issue it hangs from is what a write about it is addressed by.
-func addressedIn(a answer, holder map[string]any, kind ownerKind, what string) (addressed, *diag.Fault) {
+func readableIDAt(a decodedResponse, holder map[string]any, kind ownerKind, what string) (readableID, *diag.Fault) {
 	readable, isText := holder[idReadableKey].(string)
 	if !isText {
 		message := fmt.Sprintf("the readable id of the %s arrived as something other than a string", kind)
-		return addressed{}, shapeFailure(a.response, a.body, message)
+		return readableID{}, shapeFailure(a.httpResponse, a.body, message)
 	}
 	if found, fault := parseOwner(readable); fault != nil || found.kind != kind {
 		message := fmt.Sprintf("the %s arrived with %s for a readable id, and %s is addressed by the readable "+
 			"id the server gave", kind, render.Quote(readable), what)
-		return addressed{}, shapeFailure(a.response, a.body, message)
+		return readableID{}, shapeFailure(a.httpResponse, a.body, message)
 	}
-	return addressed{readable: readable}, nil
+	return readableID{readable: readable}, nil
 }
 
 // One text carries every form: id "<argument>" <reason>, so a refusal names what the string is rather than
 // only that it is not what the command wanted.
-func refusedID(arg string, wrong form) *diag.Fault {
+func invalidIDFault(arg string, wrong form) *diag.Fault {
 	reason := notAReadableID
 	marker, written := articleMarkerOf(arg)
 	switch {
@@ -261,24 +246,24 @@ func parseLogin(arg string) (string, *diag.Fault) {
 	// The generated client resolves "./users/<login>" against the server, so "" and "." would ask for the
 	// collection of users and ".." for /api/.
 	case arg == "", arg == ".", arg == "..":
-		return "", refusedLogin(arg, "would reach an endpoint other than the one user it names")
+		return "", invalidLoginFault(arg, "would reach an endpoint other than the one user it names")
 	// A space makes the string a name rather than a login, and the way from a name to a login is worth naming.
 	case strings.ContainsFunc(arg, unicode.IsSpace):
-		return "", refusedLogin(arg, "holds a space, which no login does, and "+findByName(arg))
+		return "", invalidLoginFault(arg, "holds a space, which no login does, and "+findByName(arg))
 	case isInternalID(arg):
-		return "", refusedLogin(arg, "is the internal id of a user, which the server reads in place of a login")
+		return "", invalidLoginFault(arg, "is the internal id of a user, which the server reads in place of a login")
 	case isHubID(arg):
-		return "", refusedLogin(arg, "is a Hub id, which the server reads in place of a login")
+		return "", invalidLoginFault(arg, "is a Hub id, which the server reads in place of a login")
 	// Only in lower case: ME and Me the server has no user for.
 	case arg == "me":
-		return "", refusedLogin(arg, "is the owner of the token to the server, not a login of its own")
+		return "", invalidLoginFault(arg, "is the owner of the token to the server, not a login of its own")
 	}
 	return arg, nil
 }
 
 // One text carries every form: login "<argument>" <reason>, so a refusal names what was addressed whatever it
 // was taken for.
-func refusedLogin(arg, reason string) *diag.Fault {
+func invalidLoginFault(arg, reason string) *diag.Fault {
 	return &diag.Fault{Code: diag.BadUsage, Message: fmt.Sprintf("login %s %s", render.Quote(arg), reason)}
 }
 

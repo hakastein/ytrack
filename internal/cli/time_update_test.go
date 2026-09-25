@@ -62,7 +62,7 @@ func TestTimeUpdateRefusesWhatItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"time", "update", "DEV-1", "199-6"}, tc.argv...)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -131,7 +131,7 @@ func TestTimeUpdateRefusesAnIDThatIsNoInternalID(t *testing.T) {
 // the request goes out as it was written, and the answer is the server's word about an id it has none of.
 func TestTimeUpdateSendsAnIDWithALeadingZeroAsItWasWritten(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusNotFound, entityNotFound("199-06")))
+	server := serve(t, respondWith(http.StatusNotFound, entityNotFound("199-06")))
 
 	got := runWith(t, server.env(), "time", "update", "DEV-1", "199-06", "--text", "x")
 
@@ -190,7 +190,7 @@ func TestTimeUpdateSendsTheNamedPartsAlone(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := writingTime(t, answer(http.StatusOK, tc.answered.json()))
+			server := writingTime(t, respondWith(http.StatusOK, tc.answered.json()))
 
 			got := runWith(t, server.env(), append([]string{"time", "update", "DEV-1", "199-6"}, tc.argv...)...)
 
@@ -208,8 +208,8 @@ func TestTimeUpdateSendsTheNamedPartsAlone(t *testing.T) {
 func TestTimeUpdateReadsTheTypesOfTheProjectBeforeTheWrite(t *testing.T) {
 	t.Parallel()
 	server := writingTimeOfAType(t,
-		answer(http.StatusOK, devIssueWithWorkItemTypes()),
-		answer(http.StatusOK, answeredWorkItem{
+		respondWith(http.StatusOK, devIssueWithWorkItemTypes()),
+		respondWith(http.StatusOK, answeredWorkItem{
 			workType: `{"$type":"WorkItemType","id":"` + workItemTypeID(1) + `","name":"Тестирование"}`,
 		}.json()))
 
@@ -239,13 +239,13 @@ func TestTimeUpdateRefusesAPartTheServerDidNotEmpty(t *testing.T) {
 			name:     "the type",
 			emptied:  "type",
 			answered: answeredWorkItem{workType: `{"$type":"WorkItemType","name":"Разработка"}`},
-			mismatch: []any{[]detail{{"field", "type"}, {"written", nil}, {"arrived", "Разработка"}}},
+			mismatch: []any{[]detail{{"field", "type"}, {"expected", nil}, {"actual", "Разработка"}}},
 		},
 		{
 			name:     "the text",
 			emptied:  "text",
 			answered: answeredWorkItem{text: asJSON("Разбор полигона")},
-			mismatch: []any{[]detail{{"field", "text"}, {"written", nil}, {"arrived", "Разбор полигона"}}},
+			mismatch: []any{[]detail{{"field", "text"}, {"expected", nil}, {"actual", "Разбор полигона"}}},
 		},
 		{
 			// An empty string is not an empty text here: YouTrack keeps one, and --clear text sent the null
@@ -253,18 +253,18 @@ func TestTimeUpdateRefusesAPartTheServerDidNotEmpty(t *testing.T) {
 			name:     "the text emptied to an empty string",
 			emptied:  "text",
 			answered: answeredWorkItem{text: asJSON("")},
-			mismatch: []any{[]detail{{"field", "text"}, {"written", nil}, {"arrived", ""}}},
+			mismatch: []any{[]detail{{"field", "text"}, {"expected", nil}, {"actual", ""}}},
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := writingTime(t, answer(http.StatusOK, tc.answered.json()))
+			server := writingTime(t, respondWith(http.StatusOK, tc.answered.json()))
 
 			got := runWith(t, server.env(), "time", "update", "DEV-1", "199-6", "--clear", tc.emptied)
 
 			found := requireUncertainty(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Equal(t, []string{"request", "issue", "id", "mismatch"}, detailKeys(found))
 			assert.Equal(t, "DEV-1", detailNamed(t, found, "issue"))
 			assert.Equal(t, "199-6", detailNamed(t, found, "id"))
@@ -302,7 +302,7 @@ func TestTimeUpdateAsksForWhatItChecksWhateverWasAskedToPrint(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := writingTime(t, answer(http.StatusOK, tc.answered.json()))
+			server := writingTime(t, respondWith(http.StatusOK, tc.answered.json()))
 
 			got := runWith(t, server.env(), append([]string{"time", "update", "DEV-1", "199-6"},
 				append(tc.argv, "--fields", "id")...)...)
@@ -316,9 +316,9 @@ func TestTimeUpdateAsksForWhatItChecksWhateverWasAskedToPrint(t *testing.T) {
 
 // What the call named nothing for is held to nothing: the work item holds what it held, a workflow may have
 // moved it, and either way the answer is the only word there is on it. It is printed all the same.
-func TestTimeUpdateHoldsNothingItNeverWrote(t *testing.T) {
+func TestTimeUpdateChecksNothingItNeverWrote(t *testing.T) {
 	t.Parallel()
-	server := writingTime(t, answer(http.StatusOK, answeredWorkItem{
+	server := writingTime(t, respondWith(http.StatusOK, answeredWorkItem{
 		duration: `{"$type":"DurationValue","minutes":45}`,
 		workType: `{"$type":"WorkItemType","name":"Кодревью"}`,
 		date:     "1788307200000",
@@ -338,12 +338,12 @@ func TestTimeUpdateHoldsNothingItNeverWrote(t *testing.T) {
 // one the instance has none of are the same 404, and nothing was written either way.
 func TestTimeUpdateRefusesWhatTheServerRefused(t *testing.T) {
 	t.Parallel()
-	server := writingTime(t, answer(http.StatusNotFound,
+	server := writingTime(t, respondWith(http.StatusNotFound,
 		`{"error":"Not Found","error_description":"Entity with id 199-6 not found"}`))
 
 	got := runWith(t, server.env(), "time", "update", "DEV-1", "199-6", "--text", "x")
 
-	want := refusal{
+	want := faultDocument{
 		code: "not_found",
 		details: []detail{
 			{"request", workItemUpdateRequest(server.url, "DEV-1", "199-6", sentWorkItemWriteFields)},
@@ -356,9 +356,6 @@ func TestTimeUpdateRefusesWhatTheServerRefused(t *testing.T) {
 	assert.Equal(t, []string{http.MethodPost}, sentMethods(server))
 }
 
-// A work item of the polygon changed for real: each call writes the part it names and leaves the rest as
-// the work item holds it, the parts under --clear come back empty, and the time spent on the issue moves with
-// the duration, in the answer to the write itself.
 func TestTimeUpdateWritesIntoAWorkItemOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -407,9 +404,6 @@ func TestTimeUpdateRefusesAWorkItemOfAnotherIssueOfTheDevInstance(t *testing.T) 
 	assert.Equal(t, "ytrack contract a", kept[0]["text"])
 }
 
-// ytrack sends the minutes and has no way to send the ISO period as the id of a duration, so that body is put
-// on the wire between ytrack and the polygon: the server refuses it word for word here as it does on a
-// creation, and the work item keeps the length it had.
 func TestTimeUpdateIsRefusedTheDurationWrittenAsAnID(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

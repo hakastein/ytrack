@@ -29,8 +29,8 @@ func articleDeletionRequest(address, readable string) string {
 
 // The refusal an article the read does not find becomes: said is the server's own sentence about it, which is
 // one sentence for an article nobody wrote and another for one the token may not see.
-func noArticleToDelete(address, id, said string) refusal {
-	return refusal{
+func noArticleToDelete(address, id, said string) faultDocument {
+	return faultDocument{
 		code: "not_found",
 		details: []detail{
 			{"request", articleReadRequest(address, id)},
@@ -63,7 +63,7 @@ func TestArticleDeleteRefusesBeforeAnyRequest(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -87,7 +87,7 @@ func TestArticleDeleteHelpOffersNoConfirmation(t *testing.T) {
 // the id that came back, and that id is the document.
 func TestArticleDeleteReadsTheIDAndDeletesByIt(t *testing.T) {
 	t.Parallel()
-	server := deleting(t, answer(http.StatusOK, articleNamed("DEV-A-7")), deletionDone())
+	server := deleting(t, respondWith(http.StatusOK, articleNamed("DEV-A-7")), deletionDone())
 
 	got := runWith(t, server.env(), "article", "delete", "dev-A-7")
 
@@ -120,7 +120,7 @@ func TestArticleDeleteRefusesAnArticleTheReadDoesNotFind(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := `{"error":"Not Found","error_description":` + strconv.Quote(tc.said) + `}`
-			server := deleting(t, answer(http.StatusNotFound, body), noDeletion(t))
+			server := deleting(t, respondWith(http.StatusNotFound, body), noDeletion(t))
 
 			got := runWith(t, server.env(), "article", "delete", "dev-A-7")
 
@@ -162,11 +162,11 @@ func TestArticleDeleteRefusesWhatTheServerRefused(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := `{"error":` + strconv.Quote(tc.upstreamError) + `,"error_description":` + strconv.Quote(tc.upstreamMessage) + `}`
-			server := deleting(t, answer(http.StatusOK, articleNamed("DEV-A-7")), answer(tc.status, body))
+			server := deleting(t, respondWith(http.StatusOK, articleNamed("DEV-A-7")), respondWith(tc.status, body))
 
 			got := runWith(t, server.env(), "article", "delete", "DEV-A-7")
 
-			want := refusal{
+			want := faultDocument{
 				code: tc.code,
 				details: append([]detail{
 					{"request", articleDeletionRequest(server.url, "DEV-A-7")},
@@ -197,7 +197,7 @@ func TestArticleDeleteRefusesA200ThatCarriesABody(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := deleting(t, answer(http.StatusOK, articleNamed("DEV-A-7")), func(w http.ResponseWriter, _ *http.Request) {
+			server := deleting(t, respondWith(http.StatusOK, articleNamed("DEV-A-7")), func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", tc.contentType)
 				w.WriteHeader(http.StatusOK)
 				_, _ = io.WriteString(w, tc.body)
@@ -205,8 +205,8 @@ func TestArticleDeleteRefusesA200ThatCarriesABody(t *testing.T) {
 
 			got := runWith(t, server.env(), "article", "delete", "DEV-A-7")
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", articleDeletionRequest(server.url, "DEV-A-7")},
 					{"upstream_status", 200},
@@ -225,24 +225,24 @@ func TestArticleDeleteRefusesA200ThatCarriesABody(t *testing.T) {
 func TestArticleDeleteRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		arrived string
+		name     string
+		received string
 	}{
-		{name: "two dots", arrived: `".."`},
-		{name: "a path after the id", arrived: `"DEV-A-7/.."`},
-		{name: "the id of an issue", arrived: `"DEV-1"`},
-		{name: "a number", arrived: "7"},
+		{name: "two dots", received: `".."`},
+		{name: "a path after the id", received: `"DEV-A-7/.."`},
+		{name: "the id of an issue", received: `"DEV-1"`},
+		{name: "a number", received: "7"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			body := `{"$type":"Article","idReadable":` + tc.arrived + `}`
-			server := deleting(t, answer(http.StatusOK, body), noDeletion(t))
+			body := `{"$type":"Article","idReadable":` + tc.received + `}`
+			server := deleting(t, respondWith(http.StatusOK, body), noDeletion(t))
 
 			got := runWith(t, server.env(), "article", "delete", "dev-A-7")
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", articleReadRequest(server.url, "dev-A-7")},
 					{"upstream_status", 200},
@@ -262,9 +262,6 @@ func contractArticleTitle(t *testing.T) string {
 	return "ytrack contract " + t.Name()
 }
 
-// An article of the polygon, deleted for real: the id printed is the one the polygon gave it, and the read
-// afterwards finds nothing. The article is the scenario's own — the fixtures of the knowledge base are read and
-// never written — and a scenario that deleted its own article leaves nothing to clean up.
 func TestArticleDeleteDeletesAnArticleOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -278,7 +275,6 @@ func TestArticleDeleteDeletesAnArticleOfTheDevInstance(t *testing.T) {
 	assert.Equal(t, []string{http.MethodPost, http.MethodGet, http.MethodDelete, http.MethodGet}, sentMethods(dev))
 }
 
-// The polygon has no such article, and the read says so before a deletion is sent to a number nobody used.
 func TestArticleDeleteRefusesAnArticleTheDevInstanceDoesNotHave(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

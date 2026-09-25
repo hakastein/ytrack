@@ -123,20 +123,20 @@ func kindOfBinding(valueType string) string {
 }
 
 // The field as it comes back on the issue, each value under the $type the server sends it with.
-func (r namedRow) arrived() arrivedField {
+func (r namedRow) received() receivedField {
 	values := make([]string, 0, len(r.written))
 	for _, value := range r.written {
-		values = append(values, r.holding(value))
+		values = append(values, r.valueJSON(value))
 	}
 	held := values[0]
 	if r.isMulti {
 		held = "[" + strings.Join(values, ",") + "]"
 	}
-	return arrivedField{name: r.name, valueType: r.valueType, isMultiValue: r.isMulti,
+	return receivedField{name: r.name, valueType: r.valueType, isMultiValue: r.isMulti,
 		ordinal: strconv.Itoa(len(r.name)), binding: r.id(), value: held}
 }
 
-func (r namedRow) holding(value string) string {
+func (r namedRow) valueJSON(value string) string {
 	switch r.valueType {
 	case "user":
 		return `{"$type":"User","login":` + strconv.Quote(value) + `}`
@@ -153,15 +153,15 @@ func projectOfRows(rows []namedRow) string {
 	for _, row := range rows {
 		fields = append(fields, row.writable())
 	}
-	return projectToWrite(fields...)
+	return projectResponse(fields...)
 }
 
 func issueOfRows(readable, summary string, rows []namedRow) string {
-	fields := make([]arrivedField, 0, len(rows))
+	fields := make([]receivedField, 0, len(rows))
 	for _, row := range rows {
-		fields = append(fields, row.arrived())
+		fields = append(fields, row.received())
 	}
-	return filedIssueHolding(readable, summary, "null", arrivedFields(fields...))
+	return createdIssueWith(readable, summary, "null", receivedFields(fields...))
 }
 
 // The flags of a creation that fills every row, written in an order of nobody's: the body is the project's
@@ -196,7 +196,7 @@ func TestIssueCreateRefusesAFieldItCannotRead(t *testing.T) {
 
 			got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--field", tc.written)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -209,8 +209,8 @@ func TestIssueCreateRefusesAFieldItCannotRead(t *testing.T) {
 func TestIssueCreateWritesEveryTypeNamedByAName(t *testing.T) {
 	t.Parallel()
 	rows := namedRows()
-	server := creating(t, answer(http.StatusOK, projectOfRows(rows)),
-		answer(http.StatusOK, issueOfRows("DEV-7", "x", rows)))
+	server := creating(t, respondWith(http.StatusOK, projectOfRows(rows)),
+		respondWith(http.StatusOK, issueOfRows("DEV-7", "x", rows)))
 
 	got := runWith(t, server.env(), append([]string{"issue", "create", "DEV", "--summary", "x"}, flagsOfRows(rows)...)...)
 
@@ -243,14 +243,14 @@ func TestIssueCreateSplitsAFieldAtTheFirstEquals(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			metadata := projectToWrite(
+			metadata := projectResponse(
 				writableField{id: "180-18", name: "Клиент", valueType: "enum", canBeEmpty: true},
 				writableField{id: "180-19", name: "a", valueType: "enum", canBeEmpty: true},
 			)
-			held := arrivedFields(arrivedField{name: tc.field, valueType: "enum", binding: "180-18",
+			held := receivedFields(receivedField{name: tc.field, valueType: "enum", binding: "180-18",
 				value: bundleElement(tc.value)})
-			server := creating(t, answer(http.StatusOK, metadata),
-				answer(http.StatusOK, filedIssueHolding("DEV-7", "x", "null", held)))
+			server := creating(t, respondWith(http.StatusOK, metadata),
+				respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
 
 			got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--field", tc.written)
 
@@ -266,10 +266,10 @@ func TestIssueCreateSplitsAFieldAtTheFirstEquals(t *testing.T) {
 // back whole, and the parameter that would cut the answer down is never sent.
 func TestIssueCreateAsksForTheFieldsItChecks(t *testing.T) {
 	t.Parallel()
-	metadata := projectToWrite(writableField{id: "180-15", name: "Type", valueType: "enum", canBeEmpty: true})
-	held := arrivedFields(arrivedField{name: "Type", valueType: "enum", binding: "180-15", value: bundleElement("Task")})
-	server := creating(t, answer(http.StatusOK, metadata),
-		answer(http.StatusOK, `{"$type":"Issue","idReadable":"DEV-7","summary":"x","customFields":`+held+`}`))
+	metadata := projectResponse(writableField{id: "180-15", name: "Type", valueType: "enum", canBeEmpty: true})
+	held := receivedFields(receivedField{name: "Type", valueType: "enum", binding: "180-15", value: bundleElement("Task")})
+	server := creating(t, respondWith(http.StatusOK, metadata),
+		respondWith(http.StatusOK, `{"$type":"Issue","idReadable":"DEV-7","summary":"x","customFields":`+held+`}`))
 
 	got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--field", "Type=Task",
 		"--fields", "idReadable")
@@ -285,9 +285,9 @@ func TestIssueCreateAsksForTheFieldsItChecks(t *testing.T) {
 // The values are held against the answer the way the server resolves them: a name in any letter case is
 // the same name, a set is a set however it comes back, and a value written twice comes back once. A value
 // that came back another is the write disagreeing with itself, and the issue exists by then.
-func TestIssueCreateHoldsTheAnswerAgainstTheValuesItWrote(t *testing.T) {
+func TestIssueCreateChecksTheResponseAgainstTheValuesItWrote(t *testing.T) {
 	t.Parallel()
-	metadata := projectToWrite(
+	metadata := projectResponse(
 		writableField{id: "180-15", name: "Type", valueType: "enum", canBeEmpty: true},
 		writableField{id: "180-18", name: "Клиент", valueType: "enum", isMultiValue: true, canBeEmpty: true},
 		writableField{id: "180-21", kind: "UserProjectCustomField", name: "Assignee", valueType: "user",
@@ -300,14 +300,14 @@ func TestIssueCreateHoldsTheAnswerAgainstTheValuesItWrote(t *testing.T) {
 	}
 	t.Run("what the server resolved is what was written", func(t *testing.T) {
 		t.Parallel()
-		held := arrivedFields(
-			arrivedField{name: "Type", valueType: "enum", binding: "180-15", value: bundleElement("Task")},
-			arrivedField{name: "Клиент", valueType: "enum", isMultiValue: true, binding: "180-18", value: client},
-			arrivedField{name: "Assignee", valueType: "user", binding: "180-21",
+		held := receivedFields(
+			receivedField{name: "Type", valueType: "enum", binding: "180-15", value: bundleElement("Task")},
+			receivedField{name: "Клиент", valueType: "enum", isMultiValue: true, binding: "180-18", value: client},
+			receivedField{name: "Assignee", valueType: "user", binding: "180-21",
 				value: `{"$type":"User","login":"admin"}`},
 		)
-		server := creating(t, answer(http.StatusOK, metadata),
-			answer(http.StatusOK, filedIssueHolding("DEV-7", "x", "null", held)))
+		server := creating(t, respondWith(http.StatusOK, metadata),
+			respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
 
 		got := runWith(t, server.env(), append([]string{"issue", "create", "DEV", "--summary", "x"}, written...)...)
 
@@ -318,45 +318,45 @@ func TestIssueCreateHoldsTheAnswerAgainstTheValuesItWrote(t *testing.T) {
 		t.Parallel()
 		// A write replaces what the field held rather than adding to it, so a value the write never sent is
 		// the answer disagreeing with it as much as one it sent and did not get back.
-		held := arrivedFields(
-			arrivedField{name: "Type", valueType: "enum", binding: "180-15", value: bundleElement("Task")},
-			arrivedField{name: "Клиент", valueType: "enum", isMultiValue: true, binding: "180-18",
+		held := receivedFields(
+			receivedField{name: "Type", valueType: "enum", binding: "180-15", value: bundleElement("Task")},
+			receivedField{name: "Клиент", valueType: "enum", isMultiValue: true, binding: "180-18",
 				value: `[` + bundleElement("АЛЬФА") + `,` + bundleElement("ACME") + `,` + bundleElement("ГАММА") + `]`},
-			arrivedField{name: "Assignee", valueType: "user", binding: "180-21",
+			receivedField{name: "Assignee", valueType: "user", binding: "180-21",
 				value: `{"$type":"User","login":"admin"}`},
 		)
-		server := creating(t, answer(http.StatusOK, metadata),
-			answer(http.StatusOK, filedIssueHolding("DEV-7", "x", "null", held)))
+		server := creating(t, respondWith(http.StatusOK, metadata),
+			respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
 
 		got := runWith(t, server.env(), append([]string{"issue", "create", "DEV", "--summary", "x"}, written...)...)
 
 		found := requireUncertainty(t, got)
-		assert.Equal(t, "upstream_lied", found.code)
+		assert.Equal(t, "upstream_invalid", found.code)
 		assert.Equal(t, []any{[]detail{
 			{"field", "Клиент"},
-			{"written", []any{"ACME", "АЛЬФА", "acme"}},
-			{"arrived", []any{"АЛЬФА", "ACME", "ГАММА"}},
+			{"expected", []any{"ACME", "АЛЬФА", "acme"}},
+			{"actual", []any{"АЛЬФА", "ACME", "ГАММА"}},
 		}}, detailNamed(t, found, "mismatch"))
 	})
 	t.Run("a value that came back another", func(t *testing.T) {
 		t.Parallel()
-		held := arrivedFields(
-			arrivedField{name: "Type", valueType: "enum", binding: "180-15", value: bundleElement("Bug")},
-			arrivedField{name: "Клиент", valueType: "enum", isMultiValue: true, binding: "180-18", value: client},
-			arrivedField{name: "Assignee", valueType: "user", binding: "180-21",
+		held := receivedFields(
+			receivedField{name: "Type", valueType: "enum", binding: "180-15", value: bundleElement("Bug")},
+			receivedField{name: "Клиент", valueType: "enum", isMultiValue: true, binding: "180-18", value: client},
+			receivedField{name: "Assignee", valueType: "user", binding: "180-21",
 				value: `{"$type":"User","login":"admin"}`},
 		)
-		server := creating(t, answer(http.StatusOK, metadata),
-			answer(http.StatusOK, filedIssueHolding("DEV-7", "x", "null", held)))
+		server := creating(t, respondWith(http.StatusOK, metadata),
+			respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
 
 		got := runWith(t, server.env(), append([]string{"issue", "create", "DEV", "--summary", "x"}, written...)...)
 
-		want := refusal{
-			code: "upstream_lied",
+		want := faultDocument{
+			code: "upstream_invalid",
 			details: []detail{
 				{"request", creationRequest(server.url, askedIssueFields)},
 				{"issue", "DEV-7"},
-				{"mismatch", []any{[]detail{{"field", "Type"}, {"written", "task"}, {"arrived", "Bug"}}}},
+				{"mismatch", []any{[]detail{{"field", "Type"}, {"expected", "task"}, {"actual", "Bug"}}}},
 			},
 		}
 		assert.Equal(t, want, requireUncertainty(t, got))
@@ -365,9 +365,9 @@ func TestIssueCreateHoldsTheAnswerAgainstTheValuesItWrote(t *testing.T) {
 
 // A field the write filled and the answer holds nothing in is the write disagreeing with itself as much as a
 // value that came back another: empty is printed the way the type would have held it.
-func TestIssueCreateRefusesAnAnswerThatHoldsNothingWhereTheWriteFilled(t *testing.T) {
+func TestIssueCreateRefusesAnEmptyResponseValueWhereTheWriteSetOne(t *testing.T) {
 	t.Parallel()
-	metadata := projectToWrite(
+	metadata := projectResponse(
 		writableField{id: "180-15", name: "Type", valueType: "enum", canBeEmpty: true},
 		writableField{id: "180-18", name: "Клиент", valueType: "enum", isMultiValue: true, canBeEmpty: true},
 	)
@@ -378,47 +378,45 @@ func TestIssueCreateRefusesAnAnswerThatHoldsNothingWhereTheWriteFilled(t *testin
 	}{
 		{
 			name: "a value the answer sent null for",
-			held: arrivedFields(
-				arrivedField{name: "Type", valueType: "enum", binding: "180-15"},
-				arrivedField{name: "Клиент", valueType: "enum", isMultiValue: true, binding: "180-18",
+			held: receivedFields(
+				receivedField{name: "Type", valueType: "enum", binding: "180-15"},
+				receivedField{name: "Клиент", valueType: "enum", isMultiValue: true, binding: "180-18",
 					value: `[` + bundleElement("ACME") + `]`},
 			),
-			mismatch: []any{[]detail{{"field", "Type"}, {"written", "Task"}, {"arrived", nil}}},
+			mismatch: []any{[]detail{{"field", "Type"}, {"expected", "Task"}, {"actual", nil}}},
 		},
 		{
 			name: "a field the answer does not carry at all",
-			held: arrivedFields(arrivedField{name: "Type", valueType: "enum", binding: "180-15",
+			held: receivedFields(receivedField{name: "Type", valueType: "enum", binding: "180-15",
 				value: bundleElement("Task")}),
-			mismatch: []any{[]detail{{"field", "Клиент"}, {"written", []any{"ACME"}}, {"arrived", nil}}},
+			mismatch: []any{[]detail{{"field", "Клиент"}, {"expected", []any{"ACME"}}, {"actual", nil}}},
 		},
 		{
 			name: "a field that holds several and holds none",
-			held: arrivedFields(
-				arrivedField{name: "Type", valueType: "enum", binding: "180-15", value: bundleElement("Task")},
-				arrivedField{name: "Клиент", valueType: "enum", isMultiValue: true, binding: "180-18", value: "[]"},
+			held: receivedFields(
+				receivedField{name: "Type", valueType: "enum", binding: "180-15", value: bundleElement("Task")},
+				receivedField{name: "Клиент", valueType: "enum", isMultiValue: true, binding: "180-18", value: "[]"},
 			),
-			mismatch: []any{[]detail{{"field", "Клиент"}, {"written", []any{"ACME"}}, {"arrived", []any{}}}},
+			mismatch: []any{[]detail{{"field", "Клиент"}, {"expected", []any{"ACME"}}, {"actual", []any{}}}},
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := creating(t, answer(http.StatusOK, metadata),
-				answer(http.StatusOK, filedIssueHolding("DEV-7", "x", "null", tc.held)))
+			server := creating(t, respondWith(http.StatusOK, metadata),
+				respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", tc.held)))
 
 			got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x",
 				"--field", "Type=Task", "--field", "Клиент=ACME")
 
 			found := requireUncertainty(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Equal(t, detail{"mismatch", tc.mismatch}, found.details[2])
 		})
 	}
 }
 
-// invalidRow is one row of an "invalid" list of details: the field and value it names are contract, and the
-// reason it gives is prose ytrack composed for a human, so only its presence is checked.
-func invalidRow(t *testing.T, found refusal, index int, field string, value any) {
+func invalidRow(t *testing.T, found faultDocument, index int, field string, value any) {
 	t.Helper()
 	rows, ok := detailNamed(t, found, "invalid").([]any)
 	require.True(t, ok, "invalid: %v", found.details)
@@ -439,8 +437,8 @@ func TestIssueCreateRefusesAValueItCannotSend(t *testing.T) {
 	t.Parallel()
 	t.Run("a value of nothing at all", func(t *testing.T) {
 		t.Parallel()
-		metadata := projectToWrite(writableField{id: "180-15", name: "Type", valueType: "enum", canBeEmpty: true})
-		server := creating(t, answer(http.StatusOK, metadata), noCreation(t))
+		metadata := projectResponse(writableField{id: "180-15", name: "Type", valueType: "enum", canBeEmpty: true})
+		server := creating(t, respondWith(http.StatusOK, metadata), noCreation(t))
 
 		got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--field", "Type=")
 
@@ -451,13 +449,13 @@ func TestIssueCreateRefusesAValueItCannotSend(t *testing.T) {
 	})
 	t.Run("a type the catalogue of ytrack does not model", func(t *testing.T) {
 		t.Parallel()
-		metadata := projectToWrite(writableField{id: "180-15", name: "Type", valueType: "quantum", canBeEmpty: true})
-		server := creating(t, answer(http.StatusOK, metadata), noCreation(t))
+		metadata := projectResponse(writableField{id: "180-15", name: "Type", valueType: "quantum", canBeEmpty: true})
+		server := creating(t, respondWith(http.StatusOK, metadata), noCreation(t))
 
 		got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--field", "Type=Task")
 
 		found := requireRefusal(t, got)
-		assert.Equal(t, "upstream_lied", found.code)
+		assert.Equal(t, "upstream_invalid", found.code)
 		assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 	})
 }
@@ -467,13 +465,13 @@ func TestIssueCreateRefusesAValueItCannotSend(t *testing.T) {
 // than one.
 func TestIssueCreateRefusesNamesAndRepeatsAfterTheMetadata(t *testing.T) {
 	t.Parallel()
-	metadata := projectToWrite(
+	metadata := projectResponse(
 		writableField{id: "180-15", name: "Type", translate: "Тип", valueType: "enum", canBeEmpty: true},
 		writableField{id: "180-18", name: "Клиент", valueType: "enum", isMultiValue: true, canBeEmpty: true},
 	)
 	t.Run("one field named twice", func(t *testing.T) {
 		t.Parallel()
-		server := creating(t, answer(http.StatusOK, metadata), noCreation(t))
+		server := creating(t, respondWith(http.StatusOK, metadata), noCreation(t))
 
 		got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x",
 			"--field", "Type=Bug", "--field", "тип=Task")
@@ -489,12 +487,12 @@ func TestIssueCreateRefusesNamesAndRepeatsAfterTheMetadata(t *testing.T) {
 	})
 	t.Run("names no field of the project answers to", func(t *testing.T) {
 		t.Parallel()
-		server := creating(t, answer(http.StatusOK, metadata), noCreation(t))
+		server := creating(t, respondWith(http.StatusOK, metadata), noCreation(t))
 
 		got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x",
 			"--field", "Типп=x", "--field", "Нет=y")
 
-		want := refusal{
+		want := faultDocument{
 			code: "unknown_name",
 			details: []detail{
 				{"request", writeMetadataRequest(server.url, "DEV")},
@@ -510,15 +508,15 @@ func TestIssueCreateRefusesNamesAndRepeatsAfterTheMetadata(t *testing.T) {
 	})
 	t.Run("a name more than one field of the project answers to", func(t *testing.T) {
 		t.Parallel()
-		twice := projectToWrite(
+		twice := projectResponse(
 			writableField{id: "180-15", name: "Type", translate: "Общее", valueType: "enum", canBeEmpty: true},
 			writableField{id: "180-18", name: "Клиент", translate: "Общее", valueType: "enum", canBeEmpty: true},
 		)
-		server := creating(t, answer(http.StatusOK, twice), noCreation(t))
+		server := creating(t, respondWith(http.StatusOK, twice), noCreation(t))
 
 		got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--field", "общее=x")
 
-		want := refusal{
+		want := faultDocument{
 			code: "unknown_name",
 			details: []detail{
 				{"request", writeMetadataRequest(server.url, "DEV")},
@@ -536,11 +534,11 @@ func TestIssueCreateRefusesNamesAndRepeatsAfterTheMetadata(t *testing.T) {
 // one misspelling would otherwise be listed as many times as it was typed.
 func TestIssueWriteNamesAnUnresolvedNameOnce(t *testing.T) {
 	t.Parallel()
-	metadata := projectToWrite(
+	metadata := projectResponse(
 		writableField{id: "180-15", name: "Type", translate: "Тип", valueType: "enum", canBeEmpty: true},
 		writableField{id: "180-18", name: "Клиент", valueType: "enum", isMultiValue: true, canBeEmpty: true},
 	)
-	ambiguous := projectToWrite(
+	ambiguous := projectResponse(
 		writableField{id: "180-15", name: "Type", translate: "Общее", valueType: "enum", canBeEmpty: true},
 		writableField{id: "180-18", name: "Клиент", translate: "Общее", valueType: "enum", canBeEmpty: true},
 	)
@@ -582,9 +580,9 @@ func TestIssueWriteNamesAnUnresolvedNameOnce(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			read := answer(http.StatusOK, tc.project)
+			read := respondWith(http.StatusOK, tc.project)
 			if tc.argv[1] == "update" {
-				read = answer(http.StatusOK, issueToUpdate("DEV-1", tc.project))
+				read = respondWith(http.StatusOK, issueToUpdate("DEV-1", tc.project))
 			}
 			server := serve(t, readThenUpdate(read, noUpdate(t)))
 
@@ -603,16 +601,16 @@ func TestIssueWriteNamesAnUnresolvedNameOnce(t *testing.T) {
 // construction and ytrack checks no form of its own.
 func TestIssueCreateWritesAUserByLoginAlone(t *testing.T) {
 	t.Parallel()
-	metadata := projectToWrite(writableField{id: "180-21", kind: "UserProjectCustomField", name: "Assignee",
+	metadata := projectResponse(writableField{id: "180-21", kind: "UserProjectCustomField", name: "Assignee",
 		valueType: "user", canBeEmpty: true})
 	logins := []string{"2-1", "me", "7fae4e41-01f8-42c0-9cc4-960c478d8a72", "Иван Иванов"}
 	for _, login := range logins {
 		t.Run("a login of "+strconv.Quote(login), func(t *testing.T) {
 			t.Parallel()
-			held := arrivedFields(arrivedField{name: "Assignee", valueType: "user", binding: "180-21",
+			held := receivedFields(receivedField{name: "Assignee", valueType: "user", binding: "180-21",
 				value: `{"$type":"User","login":` + strconv.Quote(login) + `}`})
-			server := creating(t, answer(http.StatusOK, metadata),
-				answer(http.StatusOK, filedIssueHolding("DEV-7", "x", "null", held)))
+			server := creating(t, respondWith(http.StatusOK, metadata),
+				respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
 
 			got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--field", "Assignee="+login)
 
@@ -625,7 +623,7 @@ func TestIssueCreateWritesAUserByLoginAlone(t *testing.T) {
 	t.Run("a login the server has no user for", func(t *testing.T) {
 		t.Parallel()
 		said := `{"error":"","error_description":"Не существует пользователя с именем me","error_field":"value"}`
-		server := creating(t, answer(http.StatusOK, metadata), answer(http.StatusBadRequest, said))
+		server := creating(t, respondWith(http.StatusOK, metadata), respondWith(http.StatusBadRequest, said))
 
 		got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--field", "Assignee=me")
 
@@ -635,8 +633,6 @@ func TestIssueCreateWritesAUserByLoginAlone(t *testing.T) {
 	})
 }
 
-// The custom fields DEV requires of a new issue, filled with values the polygon has, so that a scenario about
-// anything else is not answered about these.
 func devRequired() []string {
 	return []string{
 		"--field", "Type=Task",
@@ -675,9 +671,6 @@ func sentFieldTypes(t *testing.T, body string) map[string]string {
 	return types
 }
 
-// The polygon fills nine of its fields in one call: the names are resolved against the project and the
-// values against the bundles of the instance, which is the server's own work, and every value comes back the
-// way the server keeps it — a name in the letter case of the bundle, a login in the letter case of the user.
 func TestIssueCreateFillsTheFieldsOfTheDevProject(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -713,9 +706,6 @@ func TestIssueCreateFillsTheFieldsOfTheDevProject(t *testing.T) {
 	}, sentFieldTypes(t, dev.asks()[1]))
 }
 
-// The value is resolved by the server and by nobody else: the bundle of the polygon holds a value whose
-// letters read as the one written here and are not the same letters, and what the server says about a value
-// it does not find passes on word for word. Nothing is filed.
 func TestIssueCreateRefusesAValueTheDevInstanceDoesNotHave(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

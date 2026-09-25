@@ -119,7 +119,7 @@ func TestNoCommandTakesHalfALoginFromTheEnvironment(t *testing.T) {
 
 			got := runWith(t, []string{"HOME=" + home, tc.set(asked)}, "auth", "status")
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assertNoToken(t, got, recordToken)
 			assertNoToken(t, got, token)
 			assert.Empty(t, asked.requests())
@@ -130,7 +130,7 @@ func TestNoCommandTakesHalfALoginFromTheEnvironment(t *testing.T) {
 
 // A file nobody had to read cannot make a command fail: an environment holding a whole login is the whole of
 // what is read, and a caller working from one has no stake in the state of their record file.
-func TestAuthStatusDoesNotReadTheFileWhenTheEnvironmentHoldsBothValues(t *testing.T) {
+func TestAuthStatusDoesNotReadTheFileWhenTheEnvironmentHasBothValues(t *testing.T) {
 	t.Parallel()
 	server := serveUserOfTheToken(t, map[string]string{token: envUser})
 	home, _ := homeWith(t, "not a file of login records")
@@ -172,7 +172,7 @@ func TestNoCommandUsesAFileOfLoginRecordsItCannotRead(t *testing.T) {
 
 			got := runWith(t, []string{"HOME=" + home}, "auth", "status")
 
-			want := refusal{code: "bad_usage", details: []detail{fileDetail(path)}}
+			want := faultDocument{code: "bad_usage", details: []detail{fileDetail(path)}}
 			assert.Equal(t, want, requireRefusal(t, got))
 		})
 	}
@@ -200,7 +200,7 @@ func TestNoCommandMendsAFileOfLoginRecordsTheSystemKeepsFromIt(t *testing.T) {
 
 		got := runWith(t, []string{"HOME=" + home}, "auth", "status")
 
-		want := refusal{code: "denied", details: []detail{directoryDetail(path)}}
+		want := faultDocument{code: "denied", details: []detail{directoryDetail(path)}}
 		assert.Equal(t, want, requireRefusal(t, got))
 	})
 	t.Run("a directory the last record cannot be taken out of", func(t *testing.T) {
@@ -211,7 +211,7 @@ func TestNoCommandMendsAFileOfLoginRecordsTheSystemKeepsFromIt(t *testing.T) {
 
 		got := runWith(t, []string{"HOME=" + home}, "auth", "logout", "--global")
 
-		want := refusal{code: "denied", details: []detail{directoryDetail(path)}}
+		want := faultDocument{code: "denied", details: []detail{directoryDetail(path)}}
 		assert.Equal(t, want, requireRefusal(t, got))
 		assertNoRecordedToken(t, got)
 		assert.FileExists(t, path)
@@ -242,7 +242,7 @@ func TestNoCommandSendsATokenARecordCannotCarry(t *testing.T) {
 
 	got := runWith(t, []string{"HOME=" + home}, "auth", "status")
 
-	assert.Equal(t, refusal{code: "bad_usage", details: []detail{fileDetail(path)}}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage", details: []detail{fileDetail(path)}}, requireRefusal(t, got))
 	assertNoToken(t, got, recordToken)
 	assert.Empty(t, server.requests())
 }
@@ -255,7 +255,7 @@ func TestNoCommandFindsAValueWithoutAFileToFindItIn(t *testing.T) {
 
 		got := runWith(t, []string{"HOME=" + home}, "auth", "status")
 
-		want := refusal{code: "denied", details: []detail{lookedIn("YTRACK_URL", "YTRACK_TOKEN", "settings")}}
+		want := faultDocument{code: "denied", details: []detail{lookedIn("YTRACK_URL", "YTRACK_TOKEN", "settings")}}
 		assert.Equal(t, want, requireRefusal(t, got))
 	})
 	t.Run("no home directory", func(t *testing.T) {
@@ -263,7 +263,7 @@ func TestNoCommandFindsAValueWithoutAFileToFindItIn(t *testing.T) {
 
 		got := runWith(t, nil, "auth", "status")
 
-		want := refusal{code: "denied", details: []detail{lookedIn("YTRACK_URL", "YTRACK_TOKEN")}}
+		want := faultDocument{code: "denied", details: []detail{lookedIn("YTRACK_URL", "YTRACK_TOKEN")}}
 		assert.Equal(t, want, requireRefusal(t, got))
 	})
 	t.Run("a home directory that is not an absolute path", func(t *testing.T) {
@@ -271,7 +271,7 @@ func TestNoCommandFindsAValueWithoutAFileToFindItIn(t *testing.T) {
 
 		got := runWith(t, []string{"HOME=home"}, "auth", "status")
 
-		want := refusal{code: "denied", details: []detail{lookedIn("YTRACK_URL", "YTRACK_TOKEN")}}
+		want := faultDocument{code: "denied", details: []detail{lookedIn("YTRACK_URL", "YTRACK_TOKEN")}}
 		assert.Equal(t, want, requireRefusal(t, got))
 	})
 }
@@ -293,7 +293,7 @@ func TestAuthStatusTakesTheRecordWhenTheVariablesAreEmpty(t *testing.T) {
 // Every command reads the address and the token the same way, so the record reaches one that never mentions it.
 func TestProjectShowGoesToTheAddressOfTheGlobalRecordWithItsToken(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, projectDEV))
+	server := serve(t, respondWith(http.StatusOK, projectDEV))
 	home, _ := homeWith(t, globalRecord(server.url, recordToken))
 
 	got := runWith(t, []string{"HOME=" + home}, "project", "show", "DEV")
@@ -324,14 +324,14 @@ func TestNoCommandPrintsThePasswordOfAnAddressItCannotUse(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var env []string
-			var want refusal
+			var want faultDocument
 			if tc.inRecord {
 				home, path := homeWith(t, globalRecord(tc.address, recordToken))
 				env = []string{"HOME=" + home}
-				want = refusal{code: "bad_usage", details: []detail{fileDetail(path)}}
+				want = faultDocument{code: "bad_usage", details: []detail{fileDetail(path)}}
 			} else {
 				env = []string{"YTRACK_URL=" + tc.address, "YTRACK_TOKEN=" + token}
-				want = refusal{code: "bad_usage"}
+				want = faultDocument{code: "bad_usage"}
 			}
 
 			got := runWith(t, env, "auth", "status")

@@ -35,8 +35,6 @@ plugins:
       - {name: "Дизайн/Прототипирование"}
 `
 
-// DEV of the polygon under the default: the fifteen types of work its time tracking is set up with, in the
-// order the server keeps them in.
 const printedDevProject = `shortName: "DEV"
 name: "DEVELOPMENT"
 plugins:
@@ -73,8 +71,6 @@ func lookedIn(places ...any) detail {
 	return detail{"looked_in", places}
 }
 
-// The default reaches the polygon in one request and prints DEV with the types of work its time tracking
-// is set up with.
 func TestProjectShowPrintsDEVOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -86,10 +82,6 @@ func TestProjectShowPrintsDEVOfTheDevInstance(t *testing.T) {
 	assert.Len(t, dev.requests(), 1)
 }
 
-// The types of work are settings of a project's time tracking and nothing among its custom fields:
-// the set DEV of the polygon carries holds neither the name of a field, nor the name a project gives one, nor
-// the name of a value of any bundle, letter case aside. Two types the instance-wide catalogue has and DEV is
-// not set up with are absent from the set as well, so the set is the project's own.
 func TestProjectShowKeepsTheTypesOfWorkOutOfTheCustomFieldsOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -161,8 +153,6 @@ func TestProjectShowKeepsTheTypesOfWorkOutOfTheCustomFieldsOfTheDevInstance(t *t
 	assert.Len(t, dev.requests(), 1)
 }
 
-// The switch stands in the default because a project that has time tracking off carries its set of types
-// all the same: DOCS of the polygon is off and lists sixteen.
 func TestProjectShowPrintsTheProjectOfTheDevInstanceThatHasTimeTrackingOff(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -198,7 +188,7 @@ plugins:
 
 // The switch is printed as it arrived rather than standing in for the set: a project that has time
 // tracking off still lists its types, and a set the server sends empty is printed empty.
-func TestProjectShowPrintsTheTimeTrackingSettingsAsTheyArrived(t *testing.T) {
+func TestProjectShowPrintsTheTimeTrackingSettingsAsReceived(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name     string
@@ -222,7 +212,7 @@ func TestProjectShowPrintsTheTimeTrackingSettingsAsTheyArrived(t *testing.T) {
 			t.Parallel()
 			body := `{"shortName":"DEV","name":"DEVELOPMENT","plugins":{"timeTrackingSettings":` + tc.settings +
 				`,"$type":"ProjectPlugins"},"$type":"Project"}`
-			server := serve(t, answer(http.StatusOK, body))
+			server := serve(t, respondWith(http.StatusOK, body))
 
 			got := runWith(t, server.env(), "project", "show", "DEV")
 
@@ -252,7 +242,7 @@ func TestNoCommandOfItsOwnReadsTheTypesOfWork(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -298,9 +288,9 @@ func TestProjectShowRefusesAFieldHiddenFromTheMember(t *testing.T) {
 
 	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).member}, "project", "show", "DEV", "--fields", "+archived")
 
-	want := refusal{
-		code:    "upstream_lied",
-		details: judgmentDetails(dev.url, defaultProjectFields+",archived", "missing", missingEntry("archived", "Project")),
+	want := faultDocument{
+		code:    "upstream_invalid",
+		details: missingFieldDetails(dev.url, defaultProjectFields+",archived", "missing", missingEntry("archived", "Project")),
 	}
 	assert.Equal(t, want, requireRefusal(t, got))
 	assert.Len(t, dev.requests(), 1)
@@ -308,7 +298,7 @@ func TestProjectShowRefusesAFieldHiddenFromTheMember(t *testing.T) {
 
 func TestProjectShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, projectDEV))
+	server := serve(t, respondWith(http.StatusOK, projectDEV))
 
 	got := runWith(t, server.env(), "project", "show", "DEV")
 
@@ -325,7 +315,7 @@ func TestProjectShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
 
 func TestProjectShowPrintsNullAndBooleansBare(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, `{"shortName":"DEV","name":"DEVELOPMENT","archived":true,"leader":null,"$type":"Project"}`))
+	server := serve(t, respondWith(http.StatusOK, `{"shortName":"DEV","name":"DEVELOPMENT","archived":true,"leader":null,"$type":"Project"}`))
 
 	got := runWith(t, server.env(), "project", "show", "DEV", "--fields", "shortName,name,archived,leader(login)")
 
@@ -339,7 +329,7 @@ leader: null
 
 func TestProjectShowTakesWhitespaceAroundTheAnswer(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, " \t\r\n"+projectDEV+" \t\r\n"))
+	server := serve(t, respondWith(http.StatusOK, " \t\r\n"+projectDEV+" \t\r\n"))
 
 	got := runWith(t, server.env(), "project", "show", "DEV")
 
@@ -348,7 +338,7 @@ func TestProjectShowTakesWhitespaceAroundTheAnswer(t *testing.T) {
 
 func TestProjectShowSendsACodeOfLettersDigitsAndUnderscores(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, projectDEV))
+	server := serve(t, respondWith(http.StatusOK, projectDEV))
 
 	got := runWith(t, server.env(), "project", "show", "Проект_²")
 
@@ -372,7 +362,7 @@ func TestProjectShowReachesTheAPIUnderThePathOfTheAddress(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, projectDEV))
+			server := serve(t, respondWith(http.StatusOK, projectDEV))
 
 			got := runWith(t, []string{"YTRACK_URL=" + server.url + tc.path, "YTRACK_TOKEN=" + token}, "project", "show", "DEV")
 
@@ -400,7 +390,7 @@ func TestProjectShowTakesExactlyOneCode(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 		})
 	}
 }
@@ -423,7 +413,7 @@ func TestProjectShowRefusesAnAddressItCannotUse(t *testing.T) {
 
 			got := runWith(t, env, "project", "show", "DEV")
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assertNoToken(t, got, token)
 		})
 	}
@@ -449,7 +439,7 @@ func TestProjectShowRefusesAnAddressWithAQueryOrAFragment(t *testing.T) {
 
 			got := runWith(t, []string{"YTRACK_URL=" + address, "YTRACK_TOKEN=" + token}, "project", "show", "DEV")
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assertNoToken(t, got, token)
 		})
 	}
@@ -478,7 +468,7 @@ func TestProjectShowRefusesWithoutAToken(t *testing.T) {
 
 			got := runWith(t, env, "project", "show", "DEV")
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.NotContains(t, got.stderr, "secret")
 			assertNoToken(t, got, token)
 			assert.Empty(t, server.requests())
@@ -492,33 +482,33 @@ func TestProjectRefusesACallForTheFaultCheckedFirst(t *testing.T) {
 		name string
 		argv []string
 		env  []string
-		want refusal
+		want faultDocument
 	}{
 		{
 			name: "a code of another form, fields that do not parse, no address and no token",
 			argv: []string{"project", "show", "a/b", "--fields", "a,,b"},
-			want: refusal{code: "bad_usage"},
+			want: faultDocument{code: "bad_usage"},
 		},
 		{
 			name: "a limit it cannot send, fields that do not parse, no address and no token",
 			argv: []string{"project", "list", "--limit", "0", "--fields", "a,,b"},
-			want: refusal{code: "bad_usage"},
+			want: faultDocument{code: "bad_usage"},
 		},
 		{
 			name: "fields that do not parse, no address and no token",
 			argv: []string{"project", "show", "DEV", "--fields", "a,,b"},
-			want: refusal{code: "bad_usage"},
+			want: faultDocument{code: "bad_usage"},
 		},
 		{
 			name: "no address and no token",
 			argv: []string{"project", "show", "DEV"},
-			want: refusal{code: "denied", details: []detail{lookedIn("YTRACK_URL", "YTRACK_TOKEN")}},
+			want: faultDocument{code: "denied", details: []detail{lookedIn("YTRACK_URL", "YTRACK_TOKEN")}},
 		},
 		{
 			name: "an empty address and an empty token",
 			argv: []string{"project", "show", "DEV"},
 			env:  []string{"YTRACK_URL=", "YTRACK_TOKEN="},
-			want: refusal{code: "denied", details: []detail{lookedIn("YTRACK_URL", "YTRACK_TOKEN")}},
+			want: faultDocument{code: "denied", details: []detail{lookedIn("YTRACK_URL", "YTRACK_TOKEN")}},
 		},
 	}
 	for _, tc := range tests {
@@ -550,7 +540,7 @@ func TestProjectShowRefusesATokenItCannotSend(t *testing.T) {
 
 			got := runWith(t, []string{"YTRACK_URL=" + server.url, "YTRACK_TOKEN=" + tc.token}, "project", "show", "DEV")
 
-			want := refusal{code: "bad_usage"}
+			want := faultDocument{code: "bad_usage"}
 			assert.Equal(t, want, requireRefusal(t, got))
 			assert.NotContains(t, got.stderr, token)
 		})
@@ -566,13 +556,13 @@ func TestProjectShowRefusesWithoutThePasswordOfTheAddress(t *testing.T) {
 	}{
 		{
 			name:    "a refusal by the status of the answer",
-			handler: answer(http.StatusNotFound, `{"error":"Not Found","error_description":"Entity with id DEV not found"}`),
+			handler: respondWith(http.StatusNotFound, `{"error":"Not Found","error_description":"Entity with id DEV not found"}`),
 			code:    "not_found",
 		},
 		{
 			name:    "a refusal of the judgment of names",
-			handler: answer(http.StatusOK, `{"$type":"Project"}`),
-			code:    "upstream_lied",
+			handler: respondWith(http.StatusOK, `{"$type":"Project"}`),
+			code:    "upstream_invalid",
 		},
 	}
 	for _, tc := range tests {
@@ -596,13 +586,13 @@ func TestProjectShowRefusesWithoutThePasswordOfTheAddress(t *testing.T) {
 
 func TestProjectShowRefusesWhenStdoutFails(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, projectDEV))
+	server := serve(t, respondWith(http.StatusOK, projectDEV))
 	var stderr strings.Builder
 
 	code := cli.Run(t.Context(), []string{"project", "show", "DEV"}, server.env(), nil, nil, failingWriter{}, &stderr)
 
 	got := outcome{code: code, stderr: stderr.String()}
-	assert.Equal(t, refusal{code: "upstream_failed"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "upstream_failed"}, requireRefusal(t, got))
 }
 
 type failingWriter struct{}

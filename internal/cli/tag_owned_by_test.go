@@ -36,7 +36,7 @@ func TestTagRefusesAnOwnerOfNoLogin(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -117,7 +117,7 @@ func TestTagDeleteRefusesANameNoTagOfThatOwnerCarries(t *testing.T) {
 
 			got := runWith(t, server.env(), "tag", "delete", "--name", tc.written, "--owned-by", tc.owner)
 
-			want := refusal{
+			want := faultDocument{
 				code: "unknown_name",
 				details: []detail{
 					{"request", tagsRequest(server.url, resolvedTagFields, "-1")},
@@ -150,8 +150,8 @@ func TestTagAddAndRemoveNarrowTheNameByTheOwnerOfTheTag(t *testing.T) {
 		{
 			name:    "a tagging",
 			argv:    []string{"tag", "add", "DEV-7", "--name", "amb", "--owned-by", "dev.limited"},
-			serving: hangingATag,
-			write:   answer(http.StatusOK, shownTag("10-23", "amb", "dev.limited")),
+			serving: addingATag,
+			write:   respondWith(http.StatusOK, catalogueTag("10-23", "amb", "dev.limited")),
 			method:  http.MethodPost,
 			path:    tagsOfOwnerPath("issues", "DEV-7"),
 		},
@@ -167,7 +167,7 @@ func TestTagAddAndRemoveNarrowTheNameByTheOwnerOfTheTag(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := tc.serving(t, answer(http.StatusOK, issueNamed("DEV-7")), shownTags(), tc.write)
+			server := tc.serving(t, respondWith(http.StatusOK, issueNamed("DEV-7")), shownTags(), tc.write)
 
 			got := runWith(t, server.env(), tc.argv...)
 
@@ -189,7 +189,7 @@ func TestTagDeleteDestroysTheTagOfTheNamedOwnerOnTheDevInstance(t *testing.T) {
 
 	own := runWith(t, limited, "tag", "create", "--name", name)
 	require.Equal(t, 0, own.code, "stderr: %s", own.stderr)
-	t.Cleanup(func() { removeTagIfItStands(t, limited, name, "dev.limited") })
+	t.Cleanup(func() { removeTagIfPresent(t, limited, name, "dev.limited") })
 
 	shared := runWith(t, dev.env(), "tag", "create", "--name", name, "--visible-for", everyoneRegistered)
 	require.Equal(t, 0, shared.code, "stderr: %s", shared.stderr)
@@ -204,13 +204,13 @@ func TestTagDeleteDestroysTheTagOfTheNamedOwnerOnTheDevInstance(t *testing.T) {
 	assert.True(t, tagIsListed(t, dev, name), "the admin's tag went with the one of the token that named it")
 }
 
-// removeTagIfItStands is the cleanup of a scenario whose own body destroys the tag: it runs where the body
+// removeTagIfPresent is the cleanup of a scenario whose own body destroys the tag: it runs where the body
 // never got that far, and a tag already gone is the resolver answering unknown_name, which is what was wanted.
 // The owner is named because the name is one two tokens carry until then.
-func removeTagIfItStands(t *testing.T, env []string, name, owner string) {
+func removeTagIfPresent(t *testing.T, env []string, name, owner string) {
 	t.Helper()
 	got := runInContext(t, context.Background(), env, "tag", "delete", "--name", name, "--owned-by", owner)
 	if got.code != 0 {
-		assert.Contains(t, got.stderr, "unknown_name", "the tag was left on the polygon")
+		assert.Contains(t, got.stderr, "unknown_name", "the tag was left on the dev instance")
 	}
 }

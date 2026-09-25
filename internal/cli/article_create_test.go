@@ -45,12 +45,10 @@ func (a answeredArticle) json() string {
 		`,"project":` + cmp.Or(a.project, `{"$type":"Project","shortName":"DEV"}`) + `}`
 }
 
-func filedArticle(readable, summary, content string) string {
+func createdArticle(readable, summary, content string) string {
 	return answeredArticle{readable: readable, summary: summary, content: content}.json()
 }
 
-// filedArticleIn is filedArticle with the project of the answer written out, which is the one part of a
-// creation the caller names that no default of article show prints.
 func filedArticleIn(readable, summary, content, project string) string {
 	return answeredArticle{readable: readable, summary: summary, content: content, project: project}.json()
 }
@@ -110,7 +108,7 @@ func TestArticleCreateRefusesBeforeAnyRequest(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -141,7 +139,7 @@ func TestArticleCreateRefusesTextTheServerWouldRewrite(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"article", "create", "DEV"}, tc.argv...)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -168,7 +166,7 @@ func TestArticleCreateHasNoFlagsBesidesItsOwn(t *testing.T) {
 
 			got := runWith(t, server.env(), "article", "create", "DEV", "--summary", "x", tc.flag, "y")
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -182,7 +180,7 @@ func TestArticleCreatePrintsNoComments(t *testing.T) {
 
 	got := runWith(t, server.env(), "article", "create", "DEV", "--summary", "x", "--fields", "+comments(text)")
 
-	assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 	assert.Empty(t, server.requests())
 }
 
@@ -205,7 +203,7 @@ func TestArticleCreateFilesTheArticleInOneRequest(t *testing.T) {
 	t.Parallel()
 	const title = "[bug] fix login"
 	text := longContent()
-	server := creatingAnArticle(t, answer(http.StatusOK, filedArticle("DEV-A-7", title, asJSON(text))))
+	server := creatingAnArticle(t, respondWith(http.StatusOK, createdArticle("DEV-A-7", title, asJSON(text))))
 
 	got := runWith(t, server.env(), "article", "create", "DEV", "--summary", title, "--content", text)
 
@@ -227,19 +225,13 @@ func TestArticleCreateFilesTheArticleInOneRequest(t *testing.T) {
 	assert.Equal(t, text, nodeAt(t, mapping, "content").Value)
 }
 
-// The most content the polygon was measured to keep on a creation, holding everything an article keeps byte
-// for byte: a lone carriage return, a CRLF, a line separator, trailing spaces, a line of three dashes and a
-// character outside the basic plane. The description of an issue would lose the carriage return.
 func longContent() string {
-	return filling(hostileText, 131_071)
+	return textOfSize(hostileText, 131_071)
 }
 
 const hostileText = "Шаги:  \r\n1. открыть\rи закрыть   \n---\n\xe2\x80\xa8и ещё \xf0\x9f\x98\x80\n"
 
-// filling is text of exactly size bytes built out of chunk: the cut falls on a rune boundary and what is left
-// of the count is made up with a letter, so the text is valid UTF-8 whatever the chunk holds and the size is
-// the one the polygon was measured at.
-func filling(chunk string, size int) string {
+func textOfSize(chunk string, size int) string {
 	var written strings.Builder
 	for written.Len() < size {
 		written.WriteString(chunk)
@@ -316,7 +308,7 @@ func TestArticleCreateWritesTheTextItWasGiven(t *testing.T) {
 			if text, written := tc.want["content"].(string); written {
 				content = asJSON(text)
 			}
-			server := creatingAnArticle(t, answer(http.StatusOK, filedArticle("DEV-A-7", title, content)))
+			server := creatingAnArticle(t, respondWith(http.StatusOK, createdArticle("DEV-A-7", title, content)))
 
 			got := runWith(t, server.env(), append([]string{"article", "create", "DEV"}, tc.argv...)...)
 
@@ -343,58 +335,58 @@ func TestArticleCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 		{
 			name:     "a title the server stored otherwise",
 			argv:     []string{"--summary", "a b"},
-			filed:    filedArticle("DEV-A-7", "a  b", "null"),
+			filed:    createdArticle("DEV-A-7", "a  b", "null"),
 			article:  "DEV-A-7",
-			mismatch: []any{[]detail{{"field", "summary"}, {"written", "a b"}, {"arrived", "a  b"}}},
+			mismatch: []any{[]detail{{"field", "summary"}, {"expected", "a b"}, {"actual", "a  b"}}},
 		},
 		{
 			name:     "content the server kept none of",
 			argv:     []string{"--summary", "x", "--content", "первая"},
-			filed:    filedArticle("DEV-A-7", "x", "null"),
+			filed:    createdArticle("DEV-A-7", "x", "null"),
 			article:  "DEV-A-7",
-			mismatch: []any{[]detail{{"field", "content"}, {"written", "первая"}, {"arrived", nil}}},
+			mismatch: []any{[]detail{{"field", "content"}, {"expected", "первая"}, {"actual", nil}}},
 		},
 		{
 			name:     "content the server cut a carriage return out of",
 			argv:     []string{"--summary", "x", "--content", "первая\rвторая"},
-			filed:    filedArticle("DEV-A-7", "x", asJSON("перваявторая")),
+			filed:    createdArticle("DEV-A-7", "x", asJSON("перваявторая")),
 			article:  "DEV-A-7",
-			mismatch: []any{[]detail{{"field", "content"}, {"written", "первая\rвторая"}, {"arrived", "перваявторая"}}},
+			mismatch: []any{[]detail{{"field", "content"}, {"expected", "первая\rвторая"}, {"actual", "перваявторая"}}},
 		},
 		{
 			name:     "an article filed in another project",
 			argv:     []string{"--summary", "x"},
 			filed:    filedArticleIn("DEMO-A-7", "x", "null", `{"$type":"Project","shortName":"DEMO"}`),
 			article:  "DEMO-A-7",
-			mismatch: []any{[]detail{{"field", "project"}, {"written", "DEV"}, {"arrived", "DEMO"}}},
+			mismatch: []any{[]detail{{"field", "project"}, {"expected", "DEV"}, {"actual", "DEMO"}}},
 		},
 		{
 			name:     "no project on the article at all",
 			argv:     []string{"--summary", "x"},
 			filed:    filedArticleIn("DEV-A-7", "x", "null", "null"),
 			article:  "DEV-A-7",
-			mismatch: []any{[]detail{{"field", "project"}, {"written", "DEV"}, {"arrived", nil}}},
+			mismatch: []any{[]detail{{"field", "project"}, {"expected", "DEV"}, {"actual", nil}}},
 		},
 		{
 			name:    "the title and the content both",
 			argv:    []string{"--summary", "a b", "--content", "первая"},
-			filed:   filedArticle("DEV-A-7", "a  b", asJSON("вторая")),
+			filed:   createdArticle("DEV-A-7", "a  b", asJSON("вторая")),
 			article: "DEV-A-7",
 			mismatch: []any{
-				[]detail{{"field", "summary"}, {"written", "a b"}, {"arrived", "a  b"}},
-				[]detail{{"field", "content"}, {"written", "первая"}, {"arrived", "вторая"}},
+				[]detail{{"field", "summary"}, {"expected", "a b"}, {"actual", "a  b"}},
+				[]detail{{"field", "content"}, {"expected", "первая"}, {"actual", "вторая"}},
 			},
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := creatingAnArticle(t, answer(http.StatusOK, tc.filed))
+			server := creatingAnArticle(t, respondWith(http.StatusOK, tc.filed))
 
 			got := runWith(t, server.env(), append([]string{"article", "create", "DEV"}, tc.argv...)...)
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", articleCreationRequest(server.url, askedArticleFields)},
 					{"article", tc.article},
@@ -411,7 +403,7 @@ func TestArticleCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 // key comes back null, and that is the article the caller asked for.
 func TestArticleCreateChecksNoContentWhereNoneWasWritten(t *testing.T) {
 	t.Parallel()
-	server := creatingAnArticle(t, answer(http.StatusOK, filedArticle("DEV-A-7", "x", "null")))
+	server := creatingAnArticle(t, respondWith(http.StatusOK, createdArticle("DEV-A-7", "x", "null")))
 
 	got := runWith(t, server.env(), "article", "create", "DEV", "--summary", "x")
 
@@ -462,11 +454,11 @@ func TestArticleCreateRefusesWhatTheServerRefused(t *testing.T) {
 			t.Parallel()
 			said := `{"error":` + strconv.Quote(tc.upstreamError) + `,"error_description":` +
 				strconv.Quote(tc.upstreamMessage) + `}`
-			server := creatingAnArticle(t, answer(tc.status, said))
+			server := creatingAnArticle(t, respondWith(tc.status, said))
 
 			got := runWith(t, server.env(), "article", "create", "DEV", "--summary", "x")
 
-			want := refusal{
+			want := faultDocument{
 				code: tc.code,
 				details: append([]detail{
 					{"request", articleCreationRequest(server.url, askedArticleFields)},
@@ -500,7 +492,7 @@ func TestArticleCreateIsUncertainWhereTheAnswerNeverCame(t *testing.T) {
 // out is asked for whatever the expression says, and only the expression reaches the document.
 func TestArticleCreateChecksMoreThanItPrints(t *testing.T) {
 	t.Parallel()
-	server := creatingAnArticle(t, answer(http.StatusOK, filedArticle("DEV-A-7", "x", asJSON("первая"))))
+	server := creatingAnArticle(t, respondWith(http.StatusOK, createdArticle("DEV-A-7", "x", asJSON("первая"))))
 
 	got := runWith(t, server.env(), "article", "create", "DEV", "--summary", "x", "--content", "первая",
 		"--fields", "idReadable")
@@ -510,8 +502,6 @@ func TestArticleCreateChecksMoreThanItPrints(t *testing.T) {
 	assert.Equal(t, []string{"idReadable,summary,content,project(shortName)"}, server.sentFields())
 }
 
-// fileArticle is the fixture of a contract test that needs an article of its own, filed by the command that
-// files articles: the id it prints is the id the polygon gave it.
 func fileArticle(t *testing.T, dev *upstream, summary string, argv ...string) string {
 	t.Helper()
 	got := runWith(t, dev.env(), append([]string{"article", "create", "DEV", "--summary", summary}, argv...)...)
@@ -534,9 +524,6 @@ func removeArticle(t *testing.T, dev *upstream, readable string) {
 	assert.Equal(t, "not_found", requireRefusalDocument(t, gone).code)
 }
 
-// An article of eighty kilobytes filed in the polygon for real, carriage returns and all: the content is
-// read back by the command that reads articles and stands there byte for byte, which is the whole of what an
-// article keeps that the description of an issue does not.
 func TestArticleCreateFilesAnArticleOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -562,10 +549,8 @@ func TestArticleCreateFilesAnArticleOfTheDevInstance(t *testing.T) {
 	assert.Equal(t, yaml.DoubleQuotedStyle, content.Style, "a carriage return keeps content out of a literal block")
 }
 
-// The content of the largest article measured on real data, which is what a contract test writes: the polygon
-// keeps more.
 func hostileContent() string {
-	return filling(hostileText, 81_033)
+	return textOfSize(hostileText, 81_033)
 }
 
 // The server reads the code in any letter case and answers with the project as it keeps it, so an article
@@ -582,15 +567,13 @@ func TestArticleCreateFilesAnArticleInTheProjectOfALowerCaseCode(t *testing.T) {
 	assert.Regexp(t, `^DEV-A-[0-9]+$`, readable)
 }
 
-// A project the polygon has none of is the server's own refusal, word for word, and the one request that
-// went out is the one that was answered: nothing is read first, so a code that is not there costs one POST.
 func TestArticleCreateRefusesAProjectTheDevInstanceDoesNotHave(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
 	got := runWith(t, dev.env(), "article", "create", "NOPE", "--summary", contractArticleTitle(t))
 
-	want := refusal{
+	want := faultDocument{
 		code: "not_found",
 		details: []detail{
 			{"request", articleCreationRequest(dev.url, askedArticleFields)},
@@ -612,7 +595,7 @@ func TestArticleCreateRefusesTheProjectTheLimitedUserMayNotWriteIn(t *testing.T)
 	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited},
 		"article", "create", "DEV", "--summary", contractArticleTitle(t))
 
-	want := refusal{
+	want := faultDocument{
 		code: "denied",
 		details: []detail{
 			{"request", articleCreationRequest(dev.url, askedArticleFields)},

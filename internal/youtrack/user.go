@@ -10,8 +10,6 @@ import (
 	"github.com/hakastein/ytrack/internal/render"
 )
 
-// A user is read by every token alike: the catalogue of users is not filtered by the rights a token has on
-// projects, and email arrives as a string, or as null where none is set, whoever asks (measured on the polygon).
 const UserShowFields = "login,fullName,email,banned"
 
 // A ban is no reason a user is left out of a search or out of the values a field allows, so it is told either way.
@@ -34,8 +32,8 @@ func ListUsers(search, expression string, page Page) (Call, *diag.Fault) {
 }
 
 func (c *Client) listUsers(ctx context.Context, spec *schemas, search string, requested []requestedField, page Page) (*render.Node, *diag.Fault) {
-	return c.selection(ctx, spec, "users", "[]User", requested, page, func(ctx context.Context, fields string, w window) (*http.Response, error) {
-		return c.getUsers(ctx, search, fields, w)
+	return c.listPage(ctx, spec, "users", "[]User", requested, page, func(ctx context.Context, fields string, w window) (*http.Response, error) {
+		return c.apiGetUsers(ctx, search, fields, w)
 	})
 }
 
@@ -58,7 +56,7 @@ func ShowUser(login, expression string) (Call, *diag.Fault) {
 
 func (c *Client) showUser(ctx context.Context, spec *schemas, login string, requested []requestedField) (*render.Node, *diag.Fault) {
 	users, fault := c.read(ctx, spec, "User", requested, func(ctx context.Context, fields string) (*http.Response, error) {
-		return c.getUser(ctx, login, fields)
+		return c.apiGetUser(ctx, login, fields)
 	})
 	if fault != nil {
 		return nil, noSuchLogin(login, fault)
@@ -89,7 +87,7 @@ func findByName(arg string) string {
 // a human, and no rights hide either of them from the user they belong to.
 func CurrentUser(ctx context.Context, c *Client) (*render.Node, *diag.Fault) {
 	users, fault := c.read(ctx, loadSchemas(), "Me", []requestedField{{name: loginKey}, {name: "fullName"}}, func(ctx context.Context, fields string) (*http.Response, error) {
-		return c.getCurrentUser(ctx, fields)
+		return c.apiGetCurrentUser(ctx, fields)
 	})
 	if fault != nil {
 		return nil, fault

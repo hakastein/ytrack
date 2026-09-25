@@ -11,45 +11,36 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// What a partner is printed by unasked, and what link list asks of one issue: of every slot what the caller
-// asked of the issues at its other end, the end this issue stands at, both phrases of the type and how many
-// issues the server holds in the slot. Nothing is asked of the issue itself, since nothing of it is printed.
 const linkListPartner = "idReadable,summary"
 
 func linkListFields(partner string) string {
 	return "links(issues(" + partner + ")," + linkParts + ",issuesSize)"
 }
 
-// A slot as link list reads it: the slot of an issue with the count the server sends beside the issues.
-type linkedSlot struct {
+type issueLinkEntry struct {
 	id             string
 	direction      string
 	sourceToTarget string
 	targetToSource string
-	// The issues at the other end, as JSON; none at all where the slot is empty.
-	issues []string
-	// What the server says the slot holds, as JSON; empty is as many issues as it sent.
-	held string
-	// The server sends no count for the slot at all.
-	countless bool
+	issues         []string
+	held           string
+	countless      bool
 }
 
-// linked reads a slot written for a scenario of issue show the way link list asks for it.
-func linked(link arrivedLink) linkedSlot {
-	return linkedSlot{direction: link.direction, sourceToTarget: link.sourceToTarget,
+func linked(link receivedLink) issueLinkEntry {
+	return issueLinkEntry{direction: link.direction, sourceToTarget: link.sourceToTarget,
 		targetToSource: link.targetToSource, issues: link.issues}
 }
 
-// The nine slots every issue of the polygon carries, all of them empty.
-func linkedSlots() []linkedSlot {
-	slots := make([]linkedSlot, 0, len(emptySlots()))
-	for _, link := range emptySlots() {
-		slots = append(slots, linked(link))
+func issueLinkEntries() []issueLinkEntry {
+	links := make([]issueLinkEntry, 0, len(emptyIssueLinks()))
+	for _, link := range emptyIssueLinks() {
+		links = append(links, linked(link))
 	}
-	return slots
+	return links
 }
 
-func (s linkedSlot) sent(id string) string {
+func (s issueLinkEntry) sent(id string) string {
 	if s.id != "" {
 		id = s.id
 	}
@@ -68,11 +59,10 @@ func (s linkedSlot) sent(id string) string {
 		`,"issues":[` + strings.Join(s.issues, ",") + `]}`
 }
 
-// linkedIssue is the answer link list reads: the slots the issue holds its links in.
-func linkedIssue(slots ...linkedSlot) string {
-	sent := make([]string, 0, len(slots))
-	for i, slot := range slots {
-		sent = append(sent, slot.sent("163-"+strconv.Itoa(i)))
+func issueLinksResponse(links ...issueLinkEntry) string {
+	sent := make([]string, 0, len(links))
+	for i, link := range links {
+		sent = append(sent, link.sent("163-"+strconv.Itoa(i)))
 	}
 	return `{"$type":"Issue","links":[` + strings.Join(sent, ",") + `]}`
 }
@@ -100,7 +90,7 @@ func TestLinkListRefusesACallThatNamesNoOneIssue(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -134,7 +124,7 @@ func TestLinkListRefusesAPage(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"link", "list", "DEV-1"}, tc.argv...)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -142,7 +132,7 @@ func TestLinkListRefusesAPage(t *testing.T) {
 
 // --fields is the expression of an issue at the other end of a link, and every issue printed is one: a name
 // that stands only on the issue asked for is refused before any request.
-func TestLinkListRefusesNamesThatStandOnlyOnTheIssueAskedFor(t *testing.T) {
+func TestLinkListRefusesNamesThatExistOnlyOnTheIssueAskedFor(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name       string
@@ -159,15 +149,12 @@ func TestLinkListRefusesNamesThatStandOnlyOnTheIssueAskedFor(t *testing.T) {
 
 			got := runWith(t, server.env(), "link", "list", "DEV-1", "--fields", tc.expression)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// --fields of either command is the expression of an issue at the other end of a link, and that issue holds
-// its own links in slots printed as the phrase against the issues they hold: a name written under one of them
-// is refused before any request, on the command that writes a link as on the one that reads them.
 func TestLinkRefusesNamesWrittenUnderTheSlotOfAPartner(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -184,26 +171,22 @@ func TestLinkRefusesNamesWrittenUnderTheSlotOfAPartner(t *testing.T) {
 
 			got := runWith(t, server.env(), append(tc.argv, "--fields", "+links(id)")...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// One request brings the whole of the links back, and the document names the issue, counts what came and
-// prints the phrases in the order the server keeps the slots in. The id the server addresses a slot by and the
-// type it names on every object are how YouTrack holds a link, and neither reaches the document.
-func TestLinkListPrintsThePhrasesOfAnIssueInTheOrderTheyArrive(t *testing.T) {
+func TestLinkListPrintsThePhrasesOfAnIssueInTheOrderReceived(t *testing.T) {
 	t.Parallel()
-	slots := linkedSlots()
-	slots[2].id = "42-1t"
-	slots[2].issues = []string{partnerIssue("DEV-3", "[bug] fix login")}
-	slots[0].id = "42-0"
-	slots[0].issues = []string{partnerIssue("DEV-9", "Y"), partnerIssue("DEV-2", "X")}
-	// The depend slot the issue stands at the target of comes first, before the undirected one.
-	slots[0], slots[2] = slots[2], slots[0]
-	body := linkedIssue(slots...)
-	server := serve(t, answer(http.StatusOK, body))
+	links := issueLinkEntries()
+	links[2].id = "42-1t"
+	links[2].issues = []string{partnerIssue("DEV-3", "[bug] fix login")}
+	links[0].id = "42-0"
+	links[0].issues = []string{partnerIssue("DEV-9", "Y"), partnerIssue("DEV-2", "X")}
+	links[0], links[2] = links[2], links[0]
+	body := issueLinksResponse(links...)
+	server := serve(t, respondWith(http.StatusOK, body))
 
 	got := runWith(t, server.env(), "link", "list", "dev-1")
 
@@ -228,16 +211,13 @@ func TestLinkListPrintsThePhrasesOfAnIssueInTheOrderTheyArrive(t *testing.T) {
 	assert.Equal(t, []string{linkListFields(linkListPartner)}, server.sentFields())
 }
 
-// The issue asked for is the caller's own word and no part of the document, as the owner of no list is: the
-// document is the counts and the phrases, the argument goes out as it was typed, and nothing is asked of the
-// issue but its slots.
 func TestLinkListPrintsNothingOfTheIssueAskedFor(t *testing.T) {
 	t.Parallel()
-	slot := linked(arrivedLink{
+	link := linked(receivedLink{
 		direction: "BOTH", sourceToTarget: "relates to",
 		issues: []string{partnerIssue("DEV-2", "Отклонённая задача")},
 	})
-	server := serve(t, answer(http.StatusOK, linkedIssue(slot)))
+	server := serve(t, respondWith(http.StatusOK, issueLinksResponse(link)))
 
 	got := runWith(t, server.env(), "link", "list", "dev-1")
 
@@ -249,11 +229,9 @@ func TestLinkListPrintsNothingOfTheIssueAskedFor(t *testing.T) {
 	assert.Equal(t, []string{linkListFields(linkListPartner)}, server.sentFields())
 }
 
-// Every issue carries a slot for each end of each type the instance has, and an issue linked to nobody holds
-// nine empty ones: an empty slot is no link, so the block is printed empty rather than left out.
 func TestLinkListPrintsAnIssueWithNoLinkAtAll(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, linkedIssue(linkedSlots()...)))
+	server := serve(t, respondWith(http.StatusOK, issueLinksResponse(issueLinkEntries()...)))
 
 	got := runWith(t, server.env(), "link", "list", "DEV-1")
 
@@ -266,10 +244,7 @@ func TestLinkListPrintsAnIssueWithNoLinkAtAll(t *testing.T) {
 	}, requireDocument(t, got.stdout))
 }
 
-// The counts are the server's own word about each slot, not the length of what it sent, so a collection it
-// ever did cut down is declared rather than printed short; a count under what arrived is the one answer
-// contradicting itself.
-func TestLinkListCountsByWhatTheServerSaysASlotHolds(t *testing.T) {
+func TestLinkListCountsByWhatTheServerSaysAnIssueLinkHas(t *testing.T) {
 	t.Parallel()
 	partners := []string{
 		partnerIssue("DEV-2", "Отклонённая задача"),
@@ -279,8 +254,8 @@ func TestLinkListCountsByWhatTheServerSaysASlotHolds(t *testing.T) {
 
 	t.Run("more than arrived", func(t *testing.T) {
 		t.Parallel()
-		slot := linkedSlot{direction: "BOTH", sourceToTarget: "relates to", issues: partners, held: "5"}
-		server := serve(t, answer(http.StatusOK, linkedIssue(slot)))
+		link := issueLinkEntry{direction: "BOTH", sourceToTarget: "relates to", issues: partners, held: "5"}
+		server := serve(t, respondWith(http.StatusOK, issueLinksResponse(link)))
 
 		got := runWith(t, server.env(), "link", "list", "DEV-1")
 
@@ -291,14 +266,14 @@ func TestLinkListCountsByWhatTheServerSaysASlotHolds(t *testing.T) {
 
 	t.Run("fewer than arrived", func(t *testing.T) {
 		t.Parallel()
-		slot := linkedSlot{direction: "BOTH", sourceToTarget: "relates to", issues: partners, held: "1"}
-		body := linkedIssue(slot)
-		server := serve(t, answer(http.StatusOK, body))
+		link := issueLinkEntry{direction: "BOTH", sourceToTarget: "relates to", issues: partners, held: "1"}
+		body := issueLinksResponse(link)
+		server := serve(t, respondWith(http.StatusOK, body))
 
 		got := runWith(t, server.env(), "link", "list", "DEV-1")
 
 		found := requireRefusal(t, got)
-		assert.Equal(t, "upstream_lied", found.code)
+		assert.Equal(t, "upstream_invalid", found.code)
 		assert.Equal(t, body, detailNamed(t, found, "upstream_body"))
 	})
 
@@ -306,26 +281,26 @@ func TestLinkListCountsByWhatTheServerSaysASlotHolds(t *testing.T) {
 	// has nothing to fix and unknown_name would hand them a name they never wrote.
 	t.Run("no count at all", func(t *testing.T) {
 		t.Parallel()
-		slot := linkedSlot{direction: "BOTH", sourceToTarget: "relates to", issues: partners, countless: true}
-		server := serve(t, answer(http.StatusOK, linkedIssue(slot)))
+		link := issueLinkEntry{direction: "BOTH", sourceToTarget: "relates to", issues: partners, countless: true}
+		server := serve(t, respondWith(http.StatusOK, issueLinksResponse(link)))
 
 		got := runWith(t, server.env(), "link", "list", "DEV-1")
 
 		found := requireRefusal(t, got)
-		assert.Equal(t, "upstream_lied", found.code)
+		assert.Equal(t, "upstream_invalid", found.code)
 		assert.Equal(t, []any{[]detail{{"field", "links(issuesSize)"}, {"type", "IssueLink"}}},
 			detailNamed(t, found, "missing"))
 	})
 
 	t.Run("a count that is no whole number", func(t *testing.T) {
 		t.Parallel()
-		slot := linkedSlot{direction: "BOTH", sourceToTarget: "relates to", issues: partners, held: "1.5"}
-		server := serve(t, answer(http.StatusOK, linkedIssue(slot)))
+		link := issueLinkEntry{direction: "BOTH", sourceToTarget: "relates to", issues: partners, held: "1.5"}
+		server := serve(t, respondWith(http.StatusOK, issueLinksResponse(link)))
 
 		got := runWith(t, server.env(), "link", "list", "DEV-1")
 
 		found := requireRefusal(t, got)
-		assert.Equal(t, "upstream_lied", found.code)
+		assert.Equal(t, "upstream_invalid", found.code)
 	})
 }
 
@@ -336,18 +311,18 @@ func TestLinkListRefusesLinksTheServerNamesBadly(t *testing.T) {
 	partner := []string{partnerIssue("DEV-2", "Отклонённая задача")}
 	tests := []struct {
 		name  string
-		slots []linkedSlot
+		links []issueLinkEntry
 	}{
 		{
 			name: "two links of one phrase",
-			slots: []linkedSlot{
+			links: []issueLinkEntry{
 				{direction: "OUTWARD", sourceToTarget: "X", targetToSource: "Y", issues: partner},
 				{direction: "BOTH", sourceToTarget: "X", issues: partner},
 			},
 		},
 		{
 			name: "a link holding issues and going by no phrase",
-			slots: []linkedSlot{
+			links: []issueLinkEntry{
 				{direction: "INWARD", sourceToTarget: "is required for", targetToSource: "", issues: partner},
 			},
 		},
@@ -355,26 +330,23 @@ func TestLinkListRefusesLinksTheServerNamesBadly(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, linkedIssue(tc.slots...)))
+			server := serve(t, respondWith(http.StatusOK, issueLinksResponse(tc.links...)))
 
 			got := runWith(t, server.env(), "link", "list", "DEV-1")
 
 			found := requireRefusal(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 		})
 	}
 }
 
-// A partner is a record of the document, so its prose is written on the line of that record: the text keeps
-// every byte, and the lines it holds do not become lines of the document.
-func TestLinkListPrintsTheProseOfAPartnerOnItsLine(t *testing.T) {
+func TestLinkListPrintsTheTextOfAPartnerOnItsLine(t *testing.T) {
 	t.Parallel()
-	// U+2028, which YAML reads as a line break of its own, turns up in real prose.
-	const prose = "первая\nвторая\xe2\x80\xa8третья"
+	const text = "первая\nвторая\xe2\x80\xa8третья"
 	partner := `{"$type":"Issue","idReadable":"DEV-2","summary":"Отклонённая задача","description":` +
-		strconv.Quote(prose) + `}`
-	slot := linkedSlot{direction: "BOTH", sourceToTarget: "relates to", issues: []string{partner}}
-	server := serve(t, answer(http.StatusOK, linkedIssue(slot)))
+		strconv.Quote(text) + `}`
+	link := issueLinkEntry{direction: "BOTH", sourceToTarget: "relates to", issues: []string{partner}}
+	server := serve(t, respondWith(http.StatusOK, issueLinksResponse(link)))
 
 	got := runWith(t, server.env(), "link", "list", "DEV-1", "--fields", "+description")
 
@@ -382,11 +354,9 @@ func TestLinkListPrintsTheProseOfAPartnerOnItsLine(t *testing.T) {
 	assert.Equal(t, []string{linkListFields(linkListPartner + ",description")}, server.sentFields())
 	record := nodeAt(t, requireMapping(t, "stdout", got.stdout), "links", "relates to")
 	require.Equal(t, yaml.SequenceNode, record.Kind, "stdout: %q", got.stdout)
-	assert.Equal(t, prose, nodeAt(t, record.Content[0], "description").Value)
+	assert.Equal(t, text, nodeAt(t, record.Content[0], "description").Value)
 }
 
-// DEV-1 of the polygon stands at one end of each of the five types, and every phrase reads outwards from it.
-// The id the server addresses a slot by never leaves ytrack, and one request brings the whole of it back.
 func TestLinkListPrintsTheLinksOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -467,7 +437,7 @@ func TestLinkListRefusesAnIssueTheDevInstanceDoesNotShow(t *testing.T) {
 
 			got := runWith(t, env, "link", "list", tc.issue)
 
-			assert.Equal(t, refusal{
+			assert.Equal(t, faultDocument{
 				code: "not_found",
 				details: []detail{
 					{"request", issueRequest(dev.url, tc.issue, linkListFields(linkListPartner))},

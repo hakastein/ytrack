@@ -26,8 +26,8 @@ func (s *Stream) Warn(w *Warning) {
 	s.print(document(*w))
 }
 
-func (s *Stream) Refuse(f *Fault) {
-	s.print(f.printed())
+func (s *Stream) Fail(f *Fault) {
+	s.print(f.document())
 }
 
 // print still prints a document when the renderer rejects the node: the code, the

@@ -168,27 +168,27 @@ func TestCommentDeleteReadsTheAnswerOfTheRemoval(t *testing.T) {
 	}{
 		{
 			name:     "a comment the server has none of",
-			deletion: answer(http.StatusNotFound, entityNotFound("7-12")),
+			deletion: respondWith(http.StatusNotFound, entityNotFound("7-12")),
 			code:     "not_found",
 			exit:     1,
 		},
 		{
 			name: "a token that may see the issue and not remove the comment",
-			deletion: answer(http.StatusForbidden,
+			deletion: respondWith(http.StatusForbidden,
 				`{"error":"Forbidden","error_description":"HTTP 403 Forbidden"}`),
 			code: "denied",
 			exit: 1,
 		},
 		{
 			name:     "an answer carrying an object",
-			deletion: answer(http.StatusOK, `{"x":1}`),
-			code:     "upstream_lied",
+			deletion: respondWith(http.StatusOK, `{"x":1}`),
+			code:     "upstream_invalid",
 			exit:     2,
 		},
 		{
 			name:     "a page under a 200",
 			deletion: gateway(http.StatusOK),
-			code:     "upstream_lied",
+			code:     "upstream_invalid",
 			exit:     2,
 		},
 	}
@@ -209,9 +209,6 @@ func TestCommentDeleteReadsTheAnswerOfTheRemoval(t *testing.T) {
 	}
 }
 
-// A comment of an issue of the polygon removed for real: the document is the id it went by, the show of
-// the issue no longer carries it, and the server answers everything addressed to it afterwards as if it had
-// never been written.
 func TestCommentDeleteRemovesACommentOfAnIssueOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -234,8 +231,6 @@ func TestCommentDeleteRemovesACommentOfAnIssueOfTheDevInstance(t *testing.T) {
 	assert.Equal(t, "not_found", requireRefusal(t, written).code)
 }
 
-// The same on an article of the polygon, where a comment is removed outright in any case: the removal
-// takes the one that was named and leaves the other where it was.
 func TestCommentDeleteRemovesACommentOfAnArticleOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

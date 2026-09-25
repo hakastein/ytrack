@@ -72,12 +72,12 @@ func TestNoCommandNamesWhereTheTokenTheServerRefusedCameFrom(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := fmt.Sprintf(`{"error":%q,"error_description":%q}`, tc.upstreamError, tc.upstreamMessage)
-			server := serve(t, answer(tc.status, body))
+			server := serve(t, respondWith(tc.status, body))
 			env, from := tc.where(t, server.url)
 
 			got := runWith(t, env, "project", "show", "DEV")
 
-			want := refusal{
+			want := faultDocument{
 				code: "denied",
 				details: []detail{
 					{"request", showRequest(server.url, "DEV")},
@@ -131,7 +131,7 @@ func TestNoCommandLeavesTheOriginOutOfARefusalThatIsNotAboutTheToken(t *testing.
 			status:      http.StatusOK,
 			contentType: "text/html",
 			body:        "<!doctype html>\n<html><body>Log in</body></html>",
-			code:        "upstream_lied",
+			code:        "upstream_invalid",
 		},
 	}
 	for _, tc := range tests {
@@ -163,7 +163,7 @@ func TestAuthStatusRefusesATokenOfTheEnvironmentTheDevInstanceDoesNotKnow(t *tes
 
 	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + bogusToken}, "auth", "status")
 
-	want := refusal{
+	want := faultDocument{
 		code: "denied",
 		details: []detail{
 			{"request", meRequest(dev.url)},
@@ -185,7 +185,7 @@ func TestProjectShowRefusesATokenOfTheGlobalRecordTheDevInstanceDoesNotKnow(t *t
 
 	got := runWith(t, []string{"HOME=" + home}, "project", "show", "DEV")
 
-	want := refusal{
+	want := faultDocument{
 		code: "denied",
 		details: []detail{
 			{"request", showRequest(dev.url, "DEV")},

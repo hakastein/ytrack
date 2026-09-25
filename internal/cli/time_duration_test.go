@@ -9,15 +9,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// oneWorkItem is an answer of one record carrying that duration and that day, written as the polygon writes
-// them: the minutes beside the two forms the server keeps of the same length.
 func oneWorkItem(duration, date string) string {
 	return `[{"$type":"IssueWorkItem","id":"199-6","duration":` + duration + `,"date":` + date + `}]`
 }
 
 // The duration as YouTrack answers with it: the minutes, the same length written in the language of the
 // instance, and the id, which is the minutes as text.
-func arrivedDuration(minutes, presentation string) string {
+func receivedDuration(minutes, presentation string) string {
 	return `{"$type":"DurationValue","minutes":` + minutes + `,"presentation":"` + presentation +
 		`","id":"` + minutes + `"}`
 }
@@ -42,7 +40,7 @@ func TestTimeListRefusesANameUnderTheDuration(t *testing.T) {
 
 			got := runWith(t, server.env(), "time", "list", "DEV-1", "--fields", tc.expression)
 
-			want := refusal{code: "bad_usage"}
+			want := faultDocument{code: "bad_usage"}
 			assert.Equal(t, want, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
@@ -68,8 +66,8 @@ func TestTimeListPrintsTheDurationAsAPeriodOfTheMinutes(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			body := oneWorkItem(arrivedDuration(tc.minutes, "1ч 30м"), "1788220800000")
-			server := serve(t, answer(http.StatusOK, body))
+			body := oneWorkItem(receivedDuration(tc.minutes, "1ч 30м"), "1788220800000")
+			server := serve(t, respondWith(http.StatusOK, body))
 
 			got := runWith(t, server.env(), "time", "list", "DEV-1", "--fields", "id,duration")
 
@@ -91,22 +89,22 @@ func TestTimeListPrintsTheDurationAsAPeriodOfTheMinutes(t *testing.T) {
 func TestTimeListRefusesADurationItCannotRead(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		arrived string
+		name     string
+		received string
 	}{
-		{name: "no minutes at all", arrived: `{"$type":"DurationValue","presentation":"1ч 30м"}`},
-		{name: "a fraction of a minute", arrived: `{"$type":"DurationValue","minutes":1.5}`},
-		{name: "the minutes as text", arrived: `{"$type":"DurationValue","minutes":"90"}`},
-		{name: "a duration that is no object", arrived: `"PT1H30M"`},
+		{name: "no minutes at all", received: `{"$type":"DurationValue","presentation":"1ч 30м"}`},
+		{name: "a fraction of a minute", received: `{"$type":"DurationValue","minutes":1.5}`},
+		{name: "the minutes as text", received: `{"$type":"DurationValue","minutes":"90"}`},
+		{name: "a duration that is no object", received: `"PT1H30M"`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, oneWorkItem(tc.arrived, "1788220800000")))
+			server := serve(t, respondWith(http.StatusOK, oneWorkItem(tc.received, "1788220800000")))
 
 			got := runWith(t, server.env(), "time", "list", "DEV-1", "--fields", "id,duration")
 
-			assert.Equal(t, "upstream_lied", requireRefusal(t, got).code)
+			assert.Equal(t, "upstream_invalid", requireRefusal(t, got).code)
 			assert.Empty(t, got.stdout)
 		})
 	}
@@ -116,7 +114,7 @@ func TestTimeListRefusesADurationItCannotRead(t *testing.T) {
 // absent length is not a lie about one.
 func TestTimeListPrintsADurationTheWorkItemHasNone(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, oneWorkItem("null", "null")))
+	server := serve(t, respondWith(http.StatusOK, oneWorkItem("null", "null")))
 
 	got := runWith(t, server.env(), "time", "list", "DEV-1", "--fields", "id,duration,date")
 
@@ -131,17 +129,17 @@ func TestTimeListPrintsADurationTheWorkItemHasNone(t *testing.T) {
 func TestTimeListPrintsTheDayOfAWorkItemInUTC(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		arrived string
-		want    string
+		name     string
+		received string
+		want     string
 	}{
-		{name: "midnight UTC, which is what the server keeps", arrived: "1788220800000", want: "2026-09-01T00:00:00Z"},
-		{name: "noon UTC of the same day", arrived: "1788264000000", want: "2026-09-01T12:00:00Z"},
+		{name: "midnight UTC, which is what the server keeps", received: "1788220800000", want: "2026-09-01T00:00:00Z"},
+		{name: "noon UTC of the same day", received: "1788264000000", want: "2026-09-01T12:00:00Z"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, oneWorkItem(arrivedDuration("90", "1ч 30м"), tc.arrived)))
+			server := serve(t, respondWith(http.StatusOK, oneWorkItem(receivedDuration("90", "1ч 30м"), tc.received)))
 
 			got := runWith(t, server.env(), "time", "list", "DEV-1", "--fields", "id,date")
 

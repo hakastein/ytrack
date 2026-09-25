@@ -12,9 +12,8 @@ import (
 
 const cassetteMode = recorder.ModeReplayOnly
 
-// The matcher ignores Authorization, so a replay sends stand-ins for the polygon's tokens.
-func devTokens(*testing.T) polygonTokens {
-	return polygonTokens{admin: "perm-replay-admin", limited: "perm-replay-limited", member: "perm-replay-member"}
+func devTokens(*testing.T) devInstanceTokens {
+	return devInstanceTokens{admin: "perm-replay-admin", limited: "perm-replay-limited", member: "perm-replay-member"}
 }
 
 func realTransport(t *testing.T) http.RoundTripper {

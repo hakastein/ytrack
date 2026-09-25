@@ -39,7 +39,7 @@ func TestProjectShowRefusesFieldsThatDoNotParse(t *testing.T) {
 
 			got := runWith(t, server.env(), "project", "show", "DEV", "--fields", tc.fields)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 		})
 	}
 }
@@ -64,7 +64,7 @@ func TestProjectShowRefusesANameItCannotPrintAsAKey(t *testing.T) {
 
 			got := runWith(t, server.env(), "project", "show", "DEV", "--fields", tc.fields)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 		})
 	}
 }
@@ -91,7 +91,7 @@ func TestProjectShowRefusesFieldsGivenTwice(t *testing.T) {
 
 			got := runWith(t, server.env(), slices.Concat([]string{"project", "show", "DEV"}, tc.flags)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 		})
 	}
 }
@@ -124,7 +124,7 @@ func TestProjectShowSendsEachFieldOnceInOneForm(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, `{"shortName":"DEV","name":"DEVELOPMENT","archived":false,"description":null,`+
+			server := serve(t, respondWith(http.StatusOK, `{"shortName":"DEV","name":"DEVELOPMENT","archived":false,"description":null,`+
 				`"leader":{"login":"admin","fullName":"Administrator"},"team":{"name":"DEV Team","users":[{"login":"admin","fullName":"Administrator"}]},`+
 				`"plugins":{"timeTrackingSettings":{"enabled":true,"workItemTypes":[]}}}`))
 
@@ -138,16 +138,16 @@ func TestProjectShowSendsEachFieldOnceInOneForm(t *testing.T) {
 
 func TestProjectShowPrintsTheTypeWhenAskedFor(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, projectDEV))
+	server := serve(t, respondWith(http.StatusOK, projectDEV))
 
 	got := runWith(t, server.env(), "project", "show", "DEV", "--fields", "$type,shortName")
 
 	assert.Equal(t, outcome{stdout: "$type: \"Project\"\nshortName: \"DEV\"\n"}, got)
 }
 
-func TestProjectShowPrintsScalarsAsTheyArrived(t *testing.T) {
+func TestProjectShowPrintsScalarsAsReceived(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, `{"name":"[bug] fix login","archived":true,"startingNumber":9007199254740993,"issues":[],"leader":null,"$type":"Project"}`))
+	server := serve(t, respondWith(http.StatusOK, `{"name":"[bug] fix login","archived":true,"startingNumber":9007199254740993,"issues":[],"leader":null,"$type":"Project"}`))
 
 	got := runWith(t, server.env(), "project", "show", "DEV", "--fields", "name,archived,startingNumber,issues(idReadable),leader(login)")
 
@@ -167,7 +167,7 @@ func TestProjectShowPrintsAListOneFlowItemALine(t *testing.T) {
 		`{"login": "admin", "banned": false, "online": 1, "profile": {}, "groups": [{"name": "All Users"}, {"name": "DEV \"Team\""}], "tags": []}, ` +
 		`{"login": "dev.member", "banned": true, "online": null, "profile": null, "groups": [], "tags": ["a", "b"]}]}, ` +
 		`"watchers": [], "codes": [1, null, "DEV", true, [], {}]}`
-	server := serve(t, answer(http.StatusOK, body))
+	server := serve(t, respondWith(http.StatusOK, body))
 
 	got := runWith(t, server.env(), "project", "show", "DEV", "--fields", "shortName,team(name,users(login,banned,online,profile,groups(name),tags)),watchers,codes")
 
@@ -188,10 +188,10 @@ codes:
 `
 	assert.Equal(t, outcome{stdout: want}, got)
 	// Every key of the answer was asked for, so the document reads back as the answer itself.
-	var printed, arrived any
+	var printed, received any
 	require.NoError(t, yaml.Unmarshal([]byte(got.stdout), &printed))
-	require.NoError(t, yaml.Unmarshal([]byte(body), &arrived))
-	assert.Equal(t, arrived, printed)
+	require.NoError(t, yaml.Unmarshal([]byte(body), &received))
+	assert.Equal(t, received, printed)
 }
 
 func TestProjectShowPrintsTheFieldsOfTheDevInstanceInTheOrderAsked(t *testing.T) {
@@ -229,7 +229,6 @@ func TestProjectShowAddsFieldsToTheDefaultOfTheDevInstance(t *testing.T) {
 	assert.Empty(t, got.stderr)
 	assert.Equal(t, 0, got.code)
 	assert.Equal(t, []string{defaultProjectFields + ",leader(login,fullName)"}, dev.sentFields())
-	// The admin's full name is the polygon's to choose, the place of the new key is not: it follows the default.
 	assert.Regexp(t, `\nleader:\n  login: "admin"\n  fullName: "[^"\n]*"\n$`, got.stdout)
 	assert.True(t, strings.HasPrefix(got.stdout, printedDevProject), "stdout: %s", got.stdout)
 }

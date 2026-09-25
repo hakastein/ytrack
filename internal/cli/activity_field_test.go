@@ -17,22 +17,19 @@ const linkTypesPath = "/api/issueLinkTypes"
 // A link type as the server sends one: both phrases and both translations, the last two written as JSON, since
 // a translation the instance keeps none of arrives as "" from one type and as null from the next.
 func sentLinkType(source, target, translatedSource, translatedTarget string) string {
-	return sentLinkTypeHolding(strconv.Quote(source), strconv.Quote(target), translatedSource, translatedTarget)
+	return sentLinkTypeWith(strconv.Quote(source), strconv.Quote(target), translatedSource, translatedTarget)
 }
 
-// sentLinkTypeHolding is sentLinkType with all four phrases written as JSON, for a scenario that sends one of a
+// sentLinkTypeWith is sentLinkType with all four phrases written as JSON, for a scenario that sends one of a
 // shape no phrase can be read out of.
-func sentLinkTypeHolding(source, target, translatedSource, translatedTarget string) string {
+func sentLinkTypeWith(source, target, translatedSource, translatedTarget string) string {
 	return `{"$type":"IssueLinkType","name":"Type","sourceToTarget":` + source +
 		`,"targetToSource":` + target +
 		`,"localizedSourceToTarget":` + translatedSource +
 		`,"localizedTargetToSource":` + translatedTarget + `}`
 }
 
-// The five link types of the polygon, as it answers them: the translations are written in lower case while a
-// record of the journal carries the same phrase capitalized, Copy carries none at either end, and the
-// undirected Relates has an empty phrase at the end no issue stands at.
-func polygonLinkTypes() string {
+func devInstanceLinkTypes() string {
 	return `[` + strings.Join([]string{
 		sentLinkType("relates to", "", `"связана с"`, `""`),
 		sentLinkType("is required for", "depends on", `"обязательна для"`, `"зависит от"`),
@@ -53,13 +50,10 @@ func linkTypesOf(answering, handler http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// linksKnown is the requests of a journal with the link types of the polygon answered before them, for a
-// scenario that stands its own server up and says nothing of the types.
 func linksKnown(rest http.HandlerFunc) http.HandlerFunc {
-	return linkTypesOf(answer(http.StatusOK, polygonLinkTypes()), rest)
+	return linkTypesOf(respondWith(http.StatusOK, devInstanceLinkTypes()), rest)
 }
 
-// linkingTypes is journal with link types of the scenario's own in place of the five the polygon keeps.
 func linkingTypes(t *testing.T, types, handler http.HandlerFunc) *upstream {
 	t.Helper()
 	return serve(t, linkTypesOf(types, handler))
@@ -98,7 +92,7 @@ func TestActivityPrintsALinkByThePhraseOfItsType(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.label, func(t *testing.T) {
 			t.Parallel()
-			server := journal(t, answer(http.StatusOK, `[`+sentLinkRecord(tc.label)+`]`))
+			server := journal(t, respondWith(http.StatusOK, `[`+sentLinkRecord(tc.label)+`]`))
 
 			got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "field")
 
@@ -110,35 +104,33 @@ func TestActivityPrintsALinkByThePhraseOfItsType(t *testing.T) {
 
 // The label is the whole of what a record says about the link it stands for, so a label the types of the
 // instance do not settle leaves nothing to print: the phrase would have to be guessed either way.
-func TestActivityRefusesALinkThePhrasesOfTheInstanceDoNotSettle(t *testing.T) {
+func TestActivityRefusesALinkThePhrasesOfTheInstanceDoNotResolve(t *testing.T) {
 	t.Parallel()
 	ambiguous := `[` + sentLinkType("relates to", "", `"связана с"`, `""`) + `,` +
 		sentLinkType("refers to", "", `"связана с"`, `""`) + `,` +
 		sentLinkType("is required for", "depends on", `"обязательна для"`, `"зависит от"`) + `]`
 	t.Run("a link of a phrase no type of the instance goes by", func(t *testing.T) {
 		t.Parallel()
-		server := journal(t, answer(http.StatusOK, `[`+sentLinkRecord("Блокирует")+`]`))
+		server := journal(t, respondWith(http.StatusOK, `[`+sentLinkRecord("Блокирует")+`]`))
 
 		got := runWith(t, server.env(), "activity", "list", journalIssue)
 
 		found := requireRefusal(t, got)
-		assert.Equal(t, "upstream_lied", found.code)
+		assert.Equal(t, "upstream_invalid", found.code)
 		assert.Empty(t, got.stdout)
 	})
 	t.Run("a link of a phrase two types of the instance go by", func(t *testing.T) {
 		t.Parallel()
-		server := linkingTypes(t, answer(http.StatusOK, ambiguous), answer(http.StatusOK, `[`+sentLinkRecord("Связана с")+`]`))
+		server := linkingTypes(t, respondWith(http.StatusOK, ambiguous), respondWith(http.StatusOK, `[`+sentLinkRecord("Связана с")+`]`))
 
 		got := runWith(t, server.env(), "activity", "list", journalIssue)
 
 		found := requireRefusal(t, got)
-		assert.Equal(t, "upstream_lied", found.code)
+		assert.Equal(t, "upstream_invalid", found.code)
 	})
-	// Two types written alike are the instance's business until a record stands for one of them: what is judged
-	// is the journal that arrived and not the catalogue it was read against.
 	t.Run("two types written alike and no record of either", func(t *testing.T) {
 		t.Parallel()
-		server := linkingTypes(t, answer(http.StatusOK, ambiguous), answer(http.StatusOK, `[`+sentLinkRecord("Зависит от")+`]`))
+		server := linkingTypes(t, respondWith(http.StatusOK, ambiguous), respondWith(http.StatusOK, `[`+sentLinkRecord("Зависит от")+`]`))
 
 		got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "field")
 
@@ -146,31 +138,25 @@ func TestActivityRefusesALinkThePhrasesOfTheInstanceDoNotSettle(t *testing.T) {
 	})
 }
 
-// A type whose two ends are written alike is one phrase under one label, not two of them: without that, every
-// record of such a link would be refused as a phrase two types go by, and the whole journal of the links of the
-// instance would be unreadable. YouTrack lets a symmetric type be filed this way, and the polygon carries none.
 func TestActivityPrintsALinkOfATypeWrittenAlikeAtBothEnds(t *testing.T) {
 	t.Parallel()
 	symmetric := `[` + sentLinkType("relates to", "relates to", `"связана с"`, `"связана с"`) + `,` +
 		sentLinkType("is required for", "depends on", `"обязательна для"`, `"зависит от"`) + `]`
-	server := linkingTypes(t, answer(http.StatusOK, symmetric), answer(http.StatusOK, `[`+sentLinkRecord("Связана с")+`]`))
+	server := linkingTypes(t, respondWith(http.StatusOK, symmetric), respondWith(http.StatusOK, `[`+sentLinkRecord("Связана с")+`]`))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "field")
 
 	assert.Equal(t, outcome{stdout: oneRecord(`field: "relates to"`)}, got)
 }
 
-// An end a type keeps no phrase for is no end rather than an end whose phrase is nothing at all: a record that
-// names its link by no phrase stands for a link of no type of the instance, and the phrase would have to be
-// guessed. The undirected type of the polygon is the one that has such an end.
 func TestActivityRefusesALinkNamedByNoPhraseAtAll(t *testing.T) {
 	t.Parallel()
-	server := journal(t, answer(http.StatusOK, `[`+sentLinkRecord("")+`]`))
+	server := journal(t, respondWith(http.StatusOK, `[`+sentLinkRecord("")+`]`))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "field")
 
 	found := requireRefusal(t, got)
-	assert.Equal(t, "upstream_lied", found.code)
+	assert.Equal(t, "upstream_invalid", found.code)
 	assert.Empty(t, got.stdout)
 }
 
@@ -185,23 +171,23 @@ func TestActivityRefusesACatalogueOfLinkTypesOfAShapeItCannotRead(t *testing.T) 
 	}{
 		{
 			name: "a phrase that arrived as a number",
-			kind: sentLinkTypeHolding(`7`, `""`, `""`, `""`),
+			kind: sentLinkTypeWith(`7`, `""`, `""`, `""`),
 		},
 		{
 			name: "a translation that arrived as a list",
-			kind: sentLinkTypeHolding(`"relates to"`, `""`, `["связана с"]`, `""`),
+			kind: sentLinkTypeWith(`"relates to"`, `""`, `["связана с"]`, `""`),
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := linkingTypes(t, answer(http.StatusOK, `[`+tc.kind+`]`),
-				answer(http.StatusOK, `[`+sentLinkRecord("Зависит от")+`]`))
+			server := linkingTypes(t, respondWith(http.StatusOK, `[`+tc.kind+`]`),
+				respondWith(http.StatusOK, `[`+sentLinkRecord("Зависит от")+`]`))
 
 			got := runWith(t, server.env(), "activity", "list", journalIssue)
 
 			found := requireRefusal(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Equal(t, 0, sentTo(server, activitiesPath))
 		})
 	}
@@ -231,7 +217,7 @@ func TestActivityReadsTheLinkTypesOnlyForAJournalThatPrintsALink(t *testing.T) {
 			comment := sentActivity{
 				kind: "CommentActivityItem", category: "CommentsCategory", timestamp: middle,
 			}.sent()
-			server := journal(t, answer(http.StatusOK, `[`+comment+`]`))
+			server := journal(t, respondWith(http.StatusOK, `[`+comment+`]`))
 
 			got := runWith(t, server.env(), slices.Concat([]string{"activity", "list", journalIssue}, tc.flags)...)
 
@@ -246,8 +232,8 @@ func TestActivityReadsTheLinkTypesOnlyForAJournalThatPrintsALink(t *testing.T) {
 // journal printed without them would name every link by the label of an instance nobody asked about.
 func TestActivitySendsNoJournalWhereTheLinkTypesFail(t *testing.T) {
 	t.Parallel()
-	server := linkingTypes(t, answer(http.StatusInternalServerError, `{"error":"Internal Server Error"}`),
-		answer(http.StatusOK, `[`+sentLinkRecord("Зависит от")+`]`))
+	server := linkingTypes(t, respondWith(http.StatusInternalServerError, `{"error":"Internal Server Error"}`),
+		respondWith(http.StatusOK, `[`+sentLinkRecord("Зависит от")+`]`))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue)
 
@@ -264,13 +250,13 @@ func TestActivityRefusesACatalogueOfLinkTypesAsLongAsItAskedFor(t *testing.T) {
 	for at := range 1000 {
 		types = append(types, sentLinkType("goes with "+strconv.Itoa(at), "", `""`, `""`))
 	}
-	server := linkingTypes(t, answer(http.StatusOK, `[`+strings.Join(types, ",")+`]`),
-		answer(http.StatusOK, `[`+sentLinkRecord("Зависит от")+`]`))
+	server := linkingTypes(t, respondWith(http.StatusOK, `[`+strings.Join(types, ",")+`]`),
+		respondWith(http.StatusOK, `[`+sentLinkRecord("Зависит от")+`]`))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue)
 
 	found := requireRefusal(t, got)
-	assert.Equal(t, "upstream_lied", found.code)
+	assert.Equal(t, "upstream_invalid", found.code)
 	assert.Equal(t, 0, sentTo(server, activitiesPath))
 }
 
@@ -301,7 +287,7 @@ func TestActivityPrintsTheFieldOfEveryOtherCategoryByItsCategory(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := journal(t, answer(http.StatusOK, `[`+tc.activity+`]`))
+			server := journal(t, respondWith(http.StatusOK, `[`+tc.activity+`]`))
 
 			got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "field")
 
@@ -319,19 +305,15 @@ func TestActivityRefusesAChangeOfACustomFieldThatNamesNoField(t *testing.T) {
 		kind: "CustomFieldActivityItem", category: "CustomFieldCategory", timestamp: middle,
 		field: `{"$type":"CustomFilterField","name":"Состояние"}`,
 	}.sent()
-	server := journal(t, answer(http.StatusOK, `[`+activity+`]`))
+	server := journal(t, respondWith(http.StatusOK, `[`+activity+`]`))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "field")
 
 	found := requireRefusal(t, got)
-	assert.Equal(t, "upstream_lied", found.code)
+	assert.Equal(t, "upstream_invalid", found.code)
 }
 
-// What a record stands for is the row's assertion like everything else about it: a record of a link that names
-// no filter of its own, or one whose filter carries no phrase, is the server answering something other than the
-// journal it was asked for. Neither is caught by the judgment of names — the names ytrack asks below the field
-// are judged by the row that prints them.
-func TestActivityRefusesAFieldOfARecordOfALinkTheRowDoesNotStandFor(t *testing.T) {
+func TestActivityRefusesAFieldOfARecordOfALinkTheRowDoesNotReferTo(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
@@ -353,20 +335,17 @@ func TestActivityRefusesAFieldOfARecordOfALinkTheRowDoesNotStandFor(t *testing.T
 				kind: "LinksActivityItem", category: "LinksCategory", timestamp: middle,
 				field: tc.field, added: sentLinkedIssue,
 			}.sent()
-			server := journal(t, answer(http.StatusOK, `[`+activity+`]`))
+			server := journal(t, respondWith(http.StatusOK, `[`+activity+`]`))
 
 			got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "field")
 
 			found := requireRefusal(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Empty(t, got.stdout)
 		})
 	}
 }
 
-// One lie of the server is one diagnosis: what a change of a custom field stands for is judged wherever such a
-// record is read, so a filter of the wrong subtype is named as that whether the journal prints the field, the
-// values or both. Read on the way to the values alone, it would blame the project for a field with no name.
 func TestActivityNamesAFilterOfTheWrongSubtypeWhateverTheJournalPrints(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -386,12 +365,12 @@ func TestActivityNamesAFilterOfTheWrongSubtypeWhateverTheJournalPrints(t *testin
 					`"name":"State","fieldType":{"$type":"FieldType","valueType":"state"}}}`,
 				added: sentStateValue,
 			}.sent()
-			server := journal(t, answer(http.StatusOK, `[`+activity+`]`))
+			server := journal(t, respondWith(http.StatusOK, `[`+activity+`]`))
 
 			got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", tc.fields)
 
 			found := requireRefusal(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 		})
 	}
 }

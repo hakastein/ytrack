@@ -35,7 +35,7 @@ const (
 	filePart = "files[0]"
 )
 
-// attached is the one kind of entity attachments hang from: which schema an attachment of it stands at, which
+// attachmentTarget is the one kind of entity attachments hang from: which schema an attachment of it stands at, which
 // the server names in $type on every object it sends; the name of the property that attachment holds its owner
 // under; and which of the two kinds it is.
 //
@@ -43,35 +43,34 @@ const (
 // second reads like the word a refusal names the owner by is a coincidence of the API's naming and nothing to
 // lean on: ownerKind.String() is text for a reader, and no request is built out of it, so rewording a refusal
 // leaves every request as it was.
-type attached struct {
-	// The schema one attachment stands at, which is what the answer is judged against.
+type attachmentTarget struct {
 	schema string
 	// The name the owner hangs under, which is what goes out in fields= and what the answer is read by.
 	owner string
 	kind  ownerKind
 }
 
-func issueAttachments() attached {
-	return attached{schema: issueAttachmentSchema, owner: "issue", kind: issueOwner}
+func issueAttachmentTarget() attachmentTarget {
+	return attachmentTarget{schema: issueAttachmentSchema, owner: "issue", kind: issueOwner}
 }
 
-func articleAttachments() attached {
-	return attached{schema: articleAttachmentSchema, owner: "article", kind: articleOwner}
+func articleAttachmentTarget() attachmentTarget {
+	return attachmentTarget{schema: articleAttachmentSchema, owner: "article", kind: articleOwner}
 }
 
-// attachmentsOf is the machinery of the kind of owner a command was given, which is the one place the two
+// attachmentTargetOf is the machinery of the kind of owner a command was given, which is the one place the two
 // kinds are told apart: the schema an answer stands at and the name the owner arrives under both follow from
 // it rather than from a second reading of the id.
-func attachmentsOf(kind ownerKind) attached {
+func attachmentTargetOf(kind ownerKind) attachmentTarget {
 	if kind == articleOwner {
-		return articleAttachments()
+		return articleAttachmentTarget()
 	}
-	return issueAttachments()
+	return issueAttachmentTarget()
 }
 
 // The schema of an answer carrying several of them, which is what a page of a list and what one write files
 // both arrive as.
-func (h attached) listing() string {
+func (h attachmentTarget) listSchema() string {
 	return "[]" + h.schema
 }
 
@@ -102,7 +101,7 @@ func ListAttachments(id string, expression *string, page Page) (Call, *diag.Faul
 // carries a counter of its attachments — commentsCount has no counterpart — so there is nothing else to count
 // them by.
 func (c *Client) listAttachments(ctx context.Context, spec *schemas, at owner, requested []requestedField, page Page) (*render.Node, *diag.Fault) {
-	return c.selection(ctx, spec, attachmentsPlural, attachmentsOf(at.kind).listing(), requested, page, func(ctx context.Context, fields string, w window) (*http.Response, error) {
+	return c.listPage(ctx, spec, attachmentsPlural, attachmentTargetOf(at.kind).listSchema(), requested, page, func(ctx context.Context, fields string, w window) (*http.Response, error) {
 		return c.getAttachments(ctx, at, fields, w)
 	})
 }
@@ -112,16 +111,16 @@ func (c *Client) listAttachments(ctx context.Context, spec *schemas, at owner, r
 // left none.
 func (c *Client) getAttachments(ctx context.Context, at owner, fields string, w window) (*http.Response, error) {
 	if at.kind == articleOwner {
-		return c.getArticleAttachments(ctx, at, fields, w)
+		return c.apiGetArticleAttachments(ctx, at, fields, w)
 	}
-	return c.getIssueAttachments(ctx, at, fields, w)
+	return c.apiGetIssueAttachments(ctx, at, fields, w)
 }
 
 // attachmentFields is an expression of a command that prints attachments. A nil expression is the caller
 // leaning on the default whole, and then nothing in the tree is theirs to answer for.
 func attachmentFields(expression *string) ([]requestedField, *diag.Fault) {
 	if expression == nil {
-		return theDefault(AttachmentListFields, false)
+		return parseDefault(AttachmentListFields, false)
 	}
 	return parseFields(*expression, AttachmentListFields)
 }
@@ -133,15 +132,15 @@ type AttachedFile struct {
 	Body io.ReadCloser
 }
 
-// Opening is how a creation is handed its file. It runs after the owner has been read and never before, so a
+// FileOpener is how a creation is handed its file. It runs after the owner has been read and never before, so a
 // call that names neither an owner ytrack can address nor a file anyone could open is answered about the
 // owner; and it keeps every path of the caller's own filesystem out of this package.
-type Opening func() (AttachedFile, *diag.Fault)
+type FileOpener func() (AttachedFile, *diag.Fault)
 
 // CreateAttachment is the call that attaches the file open gives to the issue or the article of that readable
 // id, and prints the attachment as the server kept it, with the fields of expression, or with them added to
 // AttachmentListFields when it starts with +; nil is the caller leaning on the default whole.
-func CreateAttachment(id string, open Opening, expression *string) (Call, *diag.Fault) {
+func CreateAttachment(id string, open FileOpener, expression *string) (Call, *diag.Fault) {
 	at, fault := parseOwner(id)
 	if fault != nil {
 		return nil, fault
@@ -150,7 +149,7 @@ func CreateAttachment(id string, open Opening, expression *string) (Call, *diag.
 	if fault != nil {
 		return nil, fault
 	}
-	sent, fault := attachedAs(file)
+	sent, fault := newUpload(file)
 	if fault != nil {
 		return nil, fault
 	}
@@ -161,28 +160,28 @@ func CreateAttachment(id string, open Opening, expression *string) (Call, *diag.
 	}
 	spec := loadSchemas()
 	return func(ctx context.Context, c *Client) (*render.Node, *diag.Fault) {
-		return c.attachmentCreated(ctx, spec, at, sent, requested)
+		return c.createAttachment(ctx, spec, at, sent, requested)
 	}, nil
 }
 
 // One POST is the whole command. The owner is not read first: an owner the instance has none of, and one the
 // token may not see, are both answered 404 by the server itself. The price is that the bytes of a large
 // file may go out before that 404 does.
-func (c *Client) attachmentCreated(ctx context.Context, spec *schemas, at owner, sent *upload, requested []requestedField) (*render.Node, *diag.Fault) {
+func (c *Client) createAttachment(ctx context.Context, spec *schemas, at owner, sent *upload, requested []requestedField) (*render.Node, *diag.Fault) {
 	body, contentType, confirmed := sent.form()
-	return c.write(ctx, spec, attachmentsOf(at.kind).listing(), asking(requested, sent.checked()...), func(ctx context.Context, fields string) (*http.Response, error) {
-		return c.createAttachment(ctx, at, contentType, body, fields)
-	}, confirmed, writtenNode(requested))
+	return c.write(ctx, spec, attachmentTargetOf(at.kind).listSchema(), withFields(requested, sent.verifyFields()...), func(ctx context.Context, fields string) (*http.Response, error) {
+		return c.apiCreateAttachment(ctx, at, contentType, body, fields)
+	}, confirmed, writeResultNode(requested))
 }
 
 // Which API a file goes to is settled by the kind of its owner and by nothing else: each kind has one
 // operation of its own, and there is no branch that sends a request for an owner of neither kind — parseOwner
 // left none.
-func (c *Client) createAttachment(ctx context.Context, at owner, contentType string, body io.Reader, fields string) (*http.Response, error) {
+func (c *Client) apiCreateAttachment(ctx context.Context, at owner, contentType string, body io.Reader, fields string) (*http.Response, error) {
 	if at.kind == articleOwner {
-		return c.createArticleAttachment(ctx, at, contentType, body, fields)
+		return c.apiCreateArticleAttachment(ctx, at, contentType, body, fields)
 	}
-	return c.createIssueAttachment(ctx, at, contentType, body, fields)
+	return c.apiCreateIssueAttachment(ctx, at, contentType, body, fields)
 }
 
 // DeleteAttachment is the call that takes the attachment of that id off the issue or the article of that
@@ -198,7 +197,7 @@ func DeleteAttachment(id, attachment string) (Call, *diag.Fault) {
 	}
 	spec := loadSchemas()
 	return func(ctx context.Context, c *Client) (*render.Node, *diag.Fault) {
-		return c.attachmentRemoved(ctx, spec, at, file)
+		return c.deleteAttachment(ctx, spec, at, file)
 	}, nil
 }
 
@@ -206,65 +205,65 @@ func DeleteAttachment(id, attachment string) (Call, *diag.Fault) {
 // with nothing, an attachment the owner has none of is a not_found here with nothing destroyed, and the owner
 // the server names is both what the path of the DELETE is built from and what the document prints — the
 // argument was never checked, and dev-7 and DEV-7 reach the same issue.
-func (c *Client) attachmentRemoved(ctx context.Context, spec *schemas, at owner, file childID) (*render.Node, *diag.Fault) {
-	hangs := attachmentsOf(at.kind)
+func (c *Client) deleteAttachment(ctx context.Context, spec *schemas, at owner, file childID) (*render.Node, *diag.Fault) {
+	target := attachmentTargetOf(at.kind)
 	requested := []requestedField{
 		{name: idKey},
 		{name: nameKey},
-		{name: hangs.owner, children: []requestedField{{name: idReadableKey}}},
+		{name: target.owner, children: []requestedField{{name: idReadableKey}}},
 	}
-	found, fault := c.request(ctx, spec, hangs.schema, requested, func(ctx context.Context, fields string) (*http.Response, error) {
+	found, fault := c.request(ctx, spec, target.schema, requested, func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.getAttachment(ctx, at, file, fields)
 	})
 	if fault != nil {
 		return nil, fault
 	}
-	theOwner, fault := theOwnerOf(found, hangs, file)
+	theOwner, fault := attachmentOwner(found, target, file)
 	if fault != nil {
 		return nil, fault
 	}
 	if fault := writeEmpty(ctx, func(ctx context.Context) (*http.Response, error) {
-		return c.deleteAttachment(ctx, at.kind, theOwner, file)
+		return c.apiDeleteAttachment(ctx, at.kind, theOwner, file)
 	}); fault != nil {
 		return nil, fault
 	}
 	return objectNode(found, requested, found.objects[0], nil)
 }
 
-// theOwnerOf is the entity the deletion goes through, read off the answer rather than off the argument. The
+// attachmentOwner is the entity the deletion goes through, read off the answer rather than off the argument. The
 // attachment is held to being the one that was asked for: an answer about another id would be printed as the
 // caller's own and destroyed under it, and nothing else in the call would catch that.
-func theOwnerOf(a answer, hangs attached, file childID) (addressed, *diag.Fault) {
-	arrived, isText := a.objects[0][idKey].(string)
-	if !isText || arrived != file.id {
+func attachmentOwner(a decodedResponse, target attachmentTarget, file childID) (readableID, *diag.Fault) {
+	received, isText := a.objects[0][idKey].(string)
+	if !isText || received != file.id {
 		message := fmt.Sprintf("the %s asked for under id %s arrived under another id", attachmentKey, render.Quote(file.String()))
-		return addressed{}, shapeFailure(a.response, a.body, message)
+		return readableID{}, shapeFailure(a.httpResponse, a.body, message)
 	}
-	holder, isObject := a.objects[0][hangs.owner].(map[string]any)
+	holder, isObject := a.objects[0][target.owner].(map[string]any)
 	if !isObject {
 		message := fmt.Sprintf("the %s the %s hangs from arrived as something other than an object",
-			hangs.kind, attachmentKey)
-		return addressed{}, shapeFailure(a.response, a.body, message)
+			target.kind, attachmentKey)
+		return readableID{}, shapeFailure(a.httpResponse, a.body, message)
 	}
-	return addressedIn(a, holder, hangs.kind, "a deletion")
+	return readableIDAt(a, holder, target.kind, "a deletion")
 }
 
 // Which API the read goes to is settled by the kind of the owner and by nothing else, as it is for every other
 // call about attachments.
 func (c *Client) getAttachment(ctx context.Context, at owner, file childID, fields string) (*http.Response, error) {
 	if at.kind == articleOwner {
-		return c.getArticleAttachment(ctx, at, file, fields)
+		return c.apiGetArticleAttachment(ctx, at, file, fields)
 	}
-	return c.getIssueAttachment(ctx, at, file, fields)
+	return c.apiGetIssueAttachment(ctx, at, file, fields)
 }
 
 // The same rule for the deletion, which goes to the owner the read named rather than to the one the caller
 // wrote.
-func (c *Client) deleteAttachment(ctx context.Context, kind ownerKind, at addressed, file childID) (*http.Response, error) {
+func (c *Client) apiDeleteAttachment(ctx context.Context, kind ownerKind, at readableID, file childID) (*http.Response, error) {
 	if kind == articleOwner {
-		return c.deleteArticleAttachment(ctx, at, file)
+		return c.apiDeleteArticleAttachment(ctx, at, file)
 	}
-	return c.deleteIssueAttachment(ctx, at, file)
+	return c.apiDeleteIssueAttachment(ctx, at, file)
 }
 
 // upload is the file as the request carries it: the name the part is written under and the bytes of it. How
@@ -276,30 +275,17 @@ type upload struct {
 	body io.ReadCloser
 }
 
-// attachedAs is the file held to the name YouTrack would keep it under, with the file closed and nothing sent
+// newUpload is the file held to the name YouTrack would keep it under, with the file closed and nothing sent
 // where that name is one the server would rewrite.
-func attachedAs(file AttachedFile) (*upload, *diag.Fault) {
-	if fault := refuseARewrittenName(file.Name); fault != nil {
+func newUpload(file AttachedFile) (*upload, *diag.Fault) {
+	if fault := checkFileName(file.Name); fault != nil {
 		_ = file.Body.Close()
 		return nil, fault
 	}
 	return &upload{name: file.Name, body: file.Body}, nil
 }
 
-// form is one pass of the file over the wire: the multipart the write sends, the content type naming its
-// boundary, and the check the answer to that multipart is held against. The form is written into a pipe as the
-// transport reads the other end of it, so the file is never whole in memory: a file too large for the instance
-// is refused by the instance, with a document naming its limit, rather than by a buffer of ytrack's that ran
-// out of memory first and left no document at all.
-//
-// The goroutine ends when the transport closes the body, which net/http does whatever becomes of the call.
-//
-// The check comes from here and nowhere else, so it cannot be run before the pass it judges; and the count it
-// reads is this pass's own, so a second form — a retry of the write, say — is a second pass that judges itself
-// by the bytes it sent rather than one silently rewriting the count the first is judged by. The body of an
-// upload is a stream and the first pass drains it, so a second one carries nothing and says so as an error of
-// the request rather than as a size the server is blamed for.
-func (u *upload) form() (io.ReadCloser, string, func(answer) *diag.Fault) {
+func (u *upload) form() (io.ReadCloser, string, func(decodedResponse) *diag.Fault) {
 	reading, writing := io.Pipe()
 	form := multipart.NewWriter(writing)
 	// Written by the goroutine that fills the pipe and read once the answer is in hand, which are two
@@ -320,25 +306,21 @@ func (u *upload) form() (io.ReadCloser, string, func(answer) *diag.Fault) {
 		}
 		_ = writing.CloseWithError(form.Close())
 	}()
-	confirmed := func(a answer) *diag.Fault {
-		return u.confirmedBy(a, sent.Load())
+	confirmed := func(a decodedResponse) *diag.Fault {
+		return u.verify(a, sent.Load())
 	}
 	return reading, form.FormDataContentType(), confirmed
 }
 
-// checked is what the answer to the write is read for beside what the caller asked to print: the name the file
+// verifyFields is what the answer to the write is read for beside what the caller asked to print: the name the file
 // went out under and the count of bytes that went with it, which are the two the server is held to.
-func (u *upload) checked() []requestedField {
+func (u *upload) verifyFields() []requestedField {
 	return []requestedField{{name: nameKey}, {name: sizeKey}}
 }
 
-// confirmedBy holds the answer against what went out: a 200 says the server took the file, not that it kept it
-// under the name it was sent or with the bytes that were sent. The answer is the array of what the write
-// filed, and one file filed is one element of it — 200 [] was measured. mimeType is held to nothing: the
-// server works it out itself. sent is the count the pass being judged wrote, which is what form hands it.
-func (u *upload) confirmedBy(a answer, sent int64) *diag.Fault {
+func (u *upload) verify(a decodedResponse, sent int64) *diag.Fault {
 	if len(a.objects) != 1 {
-		return notTheOneAttachment(a)
+		return ambiguousAttachmentFault(a)
 	}
 	filed := a.objects[0]
 	wrong := textMismatch(nil, nameKey, u.name, filed[nameKey])
@@ -346,33 +328,33 @@ func (u *upload) confirmedBy(a answer, sent int64) *diag.Fault {
 	if len(wrong) == 0 {
 		return nil
 	}
-	return rewrittenByTheServer(a, knownAs(attachmentKey, writtenID(a, idKey)), wrong)
+	return mismatchFault(a, knownAs(attachmentKey, responseID(a, idKey)), wrong)
 }
 
 // The file went out whole and the answer names no one attachment it became, so there is nothing to print and
 // nothing to say about what the instance now holds; attachment list is where that is read.
-func notTheOneAttachment(a answer) *diag.Fault {
+func ambiguousAttachmentFault(a decodedResponse) *diag.Fault {
 	details := []render.Pair{
-		requestDetail(a.response.Request.Method, a.response.Request.URL.Redacted()),
-		{Key: "arrived_count", Value: intNode(len(a.objects))},
+		requestDetail(a.httpResponse.Request.Method, a.httpResponse.Request.URL.Redacted()),
+		{Key: "actual_count", Value: intNode(len(a.objects))},
 		bodyDetail(a.body),
 	}
 	message := "one file was sent and the answer carries something other than the one attachment it was filed as"
-	return &diag.Fault{Code: diag.UpstreamLied, Message: message, Details: details}
+	return &diag.Fault{Code: diag.UpstreamInvalid, Message: message, Details: details}
 }
 
 // The most a rune at either end of a name may be for YouTrack to keep it: the server trims a name the way
 // Java's String.trim does, by the code unit rather than by what Unicode calls a space, so U+00A0 stays and a
 // tab goes.
-const trimmedBy = ' '
+const maxTrimmedRune = ' '
 
-// refuseARewrittenName holds the name of the file to what YouTrack would keep it under. Every rule here is a
+// checkFileName holds the name of the file to what YouTrack would keep it under. Every rule here is a
 // rewrite the server makes without a word, after the file is stored: a check afterwards would report a
 // mismatch over an attachment that by then exists, so the refusal stands before anything is sent.
 //
 // A slash cannot reach here — the name is the last element of a path — and everything not named below goes as
 // it was written, spaces, semicolons, tabs inside and all.
-func refuseARewrittenName(name string) *diag.Fault {
+func checkFileName(name string) *diag.Fault {
 	because, rewritten := rewrittenName(name)
 	if !rewritten {
 		return nil
@@ -397,8 +379,8 @@ func rewrittenName(name string) (because string, rewritten bool) {
 	}
 	first, _ := utf8.DecodeRuneInString(name)
 	last, _ := utf8.DecodeLastRuneInString(name)
-	if first <= trimmedBy || last <= trimmedBy {
-		return fmt.Sprintf("it begins or ends with a character no greater than U+%04X, which YouTrack trims away", trimmedBy), true
+	if first <= maxTrimmedRune || last <= maxTrimmedRune {
+		return fmt.Sprintf("it begins or ends with a character no greater than U+%04X, which YouTrack trims away", maxTrimmedRune), true
 	}
 	return "", false
 }

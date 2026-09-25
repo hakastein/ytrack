@@ -16,7 +16,7 @@ CLI для YouTrack, рассчитанный на агента. Задачи и
   `internal/ytapi` и `catalogue.gen.go` только регенерируются (`make generate`), спека
   обновляется только через `make openapi`, проверка — `make ytapi`
 - Перед правкой того, как находятся адрес и токен (`internal/cli/credentials.go`,
-  `records.go`, `terminal.go`, `auth.go`) —
+  `loginstore.go`, `terminal.go`, `auth.go`) —
   [ADR-0008](docs/adr/0008-a-login-is-an-address-and-a-token.md):
   источников два, адрес и токен берутся из одного целиком (обе переменные — либо
   запись, найденная по каталогу вызова), половина окружения отвергается, а документ

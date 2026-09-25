@@ -20,7 +20,7 @@ numberInProject: 1
 attachments:
   - {created: "1970-01-01T00:00:00Z", size: 75}
 `
-	server := serve(t, answer(http.StatusOK, body))
+	server := serve(t, respondWith(http.StatusOK, body))
 
 	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0",
 		"--fields", "created,updated,resolved,numberInProject,attachments(created,size)")
@@ -32,19 +32,19 @@ attachments:
 func TestIssueShowPrintsAnInstantWithNoMillisecondsToSpare(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		arrived string
-		printed string
+		name     string
+		received string
+		printed  string
 	}{
-		{name: "the epoch itself", arrived: "0", printed: "1970-01-01T00:00:00Z"},
-		{name: "a whole second", arrived: "1788134400000", printed: "2026-08-31T00:00:00Z"},
-		{name: "a tenth of a second", arrived: "1788134400100", printed: "2026-08-31T00:00:00.1Z"},
-		{name: "every millisecond", arrived: "1788134400123", printed: "2026-08-31T00:00:00.123Z"},
+		{name: "the epoch itself", received: "0", printed: "1970-01-01T00:00:00Z"},
+		{name: "a whole second", received: "1788134400000", printed: "2026-08-31T00:00:00Z"},
+		{name: "a tenth of a second", received: "1788134400100", printed: "2026-08-31T00:00:00.1Z"},
+		{name: "every millisecond", received: "1788134400123", printed: "2026-08-31T00:00:00.123Z"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, `{"$type":"Issue","created":`+tc.arrived+`}`))
+			server := serve(t, respondWith(http.StatusOK, `{"$type":"Issue","created":`+tc.received+`}`))
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "created")
 
@@ -66,12 +66,12 @@ func TestIssueShowRefusesAnInstantThatIsNoWholeNumberOfMilliseconds(t *testing.T
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, tc.body))
+			server := serve(t, respondWith(http.StatusOK, tc.body))
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "created")
 
-			assert.Equal(t, refusal{
-				code: "upstream_lied",
+			assert.Equal(t, faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", issueRequest(server.url, "DEV-1", "created")},
 					{"upstream_status", 200},

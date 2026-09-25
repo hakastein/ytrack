@@ -9,10 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The three commits of DEV-451, as the journal of that issue answered them on a live instance with nothing
-// taken out but the target nobody asks for any more: a merge commit whose author YouTrack matched to a user,
-// and two commits it matched to nobody. The polygon has none to hold them to — it has no VCS integration, and
-// no API files a commit without one — so these are what VcsChangeCategory is held to.
 const capturedCommits = `[` +
 	`{"removed":[],"added":[{"urls":["https://gitlab.example.com/example/app/-/commit/14091a9f2461267ee7e02525b4f1f2923f1c9849"],"version":"14091a9f2461267ee7e02525b4f1f2923f1c9849","text":"Merge branch 'DEV-451' into 'master'\n\nDEV-451: Отмена заказа OrderCancel\n\nSee merge request example/app!41","date":1761877899000,"id":"229-185","$type":"VcsChange"}],"id":"229-185.0-0","author":{"login":"Петров.Пётр","$type":"User"},"field":null,"timestamp":1761877899000,"category":{"id":"VcsChangeCategory","$type":"ActivityCategory"},"$type":"VcsChangeActivityItem"}` + `,` +
 	`{"removed":[],"added":[{"urls":["https://gitlab.example.com/example/app/-/commit/352f7829a2384b001cc12b0c2613c756454a1f6a"],"version":"352f7829a2384b001cc12b0c2613c756454a1f6a","text":"DEV-451: отмена заказа, событие отправляется после сохранения заказа\n","date":1761829642000,"id":"229-163","$type":"VcsChange"}],"id":"229-163.0-0","author":{"login":"system_user@","$type":"VcsUnresolvedUser"},"field":null,"timestamp":1761829642000,"category":{"id":"VcsChangeCategory","$type":"ActivityCategory"},"$type":"VcsChangeActivityItem"}` + `,` +
@@ -24,7 +20,7 @@ const capturedCommits = `[` +
 // matched nobody.
 func TestActivityPrintsTheCommitsOfAnIssueByTheirLinks(t *testing.T) {
 	t.Parallel()
-	server := journal(t, answer(http.StatusOK, capturedCommits))
+	server := journal(t, respondWith(http.StatusOK, capturedCommits))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue, "--category", "vcschangecategory")
 
@@ -50,7 +46,7 @@ func TestActivityPrintsTheCommitsOfAnIssueByTheirLinks(t *testing.T) {
 // an issue is whole without a flag.
 func TestActivityAsksForTheCommitsWithEveryOtherCategory(t *testing.T) {
 	t.Parallel()
-	server := journal(t, answer(http.StatusOK, capturedCommits))
+	server := journal(t, respondWith(http.StatusOK, capturedCommits))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue)
 
@@ -64,7 +60,7 @@ func TestActivityAsksForTheCommitsWithEveryOtherCategory(t *testing.T) {
 // commit, which is what a merged merge request stands as, says so in its message alone.
 func TestActivityPrintsTheMessageAndTheHashOfACommitAskedFor(t *testing.T) {
 	t.Parallel()
-	server := journal(t, answer(http.StatusOK, capturedCommits))
+	server := journal(t, respondWith(http.StatusOK, capturedCommits))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue, "--category", "VcsChangeCategory",
 		"--limit", "2", "--fields", "+added(text,version,date)")

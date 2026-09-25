@@ -54,7 +54,7 @@ func ListProjects(expression string, page Page) (Call, *diag.Fault) {
 
 func (c *Client) showProject(ctx context.Context, spec *schemas, code string, requested []requestedField) (*render.Node, *diag.Fault) {
 	projects, fault := c.read(ctx, spec, "Project", requested, func(ctx context.Context, fields string) (*http.Response, error) {
-		return c.getProject(ctx, code, fields)
+		return c.apiGetProject(ctx, code, fields)
 	})
 	if fault != nil {
 		return nil, fault
@@ -63,7 +63,7 @@ func (c *Client) showProject(ctx context.Context, spec *schemas, code string, re
 }
 
 func (c *Client) listProjects(ctx context.Context, spec *schemas, requested []requestedField, page Page) (*render.Node, *diag.Fault) {
-	return c.selection(ctx, spec, "projects", "[]Project", requested, page, func(ctx context.Context, fields string, w window) (*http.Response, error) {
-		return c.getProjects(ctx, fields, w)
+	return c.listPage(ctx, spec, "projects", "[]Project", requested, page, func(ctx context.Context, fields string, w window) (*http.Response, error) {
+		return c.apiGetProjects(ctx, fields, w)
 	})
 }

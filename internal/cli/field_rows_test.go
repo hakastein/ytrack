@@ -436,8 +436,8 @@ func TestFieldShowRefusesTheDefaultOfATypeOutsideTheCatalogue(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", metadataRequest(server.url, "DEV")},
 					{"upstream_status", 200},
@@ -454,7 +454,7 @@ func TestFieldShowRefusesTheDefaultOfATypeOutsideTheCatalogue(t *testing.T) {
 // answered whatever the type is.
 func TestFieldShowPrintsAFieldOfATypeOutsideTheCatalogueTheCallerAsksFor(t *testing.T) {
 	t.Parallel()
-	field := answer(http.StatusOK, answeredStateOfMany)
+	field := respondWith(http.StatusOK, answeredStateOfMany)
 	server := serveTheProject(t, projectMetadata(stateOfMany), field)
 
 	got := runWith(t, server.env(), "field", "show", "DEV", "State", "--fields", "field(name)")

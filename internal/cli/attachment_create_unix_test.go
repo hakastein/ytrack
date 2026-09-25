@@ -99,7 +99,7 @@ func TestAttachmentCreateRefusesAFileThatIsNoOrdinaryOneOnUnix(t *testing.T) {
 // itself inside it: it swings the link as fast as the machine allows and sends the command until one of them
 // lands in the window. Both files are named by the link, so an attempt that missed it is an ordinary upload
 // that the server answers and the run passes.
-func TestAttachmentCreateRefusesAPathThatStoppedStandingForTheFileItWasStated(t *testing.T) {
+func TestAttachmentCreateRefusesAPathThatNoLongerPointsToTheCheckedFile(t *testing.T) {
 	dir := t.TempDir()
 	const length = 4
 	one, two := filepath.Join(dir, "one"), filepath.Join(dir, "two")
@@ -108,8 +108,8 @@ func TestAttachmentCreateRefusesAPathThatStoppedStandingForTheFileItWasStated(t 
 	const name = "file.bin"
 	path := filepath.Join(dir, name)
 	require.NoError(t, os.Symlink(one, path))
-	swinging(t, path, one, two)
-	server := serve(t, answer(http.StatusOK, filed(name, length)))
+	flipSymlink(t, path, one, two)
+	server := serve(t, respondWith(http.StatusOK, filed(name, length)))
 
 	// One attempt is some sixty milliseconds and the window is caught in the first few of them, measured under
 	// -race as well, so ten seconds is the run of attempts that says the branch is gone rather than unlucky.
@@ -126,10 +126,10 @@ func TestAttachmentCreateRefusesAPathThatStoppedStandingForTheFileItWasStated(t 
 	}
 }
 
-// swinging points path at one file and then at the other, over and over, until the test is done: the rename of
+// flipSymlink points path at one file and then at the other, over and over, until the test is done: the rename of
 // a symlink over another is one step, so the path stands for one of the two files at every moment and never
 // for nothing.
-func swinging(t *testing.T, path, one, two string) {
+func flipSymlink(t *testing.T, path, one, two string) {
 	t.Helper()
 	stop := make(chan struct{})
 	swung := make(chan struct{})

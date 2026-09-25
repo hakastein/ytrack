@@ -43,8 +43,8 @@ func userRequest(address, login, fields string) string {
 }
 
 // The whole refusal a 404 for a login becomes, with what the server said about it word for word.
-func noSuchUser(address, login string) refusal {
-	return refusal{
+func noSuchUser(address, login string) faultDocument {
+	return faultDocument{
 		code: "not_found",
 		details: []detail{
 			{"request", userRequest(address, login, "login,fullName,email,banned")},
@@ -57,7 +57,7 @@ func noSuchUser(address, login string) refusal {
 
 func TestUserShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, userLimited))
+	server := serve(t, respondWith(http.StatusOK, userLimited))
 
 	got := runWith(t, server.env(), "user", "show", "dev.limited")
 
@@ -76,7 +76,7 @@ func TestUserShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
 // document, and the name asked for follows it.
 func TestUserShowAddsFieldsToTheDefaultOfTheCommand(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, userLimited))
+	server := serve(t, respondWith(http.StatusOK, userLimited))
 
 	got := runWith(t, server.env(), "user", "show", "dev.limited", "--fields", "+id")
 
@@ -92,7 +92,7 @@ func TestUserShowRefusesFieldsThatDoNotParse(t *testing.T) {
 
 	got := runWith(t, server.env(), "user", "show", "admin", "--fields", "+")
 
-	assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 	assert.Empty(t, server.requests())
 }
 
@@ -113,7 +113,7 @@ func TestUserShowSendsALoginThatLooksLikeAPathAsOneSegment(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, userLimited))
+			server := serve(t, respondWith(http.StatusOK, userLimited))
 
 			got := runWith(t, server.env(), "user", "show", tc.login)
 
@@ -142,7 +142,7 @@ func TestUserShowTakesExactlyOneLogin(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 		})
 	}
 }
@@ -163,7 +163,7 @@ func TestUserRefusesACallThatNamesNoCommandOfIts(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 		})
 	}
 }
@@ -185,7 +185,7 @@ func TestUserShowRefusesALoginThatWouldReachAnotherEndpoint(t *testing.T) {
 
 			got := runWith(t, server.env(), "user", "show", tc.login)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -217,7 +217,7 @@ func TestUserShowRefusesEveryFormTheServerReadsAsSomethingOtherThanALogin(t *tes
 
 			got := runWith(t, server.env(), "user", "show", tc.login)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -241,7 +241,7 @@ func TestUserShowSendsAFormThatOnlyLooksLikeOneOfTheRefused(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			said := "Entity with id " + tc.login + " not found"
-			server := serve(t, answer(http.StatusNotFound, `{"error":"Not Found","error_description":"`+said+`"}`))
+			server := serve(t, respondWith(http.StatusNotFound, `{"error":"Not Found","error_description":"`+said+`"}`))
 
 			got := runWith(t, server.env(), "user", "show", tc.login)
 
@@ -261,13 +261,13 @@ func TestUserShowRefusesALoginOfALeadingDashWithoutTheSeparator(t *testing.T) {
 
 	got := runWith(t, server.env(), "user", "show", "-x")
 
-	assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 	assert.Empty(t, server.requests())
 }
 
 func TestUserShowSendsALoginOfALeadingDashAfterTheSeparator(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusNotFound, `{"error":"Not Found","error_description":"Entity with id -x not found"}`))
+	server := serve(t, respondWith(http.StatusNotFound, `{"error":"Not Found","error_description":"Entity with id -x not found"}`))
 
 	got := runWith(t, server.env(), "user", "show", "--", "-x")
 
@@ -283,7 +283,7 @@ func TestUserShowRefusesWithoutAToken(t *testing.T) {
 
 	got := runWith(t, []string{"YTRACK_URL=" + server.url}, "user", "show", "admin")
 
-	assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 	assert.Empty(t, server.requests())
 }
 
@@ -415,7 +415,7 @@ func TestUserShowRefusesANameTheSchemasOfTheDevInstanceDoNotDeclare(t *testing.T
 
 	got := runWith(t, dev.env(), "user", "show", "admin", "--fields", "login,fullNme")
 
-	want := refusal{
+	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{
 			{"request", userRequest(dev.url, "admin", "login,fullNme")},

@@ -17,19 +17,19 @@ const issueWriteFields = "idReadable,customFields($type,name,projectCustomField(
 
 // A custom field as that read sees it on the issue. Nothing of what it holds is asked for: an update writes
 // values and the check of it reads them out of the answer to the write.
-type heldField struct {
+type currentField struct {
 	name    string
 	kind    string
 	binding string
 }
 
-func (f heldField) sent() string {
+func (f currentField) sent() string {
 	return `{"$type":` + strconv.Quote(f.kind) + `,"name":` + strconv.Quote(f.name) +
 		`,"projectCustomField":{"$type":"ProjectCustomField","id":` + strconv.Quote(f.binding) + `}}`
 }
 
 // The issue an update reads, with the project it stands in and the fields it already carries.
-func issueToUpdate(readable, project string, held ...heldField) string {
+func issueToUpdate(readable, project string, held ...currentField) string {
 	fields := make([]string, 0, len(held))
 	for _, field := range held {
 		fields = append(fields, field.sent())
@@ -94,7 +94,7 @@ func TestIssueUpdateRefusesBeforeAnyRequest(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -115,9 +115,9 @@ func TestIssueUpdateHelpNamesTheDefaultAndNoFile(t *testing.T) {
 // issue does not carry gets the class of the table: the server knows of a StateMachineIssueCustomField, which
 // no table of ytrack's can, and where the issue carries nothing for a field there is nothing to copy. The
 // write goes out to the readable id that read gave, whatever letter case the caller typed.
-func TestIssueUpdateNamesEachFieldTheClassItArrivedUnder(t *testing.T) {
+func TestIssueUpdateNamesEachFieldTheClassItWasReceivedUnder(t *testing.T) {
 	t.Parallel()
-	project := projectToWrite(
+	project := projectResponse(
 		writableField{id: "180-14", kind: "StateProjectCustomField", name: "State", valueType: "state",
 			canBeEmpty: true, defaults: []string{"Новая"}},
 		writableField{id: "180-23", name: "Причина отклонения", valueType: "enum", canBeEmpty: true},
@@ -125,15 +125,15 @@ func TestIssueUpdateNamesEachFieldTheClassItArrivedUnder(t *testing.T) {
 	// A state-machine workflow on the project turns State into a class of its own, and the issue carries no
 	// Причина отклонения at all: a condition kept it off.
 	read := issueToUpdate("DEV-1", project,
-		heldField{name: "State", kind: "StateMachineIssueCustomField", binding: "180-14"})
-	held := arrivedFields(
-		arrivedField{name: "State", valueType: "state", ordinal: "1", binding: "180-14",
+		currentField{name: "State", kind: "StateMachineIssueCustomField", binding: "180-14"})
+	held := receivedFields(
+		receivedField{name: "State", valueType: "state", ordinal: "1", binding: "180-14",
 			value: bundleElement("Отклонена")},
-		arrivedField{name: "Причина отклонения", valueType: "enum", ordinal: "2", binding: "180-23",
+		receivedField{name: "Причина отклонения", valueType: "enum", ordinal: "2", binding: "180-23",
 			value: bundleElement("Дубль")},
 	)
-	server := updating(t, answer(http.StatusOK, read),
-		answer(http.StatusOK, filedIssueHolding("DEV-1", "x", "null", held)))
+	server := updating(t, respondWith(http.StatusOK, read),
+		respondWith(http.StatusOK, createdIssueWith("DEV-1", "x", "null", held)))
 
 	got := runWith(t, server.env(), "issue", "update", "dev-1",
 		"--field", "State=Отклонена", "--field", "Причина отклонения=Дубль")
@@ -156,22 +156,22 @@ func TestIssueUpdateNamesEachFieldTheClassItArrivedUnder(t *testing.T) {
 // is what the exit code of a write that happened says.
 func TestIssueUpdateRefusesAnAnswerThatEmptiedWhatTheWriteFilled(t *testing.T) {
 	t.Parallel()
-	project := projectToWrite(writableField{id: "187-2", kind: "PeriodProjectCustomField", name: "Оценка",
+	project := projectResponse(writableField{id: "187-2", kind: "PeriodProjectCustomField", name: "Оценка",
 		valueType: "period", canBeEmpty: true})
 	read := issueToUpdate("DEV-1", project,
-		heldField{name: "Оценка", kind: "PeriodIssueCustomField", binding: "187-2"})
-	held := arrivedFields(arrivedField{name: "Оценка", valueType: "period", binding: "187-2"})
-	server := updating(t, answer(http.StatusOK, read),
-		answer(http.StatusOK, filedIssueHolding("DEV-1", "x", "null", held)))
+		currentField{name: "Оценка", kind: "PeriodIssueCustomField", binding: "187-2"})
+	held := receivedFields(receivedField{name: "Оценка", valueType: "period", binding: "187-2"})
+	server := updating(t, respondWith(http.StatusOK, read),
+		respondWith(http.StatusOK, createdIssueWith("DEV-1", "x", "null", held)))
 
 	got := runWith(t, server.env(), "issue", "update", "DEV-1", "--field", "Оценка=PT7H")
 
-	want := refusal{
-		code: "upstream_lied",
+	want := faultDocument{
+		code: "upstream_invalid",
 		details: []detail{
 			{"request", updateRequest(server.url, "DEV-1", askedIssueFields)},
 			{"issue", "DEV-1"},
-			{"mismatch", []any{[]detail{{"field", "Оценка"}, {"written", "PT7H"}, {"arrived", nil}}}},
+			{"mismatch", []any{[]detail{{"field", "Оценка"}, {"expected", "PT7H"}, {"actual", nil}}}},
 		},
 	}
 	assert.Equal(t, want, requireUncertainty(t, got))
@@ -184,7 +184,7 @@ func TestIssueUpdateRefusesAnAnswerThatEmptiedWhatTheWriteFilled(t *testing.T) {
 // held to its shape before anything is sent: read as an empty string, it would be a $type of nobody's.
 func TestIssueUpdateRefusesTheClassesOfTheIssueOfAnotherShape(t *testing.T) {
 	t.Parallel()
-	project := projectToWrite(writableField{id: "180-14", kind: "StateProjectCustomField", name: "State",
+	project := projectResponse(writableField{id: "180-14", kind: "StateProjectCustomField", name: "State",
 		valueType: "state", canBeEmpty: true})
 	tests := []struct {
 		name string
@@ -203,12 +203,12 @@ func TestIssueUpdateRefusesTheClassesOfTheIssueOfAnotherShape(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			read := `{"$type":"Issue","idReadable":"DEV-1","customFields":[` + tc.held + `],"project":` + project + `}`
-			server := updating(t, answer(http.StatusOK, read), noUpdate(t))
+			server := updating(t, respondWith(http.StatusOK, read), noUpdate(t))
 
 			got := runWith(t, server.env(), "issue", "update", "DEV-1", "--field", "State=Новая")
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", issueRequest(server.url, "DEV-1", issueWriteFields)},
 					{"upstream_status", 200},
@@ -226,22 +226,22 @@ func TestIssueUpdateRefusesTheClassesOfTheIssueOfAnotherShape(t *testing.T) {
 // than by the server, and the comments are no part of a write.
 func TestIssueUpdateTakesTheExpressionOfAWrite(t *testing.T) {
 	t.Parallel()
-	project := projectToWrite(
+	project := projectResponse(
 		writableField{id: "180-15", name: "Type", valueType: "enum", canBeEmpty: true},
 		writableField{id: "180-16", name: "Priority", valueType: "enum", canBeEmpty: true},
 	)
 	read := issueToUpdate("DEV-1", project,
-		heldField{name: "Type", kind: "SingleEnumIssueCustomField", binding: "180-15"})
-	held := arrivedFields(
-		arrivedField{name: "Priority", valueType: "enum", ordinal: "2", binding: "180-16",
+		currentField{name: "Type", kind: "SingleEnumIssueCustomField", binding: "180-15"})
+	held := receivedFields(
+		receivedField{name: "Priority", valueType: "enum", ordinal: "2", binding: "180-16",
 			value: bundleElement("Low")},
-		arrivedField{name: "Type", valueType: "enum", ordinal: "1", binding: "180-15",
+		receivedField{name: "Type", valueType: "enum", ordinal: "1", binding: "180-15",
 			value: bundleElement("Task")},
 	)
-	written := filedIssueHolding("DEV-1", "x", "null", held)
+	written := createdIssueWith("DEV-1", "x", "null", held)
 	t.Run("the check reads more than the document prints", func(t *testing.T) {
 		t.Parallel()
-		server := updating(t, answer(http.StatusOK, read), answer(http.StatusOK, written))
+		server := updating(t, respondWith(http.StatusOK, read), respondWith(http.StatusOK, written))
 
 		got := runWith(t, server.env(), "issue", "update", "DEV-1", "--summary", "x",
 			"--field", "Type=Task", "--fields", "idReadable")
@@ -256,11 +256,11 @@ func TestIssueUpdateTakesTheExpressionOfAWrite(t *testing.T) {
 		server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case strings.HasPrefix(r.URL.Path, cataloguePath):
-				answer(http.StatusOK, devCatalogue())(w, r)
+				respondWith(http.StatusOK, devCatalogue())(w, r)
 			case r.Method == http.MethodPost:
-				answer(http.StatusOK, written)(w, r)
+				respondWith(http.StatusOK, written)(w, r)
 			default:
-				answer(http.StatusOK, read)(w, r)
+				respondWith(http.StatusOK, read)(w, r)
 			}
 		})
 
@@ -281,7 +281,7 @@ func TestIssueUpdateTakesTheExpressionOfAWrite(t *testing.T) {
 		got := runWith(t, server.env(), "issue", "update", "DEV-1", "--summary", "x",
 			"--fields", "+comments(text)")
 
-		assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+		assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 		assert.Empty(t, server.requests())
 	})
 }
@@ -290,23 +290,20 @@ func TestIssueUpdateTakesTheExpressionOfAWrite(t *testing.T) {
 // 2xx: the issue holds the title by then, whatever the block of custom fields came back as.
 func TestIssueUpdateIsUncertainWhereTheAnswerCannotBePrinted(t *testing.T) {
 	t.Parallel()
-	project := projectToWrite(writableField{id: "180-14", kind: "StateProjectCustomField", name: "State",
+	project := projectResponse(writableField{id: "180-14", kind: "StateProjectCustomField", name: "State",
 		valueType: "state", canBeEmpty: true})
-	held := arrivedFields(arrivedField{name: "Примечание", valueType: "string", binding: "187-10", value: "42"})
-	server := updating(t, answer(http.StatusOK, issueToUpdate("DEV-1", project)),
-		answer(http.StatusOK, filedIssueHolding("DEV-1", "x", "null", held)))
+	held := receivedFields(receivedField{name: "Примечание", valueType: "string", binding: "187-10", value: "42"})
+	server := updating(t, respondWith(http.StatusOK, issueToUpdate("DEV-1", project)),
+		respondWith(http.StatusOK, createdIssueWith("DEV-1", "x", "null", held)))
 
 	got := runWith(t, server.env(), "issue", "update", "DEV-1", "--summary", "x")
 
 	found := requireUncertainty(t, got)
-	assert.Equal(t, "upstream_lied", found.code)
+	assert.Equal(t, "upstream_invalid", found.code)
 	assert.Equal(t, detail{"upstream_status", 200}, found.details[1])
 	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
 }
 
-// filedForUpdate files an issue of the polygon for a scenario that writes into it, filled with what DEV
-// requires and with filled besides. The cleanup runs before the recorder's own, so the cassette records the
-// deletion; the context of the test is cancelled before any cleanup, so removeIssue gets one of its own.
 func filedForUpdate(t *testing.T, dev *upstream, filled ...string) string {
 	t.Helper()
 	argv := append([]string{"issue", "create", "DEV", "--summary", contractTitle(t)}, devRequired()...)
@@ -360,29 +357,24 @@ func TestIssueUpdateWritesTheFieldOfTheDevInstanceTheSameWriteUncovers(t *testin
 	assert.Equal(t, "SingleEnumIssueCustomField", sentFieldTypes(t, lastAsk(dev))["Причина отклонения"])
 }
 
-// Prose holding what a description keeps byte for byte: trailing spaces, lines of three dashes and three
-// tildes, a character outside the basic plane, and no line ending at the end of it.
-func proseThatSurvives() string {
+func textThatSurvives() string {
 	return "Шаги:  \n1. открыть   \n---\n~~~\nи ещё 😀"
 }
 
-// The title and the prose reach the polygon as they were typed and come back the same: spaces at the
-// ends of a title and a tab in it are kept, and so is everything a description keeps. Nothing here is
-// asserted twice — the check of the write is what would refuse a byte that changed.
 func TestIssueUpdateWritesTheTextOfTheDevInstanceByteForByte(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 	readable := filedForUpdate(t, dev)
 	title := "  " + contractTitle(t) + "\t"
-	prose := proseThatSurvives()
+	text := textThatSurvives()
 
-	got := runWith(t, dev.env(), "issue", "update", readable, "--summary", title, "--description", prose)
+	got := runWith(t, dev.env(), "issue", "update", readable, "--summary", title, "--description", text)
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
 	mapping := requireMapping(t, "stdout", got.stdout)
 	assert.Equal(t, title, nodeAt(t, mapping, "summary").Value)
-	assert.Equal(t, prose, nodeAt(t, mapping, "description").Value)
+	assert.Equal(t, text, nodeAt(t, mapping, "description").Value)
 }
 
 // A field the instance computes for itself takes no value from anybody, and what it says about that

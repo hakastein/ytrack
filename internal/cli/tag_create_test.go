@@ -56,15 +56,10 @@ func sentTag(t *testing.T, u *upstream) map[string]any {
 	return body
 }
 
-// The runes YouTrack cuts off both edges of the name of a tag: every one of them was measured on the polygon
-// cut at each edge and kept where it stands inside a name. The file, group, record and unit separators are the
-// whole of the range the guard names, and each of the four was measured trimmed in its own right.
 func runesCutOffTheEdges() []rune {
 	return []rune{' ', '\t', '\n', '\r', '\v', '\f', 0x1C, 0x1D, 0x1E, 0x1F, 0xA0, 0x2028, 0x2029, 0x3000}
 }
 
-// The name every tag a contract test makes goes by: the name of the scenario, so a tag left behind on the
-// polygon names the test that left it.
 func contractTagName(t *testing.T) string {
 	t.Helper()
 	return "ytrack contract " + t.Name()
@@ -104,7 +99,7 @@ func TestTagCreateRefusesACallOfAnyOtherShape(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"tag", "create"}, tc.argv...)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -132,7 +127,7 @@ func TestTagCreateRefusesANameTheServerWouldCut(t *testing.T) {
 
 			got := runWith(t, server.env(), "tag", "create", "--name", tc.written)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -171,7 +166,7 @@ func TestTagCreateSendsTheNameAndNothingElse(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := creatingATag(t, answer(http.StatusOK, madeTag(tc.written)))
+			server := creatingATag(t, respondWith(http.StatusOK, madeTag(tc.written)))
 
 			got := runWith(t, server.env(), "tag", "create", "--name", tc.written)
 
@@ -187,7 +182,7 @@ func TestTagCreateSendsTheNameAndNothingElse(t *testing.T) {
 // of them the one --taggable-by writes, so a creation that wrote it is read without an expression of its own.
 func TestTagCreatePrintsTheTagTheServerMade(t *testing.T) {
 	t.Parallel()
-	server := creatingATag(t, answer(http.StatusOK, madeTag("[bug] fix login")))
+	server := creatingATag(t, respondWith(http.StatusOK, madeTag("[bug] fix login")))
 
 	got := runWith(t, server.env(), "tag", "create", "--name", "[bug] fix login")
 
@@ -215,30 +210,30 @@ func TestTagCreateRefusesANameTheServerKeptAsAnother(t *testing.T) {
 			name:     "a rune cut off the end after all",
 			written:  "карта" + string(rune(0x85)),
 			kept:     madeTag("карта"),
-			mismatch: []any{[]detail{{"field", "name"}, {"written", "карта" + string(rune(0x85))}, {"arrived", "карта"}}},
+			mismatch: []any{[]detail{{"field", "name"}, {"expected", "карта" + string(rune(0x85))}, {"actual", "карта"}}},
 		},
 		{
 			name:     "another letter case",
 			written:  "Карта",
 			kept:     madeTag("карта"),
-			mismatch: []any{[]detail{{"field", "name"}, {"written", "Карта"}, {"arrived", "карта"}}},
+			mismatch: []any{[]detail{{"field", "name"}, {"expected", "Карта"}, {"actual", "карта"}}},
 		},
 		{
 			name:     "no name on the tag at all",
 			written:  "карта",
 			kept:     `{"$type":"Tag","name":null,"owner":{"$type":"User","login":"admin"}}`,
-			mismatch: []any{[]detail{{"field", "name"}, {"written", "карта"}, {"arrived", nil}}},
+			mismatch: []any{[]detail{{"field", "name"}, {"expected", "карта"}, {"actual", nil}}},
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := creatingATag(t, answer(http.StatusOK, tc.kept))
+			server := creatingATag(t, respondWith(http.StatusOK, tc.kept))
 
 			got := runWith(t, server.env(), "tag", "create", "--name", tc.written, "--fields", "name")
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", tagCreationRequest(server.url, "name")},
 					{"tag", tc.written},
@@ -251,9 +246,6 @@ func TestTagCreateRefusesANameTheServerKeptAsAnother(t *testing.T) {
 	}
 }
 
-// What the server says about a body it refused passes on word for word, and no tag was made, so the caller
-// may fix the call and send it again. The body of the duplicate is the one the polygon was measured answering
-// with: what names the name is a child of the refusal rather than its own message (3.2, 3.9).
 func TestTagCreateRefusesWhatTheServerRefused(t *testing.T) {
 	t.Parallel()
 	const duplicate = `{"error":"invalid_properties","error_description":"Property Tag.name is invalid",` +
@@ -292,11 +284,11 @@ func TestTagCreateRefusesWhatTheServerRefused(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := creatingATag(t, answer(tc.status, tc.body))
+			server := creatingATag(t, respondWith(tc.status, tc.body))
 
 			got := runWith(t, server.env(), "tag", "create", "--name", "карта")
 
-			want := refusal{
+			want := faultDocument{
 				code: tc.code,
 				details: append([]detail{
 					{"request", tagCreationRequest(server.url, createdTagFields)},
@@ -330,7 +322,7 @@ func TestTagCreateIsUncertainWhereTheAnswerNeverCame(t *testing.T) {
 // caller asked to see it, and only the expression reaches the document.
 func TestTagCreateChecksMoreThanItPrints(t *testing.T) {
 	t.Parallel()
-	server := creatingATag(t, answer(http.StatusOK, madeTag("карта")))
+	server := creatingATag(t, respondWith(http.StatusOK, madeTag("карта")))
 
 	got := runWith(t, server.env(), "tag", "create", "--name", "карта", "--fields", "owner(login)")
 
@@ -339,9 +331,6 @@ func TestTagCreateChecksMoreThanItPrints(t *testing.T) {
 	assert.Equal(t, []string{"owner(login),name"}, server.sentFields())
 }
 
-// The whole life of a tag on the polygon, by the commands that live it: a new tag is the caller's own
-// and shared with nobody, it stands in the list, the deletion prints what it took away, and afterwards the name
-// resolves to nothing. Six requests in all, and the creation is one POST with nothing read before it.
 func TestTagCreateMakesATagOfTheDevInstanceAndDeletesIt(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -450,9 +439,6 @@ func TestTagCreateRefusesANameOfCharactersThePolygonWillNotKeep(t *testing.T) {
 		"a tag stands in the list although the server refused to make one")
 }
 
-// The limit cuts the page and not the count: two tags of this scenario's own stand on the polygon, a list
-// of one asks the whole off a second pass over ids, and what it says about the rest is the server's word rather
-// than a guess off a page (1.3).
 func TestTagCreateThenListCountsBeyondTheLimit(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

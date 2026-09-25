@@ -51,8 +51,8 @@ func articleRequest(address, id string) string {
 // The whole refusal a 404 for an article becomes, with what the server said about it word for word: said is
 // its own sentence for an article that was never written and the sentence of any missing entity for one the
 // token may not see.
-func noSuchArticle(address, id, said string) refusal {
-	return refusal{
+func noSuchArticle(address, id, said string) faultDocument {
+	return faultDocument{
 		code: "not_found",
 		details: []detail{
 			{"request", articleRequest(address, id)},
@@ -63,9 +63,9 @@ func noSuchArticle(address, id, said string) refusal {
 	}
 }
 
-// articleHolding is the answer for an article carrying keys, encoded the way the server encodes it: a control
+// articleWith is the answer for an article carrying keys, encoded the way the server encodes it: a control
 // character arrives escaped rather than raw, and a character outside the basic plane as a surrogate pair.
-func articleHolding(t *testing.T, keys map[string]any) string {
+func articleWith(t *testing.T, keys map[string]any) string {
 	t.Helper()
 	object := map[string]any{"$type": "Article", "idReadable": "DEV-A-1"}
 	for key, value := range keys {
@@ -106,7 +106,7 @@ func TestArticleShowRefusesBeforeAnyRequest(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -127,7 +127,7 @@ func TestArticleShowHelpNamesTheDefaultFields(t *testing.T) {
 // One request carries the whole article, and it asks nothing of the server beyond the fields.
 func TestArticleShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, articleWithAChild()))
+	server := serve(t, respondWith(http.StatusOK, articleWithAChild()))
 
 	got := runWith(t, server.env(), "article", "show", "DEV-A-1")
 
@@ -145,10 +145,10 @@ func TestArticleShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
 // carries them without loss too. An article keeps a carriage return, so that text reaches here for real.
 func TestArticleShowPrintsContentAsALiteralBlockWhereverItCanCarryIt(t *testing.T) {
 	t.Parallel()
-	for _, tc := range proseCases() {
+	for _, tc := range textCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, articleHolding(t, map[string]any{"content": tc.text})))
+			server := serve(t, respondWith(http.StatusOK, articleWith(t, map[string]any{"content": tc.text})))
 
 			got := runWith(t, server.env(), "article", "show", "DEV-A-1", "--comments=0", "--fields", "idReadable,content")
 
@@ -163,14 +163,14 @@ func TestArticleShowPrintsContentAsALiteralBlockWhereverItCanCarryIt(t *testing.
 
 // A root article with nothing under it and nothing on it prints every key it was asked for: an empty
 // parent, an empty list of children, an empty list of tags, no content at all and no comment.
-func TestArticleShowPrintsAnArticleThatHoldsNothing(t *testing.T) {
+func TestArticleShowPrintsAnEmptyArticle(t *testing.T) {
 	t.Parallel()
 	empty := map[string]any{
 		"summary": "Пустая статья", "reporter": map[string]any{"$type": "User", "login": "admin"},
 		"created": 1789035410875, "updated": 1789035410875, "tags": []any{},
 		"parentArticle": nil, "childArticles": []any{}, "content": nil, "comments": []any{},
 	}
-	server := serve(t, answer(http.StatusOK, articleHolding(t, empty)))
+	server := serve(t, respondWith(http.StatusOK, articleWith(t, empty)))
 
 	got := runWith(t, server.env(), "article", "show", "DEV-A-1")
 
@@ -201,7 +201,7 @@ func TestArticleShowPassesOnWhatTheServerAnswered(t *testing.T) {
 	}{
 		{
 			name: "a web page under a 200", status: http.StatusOK,
-			body: "<html><body>login</body></html>", code: "upstream_lied",
+			body: "<html><body>login</body></html>", code: "upstream_invalid",
 		},
 		{
 			name: "a refusal of the server", status: http.StatusForbidden,
@@ -211,7 +211,7 @@ func TestArticleShowPassesOnWhatTheServerAnswered(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(tc.status, tc.body))
+			server := serve(t, respondWith(tc.status, tc.body))
 
 			got := runWith(t, server.env(), "article", "show", "DEV-A-1")
 
@@ -222,9 +222,6 @@ func TestArticleShowPassesOnWhatTheServerAnswered(t *testing.T) {
 	}
 }
 
-// The root article of the polygon, whole, in one request, comments and all: the content is held against
-// the body the server sent rather than against a copy of the fixture, and the two instants against their form,
-// since they are the moment the polygon was installed.
 func TestArticleShowPrintsAnArticleOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -257,8 +254,6 @@ func TestArticleShowPrintsAnArticleOfTheDevInstance(t *testing.T) {
 	assert.Len(t, dev.requests(), 1)
 }
 
-// The server reads the code in any letter case and the number with leading zeros, and answers with the id
-// it keeps: the child of the polygon hangs from the root article and holds no article of its own.
 func TestArticleShowPrintsTheChildArticleOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -274,8 +269,6 @@ func TestArticleShowPrintsTheChildArticleOfTheDevInstance(t *testing.T) {
 	assert.Len(t, dev.requests(), 1)
 }
 
-// An article the polygon has none of is a 404 of the server, and the form has already settled that no
-// second request to the issues follows it.
 func TestArticleShowRefusesAnArticleTheDevInstanceDoesNotHave(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

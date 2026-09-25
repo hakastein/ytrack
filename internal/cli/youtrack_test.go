@@ -32,18 +32,14 @@ import (
 // token goes out as YTRACK_TOKEN, so a test can look for it where it must not appear.
 const token = "perm-ytrack-test-token"
 
-// A cassette matches a request by its URL and host, so every request goes out to this one address,
-// the polygon's port in dev/.env.example, whatever port the test's own server listens on.
 const devInstanceURL = "http://localhost:8091"
 
 // upstream is the server behind YTRACK_URL, keeping every request it was sent.
 type upstream struct {
-	url    string
-	token  string
-	server *httptest.Server
-	mu     sync.Mutex
-	// What the address and the body of a request are edited into on their way in, or nil where the request
-	// stands as ytrack sent it; see devInstanceRewriting and (*upstream).replacing.
+	url      string
+	token    string
+	server   *httptest.Server
+	mu       sync.Mutex
 	rewrite  func(*url.URL)
 	replace  func(*http.Request, []byte) []byte
 	received []*http.Request
@@ -51,8 +47,7 @@ type upstream struct {
 	answered [][]byte
 }
 
-// The tokens make install leaves for the polygon's users; no cassette may hold one.
-type polygonTokens struct {
+type devInstanceTokens struct {
 	admin   string
 	limited string
 	member  string
@@ -65,7 +60,7 @@ func serve(t *testing.T, handler http.HandlerFunc) *upstream {
 
 func (u *upstream) serving(t *testing.T, handler http.HandlerFunc) *upstream {
 	t.Helper()
-	return u.start(t, httptest.NewUnstartedServer(u.keeping(t, handler)))
+	return u.start(t, httptest.NewUnstartedServer(u.recording(t, handler)))
 }
 
 // appending is the rewrite that writes added onto the raw query of every request. The text is raw, spelled as
@@ -89,7 +84,7 @@ func appending(added string) func(*url.URL) {
 func serveWithoutKeepAlive(t *testing.T, handler http.HandlerFunc) *upstream {
 	t.Helper()
 	u := &upstream{token: token}
-	server := httptest.NewUnstartedServer(u.keeping(t, handler))
+	server := httptest.NewUnstartedServer(u.recording(t, handler))
 	server.Config.SetKeepAlivesEnabled(false)
 	return u.start(t, server)
 }
@@ -120,10 +115,10 @@ func (u *upstream) stopListening(t *testing.T) {
 	}, time.Minute, time.Millisecond, "%s is still taking connections", address)
 }
 
-// keeping is handler with every request it is sent edited and then written down, both before anything else
+// recording is handler with every request it is sent edited and then written down, both before anything else
 // reads it, so what is written down, what a cassette keeps and what the handler is sent are one request and
 // not three.
-func (u *upstream) keeping(t *testing.T, handler http.HandlerFunc) http.HandlerFunc {
+func (u *upstream) recording(t *testing.T, handler http.HandlerFunc) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
 		rewrite, replace := u.editing()
@@ -155,8 +150,6 @@ func (u *upstream) editing() (func(*url.URL), func(*http.Request, []byte) []byte
 	return u.rewrite, u.replace
 }
 
-// rewriting puts an edit of the address in force, or takes the one in force off again where it is handed nil,
-// so one scenario asks the polygon about an address ytrack sends and about one it never would.
 func (u *upstream) rewriting(rewrite func(*url.URL)) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -171,27 +164,17 @@ func (u *upstream) replacing(replace func(*http.Request, []byte) []byte) {
 	u.replace = replace
 }
 
-// devInstance is the polygon as its admin sees it: replayed from the cassette named after the test,
-// or, under the contract tag, the polygon itself, which rewrites that cassette.
 func devInstance(t *testing.T) *upstream {
 	t.Helper()
-	return devInstanceRewriting(t, nil)
+	return devInstanceWithRewrite(t, nil)
 }
 
-// devInstanceAsking is devInstance with added written onto the query of every request that goes through it. It
-// is how a scenario holds the polygon to a parameter ytrack has no way to send: the specification declares none
-// such for the operation, so the generated client carries no field for it either, and the only place left to
-// put it is the wire.
 func devInstanceAsking(t *testing.T, added string) *upstream {
 	t.Helper()
-	return devInstanceRewriting(t, appending(added))
+	return devInstanceWithRewrite(t, appending(added))
 }
 
-// devInstanceRewriting is devInstance with rewrite standing between ytrack and the recorder: it is handed the
-// address of every request before that request is written down or sent on, so a scenario can hold the polygon
-// to a request ytrack itself will not send. The cassette keeps what the polygon was asked, so the recording and
-// the replay ask the same thing, and so does the journal.
-func devInstanceRewriting(t *testing.T, rewrite func(*url.URL)) *upstream {
+func devInstanceWithRewrite(t *testing.T, rewrite func(*url.URL)) *upstream {
 	t.Helper()
 	tokens := devTokens(t)
 	rec, err := recorder.New("testdata/cassettes/"+t.Name(),
@@ -208,8 +191,6 @@ func devInstanceRewriting(t *testing.T, rewrite func(*url.URL)) *upstream {
 			assert.NoError(t, rec.Stop())
 		}
 	})
-	// The handler reads dev after serving returned it, so a scenario against real data can hold the document
-	// against what the polygon said rather than against a copy of the fixture.
 	dev := &upstream{token: tokens.admin, rewrite: rewrite}
 	dev.serving(t, func(w http.ResponseWriter, r *http.Request) {
 		response, err := forward(rec, r)
@@ -233,11 +214,9 @@ func devInstanceRewriting(t *testing.T, rewrite func(*url.URL)) *upstream {
 	return dev
 }
 
-func scrub(tokens polygonTokens) recorder.HookFunc {
+func scrub(tokens devInstanceTokens) recorder.HookFunc {
 	return func(i *cassette.Interaction) error {
 		i.Request.Headers.Del("Authorization")
-		// All that differs between two recordings of the same answer: X-Version changes with a polygon
-		// installed anew on the same build, and the web page's Last-Modified is a moment of its run.
 		i.Response.Headers.Del("Date")
 		i.Response.Headers.Del("Last-Modified")
 		i.Response.Headers.Del("X-Version")
@@ -248,14 +227,14 @@ func scrub(tokens polygonTokens) recorder.HookFunc {
 		}
 		for _, secret := range []string{tokens.admin, tokens.limited, tokens.member} {
 			if bytes.Contains(recorded, []byte(secret)) {
-				return fmt.Errorf("interaction %d holds a token of the polygon", i.ID)
+				return fmt.Errorf("interaction %d holds a token of the dev instance", i.ID)
 			}
 		}
 		return nil
 	}
 }
 
-func TestCassetteRefusesATokenOfThePolygon(t *testing.T) {
+func TestCassetteRefusesATokenOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	tokens := devTokens(t)
 	tests := []struct {
@@ -271,7 +250,7 @@ func TestCassetteRefusesATokenOfThePolygon(t *testing.T) {
 			t.Parallel()
 			interaction := &cassette.Interaction{Response: cassette.Response{Body: `{"token":"` + tc.token + `"}`}}
 
-			assert.EqualError(t, scrub(tokens)(interaction), "interaction 0 holds a token of the polygon")
+			assert.EqualError(t, scrub(tokens)(interaction), "interaction 0 holds a token of the dev instance")
 		})
 	}
 }
@@ -315,7 +294,7 @@ func markingUp(t *testing.T, handler http.HandlerFunc) http.HandlerFunc {
 			handler(w, r)
 			return
 		}
-		answer(http.StatusOK, markup(t, searchAsked(t, r)))(w, r)
+		respondWith(http.StatusOK, markup(t, searchAsked(t, r)))(w, r)
 	}
 }
 
@@ -372,7 +351,7 @@ func serveNothing(t *testing.T) *upstream {
 	})
 }
 
-func answer(status int, body string) http.HandlerFunc {
+func respondWith(status int, body string) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
@@ -380,10 +359,10 @@ func answer(status int, body string) http.HandlerFunc {
 	}
 }
 
-// theHolderOfALink is the client a signed link is fetched by: whoever came by the link and nothing else. It
+// anonymousClient is the client a signed link is fetched by: whoever came by the link and nothing else. It
 // carries no Authorization, keeps no cookie jar and follows no redirect, so what comes back is the answer the
 // link itself was given rather than one a session of its own earned it.
-func theHolderOfALink() *http.Client {
+func anonymousClient() *http.Client {
 	return &http.Client{
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
@@ -399,7 +378,7 @@ func fetched(t *testing.T, address, bearer string) (*http.Response, []byte) {
 	if bearer != "" {
 		request.Header.Set("Authorization", "Bearer "+bearer)
 	}
-	response, err := theHolderOfALink().Do(request)
+	response, err := anonymousClient().Do(request)
 	require.NoError(t, err)
 	defer response.Body.Close()
 	body, err := io.ReadAll(response.Body)

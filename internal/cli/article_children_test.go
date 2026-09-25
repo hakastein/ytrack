@@ -38,7 +38,7 @@ func TestArticleListRefusesAParentItCannotList(t *testing.T) {
 func TestArticleListRefusesAParentTheServerHasNot(t *testing.T) {
 	t.Parallel()
 	const said = `{"error":"Not Found","error_description":"Entity with id DEV-A-9 not found"}`
-	server := serve(t, answer(http.StatusNotFound, said))
+	server := serve(t, respondWith(http.StatusNotFound, said))
 
 	got := runWith(t, server.env(), "article", "list", "--parent", "DEV-A-9")
 

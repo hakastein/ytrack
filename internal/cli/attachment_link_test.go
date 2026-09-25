@@ -12,8 +12,6 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// The form a signed link of the polygon takes: the id of the file, the signature and the moment the attachment
-// was last written, which is what a scenario holds a live link to instead of the bytes of the signature.
 const signedLinkForm = `^/api/files/[0-9]+-[0-9]+\?sign=[A-Za-z0-9_-]+&updated=[0-9]+$`
 
 // The form a preview link takes, which is the same one without the moment: a preview is a file of its own,
@@ -28,7 +26,7 @@ const issueWithAttachments = `{"$type":"Issue","attachments":[` +
 
 func TestIssueShowPrintsTheLinksOfAnAttachmentWhole(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, issueWithAttachments))
+	server := serve(t, respondWith(http.StatusOK, issueWithAttachments))
 
 	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0",
 		"--fields", "attachments(id,url,thumbnailURL)")
@@ -44,7 +42,7 @@ func TestIssueShowPrintsTheLinksOfAnAttachmentWhole(t *testing.T) {
 // would write it twice.
 func TestIssueShowResolvesAnAttachmentLinkAgainstTheHostAndNotThePathOfTheAddress(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, issueWithAttachments))
+	server := serve(t, respondWith(http.StatusOK, issueWithAttachments))
 
 	got := runWith(t, []string{"YTRACK_URL=" + server.url + "/ctx", "YTRACK_TOKEN=" + token},
 		"issue", "show", "DEV-1", "--comments=0", "--fields", "attachments(url)")
@@ -63,7 +61,7 @@ func TestArticleShowPrintsTheLinksOfAnAttachmentWhole(t *testing.T) {
 	t.Parallel()
 	const body = `{"$type":"Article","attachments":[{"$type":"ArticleAttachment",` +
 		`"url":"/api/files/522-4?sign=z&updated=2","thumbnailURL":"/api/files/211-3?sign=y"}]}`
-	server := serve(t, answer(http.StatusOK, body))
+	server := serve(t, respondWith(http.StatusOK, body))
 
 	got := runWith(t, server.env(), "article", "show", "DEV-A-1", "--comments=0",
 		"--fields", "attachments(url,thumbnailURL)")
@@ -77,35 +75,35 @@ func TestArticleShowPrintsTheLinksOfAnAttachmentWhole(t *testing.T) {
 func TestIssueShowRefusesAnAttachmentLinkThatIsNoAbsolutePath(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		arrived string
+		name     string
+		received string
 	}{
-		{name: "a host of its own", arrived: "https://evil/api/files/1"},
-		{name: "an authority and no scheme", arrived: "//evil/x"},
+		{name: "a host of its own", received: "https://evil/api/files/1"},
+		{name: "an authority and no scheme", received: "//evil/x"},
 		// An authority naming a user and no host at all: resolved, it would print as http://u@/p under a name
 		// that means this instance.
-		{name: "a user and no host", arrived: "//u@/p"},
-		{name: "a relative path", arrived: "api/files/1"},
-		{name: "an opaque reference", arrived: "mailto:a@b"},
-		{name: "nothing at all", arrived: ""},
+		{name: "a user and no host", received: "//u@/p"},
+		{name: "a relative path", received: "api/files/1"},
+		{name: "an opaque reference", received: "mailto:a@b"},
+		{name: "nothing at all", received: ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			sent, err := json.Marshal(tc.arrived)
+			sent, err := json.Marshal(tc.received)
 			require.NoError(t, err)
 			body := `{"$type":"Issue","attachments":[{"$type":"IssueAttachment","url":` + string(sent) + `}]}`
-			server := serve(t, answer(http.StatusOK, body))
+			server := serve(t, respondWith(http.StatusOK, body))
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0",
 				"--fields", "attachments(url)")
 
-			assert.Equal(t, refusal{
-				code: "upstream_lied",
+			assert.Equal(t, faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", issueRequest(server.url, "DEV-1", "attachments(url)")},
 					{"field", "attachments(url)"},
-					{"upstream_value", tc.arrived},
+					{"upstream_value", tc.received},
 				},
 			}, requireRefusal(t, got))
 		})
@@ -131,7 +129,7 @@ func TestAttachmentListPrintsTheLinkOfAnAttachmentTheServerNamedNothing(t *testi
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, records))
+			server := serve(t, respondWith(http.StatusOK, records))
 
 			got := runWith(t, server.env(), "attachment", "list", tc.owner)
 
@@ -144,34 +142,31 @@ func TestAttachmentListPrintsTheLinkOfAnAttachmentTheServerNamedNothing(t *testi
 	}
 }
 
-// Х. And what such an object carries is judged by the same rule it is resolved by: the link of a nameless
-// attachment is held to being an absolute path like every other, rather than printed as it came under a
-// nought exit code.
 func TestAttachmentListRefusesALinkOfAnAttachmentTheServerNamedNothing(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		arrived string
+		name     string
+		received string
 	}{
-		{name: "a relative path", arrived: "api/files/12-2"},
-		{name: "a host of its own", arrived: "https://evil/api/files/12-2"},
+		{name: "a relative path", received: "api/files/12-2"},
+		{name: "a host of its own", received: "https://evil/api/files/12-2"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			sent, err := json.Marshal(tc.arrived)
+			sent, err := json.Marshal(tc.received)
 			require.NoError(t, err)
 			body := `[{"id":"12-2","name":"a.txt","size":1,"mimeType":"text/plain","url":` + string(sent) + `}]`
-			server := serve(t, answer(http.StatusOK, body))
+			server := serve(t, respondWith(http.StatusOK, body))
 
 			got := runWith(t, server.env(), "attachment", "list", "DEV-1")
 
-			assert.Equal(t, refusal{
-				code: "upstream_lied",
+			assert.Equal(t, faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", attachmentsRequest(server.url, "issues", "DEV-1", attachmentFields, "50")},
 					{"field", "url"},
-					{"upstream_value", tc.arrived},
+					{"upstream_value", tc.received},
 				},
 			}, requireRefusal(t, got))
 		})
@@ -184,7 +179,7 @@ func TestAttachmentListRefusesALinkOfAnAttachmentTheServerNamedNothing(t *testin
 func TestIssueShowPrintsTheLinkOfAnAttachmentTheServerNamedNothing(t *testing.T) {
 	t.Parallel()
 	const body = `{"$type":"Issue","attachments":[{"url":"/api/files/12-2?sign=Ab-_9&updated=1"}]}`
-	server := serve(t, answer(http.StatusOK, body))
+	server := serve(t, respondWith(http.StatusOK, body))
 
 	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "attachments(url)")
 
@@ -196,7 +191,7 @@ func TestIssueShowPrintsTheLinkOfAnAttachmentTheServerNamedNothing(t *testing.T)
 // Х. Where the specification names no schema for a place — Project.customFields holds an object of none — the
 // server's own name is all there is, and an object that carries neither is left as it arrived: nothing says
 // what stands there, and resolving it would be a guess.
-func TestProjectShowReadsALinkOfAPlaceOfNoSchemaByTheNameTheServerGaveIt(t *testing.T) {
+func TestProjectShowReadsALinkOfANodeOfNoSchemaByTheNameTheServerGaveIt(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
@@ -218,7 +213,7 @@ func TestProjectShowReadsALinkOfAPlaceOfNoSchemaByTheNameTheServerGaveIt(t *test
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := `{"$type":"Project","customFields":[` + tc.object + `]}`
-			server := serve(t, answer(http.StatusOK, body))
+			server := serve(t, respondWith(http.StatusOK, body))
 
 			got := runWith(t, server.env(), "project", "show", "DEV", "--fields", "customFields(url)")
 
@@ -230,10 +225,10 @@ func TestProjectShowReadsALinkOfAPlaceOfNoSchemaByTheNameTheServerGaveIt(t *test
 
 // url is declared on sixteen schemas of the specification, and on some of them the server sends an address of
 // another host altogether: only the schemas of the table are resolved against the instance.
-func TestIssueShowPrintsTheLinkOfAnotherSchemaAsItArrived(t *testing.T) {
+func TestIssueShowPrintsTheLinkOfAnotherSchemaAsReceived(t *testing.T) {
 	t.Parallel()
 	const body = `{"$type":"Issue","externalIssue":{"$type":"ExternalIssue","url":"https://jira.example/X-1"}}`
-	server := serve(t, answer(http.StatusOK, body))
+	server := serve(t, respondWith(http.StatusOK, body))
 
 	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "externalIssue(url)")
 
@@ -255,7 +250,7 @@ func TestIssueShowPrintsTheAvatarOfAUserWhole(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := `{"$type":"Issue","reporter":{"$type":"` + tc.named + `","avatarUrl":"/hub/api/rest/avatar/u?s=48"}}`
-			server := serve(t, answer(http.StatusOK, body))
+			server := serve(t, respondWith(http.StatusOK, body))
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "reporter(avatarUrl)")
 
@@ -268,17 +263,17 @@ func TestIssueShowPrintsTheAvatarOfAUserWhole(t *testing.T) {
 func TestProjectShowPrintsTheIconOfTheProjectWhole(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		arrived string
-		printed string
+		name     string
+		received string
+		printed  string
 	}{
-		{name: "an icon", arrived: `"/api/entityIcons/0-3"`, printed: `"%s/api/entityIcons/0-3"`},
-		{name: "no icon", arrived: "null", printed: "null"},
+		{name: "an icon", received: `"/api/entityIcons/0-3"`, printed: `"%s/api/entityIcons/0-3"`},
+		{name: "no icon", received: "null", printed: "null"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, `{"$type":"Project","iconUrl":`+tc.arrived+`}`))
+			server := serve(t, respondWith(http.StatusOK, `{"$type":"Project","iconUrl":`+tc.received+`}`))
 
 			got := runWith(t, server.env(), "project", "show", "DEV", "--fields", "iconUrl")
 
@@ -294,7 +289,7 @@ func TestIssueListPrintsAnAttachmentLinkWholeInARecord(t *testing.T) {
 	t.Parallel()
 	record := listedRecord("DEV-1", namedFieldsOfTheDefault(),
 		`"attachments":[{"$type":"IssueAttachment","url":"/api/files/12-2?sign=Ab-_9&updated=1"}]`)
-	server := searching(t, answer(http.StatusOK, `[`+record+`]`))
+	server := searching(t, respondWith(http.StatusOK, `[`+record+`]`))
 
 	got := runWith(t, server.env(), "issue", "list", "--query", "x", "--fields", "+attachments(url)")
 
@@ -302,9 +297,7 @@ func TestIssueListPrintsAnAttachmentLinkWholeInARecord(t *testing.T) {
 	assert.Contains(t, lines[0], `attachments: [{url: "`+server.url+`/api/files/12-2?sign=Ab-_9&updated=1"}]`)
 }
 
-// What the attachment of the polygon's DEV-1 prints: the link is the one the server sent, path and query byte
-// for byte, under the address ytrack was pointed at.
-func TestIssueShowPrintsTheLinkOfThePolygonAttachmentWhole(t *testing.T) {
+func TestIssueShowPrintsTheLinkOfTheDevInstanceAttachmentWhole(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
@@ -323,8 +316,7 @@ func TestIssueShowPrintsTheLinkOfThePolygonAttachmentWhole(t *testing.T) {
 	assert.Len(t, dev.requests(), 1)
 }
 
-// The avatar of the polygon's admin is a path of the hub, which lives under the same address as the API.
-func TestUserShowPrintsTheAvatarOfThePolygonWhole(t *testing.T) {
+func TestUserShowPrintsTheAvatarOfTheDevInstanceWhole(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
@@ -344,7 +336,7 @@ func TestUserShowPrintsTheAvatarOfThePolygonWhole(t *testing.T) {
 // gives the file to a client that holds nothing else, and it is the signature that is read rather than the
 // caller, so the same address without one is refused to the admin too. ytrack never walks in here itself —
 // during the call there is no request for the bytes of a file at all.
-func TestTheSignedLinkOfThePolygonGivesTheFileWithoutAnAuthorizationHeader(t *testing.T) {
+func TestTheSignedLinkOfTheDevInstanceGivesTheFileWithoutAnAuthorizationHeader(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
@@ -366,7 +358,7 @@ func TestTheSignedLinkOfThePolygonGivesTheFileWithoutAnAuthorizationHeader(t *te
 
 		require.Equal(t, http.StatusOK, response.StatusCode, "body: %s", body)
 		assert.Len(t, body, printed[0].Size, "the file is as long as the size that was printed with the link")
-		encoded, found := strings.CutPrefix(response.Header.Get("Content-Disposition"), attachedAs)
+		encoded, found := strings.CutPrefix(response.Header.Get("Content-Disposition"), contentDisposition)
 		require.True(t, found, "Content-Disposition: %q", response.Header.Get("Content-Disposition"))
 		assert.NotEqual(t, printed[0].Name, encoded, "the name of the file went out unencoded")
 		decoded, err := url.PathUnescape(encoded)
@@ -431,7 +423,7 @@ const filesPath = "/api/files/"
 
 // How the server names the file it hands over: the name of the attachment percent-encoded, which is what the
 // holder of the link saves it under.
-const attachedAs = `attachment; filename*=UTF-8''`
+const contentDisposition = `attachment; filename*=UTF-8''`
 
 // A printed attachment, read back off stdout: every key of the default of attachment list, of which a
 // scenario that asked for fewer leaves the rest empty.
@@ -471,14 +463,14 @@ func sentAttachmentLinks(t *testing.T, u *upstream) []string {
 	t.Helper()
 	answers := u.answers()
 	require.NotEmpty(t, answers, "the server answered nothing")
-	var arrived struct {
+	var received struct {
 		Attachments []struct {
 			URL string `json:"url"`
 		} `json:"attachments"`
 	}
-	require.NoError(t, json.Unmarshal(answers[0], &arrived), "the answer: %s", answers[0])
-	links := make([]string, 0, len(arrived.Attachments))
-	for _, attachment := range arrived.Attachments {
+	require.NoError(t, json.Unmarshal(answers[0], &received), "the answer: %s", answers[0])
+	links := make([]string, 0, len(received.Attachments))
+	for _, attachment := range received.Attachments {
 		links = append(links, attachment.URL)
 	}
 	require.NotEmpty(t, links, "the answer carries no attachment: %s", answers[0])

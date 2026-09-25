@@ -49,13 +49,13 @@ func TestIssueListRefusesASearchThatCannotBeMarkedUp(t *testing.T) {
 		assist http.HandlerFunc
 		code   string
 	}{
-		{name: "a server that failed", assist: answer(http.StatusInternalServerError, said), code: "upstream_failed"},
+		{name: "a server that failed", assist: respondWith(http.StatusInternalServerError, said), code: "upstream_failed"},
 		{
 			name:   "a token the server will not take",
-			assist: answer(http.StatusUnauthorized, `{"error":"Unauthorized","error_description":"Not authorized"}`),
+			assist: respondWith(http.StatusUnauthorized, `{"error":"Unauthorized","error_description":"Not authorized"}`),
 			code:   "denied",
 		},
-		{name: "a page in place of an answer", assist: signInPage, code: "upstream_lied"},
+		{name: "a page in place of an answer", assist: signInPage, code: "upstream_invalid"},
 		{name: "an answer that breaks off", assist: breakOff, code: "upstream_failed"},
 	}
 	for _, tc := range tests {
@@ -97,12 +97,12 @@ func TestIssueListRefusesAMarkupShortOfWhatItAskedFor(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := marking(t, answer(http.StatusOK, tc.marked), notAsked(t))
+			server := marking(t, respondWith(http.StatusOK, tc.marked), notAsked(t))
 
 			got := runWith(t, server.env(), "issue", "list", "--query", "project: DEV")
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", "POST " + server.url + assistPath + "?fields=" + markupFields},
 					{"fields", markupFields},
@@ -136,7 +136,7 @@ func TestIssueListRefusesAMarkupThatDoesNotFitTheSearch(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := marking(t, answer(http.StatusOK, tc.marked), answer(http.StatusOK, `[`+listedDEV1()+`]`))
+			server := marking(t, respondWith(http.StatusOK, tc.marked), respondWith(http.StatusOK, `[`+listedDEV1()+`]`))
 
 			got := runWith(t, server.env(), "issue", "list", "--query", markedSearch)
 
@@ -147,15 +147,12 @@ func TestIssueListRefusesAMarkupThatDoesNotFitTheSearch(t *testing.T) {
 				return
 			}
 			found := requireRefusal(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Equal(t, 0, sentTo(server, issuesPath))
 		})
 	}
 }
 
-// styleRanges and the members of a range are names of ytrack's own, so an answer that carries them in a shape
-// the markup cannot be read out of is the server falling short of the request. Each shape passes the judgment
-// of names — the names are all there — and is caught where the markup itself is read.
 func TestIssueListRefusesAMarkupOfAShapeItCannotRead(t *testing.T) {
 	t.Parallel()
 	const search = "State: Opne"
@@ -185,12 +182,12 @@ func TestIssueListRefusesAMarkupOfAShapeItCannotRead(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := marking(t, answer(http.StatusOK, tc.marked), notAsked(t))
+			server := marking(t, respondWith(http.StatusOK, tc.marked), notAsked(t))
 
 			got := runWith(t, server.env(), "issue", "list", "--query", search)
 
 			found := requireRefusal(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 			requireMarkedUpFirst(t, server, search)
 			assert.Equal(t, 0, sentTo(server, issuesPath))
 		})

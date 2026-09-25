@@ -37,7 +37,7 @@ func linkTypeFields() []requestedField {
 // link: what it is read for is the untranslated phrase, and nothing else of the instance carries one.
 func (c *Client) linkPhrases(ctx context.Context, spec *schemas) (linkPhrases, *diag.Fault) {
 	a, fault := c.request(ctx, spec, linkTypeCatalogue, linkTypeFields(), func(ctx context.Context, fields string) (*http.Response, error) {
-		return c.getIssueLinkTypes(ctx, fields, linkTypesAtMost)
+		return c.apiGetIssueLinkTypes(ctx, fields, linkTypesAtMost)
 	})
 	if fault != nil {
 		return nil, fault
@@ -45,7 +45,7 @@ func (c *Client) linkPhrases(ctx context.Context, spec *schemas) (linkPhrases, *
 	if len(a.objects) >= linkTypesAtMost {
 		message := fmt.Sprintf("the instance answered with as many link types as were asked for, %d, so the "+
 			"phrases of any past them are missing", linkTypesAtMost)
-		return nil, shapeFailure(a.response, a.body, message)
+		return nil, shapeFailure(a.httpResponse, a.body, message)
 	}
 	phrases := linkPhrases{}
 	for _, kind := range a.objects {
@@ -55,7 +55,7 @@ func (c *Client) linkPhrases(ctx context.Context, spec *schemas) (linkPhrases, *
 		} {
 			label, phrase, held, reason := linkEnd(kind, end[0], end[1])
 			if reason != "" {
-				return nil, shapeFailure(a.response, a.body, reason)
+				return nil, shapeFailure(a.httpResponse, a.body, reason)
 			}
 			if held {
 				phrases.add(label, phrase)

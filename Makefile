@@ -7,7 +7,7 @@ VERSION ?=
 go:
 	test -z "$$(gofmt -l cmd internal scripts)" || { gofmt -l cmd internal scripts; exit 1; }
 	go vet ./...
-	go vet scripts/ytapi-seam.go
+	go vet scripts/ytapi-imports.go
 	go vet scripts/catalogue.go
 	go test -race ./...
 

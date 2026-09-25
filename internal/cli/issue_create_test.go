@@ -20,8 +20,6 @@ const projectWriteFields = "id,shortName,customFields(id,canBeEmpty,defaultValue
 	"condition($type,showForNullValue,field(id),values(name))," +
 	"field(name,localizedName,fieldType(valueType,isMultiValue)))"
 
-// The subtypes of ProjectCustomField the specification gives no defaultValues: they send no such key at all,
-// and a creation reads its absence as a project that fills the field with nothing.
 func withoutDefaults() []string {
 	return []string{"PeriodProjectCustomField", "SimpleProjectCustomField", "TextProjectCustomField"}
 }
@@ -78,8 +76,7 @@ func onlyWhen(controls string, showForNullValue bool, values ...string) string {
 		`,"values":` + bundleNames(values) + `}`
 }
 
-// The project a creation reads, under the id and the code the polygon gives DEV.
-func projectToWrite(fields ...writableField) string {
+func projectResponse(fields ...writableField) string {
 	sent := make([]string, 0, len(fields))
 	for _, field := range fields {
 		sent = append(sent, field.sent())
@@ -89,7 +86,7 @@ func projectToWrite(fields ...writableField) string {
 
 // A project that requires nothing of a new issue, which is what a scenario about the body itself needs.
 func projectRequiringNothing() string {
-	return projectToWrite(
+	return projectResponse(
 		writableField{id: "180-14", kind: "StateProjectCustomField", name: "State", valueType: "state",
 			canBeEmpty: true, defaults: []string{"Новая"}},
 		writableField{id: "187-2", kind: "PeriodProjectCustomField", name: "Оценка", valueType: "period",
@@ -99,12 +96,11 @@ func projectRequiringNothing() string {
 
 // The issue a creation answers with, under the default expression: what the write put there and the empty
 // blocks of everything it did not. description is JSON already, so a scenario may send null for it.
-func filedIssue(readable, summary, description string) string {
-	return filedIssueHolding(readable, summary, description, "[]")
+func createdIssue(readable, summary, description string) string {
+	return createdIssueWith(readable, summary, description, "[]")
 }
 
-// filedIssueHolding is filedIssue with custom fields on the new issue, written as the block arrives.
-func filedIssueHolding(readable, summary, description, fields string) string {
+func createdIssueWith(readable, summary, description, fields string) string {
 	return `{"$type":"Issue","idReadable":` + strconv.Quote(readable) +
 		`,"summary":` + asJSON(summary) +
 		`,"reporter":{"$type":"User","login":"admin"},"created":1789035410875,"updated":1789035410875,` +
@@ -170,7 +166,7 @@ func TestIssueCreateRefusesBeforeAnyRequest(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -202,7 +198,7 @@ func TestIssueCreateRefusesTextTheServerWouldRewrite(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"issue", "create", "DEV"}, tc.argv...)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -228,7 +224,7 @@ func TestIssueCreateHasNoFlagsBesidesItsOwn(t *testing.T) {
 
 			got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", tc.flag, "y")
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -242,7 +238,7 @@ func TestIssueCreatePrintsNoComments(t *testing.T) {
 
 	got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--fields", "+comments(text)")
 
-	assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 	assert.Empty(t, server.requests())
 }
 
@@ -263,11 +259,11 @@ func TestIssueCreateHelpNamesTheDefaultAndNoFile(t *testing.T) {
 func TestIssueCreateReadsTheProjectAndFilesTheIssue(t *testing.T) {
 	t.Parallel()
 	const title = "[bug] fix login"
-	prose := longDescription()
-	server := creating(t, answer(http.StatusOK, projectRequiringNothing()),
-		answer(http.StatusOK, filedIssue("DEV-7", title, asJSON(prose))))
+	text := longDescription()
+	server := creating(t, respondWith(http.StatusOK, projectRequiringNothing()),
+		respondWith(http.StatusOK, createdIssue("DEV-7", title, asJSON(text))))
 
-	got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", title, "--description", prose)
+	got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", title, "--description", text)
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
@@ -280,24 +276,22 @@ func TestIssueCreateReadsTheProjectAndFilesTheIssue(t *testing.T) {
 	assert.Equal(t, map[string]any{
 		"project":     map[string]any{"id": "0-1"},
 		"summary":     title,
-		"description": prose,
+		"description": text,
 	}, body)
 
 	mapping := requireMapping(t, "stdout", got.stdout)
 	assert.Equal(t, []string{"idReadable", "summary", "reporter", "created", "updated", "resolved", "tags",
 		"customFields", "links", "description"}, keysOf(mapping))
 	assert.Equal(t, "DEV-7", nodeAt(t, mapping, "idReadable").Value)
-	assert.Equal(t, prose, nodeAt(t, mapping, "description").Value)
+	assert.Equal(t, text, nodeAt(t, mapping, "description").Value)
 }
 
-// Prose of eighty kilobytes holding everything a description keeps byte for byte: trailing spaces, a line of
-// three dashes, a character outside the basic plane, and no line ending at the end of it.
 func longDescription() string {
-	var prose strings.Builder
-	for prose.Len() < 81_000 {
-		prose.WriteString("Шаги:  \n1. открыть   \n---\nи ещё 😀\n")
+	var text strings.Builder
+	for text.Len() < 81_000 {
+		text.WriteString("Шаги:  \n1. открыть   \n---\nи ещё 😀\n")
 	}
-	return strings.TrimSuffix(prose.String(), "\n")
+	return strings.TrimSuffix(text.String(), "\n")
 }
 
 // Text is the value of a flag, so pflag hands it over whatever it starts with: a body of one dash and a
@@ -333,8 +327,8 @@ func TestIssueCreateWritesTextThatStartsWithADash(t *testing.T) {
 			if written, given := tc.want["description"].(string); given {
 				description = asJSON(written)
 			}
-			server := creating(t, answer(http.StatusOK, projectRequiringNothing()),
-				answer(http.StatusOK, filedIssue("DEV-7", summary, description)))
+			server := creating(t, respondWith(http.StatusOK, projectRequiringNothing()),
+				respondWith(http.StatusOK, createdIssue("DEV-7", summary, description)))
 
 			got := runWith(t, server.env(), append([]string{"issue", "create", "DEV"}, tc.argv...)...)
 
@@ -351,17 +345,17 @@ func TestIssueCreateWritesTextThatStartsWithADash(t *testing.T) {
 // to learn four names. A field the project fills unasked is not required of the caller.
 func TestIssueCreateNamesEveryRequiredFieldAtOnce(t *testing.T) {
 	t.Parallel()
-	metadata := projectToWrite(
+	metadata := projectResponse(
 		writableField{id: "180-15", name: "Type", valueType: "enum"},
 		writableField{id: "180-16", name: "Priority", valueType: "enum", defaults: []string{"Low"}},
 		writableField{id: "180-18", name: "Клиент", valueType: "enum", isMultiValue: true},
 		writableField{id: "180-20", name: "Система", valueType: "enum", isMultiValue: true, canBeEmpty: true},
 	)
-	server := creating(t, answer(http.StatusOK, metadata), noCreation(t))
+	server := creating(t, respondWith(http.StatusOK, metadata), noCreation(t))
 
 	got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x")
 
-	want := refusal{
+	want := faultDocument{
 		code: "missing_required",
 		details: []detail{
 			{"request", writeMetadataRequest(server.url, "DEV")},
@@ -417,13 +411,13 @@ func TestIssueCreateRequiresNoFieldAConditionHides(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			metadata := projectToWrite(tc.state, writableField{id: "180-23", name: "Причина отклонения",
+			metadata := projectResponse(tc.state, writableField{id: "180-23", name: "Причина отклонения",
 				valueType: "enum", condition: tc.condition})
-			issue := answer(http.StatusOK, filedIssue("DEV-7", "x", "null"))
+			issue := respondWith(http.StatusOK, createdIssue("DEV-7", "x", "null"))
 			if tc.missing != nil {
 				issue = noCreation(t)
 			}
-			server := creating(t, answer(http.StatusOK, metadata), issue)
+			server := creating(t, respondWith(http.StatusOK, metadata), issue)
 
 			got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x")
 
@@ -454,14 +448,14 @@ func TestIssueCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 			argv:        []string{"--summary", "a b"},
 			summary:     "a  b",
 			description: "null",
-			mismatch:    []any{[]detail{{"field", "summary"}, {"written", "a b"}, {"arrived", "a  b"}}},
+			mismatch:    []any{[]detail{{"field", "summary"}, {"expected", "a b"}, {"actual", "a  b"}}},
 		},
 		{
 			name:        "prose the server kept none of",
 			argv:        []string{"--summary", "x", "--description", "первая"},
 			summary:     "x",
 			description: "null",
-			mismatch:    []any{[]detail{{"field", "description"}, {"written", "первая"}, {"arrived", nil}}},
+			mismatch:    []any{[]detail{{"field", "description"}, {"expected", "первая"}, {"actual", nil}}},
 		},
 		{
 			name:        "both of them",
@@ -469,21 +463,21 @@ func TestIssueCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 			summary:     "a  b",
 			description: `"вторая"`,
 			mismatch: []any{
-				[]detail{{"field", "summary"}, {"written", "a b"}, {"arrived", "a  b"}},
-				[]detail{{"field", "description"}, {"written", "первая"}, {"arrived", "вторая"}},
+				[]detail{{"field", "summary"}, {"expected", "a b"}, {"actual", "a  b"}},
+				[]detail{{"field", "description"}, {"expected", "первая"}, {"actual", "вторая"}},
 			},
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := creating(t, answer(http.StatusOK, projectRequiringNothing()),
-				answer(http.StatusOK, filedIssue("DEV-7", tc.summary, tc.description)))
+			server := creating(t, respondWith(http.StatusOK, projectRequiringNothing()),
+				respondWith(http.StatusOK, createdIssue("DEV-7", tc.summary, tc.description)))
 
 			got := runWith(t, server.env(), append([]string{"issue", "create", "DEV"}, tc.argv...)...)
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", creationRequest(server.url, askedIssueFields)},
 					{"issue", "DEV-7"},
@@ -521,20 +515,20 @@ func TestIssueCreateRefusesMetadataOfTheProjectOfAnotherShape(t *testing.T) {
 		},
 		{
 			name:    "whether the project lets the field stand empty",
-			project: projectHolding(field(`"canBeEmpty":null`, defaults, condition)),
+			project: projectWith(field(`"canBeEmpty":null`, defaults, condition)),
 		},
 		{
 			name:    "a value the project fills the field with unasked",
-			project: projectHolding(field(empty, `"defaultValues":[{"$type":"EnumBundleElement","name":7}]`, condition)),
+			project: projectWith(field(empty, `"defaultValues":[{"$type":"EnumBundleElement","name":7}]`, condition)),
 		},
 		{
 			name: "the null the condition of the field shows it for",
-			project: projectHolding(field(empty, defaults,
+			project: projectWith(field(empty, defaults,
 				`"condition":{"$type":"FieldBasedCondition","showForNullValue":null,"field":null,"values":[]}`)),
 		},
 		{
 			name: "the field the condition of the field watches",
-			project: projectHolding(field(empty, defaults,
+			project: projectWith(field(empty, defaults,
 				`"condition":{"$type":"FieldBasedCondition","showForNullValue":false,`+
 					`"field":{"$type":"StateProjectCustomField","id":7},"values":[]}`)),
 		},
@@ -542,12 +536,12 @@ func TestIssueCreateRefusesMetadataOfTheProjectOfAnotherShape(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := creating(t, answer(http.StatusOK, tc.project), noCreation(t))
+			server := creating(t, respondWith(http.StatusOK, tc.project), noCreation(t))
 
 			got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x")
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", writeMetadataRequest(server.url, "DEV")},
 					{"upstream_status", 200},
@@ -560,8 +554,8 @@ func TestIssueCreateRefusesMetadataOfTheProjectOfAnotherShape(t *testing.T) {
 	}
 }
 
-// projectHolding is the project a write reads, carrying that one custom field as the answer sends it.
-func projectHolding(field string) string {
+// projectWith is the project a write reads, carrying that one custom field as the answer sends it.
+func projectWith(field string) string {
 	return `{"$type":"Project","id":"0-1","shortName":"DEV","customFields":[` + field + `]}`
 }
 
@@ -571,14 +565,14 @@ func projectHolding(field string) string {
 // write passes and the document is where the answer is found out.
 func TestIssueCreateIsUncertainWhereTheAnswerCannotBePrinted(t *testing.T) {
 	t.Parallel()
-	held := arrivedFields(arrivedField{name: "Примечание", valueType: "string", binding: "187-10", value: "42"})
-	server := creating(t, answer(http.StatusOK, projectRequiringNothing()),
-		answer(http.StatusOK, filedIssueHolding("DEV-7", "x", "null", held)))
+	held := receivedFields(receivedField{name: "Примечание", valueType: "string", binding: "187-10", value: "42"})
+	server := creating(t, respondWith(http.StatusOK, projectRequiringNothing()),
+		respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
 
 	got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x")
 
 	found := requireUncertainty(t, got)
-	assert.Equal(t, "upstream_lied", found.code)
+	assert.Equal(t, "upstream_invalid", found.code)
 	assert.Equal(t, detail{"upstream_status", 200}, found.details[1])
 	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
 }
@@ -589,11 +583,11 @@ func TestIssueCreateRefusesWhatTheServerRefused(t *testing.T) {
 	t.Parallel()
 	const said = `{"error":"Field required","error_description":"Поле Тип обязательно","error_field":"Тип",` +
 		`"error_type":"workflow","error_workflow_type":"require"}`
-	server := creating(t, answer(http.StatusOK, projectRequiringNothing()), answer(http.StatusBadRequest, said))
+	server := creating(t, respondWith(http.StatusOK, projectRequiringNothing()), respondWith(http.StatusBadRequest, said))
 
 	got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x")
 
-	want := refusal{
+	want := faultDocument{
 		code: "rejected",
 		details: []detail{
 			{"request", creationRequest(server.url, askedIssueFields)},
@@ -614,11 +608,11 @@ func TestIssueCreateRefusesWhatTheTokenMayNotReachAt(t *testing.T) {
 	t.Run("a project the read does not find", func(t *testing.T) {
 		t.Parallel()
 		said := `{"error":"Not Found","error_description":"Entity with id NOPE not found"}`
-		server := creating(t, answer(http.StatusNotFound, said), noCreation(t))
+		server := creating(t, respondWith(http.StatusNotFound, said), noCreation(t))
 
 		got := runWith(t, server.env(), "issue", "create", "NOPE", "--summary", "x")
 
-		want := refusal{
+		want := faultDocument{
 			code: "not_found",
 			details: []detail{
 				{"request", writeMetadataRequest(server.url, "NOPE")},
@@ -633,11 +627,11 @@ func TestIssueCreateRefusesWhatTheTokenMayNotReachAt(t *testing.T) {
 	t.Run("a token that may read the project and not write in it", func(t *testing.T) {
 		t.Parallel()
 		said := `{"error":"Forbidden","error_description":"HTTP 403 Forbidden"}`
-		server := creating(t, answer(http.StatusOK, projectRequiringNothing()), answer(http.StatusForbidden, said))
+		server := creating(t, respondWith(http.StatusOK, projectRequiringNothing()), respondWith(http.StatusForbidden, said))
 
 		got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x")
 
-		want := refusal{
+		want := faultDocument{
 			code: "denied",
 			details: []detail{
 				{"request", creationRequest(server.url, askedIssueFields)},
@@ -656,8 +650,8 @@ func TestIssueCreateRefusesWhatTheTokenMayNotReachAt(t *testing.T) {
 // went out are asked for whatever the expression says, and only the expression reaches the document.
 func TestIssueCreateChecksMoreThanItPrints(t *testing.T) {
 	t.Parallel()
-	server := creating(t, answer(http.StatusOK, projectRequiringNothing()),
-		answer(http.StatusOK, filedIssue("DEV-7", "x", `"первая"`)))
+	server := creating(t, respondWith(http.StatusOK, projectRequiringNothing()),
+		respondWith(http.StatusOK, createdIssue("DEV-7", "x", `"первая"`)))
 
 	got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--description", "первая",
 		"--fields", "idReadable")
@@ -672,20 +666,20 @@ func TestIssueCreateChecksMoreThanItPrints(t *testing.T) {
 // write is about.
 func TestIssueCreatePrintsTheCustomFieldsItWasAskedFor(t *testing.T) {
 	t.Parallel()
-	issue := `{"$type":"Issue","idReadable":"DEV-7","summary":"x","customFields":` + arrivedFields(
-		arrivedField{name: "Priority", valueType: "enum", ordinal: "2", binding: "180-16",
+	issue := `{"$type":"Issue","idReadable":"DEV-7","summary":"x","customFields":` + receivedFields(
+		receivedField{name: "Priority", valueType: "enum", ordinal: "2", binding: "180-16",
 			value: bundleElement("Low")},
-		arrivedField{name: "Type", valueType: "enum", ordinal: "1", binding: "180-15",
+		receivedField{name: "Type", valueType: "enum", ordinal: "1", binding: "180-15",
 			value: bundleElement("Task")},
 	) + `}`
 	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasPrefix(r.URL.Path, cataloguePath):
-			answer(http.StatusOK, devCatalogue())(w, r)
+			respondWith(http.StatusOK, devCatalogue())(w, r)
 		case r.Method == http.MethodPost:
-			answer(http.StatusOK, issue)(w, r)
+			respondWith(http.StatusOK, issue)(w, r)
 		default:
-			answer(http.StatusOK, projectRequiringNothing())(w, r)
+			respondWith(http.StatusOK, projectRequiringNothing())(w, r)
 		}
 	})
 
@@ -728,7 +722,7 @@ func TestIssueCreateNamesWhatTheDevProjectRequires(t *testing.T) {
 
 	got := runWith(t, dev.env(), "issue", "create", "DEV", "--summary", contractTitle(t))
 
-	want := refusal{
+	want := faultDocument{
 		code: "missing_required",
 		details: []detail{
 			{"request", writeMetadataRequest(dev.url, "DEV")},

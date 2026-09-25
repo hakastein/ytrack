@@ -77,14 +77,12 @@ func TestArticleUpdateRefusesBeforeAnyRequest(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"article", "update"}, tc.argv...)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// An update has the flags it has: nothing reads a value out of a file, and the custom fields and the prose
-// of an issue are no parts of an article.
 func TestArticleUpdateHasNoFlagsBesidesItsOwn(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -103,7 +101,7 @@ func TestArticleUpdateHasNoFlagsBesidesItsOwn(t *testing.T) {
 
 			got := runWith(t, server.env(), "article", "update", "DEV-A-7", tc.flag, "y")
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -168,8 +166,8 @@ func TestArticleUpdateWritesOnlyThePartsItWasGiven(t *testing.T) {
 			}
 			filed := answeredArticle{readable: "DEV-A-7", summary: title, content: text}
 			server := updatingAnArticle(t,
-				answer(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-				answer(http.StatusOK, filed.json()))
+				respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+				respondWith(http.StatusOK, filed.json()))
 
 			got := runWith(t, server.env(), append([]string{"article", "update", "dev-A-7"}, tc.argv...)...)
 
@@ -184,12 +182,12 @@ func TestArticleUpdateWritesOnlyThePartsItWasGiven(t *testing.T) {
 
 // A title the call does not write leaves its key out of the body, and the answer is then held to nothing
 // about it: the article keeps the title it had, whatever that is.
-func TestArticleUpdateHoldsTheAnswerToThePartsItWrote(t *testing.T) {
+func TestArticleUpdateChecksTheResponseAgainstThePartsItWrote(t *testing.T) {
 	t.Parallel()
 	filed := answeredArticle{readable: "DEV-A-7", summary: "заголовок, которого никто не писал", content: "null"}
 	server := updatingAnArticle(t,
-		answer(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		answer(http.StatusOK, filed.json()))
+		respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+		respondWith(http.StatusOK, filed.json()))
 
 	got := runWith(t, server.env(), "article", "update", "DEV-A-7", "--clear", "content")
 
@@ -220,8 +218,8 @@ func TestArticleUpdateWritesTheTitleItWasGiven(t *testing.T) {
 			t.Parallel()
 			filed := answeredArticle{readable: "DEV-A-7", summary: tc.title, content: "null"}
 			server := updatingAnArticle(t,
-				answer(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-				answer(http.StatusOK, filed.json()))
+				respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+				respondWith(http.StatusOK, filed.json()))
 
 			got := runWith(t, server.env(), "article", "update", "DEV-A-7", "--summary", tc.title)
 
@@ -272,8 +270,8 @@ func TestArticleUpdateChecksMoreThanItPrints(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := updatingAnArticle(t,
-				answer(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-				answer(http.StatusOK, tc.filed.json()))
+				respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+				respondWith(http.StatusOK, tc.filed.json()))
 			argv := append([]string{"article", "update", "dev-A-7"}, tc.argv...)
 
 			got := runWith(t, server.env(), append(argv, "--fields", "idReadable")...)
@@ -300,34 +298,34 @@ func TestArticleUpdateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 			name:     "a title the server stored otherwise",
 			argv:     []string{"--summary", "a b"},
 			filed:    answeredArticle{readable: "DEV-A-7", summary: "a  b", content: "null"},
-			mismatch: []any{[]detail{{"field", "summary"}, {"written", "a b"}, {"arrived", "a  b"}}},
+			mismatch: []any{[]detail{{"field", "summary"}, {"expected", "a b"}, {"actual", "a  b"}}},
 		},
 		{
 			name:  "content the server cut a carriage return out of",
 			argv:  []string{"--content", "первая\rвторая"},
 			filed: answeredArticle{readable: "DEV-A-7", summary: "x", content: asJSON("перваявторая")},
 			mismatch: []any{
-				[]detail{{"field", "content"}, {"written", "первая\rвторая"}, {"arrived", "перваявторая"}},
+				[]detail{{"field", "content"}, {"expected", "первая\rвторая"}, {"actual", "перваявторая"}},
 			},
 		},
 		{
 			name:     "content still standing where the call emptied it",
 			argv:     []string{"--clear", "content"},
 			filed:    answeredArticle{readable: "DEV-A-7", summary: "x", content: asJSON("первая")},
-			mismatch: []any{[]detail{{"field", "content"}, {"written", nil}, {"arrived", "первая"}}},
+			mismatch: []any{[]detail{{"field", "content"}, {"expected", nil}, {"actual", "первая"}}},
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := updatingAnArticle(t,
-				answer(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-				answer(http.StatusOK, tc.filed.json()))
+				respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+				respondWith(http.StatusOK, tc.filed.json()))
 
 			got := runWith(t, server.env(), append([]string{"article", "update", "DEV-A-7"}, tc.argv...)...)
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", articleUpdateRequest(server.url, "DEV-A-7", articleShowFields)},
 					{"article", "DEV-A-7"},
@@ -345,11 +343,11 @@ func TestArticleUpdateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 func TestArticleUpdateRefusesAnArticleTheReadDoesNotFind(t *testing.T) {
 	t.Parallel()
 	said := `{"error":"Not Found","error_description":"Can't find article with id DEV-A-99999"}`
-	server := updatingAnArticle(t, answer(http.StatusNotFound, said), noUpdate(t))
+	server := updatingAnArticle(t, respondWith(http.StatusNotFound, said), noUpdate(t))
 
 	got := runWith(t, server.env(), "article", "update", "DEV-A-99999", "--summary", "x")
 
-	want := refusal{
+	want := faultDocument{
 		code: "not_found",
 		details: []detail{
 			{"request", articleToWriteRequest(server.url, "DEV-A-99999")},
@@ -369,26 +367,26 @@ func TestArticleUpdateRefusesAnArticleTheReadDoesNotFind(t *testing.T) {
 func TestArticleUpdateRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		arrived string
+		name     string
+		received string
 	}{
-		{name: "two dots", arrived: `".."`},
-		{name: "a path after the id", arrived: `"DEV-A-7/.."`},
-		{name: "the id of an issue", arrived: `"DEV-1"`},
-		{name: "no id at all", arrived: `""`},
-		{name: "a number", arrived: "7"},
+		{name: "two dots", received: `".."`},
+		{name: "a path after the id", received: `"DEV-A-7/.."`},
+		{name: "the id of an issue", received: `"DEV-1"`},
+		{name: "no id at all", received: `""`},
+		{name: "a number", received: "7"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			body := `{"$type":"Article","id":"177-7","idReadable":` + tc.arrived +
+			body := `{"$type":"Article","id":"177-7","idReadable":` + tc.received +
 				`,"project":{"$type":"Project","shortName":"DEV"}}`
-			server := updatingAnArticle(t, answer(http.StatusOK, body), noUpdate(t))
+			server := updatingAnArticle(t, respondWith(http.StatusOK, body), noUpdate(t))
 
 			got := runWith(t, server.env(), "article", "update", "dev-A-7", "--summary", "x")
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", articleToWriteRequest(server.url, "dev-A-7")},
 					{"upstream_status", 200},
@@ -406,14 +404,14 @@ func TestArticleUpdateRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 func TestArticleUpdateRefusesAParentReadableIDItCannotAddressBy(t *testing.T) {
 	t.Parallel()
 	server := movingAnArticle(t, map[string]http.HandlerFunc{
-		"DEV-A-7": answer(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		"DEV-A-1": answer(http.StatusOK, articleAbove("177-1", "DEV-1", "DEV", "null")),
+		"DEV-A-7": respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+		"DEV-A-1": respondWith(http.StatusOK, articleAbove("177-1", "DEV-1", "DEV", "null")),
 	}, noUpdate(t))
 
 	got := runWith(t, server.env(), "article", "update", "DEV-A-7", "--parent", "DEV-A-1")
 
-	want := refusal{
-		code: "upstream_lied",
+	want := faultDocument{
+		code: "upstream_invalid",
 		details: []detail{
 			{"request", articleLineRequest(server.url, "DEV-A-1")},
 			{"upstream_status", 200},
@@ -429,7 +427,7 @@ func TestArticleUpdateRefusesAParentReadableIDItCannotAddressBy(t *testing.T) {
 // told that much, and the exit code says the instance may have changed.
 func TestArticleUpdateIsUncertainWhereTheAnswerNeverCame(t *testing.T) {
 	t.Parallel()
-	server := updatingAnArticle(t, answer(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")), breakOff)
+	server := updatingAnArticle(t, respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")), breakOff)
 
 	got := runWith(t, server.env(), "article", "update", "DEV-A-7", "--summary", "x")
 
@@ -440,9 +438,6 @@ func TestArticleUpdateIsUncertainWhereTheAnswerNeverCame(t *testing.T) {
 	assert.Empty(t, got.stdout)
 }
 
-// An article of the polygon written into for real: a title of the runes an article keeps and an issue loses,
-// and content holding a carriage return and a line separator, come back byte for byte both in the answer to the
-// write and in the article as ytrack reads it afterwards.
 func TestArticleUpdateWritesIntoAnArticleOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -471,7 +466,6 @@ func TestArticleUpdateWritesIntoAnArticleOfTheDevInstance(t *testing.T) {
 	assert.Equal(t, yaml.DoubleQuotedStyle, content.Style, "a carriage return keeps content out of a literal block")
 }
 
-// The polygon keeps no empty content: what --clear content sends is a null, and a null is what comes back.
 func TestArticleUpdateEmptiesTheContentOfAnArticleOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
