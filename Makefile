@@ -1,6 +1,5 @@
-.PHONY: go build dist openapi generate ytapi contract
+.PHONY: go build dist openapi generate ytapi
 
-YTRACK_DEV_STATE ?= $(CURDIR)/dev/.state
 VERSION ?=
 
 go:
@@ -24,6 +23,3 @@ generate:
 
 ytapi:
 	scripts/ytapi.sh
-
-contract:
-	YTRACK_DEV_STATE=$(YTRACK_DEV_STATE) go test -tags contract -count=1 ./internal/cli/

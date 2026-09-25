@@ -112,9 +112,6 @@ func newTag(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Com
 func newTagRemove(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {
 	var name, ownedBy string
 	remove := newCommand("remove <issue or article>", func(cmd *cobra.Command, args []string) *diag.Fault {
-		if fault := rejectNoName(cmd); fault != nil {
-			return fault
-		}
 		call, fault := youtrack.RemoveTag(args[0], name, flagValue(cmd, ownedByFlag, &ownedBy))
 		if fault != nil {
 			return fault
@@ -135,9 +132,6 @@ func newTagRemove(env []string, stdout io.Writer, renderer render.Renderer) *cob
 func newTagAdd(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {
 	var name, ownedBy string
 	add := newCommand("add <issue or article>", func(cmd *cobra.Command, args []string) *diag.Fault {
-		if fault := rejectNoName(cmd); fault != nil {
-			return fault
-		}
 		call, fault := youtrack.AddTag(args[0], name, flagValue(cmd, ownedByFlag, &ownedBy))
 		if fault != nil {
 			return fault
@@ -159,9 +153,6 @@ func newTagCreate(env []string, stdout io.Writer, renderer render.Renderer) *cob
 	var fields, name string
 	var shared youtrack.TagSharing
 	create := newCommand("create", func(cmd *cobra.Command, _ []string) *diag.Fault {
-		if fault := rejectNoName(cmd); fault != nil {
-			return fault
-		}
 		call, fault := youtrack.CreateTag(name, shared, fieldsFlagValue(cmd, &fields))
 		if fault != nil {
 			return fault
@@ -191,9 +182,6 @@ func newTagCreate(env []string, stdout io.Writer, renderer render.Renderer) *cob
 func newTagDelete(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {
 	var name, ownedBy string
 	remove := newCommand("delete", func(cmd *cobra.Command, _ []string) *diag.Fault {
-		if fault := rejectNoName(cmd); fault != nil {
-			return fault
-		}
 		call, fault := youtrack.DeleteTag(name, flagValue(cmd, ownedByFlag, &ownedBy))
 		if fault != nil {
 			return fault
@@ -214,14 +202,6 @@ func newTagDelete(env []string, stdout io.Writer, renderer render.Renderer) *cob
 func ownedByFlagOf(cmd *cobra.Command, login *string) {
 	cmd.Flags().StringVar(login, ownedByFlag, "", "owner `login`, when names clash")
 	rejectRepeat(cmd.Flags().Lookup(ownedByFlag))
-}
-
-func rejectNoName(cmd *cobra.Command) *diag.Fault {
-	if cmd.Flags().Changed(nameFlag) {
-		return nil
-	}
-	message := "no --name was given: it carries the name of the tag, which is what a tag is addressed by"
-	return &diag.Fault{Code: diag.BadUsage, Message: message}
 }
 
 func newTagList(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {

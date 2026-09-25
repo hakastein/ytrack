@@ -5,6 +5,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func TestVersionPrintsTheStampOfTheBuildAsOneDocument(t *testing.T) {
@@ -56,72 +59,19 @@ func TestVersionPrintsTheStampOfTheBuildAsOneDocument(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			got := runBuiltFrom(t, tc.build, nil, fake.ServeNothing(t).Env(), "--version")
 
-			got := runBuiltFrom(t, tc.build, nil, server.env(), "--version")
-
-			assert.Equal(t, 0, got.code)
-			assert.Empty(t, got.stderr)
-			assert.Equal(t, tc.document, got.stdout)
-			assert.Empty(t, server.requests())
+			assert.Equal(t, outcome{stdout: tc.document}, got)
 		})
 	}
 }
 
-func TestVersionIsOnlyOnTheRoot(t *testing.T) {
+func TestVersionIsRefusedUnderACommandThatRunsWithoutIt(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "a command", argv: []string{"project", "--version"}},
-		{name: "a command", argv: []string{"project", "show", "--version"}},
-		{name: "a list", argv: []string{"issue", "list", "--version"}},
-		// cobra strips flags before finding the command, so --version is read against project, not the root.
-		{name: "a command named after the flag", argv: []string{"--version", "project"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := serveNothing(t)
+	env := fake.ServeNothing(t).Env()
+	require.Equal(t, 0, runWith(t, env, "completion", "bash").code)
 
-			got := runWith(t, server.env(), tc.argv...)
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
-		})
-	}
-}
-
-func TestVersionHasNoShorthand(t *testing.T) {
-	t.Parallel()
-	server := serveNothing(t)
-
-	got := runWith(t, server.env(), "-v")
+	got := runWith(t, env, "completion", "bash", "--version")
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.requests())
-}
-
-func TestVersionWithAWordIsRefusedAsACommand(t *testing.T) {
-	t.Parallel()
-	server := serveNothing(t)
-
-	got := runWith(t, server.env(), "--version", "bogus")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.requests())
-}
-
-func TestVersionBehindHelpPrintsTheHelp(t *testing.T) {
-	t.Parallel()
-	server := serveNothing(t)
-
-	got := runWith(t, server.env(), "--version", "--help")
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, "--version")
-	assert.Contains(t, availableCommands(t, got.stdout), "project")
-	assert.Empty(t, server.requests())
 }

@@ -1785,7 +1785,7 @@ func (w issueWrite) hiddenFields() []hiddenField {
 	var hidden []hiddenField
 	for _, written := range w.fields {
 		reason, kept := w.hiddenReason(written.field)
-		if !kept || len(written.values) == 0 {
+		if !kept {
 			continue
 		}
 		hidden = append(hidden, hiddenField{name: written.field.info.name, value: written.values[0], reason: reason})

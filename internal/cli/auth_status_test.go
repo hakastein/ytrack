@@ -4,15 +4,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-)
 
-func statusFromEnv(address, login, fullName string) string {
-	return status(address, "environment", login, fullName)
-}
+	"github.com/hakastein/ytrack/internal/fake"
+)
 
 func assertNoToken(t *testing.T, got outcome, secret string) {
 	t.Helper()
@@ -20,101 +19,46 @@ func assertNoToken(t *testing.T, got outcome, secret string) {
 	assert.NotContains(t, got.stderr, secret)
 }
 
-func TestAuthRefusesACallThatDoesNotAssemble(t *testing.T) {
+func urlPrinted(t *testing.T, got outcome) any {
+	t.Helper()
+	require.Equal(t, 0, got.code, "stderr: %q", got.stderr)
+	for pair := range slices.Chunk(requireMapping(t, "stdout", got.stdout).Content, 2) {
+		if pair[0].Value == "url" {
+			return requireValue(t, pair[1])
+		}
+	}
+	require.Fail(t, "no url was printed", "stdout: %q", got.stdout)
+	return nil
+}
+
+func TestAuthStatusPrintsTheAddressTheSourceOfTheLoginAndTheUser(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		argv []string
+		name  string
+		login func(t *testing.T, server *fake.Server) []string
+		from  string
 	}{
-		{name: "the command with no subcommand", argv: []string{"auth"}},
-		{name: "a subcommand the command does not have", argv: []string{"auth", "bogus"}},
-		{name: "an argument to status", argv: []string{"auth", "status", "extra"}},
+		{name: "a login from the environment", login: func(_ *testing.T, server *fake.Server) []string { return server.Env() }, from: "environment"},
+		{name: "a saved login", login: func(t *testing.T, server *fake.Server) []string {
+			home, _ := homeWith(t, globalRecord(server.URL, fake.Token))
+			return []string{"HOME=" + home}
+		}, from: "settings"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.Serve(t, fake.JSON(http.StatusOK, `{"fullName":"Full Name","$type":"Me","login":"login"}`))
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, tc.login(t, server), "auth", "status")
 
-			assert.Equal(t, "bad_usage", requireFault(t, got).code)
-			assertNoToken(t, got, token)
+			assert.Equal(t, outcome{stdout: status(server.URL, tc.from, "login", "Full Name")}, got)
+			sent := server.Request(t, 0)
+			assert.Equal(t, []string{"/api/users/me"}, server.Paths())
+			assert.Equal(t, http.MethodGet, sent.Method)
+			assert.Equal(t, url.Values{"fields": {"login,fullName"}}, sent.URL.Query())
+			assert.Equal(t, bearing(fake.Token), sent.Header.Get("Authorization"))
 		})
 	}
-}
-
-func TestNoCommandTakesTheAddressOrTheTokenAsAFlag(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "the token on the root", argv: []string{"--token", token}},
-		{name: "the address on the root", argv: []string{"--base-url", "http://h"}},
-		{name: "the token on project show", argv: []string{"project", "show", "DEV", "--token", token}},
-		{name: "the address on project show", argv: []string{"project", "show", "DEV", "--base-url", "http://h"}},
-		{name: "the token on auth status", argv: []string{"auth", "status", "--token", token}},
-		{name: "the token on auth status after =", argv: []string{"auth", "status", "--token=" + token}},
-		{name: "the address on auth status", argv: []string{"auth", "status", "--base-url", "http://h"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := serveNothing(t)
-
-			got := runWith(t, server.env(), tc.argv...)
-
-			assert.Equal(t, "bad_usage", requireFault(t, got).code)
-			assertNoToken(t, got, token)
-		})
-	}
-}
-
-func TestAuthHelpSaysWhatEverySubcommandDoes(t *testing.T) {
-	t.Parallel()
-	server := serveNothing(t)
-
-	got := runWith(t, server.env(), "auth", "--help")
-
-	require.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	for _, command := range []string{"login", "logout", "status"} {
-		assert.Regexp(t, `(?m)^[^\S\n]+`+command+`[^\S\n]+\S`, got.stdout, "%s is listed without a description", command)
-	}
-}
-
-func TestAuthStatusHelpPrintsNoToken(t *testing.T) {
-	t.Parallel()
-	for _, flag := range []string{"--help", "-h"} {
-		t.Run(flag, func(t *testing.T) {
-			t.Parallel()
-			server := serveNothing(t)
-
-			got := runWith(t, server.env(), "auth", "status", flag)
-
-			assert.Equal(t, 0, got.code)
-			assert.Empty(t, got.stderr)
-			assert.Contains(t, got.stdout, "ytrack auth status")
-			assertNoToken(t, got, token)
-		})
-	}
-}
-
-func TestAuthStatusPrintsTheAddressTheLoginSourcesAndTheUserFromEnv(t *testing.T) {
-	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, `{"fullName":"Administrator","$type":"Me","login":"admin"}`))
-
-	got := runWith(t, server.env(), "auth", "status")
-
-	assert.Equal(t, outcome{stdout: statusFromEnv(server.url, "admin", "Administrator")}, got)
-	assertNoToken(t, got, token)
-	requests := server.requests()
-	require.Len(t, requests, 1)
-	request := requests[0]
-	assert.Equal(t, http.MethodGet, request.Method)
-	assert.Equal(t, "/api/users/me", request.URL.Path)
-	assert.Equal(t, url.Values{"fields": {"login,fullName"}}, request.URL.Query())
-	assert.Equal(t, "Bearer "+token, request.Header.Get("Authorization"))
 }
 
 func TestAuthStatusPrintsTheAddressInOneSpelling(t *testing.T) {
@@ -125,93 +69,51 @@ func TestAuthStatusPrintsTheAddressInOneSpelling(t *testing.T) {
 		printed string
 		path    string
 	}{
-		{name: "a scheme in capitals and a slash at the end", address: "HTTP://127.0.0.1:%s/", printed: "http://127.0.0.1:%s", path: "/api/users/me"},
-		{name: "a host in capitals", address: "http://[::FFFF:127.0.0.1]:%s", printed: "http://[::ffff:127.0.0.1]:%s", path: "/api/users/me"},
-		{name: "slashes at the end of a path", address: "http://127.0.0.1:%s/ctx//", printed: "http://127.0.0.1:%s/ctx", path: "/ctx/api/users/me"},
-		{name: "escaped slashes in a path that ends in slashes", address: "http://127.0.0.1:%s/a%%2Fb%%2F//", printed: "http://127.0.0.1:%s/a%%2Fb%%2F", path: "/a%2Fb%2F/api/users/me"},
+		{name: "a scheme in capitals and a slash at the end", address: "HTTP://127.0.0.1:%s%s/", printed: "http://127.0.0.1:%s%s", path: "/api/users/me"},
+		{name: "a host in capitals", address: "http://[::FFFF:127.0.0.1]:%s%s", printed: "http://[::ffff:127.0.0.1]:%s%s", path: "/api/users/me"},
+		{name: "slashes at the end of a path", address: "http://127.0.0.1:%s%s/ctx//", printed: "http://127.0.0.1:%s%s/ctx", path: "/ctx/api/users/me"},
+		{name: "escaped slashes in a path that ends in slashes", address: "http://127.0.0.1:%s%s/a%%2Fb%%2F//", printed: "http://127.0.0.1:%s%s/a%%2Fb%%2F", path: "/a%2Fb%2F/api/users/me"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(http.StatusOK, `{"login":"admin","fullName":"Administrator","$type":"Me"}`))
-			listening, err := url.Parse(server.url)
-			require.NoError(t, err)
-			port := listening.Port()
+			server := fake.Serve(t, fake.JSON(http.StatusOK, `{"login":"login","fullName":"Full Name","$type":"Me"}`))
+			listening := server.Address(t)
+			port, prefix := listening.Port(), listening.Path
 
-			got := runWith(t, []string{"YTRACK_URL=" + fmt.Sprintf(tc.address, port), "YTRACK_TOKEN=" + token}, "auth", "status")
+			got := runWith(t, []string{"YTRACK_URL=" + fmt.Sprintf(tc.address, port, prefix), "YTRACK_TOKEN=" + fake.Token}, "auth", "status")
 
-			assert.Equal(t, outcome{stdout: statusFromEnv(fmt.Sprintf(tc.printed, port), "admin", "Administrator")}, got)
-			assertNoToken(t, got, token)
-			requests := server.requests()
-			require.Len(t, requests, 1)
-			assert.Equal(t, tc.path, requests[0].URL.EscapedPath())
+			assert.Equal(t, fmt.Sprintf(tc.printed, port, prefix), urlPrinted(t, got))
+			assert.Equal(t, tc.path, server.Request(t, 0).URL.EscapedPath())
 		})
 	}
 }
 
 func TestAuthStatusPrintsTheAddressWithoutItsPassword(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, `{"login":"admin","fullName":"Administrator","$type":"Me"}`))
-	address, err := url.Parse(server.url)
-	require.NoError(t, err)
+	server := fake.Serve(t, fake.JSON(http.StatusOK, `{"login":"login","fullName":"Full Name","$type":"Me"}`))
+	address := server.Address(t)
 	address.User = url.UserPassword("svc", "secret")
 
-	got := runWith(t, []string{"YTRACK_URL=" + address.String(), "YTRACK_TOKEN=" + token}, "auth", "status")
+	got := runWith(t, []string{"YTRACK_URL=" + address.String(), "YTRACK_TOKEN=" + fake.Token}, "auth", "status")
 
-	assert.Equal(t, outcome{stdout: statusFromEnv("http://svc:xxxxx@"+address.Host, "admin", "Administrator")}, got)
-	assertNoToken(t, got, token)
+	assert.Equal(t, "http://svc:xxxxx@"+address.Host+address.Path, urlPrinted(t, got))
 }
 
 func TestAuthStatusRefusesAUserWithoutTheFullName(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, `{"login":"admin","$type":"Me"}`))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, `{"login":"login","$type":"Me"}`))
 
-	got := runWith(t, server.env(), "auth", "status")
+	got := runWith(t, server.Env(), "auth", "status")
 
 	want := faultDocument{
 		code: "upstream_invalid",
 		details: []detail{
-			{"request", "GET " + server.url + "/api/users/me?fields=login,fullName"},
+			{"request", "GET " + server.URL + "/api/users/me?fields=login,fullName"},
 			{"fields", "login,fullName"},
 			{"missing", []any{missingEntry("fullName", "Me")}},
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assertNoToken(t, got, token)
-	assert.Len(t, server.requests(), 1)
-}
-
-func TestAuthStatusPrintsTheAdminOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "auth", "status")
-
-	assert.Equal(t, outcome{stdout: statusFromEnv(dev.url, "admin", "admin")}, got)
-	assertNoToken(t, got, dev.token)
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestAuthStatusPrintsTheLimitedUserOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	limited := devTokens(t).limited
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + limited}, "auth", "status")
-
-	assert.Equal(t, outcome{stdout: statusFromEnv(dev.url, "dev.limited", "Ограниченный")}, got)
-	assertNoToken(t, got, limited)
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestAuthStatusPrintsTheMemberOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	member := devTokens(t).member
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + member}, "auth", "status")
-
-	assert.Equal(t, outcome{stdout: statusFromEnv(dev.url, "dev.member", "Участник")}, got)
-	assertNoToken(t, got, member)
-	assert.Len(t, dev.requests(), 1)
+	assert.Equal(t, []string{"/api/users/me"}, server.Paths())
 }

@@ -14,6 +14,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func aBlockDevice(t *testing.T) string {
@@ -69,42 +71,36 @@ func TestAttachmentCreateRefusesAFileThatIsNoOrdinaryOneOnUnix(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNothing(t)
+			server := fake.ServeNothing(t)
 			path := tc.path(t)
 
-			got := runWith(t, server.env(), "attachment", "create", "DEV-1", path)
+			got := runWith(t, server.Env(), "attachment", "create", "DEV-1", path)
 
 			found := requireFault(t, got)
 			assert.Equal(t, "bad_usage", found.code)
-			assert.Empty(t, server.requests())
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
 
 func TestAttachmentCreateRefusesAPathThatNoLongerPointsToTheCheckedFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
-	const length = 4
 	one, two := filepath.Join(dir, "one"), filepath.Join(dir, "two")
 	require.NoError(t, os.WriteFile(one, []byte("aaaa"), 0o600))
 	require.NoError(t, os.WriteFile(two, []byte("bbbb"), 0o600))
-	const name = "file.bin"
-	path := filepath.Join(dir, name)
+	path := filepath.Join(dir, "file.bin")
 	require.NoError(t, os.Symlink(one, path))
 	keepFlippingSymlink(t, path, one, two)
-	server := serve(t, respondWith(http.StatusOK, filed(name, length)))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, filed("file.bin", len("aaaa"))))
+	var got outcome
 
-	deadline := time.Now().Add(10 * time.Second)
-	for attempt := 1; ; attempt++ {
-		got := runWith(t, server.env(), "attachment", "create", "DEV-1", path)
-		changedBetweenTheCalls := got.code != 0
-		if changedBetweenTheCalls {
-			found := requireFault(t, got)
-			assert.Equal(t, "bad_usage", found.code)
-			return
-		}
-		require.False(t, time.Now().After(deadline),
-			"%d attempts and the path never changed between the two calls", attempt)
-	}
+	require.Eventually(t, func() bool {
+		got = runWith(t, server.Env(), "attachment", "create", "DEV-1", path, "--fields", "name")
+		return got.code != 0
+	}, 10*time.Second, time.Millisecond, "the path never changed between the two calls")
+
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 }
 
 func keepFlippingSymlink(t *testing.T, path, one, two string) {

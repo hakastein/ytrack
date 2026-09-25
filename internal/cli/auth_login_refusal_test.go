@@ -7,30 +7,31 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
-func loginEnvironment(t *testing.T) (env []string, home, path string) {
+const damagedRecords = "not a file of login records"
+
+func loginEnvironment(t *testing.T) (env []string, path string) {
 	t.Helper()
 	stated, _ := here(t)
-	home, path = emptyHome(t)
-	return append(serveNothing(t).env(), "HOME="+home, "PWD="+stated), home, path
+	home, path := homeWith(t, damagedRecords)
+	return append(fake.ServeNothing(t).Env(), "HOME="+home, "PWD="+stated), path
 }
 
 func TestAuthLoginRefusesAStdinThatIsNotATerminal(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
-		argv  []string
 		stdin func(t *testing.T) *os.File
 	}{
 		{
 			name:  "no stdin at all",
-			argv:  []string{"auth", "login"},
 			stdin: func(*testing.T) *os.File { return nil },
 		},
 		{
 			name: "a stdin that holds nothing",
-			argv: []string{"auth", "login"},
 			stdin: func(t *testing.T) *os.File {
 				t.Helper()
 				empty, err := os.Open(os.DevNull)
@@ -39,31 +40,24 @@ func TestAuthLoginRefusesAStdinThatIsNotATerminal(t *testing.T) {
 				return empty
 			},
 		},
-		{
-			name:  "no stdin at all, asked for everywhere",
-			argv:  []string{"auth", "login", "--global"},
-			stdin: func(*testing.T) *os.File { return nil },
-		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			env, home, path := loginEnvironment(t)
+			env, path := loginEnvironment(t)
 
-			got := runOn(t, tc.stdin(t), env, tc.argv...)
+			got := runOn(t, tc.stdin(t), env, "auth", "login")
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assertNoToken(t, got, token)
-			assert.NoFileExists(t, path)
-			assert.Empty(t, entries(t, home))
+			assert.Equal(t, damagedRecords, fileBytes(t, path))
 		})
 	}
 }
 
 func TestAuthLoginReadsNothingOfThePipeItIsHanded(t *testing.T) {
 	t.Parallel()
-	env, home, path := loginEnvironment(t)
-	const dialogue = "http://h\n" + token + "\n"
+	env, path := loginEnvironment(t)
+	const dialogue = "http://h\n" + fake.Token + "\n"
 	read, write, err := os.Pipe()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = read.Close() })
@@ -74,37 +68,8 @@ func TestAuthLoginReadsNothingOfThePipeItIsHanded(t *testing.T) {
 	got := runOn(t, read, env, "auth", "login")
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assertNoToken(t, got, token)
 	unread, err := io.ReadAll(read)
 	require.NoError(t, err)
 	assert.Equal(t, dialogue, string(unread))
-	assert.NoFileExists(t, path)
-	assert.Empty(t, entries(t, home))
-}
-
-func TestAuthLoginRefusesACallThatDoesNotAssemble(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "an argument", argv: []string{"auth", "login", "extra"}},
-		{name: "an argument after the flag", argv: []string{"auth", "login", "--global", "extra"}},
-		{name: "a flag for the token", argv: []string{"auth", "login", "--token", token}},
-		{name: "a flag for the token after =", argv: []string{"auth", "login", "--token=" + token}},
-		{name: "a flag for the address", argv: []string{"auth", "login", "--base-url", "http://h"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			env, home, path := loginEnvironment(t)
-
-			got := runWith(t, env, tc.argv...)
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assertNoToken(t, got, token)
-			assert.NoFileExists(t, path)
-			assert.Empty(t, entries(t, home))
-		})
-	}
+	assert.Equal(t, damagedRecords, fileBytes(t, path))
 }

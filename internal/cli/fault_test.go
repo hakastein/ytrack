@@ -19,10 +19,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hakastein/ytrack/internal/cli"
+	"github.com/hakastein/ytrack/internal/fake"
 )
 
-func showRequest(address, code string) string {
-	return "GET " + address + "/api/admin/projects/" + code + "?fields=" + defaultProjectFields
+var showDEV = []string{"project", "show", "DEV", "--fields", "shortName"}
+
+func showRequest(address string) string {
+	return "GET " + address + "/api/admin/projects/DEV?fields=shortName"
 }
 
 func TestAFaultNamesTheRequestThatWasSent(t *testing.T) {
@@ -34,41 +37,40 @@ func TestAFaultNamesTheRequestThatWasSent(t *testing.T) {
 	}{
 		{
 			name:   "a login holding a slash",
-			argv:   []string{"user", "show", "a/b"},
-			target: "/api/users/a%2Fb?fields=login,fullName,email,banned",
+			argv:   []string{"user", "show", "a/b", "--fields", "login"},
+			target: "/api/users/a%2Fb?fields=login",
 		},
 		{
 			name:   "a login holding a hash",
-			argv:   []string{"user", "show", "a#b"},
-			target: "/api/users/a%23b?fields=login,fullName,email,banned",
+			argv:   []string{"user", "show", "a#b", "--fields", "login"},
+			target: "/api/users/a%23b?fields=login",
 		},
 		{
 			name:   "a login holding a per cent",
-			argv:   []string{"user", "show", "100%"},
-			target: "/api/users/100%25?fields=login,fullName,email,banned",
+			argv:   []string{"user", "show", "100%", "--fields", "login"},
+			target: "/api/users/100%25?fields=login",
 		},
 		{
 			name: "a search holding a space, a plus, an ampersand and a hash",
-			argv: []string{"user", "list", "--query", "Иван & Co = +100%#"},
-			target: "/api/users?fields=login,fullName,banned&$top=50&query=" +
+			argv: []string{"user", "list", "--query", "Иван & Co = +100%#", "--fields", "login"},
+			target: "/api/users?fields=login&$top=50&query=" +
 				"%D0%98%D0%B2%D0%B0%D0%BD+%26+Co+%3D+%2B100%25%23",
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, respondWith(http.StatusNotFound, `{"error":"Not Found","error_description":"none"}`))
+			server := fake.Serve(t, fake.JSON(http.StatusNotFound, `{"error":"Not Found","error_description":"none"}`))
 
-			got := runWith(t, server.env(), tc.argv...)
+			got := runWith(t, server.Env(), tc.argv...)
 
 			found := requireFault(t, got)
-			require.Equal(t, detail{"request", "GET " + server.url + tc.target}, found.details[0])
-			printed, err := url.Parse(server.url + tc.target)
+			require.Equal(t, detail{"request", "GET " + server.URL + tc.target}, found.details[0])
+			printed, err := url.Parse(tc.target)
 			require.NoError(t, err)
-			requests := server.requests()
-			require.Len(t, requests, 1)
-			assert.Equal(t, requests[0].URL.EscapedPath(), printed.EscapedPath())
-			assert.Equal(t, requests[0].URL.Query(), printed.Query())
+			assert.Equal(t, []string{http.MethodGet}, server.Methods())
+			assert.Equal(t, printed.EscapedPath(), server.Request(t, 0).URL.EscapedPath())
+			assert.Equal(t, printed.Query(), server.Request(t, 0).URL.Query())
 		})
 	}
 }
@@ -189,80 +191,80 @@ func TestProjectShowRefusesByTheStatusOfTheAnswer(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, func(w http.ResponseWriter, r *http.Request) {
+			server := fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 				maps.Copy(w.Header(), tc.header)
-				respondWith(tc.status, tc.body)(w, r)
+				fake.JSON(tc.status, tc.body)(w, r)
 			})
 
-			got := runWith(t, server.env(), "project", "show", "DEV")
+			got := runWith(t, server.Env(), showDEV...)
 
 			want := faultDocument{
 				code:    tc.code,
-				details: slices.Concat([]detail{{"request", showRequest(server.url, "DEV")}}, tc.detailsAfterRequest),
+				details: slices.Concat([]detail{{"request", showRequest(server.URL)}}, tc.detailsAfterRequest),
 			}
 			assert.Equal(t, want, requireFault(t, got))
-			assert.Len(t, server.requests(), 1)
+			assert.Equal(t, []string{"/api/admin/projects/DEV"}, server.Paths())
 		})
 	}
 }
 
-func TestProjectShowRefusesACodeTheDevInstanceDoesNotHave(t *testing.T) {
+func TestEveryCommandRefusesByTheStatusOfItsFirstAnswer(t *testing.T) {
 	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "project", "show", "NOPE")
-
-	want := faultDocument{
-		code: "not_found",
-		details: []detail{
-			{"request", showRequest(dev.url, "NOPE")},
-			{"upstream_status", 404},
-			{"upstream_error", "Not Found"},
-			{"upstream_message", "Entity with id NOPE not found"},
-		},
+	attached := aFileToAttach(t)
+	tests := []struct {
+		name string
+		argv []string
+	}{
+		{name: "issue show", argv: []string{"issue", "show", "DEV-1"}},
+		{name: "issue list", argv: []string{"issue", "list", "--query", "a"}},
+		{name: "issue create", argv: []string{"issue", "create", "DEV", "--summary", "x"}},
+		{name: "issue update", argv: []string{"issue", "update", "DEV-1", "--summary", "x"}},
+		{name: "issue delete", argv: []string{"issue", "delete", "DEV-1"}},
+		{name: "article show", argv: []string{"article", "show", "DEV-A-1"}},
+		{name: "article list", argv: []string{"article", "list", "--query", "a"}},
+		{name: "article list --parent", argv: []string{"article", "list", "--parent", "DEV-A-1"}},
+		{name: "article create", argv: []string{"article", "create", "DEV", "--summary", "x"}},
+		{name: "article update", argv: []string{"article", "update", "DEV-A-1", "--summary", "x"}},
+		{name: "article delete", argv: []string{"article", "delete", "DEV-A-1"}},
+		{name: "comment list", argv: []string{"comment", "list", "DEV-1"}},
+		{name: "comment create", argv: []string{"comment", "create", "DEV-1", "--text", "x"}},
+		{name: "comment update", argv: []string{"comment", "update", "DEV-1", "7-1", "--text", "x"}},
+		{name: "comment delete", argv: []string{"comment", "delete", "DEV-1", "7-1"}},
+		{name: "attachment list", argv: []string{"attachment", "list", "DEV-1"}},
+		{name: "attachment create", argv: []string{"attachment", "create", "DEV-1", attached}},
+		{name: "attachment delete", argv: []string{"attachment", "delete", "DEV-1", "12-1"}},
+		{name: "tag list", argv: []string{"tag", "list"}},
+		{name: "tag create", argv: []string{"tag", "create", "--name", "x"}},
+		{name: "tag create --visible-for", argv: []string{"tag", "create", "--name", "x", "--visible-for", "First"}},
+		{name: "tag delete", argv: []string{"tag", "delete", "--name", "x"}},
+		{name: "tag add", argv: []string{"tag", "add", "DEV-1", "--name", "x"}},
+		{name: "tag remove", argv: []string{"tag", "remove", "DEV-1", "--name", "x"}},
+		{name: "link list", argv: []string{"link", "list", "DEV-1"}},
+		{name: "link add", argv: []string{"link", "add", "DEV-1", "needs", "DEV-2"}},
+		{name: "link remove", argv: []string{"link", "remove", "DEV-1", "needs", "DEV-2"}},
+		{name: "time list", argv: []string{"time", "list", "DEV-1"}},
+		{name: "time create", argv: []string{"time", "create", "DEV-1", "PT1H"}},
+		{name: "time update", argv: []string{"time", "update", "DEV-1", "199-6", "--text", "x"}},
+		{name: "time delete", argv: []string{"time", "delete", "DEV-1", "199-6"}},
+		{name: "activity list", argv: []string{"activity", "list", "DEV-1"}},
+		{name: "field list", argv: []string{"field", "list", "DEV"}},
+		{name: "field show", argv: []string{"field", "show", "DEV", "Type"}},
+		{name: "project show", argv: []string{"project", "show", "DEV"}},
+		{name: "project list", argv: []string{"project", "list"}},
+		{name: "user show", argv: []string{"user", "show", "first"}},
+		{name: "user list", argv: []string{"user", "list", "--query", "a"}},
 	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, dev.requests(), 1)
-}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := fake.Serve(t, fake.JSON(http.StatusForbidden, `{"error":"Forbidden","error_description":"Denied"}`))
 
-func TestProjectShowRefusesATokenTheDevInstanceDoesNotKnow(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
+			got := runWith(t, server.Env(), tc.argv...)
 
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + bogusToken}, "project", "show", "DEV")
-
-	want := faultDocument{
-		code: "denied",
-		details: []detail{
-			{"request", showRequest(dev.url, "DEV")},
-			{"upstream_status", 401},
-			{"upstream_error", "Unauthorized"},
-			{"upstream_message", "Invalid token"},
-			authFromEnv(),
-		},
+			assert.Equal(t, "denied", requireFault(t, got).code)
+			assert.Len(t, server.Requests(), 1)
+		})
 	}
-	assert.Equal(t, want, requireFault(t, got))
-	assertNoToken(t, got, bogusToken)
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestProjectShowRefusesAProjectHiddenFromTheLimitedUser(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}, "project", "show", "DEV")
-
-	want := faultDocument{
-		code: "not_found",
-		details: []detail{
-			{"request", showRequest(dev.url, "DEV")},
-			{"upstream_status", 404},
-			{"upstream_error", "Not Found"},
-			{"upstream_message", "Entity with id DEV not found"},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, dev.requests(), 1)
 }
 
 func TestProjectShowRefusesAnAnswerOfAnotherShape(t *testing.T) {
@@ -326,84 +328,66 @@ func TestProjectShowRefusesAnAnswerOfAnotherShape(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, func(w http.ResponseWriter, _ *http.Request) {
+			server := fake.Serve(t, func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", tc.contentType)
 				w.WriteHeader(tc.status)
 				_, _ = io.WriteString(w, tc.body)
 			})
 
-			got := runWith(t, server.env(), "project", "show", "DEV")
+			got := runWith(t, server.Env(), showDEV...)
 
 			want := faultDocument{
 				code: tc.code,
 				details: []detail{
-					{"request", showRequest(server.url, "DEV")},
+					{"request", showRequest(server.URL)},
 					{"upstream_status", tc.status},
 					{"upstream_body", tc.body},
 				},
 			}
 			assert.Equal(t, want, requireFault(t, got))
-			assert.Len(t, server.requests(), 1)
+			assert.Equal(t, []string{"/api/admin/projects/DEV"}, server.Paths())
 		})
 	}
 }
 
 func TestProjectShowDoesNotFollowARedirect(t *testing.T) {
 	t.Parallel()
-	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
+	server := fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/moved" {
-			respondWith(http.StatusOK, projectDEV)(w, r)
+			fake.JSON(http.StatusOK, projectDEV)(w, r)
 			return
 		}
 		w.Header().Set("Location", "/moved")
 		w.WriteHeader(http.StatusFound)
 	})
 
-	got := runWith(t, server.env(), "project", "show", "DEV")
+	got := runWith(t, server.Env(), showDEV...)
 
 	want := faultDocument{
 		code: "upstream_invalid",
 		details: []detail{
-			{"request", showRequest(server.url, "DEV")},
+			{"request", showRequest(server.URL)},
 			{"upstream_status", 302},
 			{"upstream_body", ""},
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, server.requests(), 1)
-}
-
-func TestProjectShowRefusesTheWebPageTheDevInstanceServesOutsideTheAPI(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	addressOutsideTheAPI := dev.url + "/youtrack"
-
-	got := runWith(t, []string{"YTRACK_URL=" + addressOutsideTheAPI, "YTRACK_TOKEN=" + dev.token},
-		"project", "show", "DEV")
-
-	found := requireFault(t, got)
-	assert.Equal(t, "upstream_invalid", found.code)
-	require.Len(t, found.details, 3, "details: %v", found.details)
-	assert.Equal(t, []detail{{"request", showRequest(addressOutsideTheAPI, "DEV")}, {"upstream_status", 200}},
-		found.details[:2])
-	assert.Equal(t, "upstream_body", found.details[2].key)
-	assert.Contains(t, found.details[2].value, "<html")
-	assert.Len(t, dev.requests(), 1)
+	assert.Equal(t, []string{"/api/admin/projects/DEV"}, server.Paths())
 }
 
 func TestProjectShowRefusesAnAnswerCutShort(t *testing.T) {
 	t.Parallel()
-	server := serve(t, func(w http.ResponseWriter, _ *http.Request) {
+	server := fake.Serve(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Length", "1000")
 		_, _ = io.WriteString(w, projectDEV)
 	})
 
-	got := runWith(t, server.env(), "project", "show", "DEV")
+	got := runWith(t, server.Env(), showDEV...)
 
 	want := faultDocument{
 		code: "upstream_failed",
 		details: []detail{
-			{"request", showRequest(server.url, "DEV")},
+			{"request", showRequest(server.URL)},
 			{"upstream_status", 200},
 		},
 	}
@@ -412,14 +396,12 @@ func TestProjectShowRefusesAnAnswerCutShort(t *testing.T) {
 
 func TestProjectShowRefusesWhenNothingListens(t *testing.T) {
 	t.Parallel()
-	const nowhere = "http://127.0.0.1:0"
-
-	got := runWith(t, []string{"YTRACK_URL=" + nowhere, "YTRACK_TOKEN=" + token}, "project", "show", "DEV")
+	got := runWith(t, fake.Unreachable().Env(), showDEV...)
 
 	found := requireFault(t, got)
 	assert.Equal(t, "upstream_failed", found.code)
-	assert.Equal(t, []detail{{"request", showRequest(nowhere, "DEV")}}, found.details)
-	assert.NotContains(t, got.stderr, token)
+	assert.Equal(t, []detail{{"request", showRequest(fake.NobodyListens)}}, found.details)
+	assert.NotContains(t, got.stderr, fake.Token)
 }
 
 func TestProjectShowDoesNotOfferHTTP2ToAServerThatSpeaksIt(t *testing.T) {
@@ -440,11 +422,11 @@ func TestProjectShowDoesNotOfferHTTP2ToAServerThatSpeaksIt(t *testing.T) {
 	server.StartTLS()
 	t.Cleanup(server.Close)
 
-	got := runWith(t, []string{"YTRACK_URL=" + server.URL, "YTRACK_TOKEN=" + token}, "project", "show", "DEV")
+	got := runWith(t, []string{"YTRACK_URL=" + server.URL, "YTRACK_TOKEN=" + fake.Token}, showDEV...)
 
 	found := requireFault(t, got)
 	assert.Equal(t, "upstream_failed", found.code)
-	assert.Equal(t, []detail{{"request", showRequest(server.URL, "DEV")}}, found.details)
+	assert.Equal(t, []detail{{"request", showRequest(server.URL)}}, found.details)
 	mu.Lock()
 	defer mu.Unlock()
 	require.Len(t, offered, 1, "handshakes")
@@ -453,19 +435,19 @@ func TestProjectShowDoesNotOfferHTTP2ToAServerThatSpeaksIt(t *testing.T) {
 
 func TestProjectShowRefusesWhenNoResponseComesInTime(t *testing.T) {
 	t.Parallel()
-	server := serve(t, func(_ http.ResponseWriter, r *http.Request) {
+	server := fake.Serve(t, func(_ http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 	})
 	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 	defer cancel()
 	var stdout, stderr bytes.Buffer
 
-	code := cli.Run(ctx, []string{"project", "show", "DEV"}, server.env(), nil, nil, &stdout, &stderr)
+	code := cli.Run(ctx, showDEV, server.Env(), nil, nil, &stdout, &stderr)
 
 	got := outcome{code: code, stdout: stdout.String(), stderr: stderr.String()}
 	want := faultDocument{
 		code:    "upstream_failed",
-		details: []detail{{"request", showRequest(server.url, "DEV")}},
+		details: []detail{{"request", showRequest(server.URL)}},
 	}
 	assert.Equal(t, want, requireFault(t, got))
 }

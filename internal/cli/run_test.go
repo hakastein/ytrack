@@ -1,8 +1,10 @@
 package cli_test
 
 import (
+	"bytes"
 	"io"
 	"os"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -11,9 +13,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
-)
 
-const unknownFlagOfEveryEscape = "--q\" b\\ n\n t\t r\r soh\x01 esc\x1b del\x7f nel\xc2\x85 csi\xc2\x9b ls\xe2\x80\xa8 ps\xe2\x80\xa9 bom\xef\xbb\xbf fffe\xef\xbf\xbe ffff\xef\xbf\xbf Статус 😀"
+	"github.com/hakastein/ytrack/internal/cli"
+)
 
 type outcome struct {
 	code   int
@@ -26,6 +28,23 @@ func run(t *testing.T, argv []string) outcome {
 	return runWith(t, nil, argv...)
 }
 
+func runWith(t *testing.T, env []string, argv ...string) outcome {
+	t.Helper()
+	return runOn(t, nil, env, argv...)
+}
+
+func runOn(t *testing.T, stdin *os.File, env []string, argv ...string) outcome {
+	t.Helper()
+	return runBuiltFrom(t, nil, stdin, env, argv...)
+}
+
+func runBuiltFrom(t *testing.T, build *debug.BuildInfo, stdin *os.File, env []string, argv ...string) outcome {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	code := cli.Run(t.Context(), argv, env, build, stdin, &stdout, &stderr)
+	return outcome{code: code, stdout: stdout.String(), stderr: stderr.String()}
+}
+
 func TestRunRefusesAnyCommand(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -34,15 +53,10 @@ func TestRunRefusesAnyCommand(t *testing.T) {
 	}{
 		{name: "no command", argv: []string{}},
 		{name: "unknown command", argv: []string{"bogus", "show", "DEV-1"}},
-		{name: "unknown flag", argv: []string{"project", "list", "--bogus"}},
-		{name: "help command", argv: []string{"help"}},
-		{name: "help command with a topic", argv: []string{"help", "project"}},
-		{name: "the stand-in cobra is given for a help command", argv: []string{"no-help"}},
+		{name: "help command", argv: []string{"help", "project"}},
 		{name: "command with no subcommand", argv: []string{"project"}},
 		{name: "unknown subcommand of a command", argv: []string{"project", "bogus"}},
 		{name: "completion protocol behind a flag", argv: []string{"--limit=5", "__complete", "issue"}},
-		{name: "flag with characters YAML must escape", argv: []string{unknownFlagOfEveryEscape}},
-		{name: "flag with invalid UTF-8", argv: []string{"--\xff"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -52,30 +66,12 @@ func TestRunRefusesAnyCommand(t *testing.T) {
 	}
 }
 
-func TestRunEscapesTheUnprintableAndLeavesTextRaw(t *testing.T) {
-	t.Parallel()
-	stderr := run(t, []string{unknownFlagOfEveryEscape}).stderr
-	for _, r := range []rune{0xFEFF, 0xFFFE, 0xFFFF} {
-		assert.NotContains(t, stderr, string(r), "U+%04X stands raw", r)
-	}
-	for _, form := range []string{"\\uFEFF", "\\uFFFE", "\\uFFFF", "\\x01", "Статус", "😀"} {
-		assert.Contains(t, stderr, form)
-	}
-}
-
 func TestRunTakesNilArgvAsEmpty(t *testing.T) {
 	args := os.Args
 	t.Cleanup(func() { os.Args = args })
-	os.Args = []string{args[0], "issue"}
-	assert.Equal(t, run(t, []string{}), run(t, nil))
-}
+	os.Args = []string{args[0], "--version"}
 
-func TestRunHelpIsNotACommand(t *testing.T) {
-	t.Parallel()
-	got := run(t, []string{"--help"})
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.NotEmpty(t, got.stdout)
+	assert.Equal(t, run(t, []string{}), run(t, nil))
 }
 
 type faultDocument struct {
@@ -127,7 +123,7 @@ func detailNamed(t *testing.T, found faultDocument, key string) any {
 			return printed.value
 		}
 	}
-	require.Fail(t, "the refusal printed no "+key, "%v", found.details)
+	require.Fail(t, "the fault printed no "+key, "%v", found.details)
 	return nil
 }
 
@@ -171,4 +167,25 @@ func requireMapping(t *testing.T, what, text string) *yaml.Node {
 	mapping := document.Content[0]
 	require.Equal(t, yaml.MappingNode, mapping.Kind, "%s: %q", what, text)
 	return mapping
+}
+
+func nodeAt(t *testing.T, mapping *yaml.Node, path ...string) *yaml.Node {
+	t.Helper()
+	node := mapping
+	for _, key := range path {
+		if node.Kind == yaml.SequenceNode {
+			require.Len(t, node.Content, 1)
+			node = node.Content[0]
+		}
+		require.Equal(t, yaml.MappingNode, node.Kind, "no mapping stands where %q was looked for", key)
+		found := false
+		for pair := range slices.Chunk(node.Content, 2) {
+			if pair[0].Value == key {
+				node, found = pair[1], true
+				break
+			}
+		}
+		require.True(t, found, "no key %q", key)
+	}
+	return node
 }

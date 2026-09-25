@@ -245,9 +245,12 @@ func (c *Client) readAncestors(ctx context.Context, spec *schemas, id string) (a
 			if !asked {
 				break
 			}
+			if value == nil {
+				return parent, line, nil
+			}
 			parentObject, isObject := value.(map[string]any)
 			if !isObject {
-				return parent, line, nil
+				return articleRef{}, nil, shapeFailure(a.httpResponse, a.body, "the parent of an article is neither an object nor null")
 			}
 			step, fault := readAncestor(a, parentObject)
 			if fault != nil {
