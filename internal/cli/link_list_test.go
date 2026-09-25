@@ -51,12 +51,12 @@ func TestLinkListRefusesACountBelowNone(t *testing.T) {
 		`{"$type":"Issue","idReadable":"DEV-2","summary":"Second"}]}]}`
 	server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-	got := runWith(t, server.Env(), "link", "list", "DEV-1")
+	got := runWith(t, server.Env(), "link", "list", "DEV-1", "--fields", "idReadable")
 
 	assert.Equal(t, faultDocument{
 		code: "upstream_invalid",
 		details: []detail{
-			{"request", issueRequest(server.URL, "DEV-1", linkListFields(linkListTarget))},
+			{"request", issueRequest(server.URL, "DEV-1", linkListFields("idReadable"))},
 			{"upstream_status", 200},
 			{"upstream_body", body},
 		},

@@ -51,12 +51,12 @@ func TestAttachmentListRefusesALinkThatIsNoAbsolutePath(t *testing.T) {
 	server := fake.Serve(t, fake.JSON(http.StatusOK,
 		`[{"id":"12-2","name":"a.txt","size":1,"mimeType":"text/plain","url":"api/files/12-2"}]`))
 
-	got := runWith(t, server.Env(), "attachment", "list", "DEV-1")
+	got := runWith(t, server.Env(), "attachment", "list", "DEV-1", "--fields", "url")
 
 	want := faultDocument{
 		code: "upstream_invalid",
 		details: []detail{
-			{"request", attachmentsRequest(server.URL, "issues", "DEV-1", attachmentFields, "50")},
+			{"request", attachmentsRequest(server.URL, "issues", "DEV-1", "url", "50")},
 			{"field", "url"},
 			{"upstream_value", "api/files/12-2"},
 		},

@@ -15,8 +15,6 @@ import (
 	"github.com/hakastein/ytrack/internal/fake"
 )
 
-const defaultProjectFields = "shortName,name,plugins(timeTrackingSettings(enabled,workItemTypes(name)))"
-
 const projectDEV = `{"name":"DEVELOPMENT","plugins":{"timeTrackingSettings":{"workItemTypes":[` +
 	`{"name":"First","$type":"WorkItemType"},{"name":"Second","$type":"WorkItemType"}],` +
 	`"enabled":true,"$type":"ProjectTimeTrackingSettings"},"$type":"ProjectPlugins"},"$type":"Project","shortName":"DEV"}`
@@ -53,7 +51,8 @@ func TestProjectShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
 	assert.Equal(t, []string{"/api/admin/projects/DEV"}, server.Paths())
 	request := server.Last(t)
 	assert.Equal(t, http.MethodGet, request.Method)
-	assert.Equal(t, url.Values{"fields": {defaultProjectFields}}, request.URL.Query())
+	assert.Equal(t, url.Values{"fields": {"shortName,name,plugins(timeTrackingSettings(enabled,workItemTypes(name)))"}},
+		request.URL.Query())
 	assert.Equal(t, "Bearer "+fake.Token, request.Header.Get("Authorization"))
 	assert.Equal(t, "application/json", request.Header.Get("Accept"))
 }
@@ -74,7 +73,7 @@ func TestProjectShowReachesTheAPIUnderThePathOfTheAddress(t *testing.T) {
 			t.Parallel()
 			server := fake.Serve(t, fake.JSON(http.StatusOK, projectDEV))
 
-			got := runWith(t, []string{"YTRACK_URL=" + server.URL + tc.path, "YTRACK_TOKEN=" + fake.Token}, "project", "show", "DEV")
+			got := runWith(t, []string{"YTRACK_URL=" + server.URL + tc.path, "YTRACK_TOKEN=" + fake.Token}, showDEV...)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Equal(t, []string{tc.want}, server.Paths())
@@ -257,12 +256,12 @@ func TestProjectShowRefusesWithoutThePasswordOfTheAddress(t *testing.T) {
 			require.NoError(t, err)
 			address.User = url.UserPassword("svc", "secret")
 
-			got := runWith(t, []string{"YTRACK_URL=" + address.String(), "YTRACK_TOKEN=" + fake.Token}, "project", "show", "DEV")
+			got := runWith(t, []string{"YTRACK_URL=" + address.String(), "YTRACK_TOKEN=" + fake.Token}, showDEV...)
 
 			found := requireFault(t, got)
 			assert.Equal(t, tc.code, found.code)
 			require.NotEmpty(t, found.details)
-			assert.Equal(t, detail{"request", showRequest("http://svc:xxxxx@"+address.Host+address.Path, "DEV")}, found.details[0])
+			assert.Equal(t, detail{"request", showRequest("http://svc:xxxxx@" + address.Host + address.Path)}, found.details[0])
 			assert.NotContains(t, got.stderr, "secret")
 		})
 	}
@@ -273,7 +272,7 @@ func TestProjectShowRefusesWhenStdoutFails(t *testing.T) {
 	server := fake.Serve(t, fake.JSON(http.StatusOK, projectDEV))
 	var stderr strings.Builder
 
-	code := cli.Run(t.Context(), []string{"project", "show", "DEV"}, server.Env(), nil, nil, failingWriter{}, &stderr)
+	code := cli.Run(t.Context(), showDEV, server.Env(), nil, nil, failingWriter{}, &stderr)
 
 	got := outcome{code: code, stderr: stderr.String()}
 	assert.Equal(t, faultDocument{code: "upstream_failed"}, requireFault(t, got))

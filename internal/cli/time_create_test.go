@@ -137,12 +137,12 @@ func TestTimeCreateRefusesADurationTheServerKeptOtherwise(t *testing.T) {
 		duration: `{"$type":"DurationValue","minutes":60}`,
 	}.json()))
 
-	got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H30M")
+	got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H30M", "--fields", "id")
 
 	assert.Equal(t, faultDocument{
 		code: "upstream_invalid",
 		details: []detail{
-			{"request", workItemWriteRequest(server.URL, "DEV-1", sentWorkItemWriteFields)},
+			{"request", workItemWriteRequest(server.URL, "DEV-1", "id,duration(minutes),date,text,issue(idReadable)")},
 			{"issue", "DEV-1"},
 			{"id", "199-7"},
 			{"mismatch", []any{[]detail{{"field", "duration"}, {"expected", "PT1H30M"}, {"actual", "PT1H"}}}},

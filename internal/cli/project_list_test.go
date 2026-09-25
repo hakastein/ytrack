@@ -50,12 +50,12 @@ func TestProjectListRefusesAnAnswerOfAnotherShape(t *testing.T) {
 	t.Parallel()
 	server := fake.Serve(t, fake.JSON(http.StatusOK, listedDEV))
 
-	got := runWith(t, server.Env(), "project", "list")
+	got := runWith(t, server.Env(), "project", "list", "--fields", "shortName")
 
 	want := faultDocument{
 		code: "upstream_invalid",
 		details: []detail{
-			{"request", listRequest(server.URL, "shortName,name", "50")},
+			{"request", listRequest(server.URL, "shortName", "50")},
 			{"upstream_status", 200},
 			{"upstream_body", listedDEV},
 		},
@@ -111,7 +111,7 @@ func TestProjectListRefusesAFieldAProjectDidNotBring(t *testing.T) {
 			t.Parallel()
 			server := fake.Serve(t, tc.handler)
 
-			got := runWith(t, server.Env(), "project", "list", "--limit", tc.limit)
+			got := runWith(t, server.Env(), "project", "list", "--limit", tc.limit, "--fields", "shortName,name")
 
 			want := faultDocument{
 				code: "upstream_invalid",

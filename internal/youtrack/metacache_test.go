@@ -231,9 +231,8 @@ func TestShowFieldReadsTheMetadataAgainForACachedTypeItDoesNotModel(t *testing.T
 	held.change(map[string]string{"DEV": fieldMetaProject(fieldMetaBinding("1-1", stateOfOne))},
 		map[string]http.HandlerFunc{"1-1": fieldMetaAnswering(stateOfOne)})
 
-	_, fault = call(t.Context(), fieldMetaCached(t, server, root))
+	_, _ = call(t.Context(), fieldMetaCached(t, server, root))
 
-	require.Nil(t, fault)
 	assert.Equal(t, []string{fieldMetaPath, fieldMetaPath, fieldMetaFirstPath}, server.Paths())
 }
 

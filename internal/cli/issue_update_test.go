@@ -63,6 +63,17 @@ func TestIssueUpdateRefusesACallThatWritesNothing(t *testing.T) {
 	assert.Empty(t, server.Requests())
 }
 
+func TestIssueUpdatePrintsTheDefaultFieldsOfTheIssue(t *testing.T) {
+	t.Parallel()
+	server := updating(t, fake.JSON(http.StatusOK, issueToUpdate("DEV-1", projectRequiringNothing())),
+		fake.JSON(http.StatusOK, shownIssue()))
+
+	got := runWith(t, server.Env(), "issue", "update", "DEV-1", "--summary", "First")
+
+	assert.Equal(t, outcome{stdout: printedIssueFields}, got)
+	assert.Equal(t, askedIssueFields, server.Last(t).URL.Query().Get("fields"))
+}
+
 func TestIssueUpdateReadsTheIssueAndWritesByTheIDOfIt(t *testing.T) {
 	t.Parallel()
 	project := projectResponse(

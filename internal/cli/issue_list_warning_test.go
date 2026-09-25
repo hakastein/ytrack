@@ -65,10 +65,11 @@ func TestIssueListPrintsTheIssuesItWarnedAbout(t *testing.T) {
 	server := marking(t, fake.JSON(http.StatusOK, fake.Markup(t, query, fake.StyleRange(0, 3, "text"))),
 		fake.JSON(http.StatusOK, `[`+listedDEV1()+`,`+listedDEV2()+`]`))
 
-	got := runWith(t, server.Env(), "issue", "list", "--query", query)
+	got := runWith(t, server.Env(), "issue", "list", "--query", query, "--fields", "idReadable")
 
 	assert.Equal(t, 0, got.code)
-	assert.Equal(t, "total: 2\nreturned: 2\ntruncated: false\nissues:\n"+printedDEV1Row+printedDEV2Row, got.stdout)
+	assert.Equal(t, "total: 2\nreturned: 2\ntruncated: false\nissues:\n"+
+		`  - {idReadable: "DEV-1"}`+"\n"+`  - {idReadable: "DEV-2"}`+"\n", got.stdout)
 	assert.Equal(t, warningOf(query, "one"), requireWarned(t, got))
 	assert.Equal(t, []string{fake.AssistPath, issuesPath}, server.Paths())
 }

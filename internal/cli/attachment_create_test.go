@@ -118,7 +118,7 @@ func TestAttachmentCreateReadsALoneDashAsAFileOfThatName(t *testing.T) {
 		server := fake.Serve(t, fake.JSON(http.StatusOK, filed("-", 1)))
 		path := fileWith(t, "-", []byte("x"))
 
-		got := runWith(t, server.Env(), "attachment", "create", "DEV-1", path)
+		got := runWith(t, server.Env(), "attachment", "create", "DEV-1", path, "--fields", "name")
 
 		require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 		sent := requireOnePart(t, server)
@@ -156,7 +156,8 @@ func TestAttachmentCreateReadsARelativePathFromTheWorkingDirectoryAndNotFromPWD(
 	t.Setenv("PWD", elsewhere)
 	server := fake.Serve(t, fake.JSON(http.StatusOK, filed("relative.txt", len("here"))))
 
-	got := runWith(t, append(server.Env(), "PWD="+elsewhere), "attachment", "create", "DEV-1", "relative.txt")
+	got := runWith(t, append(server.Env(), "PWD="+elsewhere), "attachment", "create", "DEV-1", "relative.txt",
+		"--fields", "name")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, "here", requireOnePart(t, server).content)
@@ -167,12 +168,12 @@ func TestAttachmentCreateExitsWith2WhereTheAnswerIsNotTheFileThatWentOut(t *test
 	server := fake.Serve(t, fake.JSON(http.StatusOK, filed("attached.txt", len("ytrack")+1)))
 	path := aFileToAttach(t)
 
-	got := runWith(t, server.Env(), "attachment", "create", "DEV-1", path)
+	got := runWith(t, server.Env(), "attachment", "create", "DEV-1", path, "--fields", "id,name,size")
 
 	want := faultDocument{
 		code: "upstream_invalid",
 		details: []detail{
-			{"request", attachmentWriteRequest(server.URL, "DEV-1", attachmentFields)},
+			{"request", attachmentWriteRequest(server.URL, "DEV-1", "id,name,size")},
 			{"attachment", "12-9"},
 			{"mismatch", []any{[]detail{{"field", "size"}, {"expected", len("ytrack")}, {"actual", len("ytrack") + 1}}}},
 		},

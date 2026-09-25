@@ -100,9 +100,9 @@ func activityServer(t *testing.T, handler http.HandlerFunc) *fake.Server {
 	})
 }
 
-func activityRequest(address, top string) string {
+func activityRequest(address, fields string) string {
 	return "GET " + address + activitiesPath + "?categories=" + activityCategories + "&reverse=true&fields=" +
-		sentActivityFields + "&$top=" + top
+		fields + "&$top=51"
 }
 
 func TestActivityRefusesAnExpressionThatClosesNothing(t *testing.T) {
@@ -134,12 +134,12 @@ func TestActivityRefusesAnAnswerOfAnotherShape(t *testing.T) {
 	outOfOrder := `[` + sentCreatedActivity(oldest) + `,` + sentLinkActivity(middle) + `]`
 	server := activityServer(t, fake.JSON(http.StatusOK, outOfOrder))
 
-	got := runWith(t, server.Env(), "activity", "list", activityIssue)
+	got := runWith(t, server.Env(), "activity", "list", activityIssue, "--fields", "timestamp")
 
 	want := faultDocument{
 		code: "upstream_invalid",
 		details: []detail{
-			{"request", activityRequest(server.URL, "51")},
+			{"request", activityRequest(server.URL, "timestamp,category(id)")},
 			{"upstream_status", 200},
 			{"upstream_body", outOfOrder},
 		},
@@ -168,7 +168,7 @@ func TestActivityChecksTheActivityPastTheLimitWithTheRest(t *testing.T) {
 			three := `[` + sentFieldActivity(newest) + `,` + sentLinkActivity(middle) + `,` + tc.past + `]`
 			server := activityServer(t, fake.JSON(http.StatusOK, three))
 
-			got := runWith(t, server.Env(), "activity", "list", activityIssue, "--limit", "2")
+			got := runWith(t, server.Env(), "activity", "list", activityIssue, "--limit", "2", "--fields", "timestamp")
 
 			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)

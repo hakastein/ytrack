@@ -23,7 +23,7 @@ func shownIssue() string {
 	}) + `,"description":"First line\nSecond line","comments":[]}`
 }
 
-const printedIssue = `idReadable: "DEV-1"
+const printedIssueFields = `idReadable: "DEV-1"
 summary: "First"
 reporter:
   login: "reporter"
@@ -41,8 +41,9 @@ links:
 description: |-
   First line
   Second line
-comments: []
 `
+
+const printedIssue = printedIssueFields + "comments: []\n"
 
 const askedIssueFields = "idReadable,summary,reporter(login),created,updated,resolved,tags(name)," +
 	customFieldsFields + ",links(issues(idReadable,summary)," + linkParts + "),description"

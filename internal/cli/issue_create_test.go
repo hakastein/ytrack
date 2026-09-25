@@ -135,6 +135,16 @@ func TestIssueCreateReadsTheProjectAndFilesTheIssue(t *testing.T) {
 		`"customFields":[{"$type":"SimpleIssueCustomField","name":"Field","value":"Third"}]}`, server.Last(t).Body)
 }
 
+func TestIssueCreatePrintsTheDefaultFieldsOfTheIssue(t *testing.T) {
+	t.Parallel()
+	server := creating(t, fake.JSON(http.StatusOK, projectRequiringNothing()), fake.JSON(http.StatusOK, shownIssue()))
+
+	got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "First")
+
+	assert.Equal(t, outcome{stdout: printedIssueFields}, got)
+	assert.Equal(t, askedIssueFields, server.Last(t).URL.Query().Get("fields"))
+}
+
 func TestIssueCreateNamesEveryRequiredFieldAtOnce(t *testing.T) {
 	t.Parallel()
 	metadata := projectResponse(

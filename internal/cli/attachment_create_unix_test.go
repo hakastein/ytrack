@@ -96,7 +96,7 @@ func TestAttachmentCreateRefusesAPathThatNoLongerPointsToTheCheckedFile(t *testi
 	var got outcome
 
 	require.Eventually(t, func() bool {
-		got = runWith(t, server.Env(), "attachment", "create", "DEV-1", path)
+		got = runWith(t, server.Env(), "attachment", "create", "DEV-1", path, "--fields", "name")
 		return got.code != 0
 	}, 10*time.Second, time.Millisecond, "the path never changed between the two calls")
 

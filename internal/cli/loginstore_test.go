@@ -278,7 +278,7 @@ func TestProjectShowGoesToTheAddressOfTheGlobalRecordWithItsToken(t *testing.T) 
 	server := fake.Serve(t, fake.JSON(http.StatusOK, projectDEV))
 	home, _ := homeWith(t, globalRecord(server.URL, recordToken))
 
-	got := runWith(t, []string{"HOME=" + home}, "project", "show", "DEV")
+	got := runWith(t, []string{"HOME=" + home}, showDEV...)
 
 	assert.Equal(t, 0, got.code)
 	assert.Equal(t, []string{"/api/admin/projects/DEV"}, server.Paths())

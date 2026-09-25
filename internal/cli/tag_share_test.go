@@ -85,7 +85,7 @@ func TestTagCreateWritesTheGroupOfEachFlagToItsSet(t *testing.T) {
 		[]sharedGroup{{id: "6-3", name: "Third"}})))
 
 	got := runWith(t, server.Env(), "tag", "create", "--name", "Early",
-		"--visible-for", "First", "--updateable-by", "Second", "--taggable-by", "Third")
+		"--visible-for", "First", "--updateable-by", "Second", "--taggable-by", "Third", "--fields", "name")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, server.Methods())

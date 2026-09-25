@@ -50,7 +50,7 @@ func TestCommentUpdateRefusesACallWithNoText(t *testing.T) {
 	assert.Empty(t, server.Requests())
 }
 
-func TestCommentUpdateReadsAnIssueCommentBeforeWritingIt(t *testing.T) {
+func TestCommentUpdateReadsAnIssueCommentBeforeWritingItAndPrintsTheComment(t *testing.T) {
 	t.Parallel()
 	server := updatingAComment(t, fake.JSON(http.StatusOK, commentDeletedState(false)),
 		fake.JSON(http.StatusOK, createdComment("7-12", hostileText)))
@@ -95,12 +95,12 @@ func TestCommentUpdateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 	server := updatingAComment(t, fake.JSON(http.StatusOK, commentDeletedState(false)),
 		fake.JSON(http.StatusOK, createdComment("7-12", "text")))
 
-	got := runWith(t, server.Env(), "comment", "update", "DEV-7", "7-12", "--text", "Text")
+	got := runWith(t, server.Env(), "comment", "update", "DEV-7", "7-12", "--text", "Text", "--fields", "text")
 
 	want := faultDocument{
 		code: "upstream_invalid",
 		details: []detail{
-			{"request", commentWriteRequest(server.URL, "DEV-7", "7-12", writtenCommentFields)},
+			{"request", commentWriteRequest(server.URL, "DEV-7", "7-12", "text")},
 			{"comment", "7-12"},
 			{"mismatch", []any{[]detail{{"field", "text"}, {"expected", "Text"}, {"actual", "text"}}}},
 		},
@@ -115,9 +115,9 @@ func TestCommentUpdateChecksTheResponseAgainstTheSchemaOfTheOwner(t *testing.T) 
 		fake.JSON(http.StatusOK, createdComment("7-12", "Text")))
 
 	got := runWith(t, server.Env(), "comment", "update", "DEV-7", "7-12", "--text", "Text",
-		"--fields", "+article(idReadable)")
+		"--fields", "text,article(idReadable)")
 
-	asked := writtenCommentFields + ",article(idReadable)"
+	const asked = "text,article(idReadable)"
 	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/hakastein/ytrack/internal/fake"
 )
@@ -44,16 +45,27 @@ func TestArticleListRefusesACallWithNoSearch(t *testing.T) {
 	assert.Empty(t, server.Requests())
 }
 
+func TestArticleListPrintsTheDefaultFieldsOfEachArticle(t *testing.T) {
+	t.Parallel()
+	server := selecting(t, fake.JSON(http.StatusOK, "["+listedParent+","+listedChild+"]"))
+
+	got := runWith(t, server.Env(), "article", "list", "--query", "project: DEV")
+
+	want := "total: 2\nreturned: 2\ntruncated: false\narticles:\n" + printedParentRow + printedChildRow
+	assert.Equal(t, outcome{stdout: want}, got)
+	assert.Equal(t, []string{"/api/articles"}, server.Paths())
+	assert.Equal(t, []string{articleListFields}, server.Fields())
+}
+
 func TestArticleListSendsTheSearchAsWritten(t *testing.T) {
 	t.Parallel()
 	const search = "  project: DEV  "
 	server := selecting(t, fake.JSON(http.StatusOK, "["+listedParent+"]"))
 
-	got := runWith(t, server.Env(), "article", "list", "--query", search)
+	got := runWith(t, server.Env(), "article", "list", "--query", search, "--fields", "idReadable")
 
-	want := "total: 1\nreturned: 1\ntruncated: false\narticles:\n" + printedParentRow
-	assert.Equal(t, outcome{stdout: want}, got)
+	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, []string{http.MethodGet}, server.Methods())
 	assert.Equal(t, []string{"/api/articles"}, server.Paths())
-	assert.Equal(t, []url.Values{{"fields": {articleListFields}, "$top": {"50"}, "query": {search}}}, server.Queries())
+	assert.Equal(t, []url.Values{{"fields": {"idReadable"}, "$top": {"50"}, "query": {search}}}, server.Queries())
 }

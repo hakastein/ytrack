@@ -37,6 +37,22 @@ func TestArticleUpdateRefusesACallThatWritesNothing(t *testing.T) {
 	assert.Empty(t, server.Requests())
 }
 
+func TestArticleUpdatePrintsTheDefaultFieldsOfTheArticle(t *testing.T) {
+	t.Parallel()
+	filed := answeredArticle{readable: "DEV-A-7", summary: "Title"}
+	server := updatingAnArticle(t,
+		fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+		fake.JSON(http.StatusOK, filed.json()))
+
+	got := runWith(t, server.Env(), "article", "update", "DEV-A-7", "--summary", "Title")
+
+	assert.Equal(t, outcome{stdout: `idReadable: "DEV-A-7"` + "\n" + `summary: "Title"` + "\n" +
+		"reporter:\n  login: \"admin\"\n" +
+		`created: "2026-09-10T10:16:50.875Z"` + "\n" + `updated: "2026-09-10T10:16:50.875Z"` + "\n" +
+		"tags: []\nparentArticle: null\nchildArticles: []\ncontent: null\n"}, got)
+	assert.Equal(t, articleShowFields, server.Last(t).URL.Query().Get("fields"))
+}
+
 func TestArticleUpdateWritesTheArticleTheReadFound(t *testing.T) {
 	t.Parallel()
 	filed := answeredArticle{readable: "DEV-A-7", summary: "Title", content: asJSON(hostileText)}
@@ -60,12 +76,12 @@ func TestArticleUpdateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 		fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
 		fake.JSON(http.StatusOK, filed.json()))
 
-	got := runWith(t, server.Env(), "article", "update", "DEV-A-7", "--content", "Text")
+	got := runWith(t, server.Env(), "article", "update", "DEV-A-7", "--content", "Text", "--fields", "idReadable")
 
 	want := faultDocument{
 		code: "upstream_invalid",
 		details: []detail{
-			{"request", articleUpdateRequest(server.URL, "DEV-A-7", articleShowFields)},
+			{"request", articleUpdateRequest(server.URL, "DEV-A-7", "idReadable,content")},
 			{"article", "DEV-A-7"},
 			{"mismatch", []any{[]detail{{"field", "content"}, {"expected", "Text"}, {"actual", "text"}}}},
 		},

@@ -61,7 +61,7 @@ func TestCommentCreateRefusesACallWithNoText(t *testing.T) {
 	assert.Empty(t, server.Requests())
 }
 
-func TestCommentCreateWritesOnAnIssueInOneRequest(t *testing.T) {
+func TestCommentCreateWritesOnAnIssueInOneRequestAndPrintsTheComment(t *testing.T) {
 	t.Parallel()
 	server := commenting(t, fake.JSON(http.StatusOK, createdComment("7-12", hostileText)))
 
@@ -88,12 +88,12 @@ func TestCommentCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 	t.Parallel()
 	server := commenting(t, fake.JSON(http.StatusOK, createdComment("7-12", "text")))
 
-	got := runWith(t, server.Env(), "comment", "create", "DEV-7", "--text", "Text")
+	got := runWith(t, server.Env(), "comment", "create", "DEV-7", "--text", "Text", "--fields", "id,text")
 
 	want := faultDocument{
 		code: "upstream_invalid",
 		details: []detail{
-			{"request", issueCommentRequest(server.URL, "DEV-7", writtenCommentFields)},
+			{"request", issueCommentRequest(server.URL, "DEV-7", "id,text")},
 			{"comment", "7-12"},
 			{"mismatch", []any{[]detail{{"field", "text"}, {"expected", "Text"}, {"actual", "text"}}}},
 		},
@@ -106,9 +106,9 @@ func TestCommentCreateChecksTheResponseAgainstTheSchemaOfTheOwner(t *testing.T) 
 	t.Parallel()
 	server := commenting(t, fake.JSON(http.StatusOK, writtenArticleComment("8-5", "Text")))
 
-	got := runWith(t, server.Env(), "comment", "create", "DEV-A-3", "--text", "Text", "--fields", "+deleted")
+	got := runWith(t, server.Env(), "comment", "create", "DEV-A-3", "--text", "Text", "--fields", "id,text,deleted")
 
-	asked := writtenCommentFields + ",deleted"
+	const asked = "id,text,deleted"
 	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{

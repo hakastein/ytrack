@@ -61,12 +61,12 @@ func TestFieldListRefusesAnOrdinalItCannotOrderBy(t *testing.T) {
 		`"field":{"$type":"CustomField","name":"First","localizedName":null,"fieldType":{"$type":"FieldType","valueType":"enum","isMultiValue":false}}}]`
 	server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-	got := runWith(t, server.Env(), "field", "list", "DEV")
+	got := runWith(t, server.Env(), "field", "list", "DEV", "--fields", "field(name)")
 
 	want := faultDocument{
 		code: "upstream_invalid",
 		details: []detail{
-			{"request", fieldsRequest(server.URL, "DEV", fieldListSent)},
+			{"request", fieldsRequest(server.URL, "DEV", "field(name),ordinal")},
 			{"upstream_status", 200},
 			{"upstream_body", body},
 		},
@@ -78,12 +78,12 @@ func TestFieldListRefusesAProjectWithNoFields(t *testing.T) {
 	t.Parallel()
 	server := fake.Serve(t, fake.JSON(http.StatusOK, `[]`))
 
-	got := runWith(t, server.Env(), "field", "list", "DEV")
+	got := runWith(t, server.Env(), "field", "list", "DEV", "--fields", "field(name)")
 
 	want := faultDocument{
 		code: "denied",
 		details: []detail{
-			{"request", fieldsRequest(server.URL, "DEV", fieldListSent)},
+			{"request", fieldsRequest(server.URL, "DEV", "field(name),ordinal")},
 			{"project", "DEV"},
 			{"permission", "jetbrains.jetpass.project-read"},
 			authFromEnv(),

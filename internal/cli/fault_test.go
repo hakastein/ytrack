@@ -22,8 +22,10 @@ import (
 	"github.com/hakastein/ytrack/internal/fake"
 )
 
-func showRequest(address, code string) string {
-	return "GET " + address + "/api/admin/projects/" + code + "?fields=" + defaultProjectFields
+var showDEV = []string{"project", "show", "DEV", "--fields", "shortName"}
+
+func showRequest(address string) string {
+	return "GET " + address + "/api/admin/projects/DEV?fields=shortName"
 }
 
 func TestAFaultNamesTheRequestThatWasSent(t *testing.T) {
@@ -35,23 +37,23 @@ func TestAFaultNamesTheRequestThatWasSent(t *testing.T) {
 	}{
 		{
 			name:   "a login holding a slash",
-			argv:   []string{"user", "show", "a/b"},
-			target: "/api/users/a%2Fb?fields=login,fullName,email,banned",
+			argv:   []string{"user", "show", "a/b", "--fields", "login"},
+			target: "/api/users/a%2Fb?fields=login",
 		},
 		{
 			name:   "a login holding a hash",
-			argv:   []string{"user", "show", "a#b"},
-			target: "/api/users/a%23b?fields=login,fullName,email,banned",
+			argv:   []string{"user", "show", "a#b", "--fields", "login"},
+			target: "/api/users/a%23b?fields=login",
 		},
 		{
 			name:   "a login holding a per cent",
-			argv:   []string{"user", "show", "100%"},
-			target: "/api/users/100%25?fields=login,fullName,email,banned",
+			argv:   []string{"user", "show", "100%", "--fields", "login"},
+			target: "/api/users/100%25?fields=login",
 		},
 		{
 			name: "a search holding a space, a plus, an ampersand and a hash",
-			argv: []string{"user", "list", "--query", "Иван & Co = +100%#"},
-			target: "/api/users?fields=login,fullName,banned&$top=50&query=" +
+			argv: []string{"user", "list", "--query", "Иван & Co = +100%#", "--fields", "login"},
+			target: "/api/users?fields=login&$top=50&query=" +
 				"%D0%98%D0%B2%D0%B0%D0%BD+%26+Co+%3D+%2B100%25%23",
 		},
 	}
@@ -194,11 +196,11 @@ func TestProjectShowRefusesByTheStatusOfTheAnswer(t *testing.T) {
 				fake.JSON(tc.status, tc.body)(w, r)
 			})
 
-			got := runWith(t, server.Env(), "project", "show", "DEV")
+			got := runWith(t, server.Env(), showDEV...)
 
 			want := faultDocument{
 				code:    tc.code,
-				details: slices.Concat([]detail{{"request", showRequest(server.URL, "DEV")}}, tc.detailsAfterRequest),
+				details: slices.Concat([]detail{{"request", showRequest(server.URL)}}, tc.detailsAfterRequest),
 			}
 			assert.Equal(t, want, requireFault(t, got))
 			assert.Equal(t, []string{"/api/admin/projects/DEV"}, server.Paths())
@@ -332,12 +334,12 @@ func TestProjectShowRefusesAnAnswerOfAnotherShape(t *testing.T) {
 				_, _ = io.WriteString(w, tc.body)
 			})
 
-			got := runWith(t, server.Env(), "project", "show", "DEV")
+			got := runWith(t, server.Env(), showDEV...)
 
 			want := faultDocument{
 				code: tc.code,
 				details: []detail{
-					{"request", showRequest(server.URL, "DEV")},
+					{"request", showRequest(server.URL)},
 					{"upstream_status", tc.status},
 					{"upstream_body", tc.body},
 				},
@@ -359,12 +361,12 @@ func TestProjectShowDoesNotFollowARedirect(t *testing.T) {
 		w.WriteHeader(http.StatusFound)
 	})
 
-	got := runWith(t, server.Env(), "project", "show", "DEV")
+	got := runWith(t, server.Env(), showDEV...)
 
 	want := faultDocument{
 		code: "upstream_invalid",
 		details: []detail{
-			{"request", showRequest(server.URL, "DEV")},
+			{"request", showRequest(server.URL)},
 			{"upstream_status", 302},
 			{"upstream_body", ""},
 		},
@@ -380,12 +382,12 @@ func TestProjectShowRefusesAnAnswerCutShort(t *testing.T) {
 		_, _ = io.WriteString(w, projectDEV)
 	})
 
-	got := runWith(t, server.Env(), "project", "show", "DEV")
+	got := runWith(t, server.Env(), showDEV...)
 
 	want := faultDocument{
 		code: "upstream_failed",
 		details: []detail{
-			{"request", showRequest(server.URL, "DEV")},
+			{"request", showRequest(server.URL)},
 			{"upstream_status", 200},
 		},
 	}
@@ -394,11 +396,11 @@ func TestProjectShowRefusesAnAnswerCutShort(t *testing.T) {
 
 func TestProjectShowRefusesWhenNothingListens(t *testing.T) {
 	t.Parallel()
-	got := runWith(t, fake.Unreachable().Env(), "project", "show", "DEV")
+	got := runWith(t, fake.Unreachable().Env(), showDEV...)
 
 	found := requireFault(t, got)
 	assert.Equal(t, "upstream_failed", found.code)
-	assert.Equal(t, []detail{{"request", showRequest(fake.NobodyListens, "DEV")}}, found.details)
+	assert.Equal(t, []detail{{"request", showRequest(fake.NobodyListens)}}, found.details)
 	assert.NotContains(t, got.stderr, fake.Token)
 }
 
@@ -420,11 +422,11 @@ func TestProjectShowDoesNotOfferHTTP2ToAServerThatSpeaksIt(t *testing.T) {
 	server.StartTLS()
 	t.Cleanup(server.Close)
 
-	got := runWith(t, []string{"YTRACK_URL=" + server.URL, "YTRACK_TOKEN=" + fake.Token}, "project", "show", "DEV")
+	got := runWith(t, []string{"YTRACK_URL=" + server.URL, "YTRACK_TOKEN=" + fake.Token}, showDEV...)
 
 	found := requireFault(t, got)
 	assert.Equal(t, "upstream_failed", found.code)
-	assert.Equal(t, []detail{{"request", showRequest(server.URL, "DEV")}}, found.details)
+	assert.Equal(t, []detail{{"request", showRequest(server.URL)}}, found.details)
 	mu.Lock()
 	defer mu.Unlock()
 	require.Len(t, offered, 1, "handshakes")
@@ -440,12 +442,12 @@ func TestProjectShowRefusesWhenNoResponseComesInTime(t *testing.T) {
 	defer cancel()
 	var stdout, stderr bytes.Buffer
 
-	code := cli.Run(ctx, []string{"project", "show", "DEV"}, server.Env(), nil, nil, &stdout, &stderr)
+	code := cli.Run(ctx, showDEV, server.Env(), nil, nil, &stdout, &stderr)
 
 	got := outcome{code: code, stdout: stdout.String(), stderr: stderr.String()}
 	want := faultDocument{
 		code:    "upstream_failed",
-		details: []detail{{"request", showRequest(server.URL, "DEV")}},
+		details: []detail{{"request", showRequest(server.URL)}},
 	}
 	assert.Equal(t, want, requireFault(t, got))
 }

@@ -63,12 +63,12 @@ func TestNoCommandNamesWhereTheTokenTheServerRefusedCameFrom(t *testing.T) {
 			server := fake.Serve(t, fake.JSON(tc.status, body))
 			env, from := tc.where(t, server.URL)
 
-			got := runWith(t, env, "project", "show", "DEV")
+			got := runWith(t, env, showDEV...)
 
 			want := faultDocument{
 				code: "denied",
 				details: []detail{
-					{"request", showRequest(server.URL, "DEV")},
+					{"request", showRequest(server.URL)},
 					{"upstream_status", tc.status},
 					{"upstream_error", tc.upstreamError},
 					{"upstream_message", tc.upstreamMessage},

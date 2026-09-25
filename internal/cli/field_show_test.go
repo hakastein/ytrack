@@ -13,7 +13,8 @@ import (
 )
 
 const (
-	metadataSent  = "customFields(id,field(name,localizedName,fieldType(valueType,isMultiValue)))"
+	namingSent    = "field(name,localizedName,fieldType(valueType,isMultiValue))"
+	metadataSent  = "customFields(id," + namingSent + ")"
 	enumFieldSent = fieldListDefault + ",bundle(values(name,archived))"
 )
 
@@ -136,12 +137,12 @@ func TestFieldShowRefusesAFieldGoneBetweenTheTwoRequests(t *testing.T) {
 	metadata := projectMetadata(projectField("180-1", "Type", "Kind"))
 	server := serveTheProject(t, metadata, fake.JSON(http.StatusNotFound, gone))
 
-	got := runWith(t, server.Env(), "field", "show", "DEV", "Type")
+	got := runWith(t, server.Env(), showType...)
 
 	want := faultDocument{
 		code: "not_found",
 		details: []detail{
-			{"request", fieldRequest(server.URL, "DEV", "180-1", enumFieldSent)},
+			{"request", fieldRequest(server.URL, "DEV", "180-1", namingSent)},
 			{"upstream_status", 404},
 			{"upstream_error", "Not Found"},
 			{"upstream_message", "Entity with id 180-1 not found"},
@@ -156,12 +157,12 @@ func TestFieldShowRefusesAFieldRenamedBetweenTheTwoRequests(t *testing.T) {
 	renamed := oneField("Renamed", "Kind", false)
 	server := serveTheProject(t, projectMetadata(projectField("180-1", "Type", "Kind")), fake.JSON(http.StatusOK, renamed))
 
-	got := runWith(t, server.Env(), "field", "show", "DEV", "Type")
+	got := runWith(t, server.Env(), showType...)
 
 	want := faultDocument{
 		code: "upstream_failed",
 		details: []detail{
-			{"request", fieldRequest(server.URL, "DEV", "180-1", enumFieldSent)},
+			{"request", fieldRequest(server.URL, "DEV", "180-1", namingSent)},
 			{"upstream_status", 200},
 			{"project", "DEV"},
 			{"field", "Type"},

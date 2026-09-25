@@ -35,7 +35,7 @@ const (
 		`author: {login: "second.author"}, date: "2026-09-02T00:00:00Z", text: "Second text"}` + "\n"
 )
 
-func TestTimeListAsksTheWorkItemsOfTheIssueInOneRequest(t *testing.T) {
+func TestTimeListAsksTheWorkItemsOfTheIssueInOneRequestAndPrintsThem(t *testing.T) {
 	t.Parallel()
 	server := fake.Serve(t, fake.JSON(http.StatusOK, "["+listedWorkItem+","+listedSecondWorkItem+"]"))
 
@@ -51,12 +51,12 @@ func TestTimeListRefusesAnAnswerOfAnotherShape(t *testing.T) {
 	t.Parallel()
 	server := fake.Serve(t, fake.JSON(http.StatusOK, listedWorkItem))
 
-	got := runWith(t, server.Env(), "time", "list", "DEV-1")
+	got := runWith(t, server.Env(), "time", "list", "DEV-1", "--fields", "id")
 
 	assert.Equal(t, faultDocument{
 		code: "upstream_invalid",
 		details: []detail{
-			{"request", "GET " + server.URL + workItemsPath("DEV-1") + "?fields=" + sentWorkItemFields + "&$top=50"},
+			{"request", "GET " + server.URL + workItemsPath("DEV-1") + "?fields=id&$top=50"},
 			{"upstream_status", 200},
 			{"upstream_body", listedWorkItem},
 		},

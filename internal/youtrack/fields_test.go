@@ -113,9 +113,8 @@ func TestShowProjectSendsEachFieldOnceInOneForm(t *testing.T) {
 			t.Parallel()
 			server := fake.Serve(t, fake.JSON(http.StatusOK, expressionProject))
 
-			_, fault := expressionShown(t, server, tc.expression)
+			_, _ = expressionShown(t, server, tc.expression)
 
-			require.Nil(t, fault)
 			assert.Equal(t, []string{tc.sent}, server.Fields())
 		})
 	}

@@ -122,13 +122,13 @@ func TestLinkAddRefusesAnAnswerWithoutTheLink(t *testing.T) {
 	t.Parallel()
 	server := linking(t, fake.JSON(http.StatusOK, linkWrittenTo("")))
 
-	got := runWith(t, server.Env(), "link", "add", "DEV-1", "needs", "DEV-2")
+	got := runWith(t, server.Env(), "link", "add", "DEV-1", "needs", "DEV-2", "--fields", "idReadable")
 
 	assert.Equal(t, faultDocument{
 		code: "upstream_invalid",
 		details: []detail{
 			{"request", "POST " + server.URL + "/api/issues/DEV-1/links/5-1t/issues?fields=" +
-				addWriteFields(linkListTarget)},
+				addWriteFields("idReadable")},
 			{"issue", "DEV-1"},
 			{"phrase", "needs"},
 			{"target", "DEV-2"},

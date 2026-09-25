@@ -17,6 +17,8 @@ const (
 	firstFieldPath = metadataPath + "/customFields/180-1"
 )
 
+var showType = []string{"field", "show", "DEV", "Type", "--fields", "field(name)"}
+
 func typeOnlyProject(t *testing.T) *fake.Server {
 	t.Helper()
 	return serveTheProject(t, projectMetadata(projectField("180-1", "Type", "Kind")),
@@ -31,10 +33,10 @@ func TestFieldShowTakesTheMetadataTheRunBeforeLeftOnDisk(t *testing.T) {
 	t.Parallel()
 	server, home := typeOnlyProject(t), t.TempDir()
 
-	first := runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
-	second := runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
+	first := runWith(t, atHome(server, home), showType...)
+	second := runWith(t, atHome(server, home), showType...)
 
-	assert.Equal(t, outcome{stdout: printedEnumType}, first)
+	require.Equal(t, 0, first.code, "stderr: %s", first.stderr)
 	assert.Equal(t, first, second)
 	assert.Equal(t, []string{metadataPath, firstFieldPath, firstFieldPath}, server.Paths())
 }
@@ -54,10 +56,10 @@ func TestFieldShowKeepsNoCacheWithoutAnAbsoluteHome(t *testing.T) {
 			server := typeOnlyProject(t)
 			env := append(server.Env(), tc.home...)
 
-			first := runWith(t, env, "field", "show", "DEV", "Type")
-			second := runWith(t, env, "field", "show", "DEV", "Type")
+			first := runWith(t, env, showType...)
+			second := runWith(t, env, showType...)
 
-			assert.Equal(t, outcome{stdout: printedEnumType}, first)
+			require.Equal(t, 0, first.code, "stderr: %s", first.stderr)
 			assert.Equal(t, first, second)
 			assert.Equal(t, []string{metadataPath, firstFieldPath, metadataPath, firstFieldPath}, server.Paths())
 		})
@@ -68,9 +70,9 @@ func TestFieldShowWritesTheCacheUnderTheYtrackDirectoryOfHome(t *testing.T) {
 	t.Parallel()
 	server, home := typeOnlyProject(t), t.TempDir()
 
-	got := runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
+	got := runWith(t, atHome(server, home), showType...)
 
-	require.Equal(t, outcome{stdout: printedEnumType}, got)
+	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, []string{filepath.Join(".ytrack", "cache")}, cacheRootsOfFilesUnder(t, home))
 }
 

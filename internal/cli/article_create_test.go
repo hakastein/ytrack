@@ -68,7 +68,7 @@ func TestArticleCreateRefusesBeforeAnyRequest(t *testing.T) {
 	}
 }
 
-func TestArticleCreateFilesTheArticleInOneRequest(t *testing.T) {
+func TestArticleCreateFilesTheArticleInOneRequestAndPrintsIt(t *testing.T) {
 	t.Parallel()
 	server := creatingAnArticle(t, fake.JSON(http.StatusOK, createdArticle("DEV-A-7", "Title", asJSON(hostileText))))
 
@@ -98,12 +98,12 @@ func TestArticleCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 	t.Parallel()
 	server := creatingAnArticle(t, fake.JSON(http.StatusOK, createdArticle("DEV-A-7", "title", "null")))
 
-	got := runWith(t, server.Env(), "article", "create", "DEV", "--summary", "Title")
+	got := runWith(t, server.Env(), "article", "create", "DEV", "--summary", "Title", "--fields", "idReadable")
 
 	want := faultDocument{
 		code: "upstream_invalid",
 		details: []detail{
-			{"request", articleCreationRequest(server.URL, askedArticleFields)},
+			{"request", articleCreationRequest(server.URL, "idReadable,summary,content,project(shortName)")},
 			{"article", "DEV-A-7"},
 			{"mismatch", []any{[]detail{{"field", "summary"}, {"expected", "Title"}, {"actual", "title"}}}},
 		},

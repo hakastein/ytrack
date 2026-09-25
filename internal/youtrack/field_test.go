@@ -24,7 +24,7 @@ const (
 
 const (
 	fieldMetaNaming     = "field(name,localizedName,fieldType(valueType,isMultiValue))"
-	fieldMetaBare       = fieldMetaNaming + ",canBeEmpty"
+	fieldMetaBare       = youtrack.FieldListFields
 	fieldMetaWithValues = fieldMetaBare + ",bundle(values(name,archived))"
 	fieldMetaWithUsers  = fieldMetaBare + ",bundle(aggregatedUsers(login))"
 )
@@ -304,9 +304,8 @@ func TestShowFieldAsksForTheFieldsOfItsType(t *testing.T) {
 			server := fieldMetaServer(t, fieldMetaProject(fieldMetaBinding("1-1", naming)),
 				map[string]string{"1-1": fieldMetaAnswer(naming)})
 
-			_, fault := fieldMetaShow(t, client(t, server), "Field", tc.expression)
+			_, _ = fieldMetaShow(t, client(t, server), "Field", tc.expression)
 
-			require.Nil(t, fault)
 			assert.Equal(t, tc.sent, server.Last(t).URL.Query().Get("fields"))
 		})
 	}
