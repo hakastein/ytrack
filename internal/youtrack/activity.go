@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 
+	yt "github.com/hakastein/youtrack"
+
 	"github.com/hakastein/ytrack/internal/diag"
 	"github.com/hakastein/ytrack/internal/render"
 )
@@ -51,7 +53,7 @@ const (
 type valueForm struct {
 	fromCustomField bool
 	asObjects       bool
-	bareKey         valueKey
+	bareKind        yt.FieldType
 }
 
 func activityTable() []activityCategory {
@@ -364,15 +366,15 @@ func customFieldValueForm(value any) (valueForm, string) {
 		return valueForm{}, fmt.Sprintf("the custom field an activity of %s stands for arrived with no type of "+
 			"value, which is what says how the change reads", customFieldCategory)
 	}
-	kind, modelled := typeNamed(named)
-	if !modelled {
+	kind := yt.FieldType{ValueType: yt.ValueType(named)}
+	if !kind.Known() {
 		return valueForm{}, fmt.Sprintf("an activity of %s arrived for a field holding values of the type %s, "+
 			"which is none of the custom-field types ytrack models", customFieldCategory, render.Quote(named))
 	}
-	if kind.isNamedValue() {
+	if kind.Named() {
 		return valueForm{fromCustomField: true, asObjects: true}, ""
 	}
-	return valueForm{fromCustomField: true, bareKey: valueKey{form: kind.valueKey.form}}, ""
+	return valueForm{fromCustomField: true, bareKind: kind}, ""
 }
 
 func valueTypeOf(field map[string]any) (string, bool) {
@@ -476,10 +478,20 @@ func (n converter) oneValue(decl typeRef, field requestedField, value any) (*ren
 	case isObject:
 		return n.value(decl, field, value)
 	}
-	node, read := n.keyValueNode(form.bareKey, value)
-	if !read {
-		return nil, n.malformed(fmt.Sprintf("a value under the %s of an activity of %s is not %s",
-			field.name, n.row.id, form.bareKey.shape()))
+	node, present, err := n.readValue(form.bareKind, keyedValue(form.bareKind, value))
+	switch {
+	case err != nil:
+		return nil, n.malformed(fmt.Sprintf("a value under the %s of an activity of %s: %v", field.name, n.row.id, err))
+	case !present:
+		return nil, n.malformed(fmt.Sprintf("a value under the %s of an activity of %s is null", field.name, n.row.id))
 	}
 	return node, nil
+}
+
+func keyedValue(kind yt.FieldType, key any) any {
+	member := kind.ValueKey()
+	if member == "" {
+		return key
+	}
+	return map[string]any{member: key}
 }

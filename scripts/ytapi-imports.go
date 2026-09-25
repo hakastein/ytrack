@@ -25,7 +25,8 @@ import (
 )
 
 const (
-	ytapiDir    = "internal/ytapi"
+	modulePath  = "github.com/hakastein/youtrack"
+	ytapiPath   = modulePath + "/ytapi"
 	adapterFile = "internal/youtrack/ytapi.go"
 )
 
@@ -86,12 +87,11 @@ func findViolations() ([]violation, error) {
 		return nil, fmt.Errorf("go list -m lists %d main modules instead of one", len(modules))
 	}
 	module := modules[0]
-	ytapiPath := module.Path + "/" + ytapiDir
 	if err := os.Chdir(module.Dir); err != nil {
 		return nil, err
 	}
 	fset := token.NewFileSet()
-	files, violations, err := walkModule(fset, ytapiPath)
+	files, violations, err := walkModule(fset)
 	if err != nil {
 		return nil, err
 	}
@@ -116,14 +116,14 @@ func findViolations() ([]violation, error) {
 		}
 		for _, p := range packages {
 			path, _, _ := strings.Cut(p.ImportPath, " ")
-			if !p.DepOnly && path == ytapiPath {
+			if path == ytapiPath {
 				ytapiListed = true
 			}
 			generatedTestMain := strings.HasSuffix(path, ".test")
-			if p.DepOnly || path == ytapiPath || generatedTestMain {
+			if p.DepOnly || generatedTestMain {
 				continue
 			}
-			found, typed, err := useViolations(fset, module.Dir, ytapiPath, p, exports)
+			found, typed, err := useViolations(fset, module.Dir, p, exports)
 			if err != nil {
 				return nil, fmt.Errorf("%s: %w", p.ImportPath, err)
 			}
@@ -134,11 +134,11 @@ func findViolations() ([]violation, error) {
 		}
 	}
 	if !ytapiListed {
-		return nil, fmt.Errorf("module %s has no package %s", module.Path, ytapiDir)
+		return nil, fmt.Errorf("module %s builds without %s", module.Path, ytapiPath)
 	}
 	var unchecked []string
 	for _, f := range files {
-		if filepath.Dir(f.path) != ytapiDir && (!f.ignored || f.isStandaloneProgram()) && !checked[f.path] {
+		if (!f.ignored || f.isStandaloneProgram()) && !checked[f.path] {
 			unchecked = append(unchecked, f.path)
 		}
 	}
@@ -151,7 +151,7 @@ func findViolations() ([]violation, error) {
 	return slices.Compact(violations), nil
 }
 
-func walkModule(fset *token.FileSet, ytapiPath string) ([]sourceFile, []violation, error) {
+func walkModule(fset *token.FileSet) ([]sourceFile, []violation, error) {
 	var files []sourceFile
 	var imports []violation
 	err := filepath.WalkDir(".", func(path string, entry fs.DirEntry, err error) error {
@@ -186,7 +186,7 @@ func walkModule(fset *token.FileSet, ytapiPath string) ([]sourceFile, []violatio
 			if importPath != ytapiPath || path == adapterFile {
 				continue
 			}
-			message := "imports " + ytapiDir
+			message := "imports " + ytapiPath
 			if spec.Name != nil {
 				message += " as " + spec.Name.Name
 			}
@@ -331,7 +331,7 @@ func (known platforms) firstArch(goos string) string {
 	return known[slices.IndexFunc(known, func(p platform) bool { return p.GOOS == goos })].GOARCH
 }
 
-func useViolations(fset *token.FileSet, root, ytapiPath string, p listedPackage, exports map[string]string) ([]violation, []string, error) {
+func useViolations(fset *token.FileSet, root string, p listedPackage, exports map[string]string) ([]violation, []string, error) {
 	dir, err := filepath.Rel(root, p.Dir)
 	if err != nil {
 		return nil, nil, err
@@ -356,11 +356,22 @@ func useViolations(fset *token.FileSet, root, ytapiPath string, p listedPackage,
 	var found []violation
 	for id, obj := range info.Uses {
 		pos := fset.Position(id.Pos())
-		if obj.Pkg() != nil && obj.Pkg().Path() == ytapiPath && pos.Filename != adapterFile && !allowed(obj) {
-			found = append(found, violation{pos.Filename, pos.Line, "uses " + obj.Name() + " from " + ytapiDir})
+		if obj.Pkg() == nil || pos.Filename == adapterFile {
+			continue
+		}
+		switch {
+		case obj.Pkg().Path() == ytapiPath && !allowed(obj):
+			found = append(found, violation{pos.Filename, pos.Line, "uses " + obj.Name() + " from " + ytapiPath})
+		case obj.Pkg().Path() == modulePath && isGeneratedClientMethod(obj):
+			found = append(found, violation{pos.Filename, pos.Line, "uses the generated client of " + modulePath})
 		}
 	}
 	return found, paths, nil
+}
+
+func isGeneratedClientMethod(obj types.Object) bool {
+	method, isFunc := obj.(*types.Func)
+	return isFunc && method.Name() == "API" && method.Signature().Recv() != nil
 }
 
 func (p listedPackage) listedImportPath(sourceImport string) string {

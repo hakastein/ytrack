@@ -163,8 +163,8 @@ func (p projectWorkItemTypes) resolveAttributes(set []namedValue, cleared []stri
 	}
 	if len(unknown) > 0 {
 		message := "the names under unknown are not attributes of the work items of the project, or values they take"
-		return nil, unknownNames(p.response.httpResponse, render.Pair{Key: projectKey, Value: render.NewString(p.project)},
-			"unknown", message, unknown)
+		sent := requestDetail(p.response.httpResponse.Request.Method, p.response.httpResponse.Request.URL.Redacted())
+		return nil, unknownNames(sent, render.Pair{Key: projectKey, Value: render.NewString(p.project)}, "unknown", message, unknown)
 	}
 	return filed, nil
 }

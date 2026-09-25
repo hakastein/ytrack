@@ -4,10 +4,9 @@ import (
 	"runtime/debug"
 	"testing"
 
+	"github.com/hakastein/youtrack/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func TestVersionPrintsTheStampOfTheBuildAsOneDocument(t *testing.T) {

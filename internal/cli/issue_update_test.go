@@ -6,9 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hakastein/youtrack/fake"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const issueWriteFields = "idReadable,customFields($type,name,projectCustomField(id))," +

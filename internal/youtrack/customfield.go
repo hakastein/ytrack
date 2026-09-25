@@ -4,15 +4,14 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"math"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
-	"time"
-	"unicode"
-	"unicode/utf8"
+
+	yt "github.com/hakastein/youtrack"
 
 	"github.com/hakastein/ytrack/internal/diag"
 	"github.com/hakastein/ytrack/internal/render"
@@ -20,55 +19,29 @@ import (
 
 type fieldInfo struct {
 	name          string
-	localizedName optionalName
-	valueType     string
-	isMultiValue  bool
+	localizedName string
+	kind          yt.FieldType
 }
 
-type optionalName struct {
-	name  string
-	given bool
-}
-
-func readLocalized(value any) (optionalName, bool) {
+func readLocalized(value any) (string, bool) {
 	switch name := value.(type) {
 	case string:
-		return optionalName{name: name, given: true}, true
+		return name, true
 	case nil:
-		return optionalName{}, true
+		return "", true
 	}
-	return optionalName{}, false
+	return "", false
 }
 
-func (l optionalName) MarshalJSON() ([]byte, error) {
-	if !l.given {
-		return []byte("null"), nil
-	}
-	return json.Marshal(l.name)
+func (n fieldInfo) translatedAs(name string) bool {
+	return n.localizedName != "" && strings.EqualFold(name, n.localizedName)
 }
 
-func (l *optionalName) UnmarshalJSON(content []byte) error {
-	if string(content) == "null" {
-		*l = optionalName{}
+func (n fieldInfo) translations() []string {
+	if n.localizedName == "" {
 		return nil
 	}
-	var name string
-	if err := json.Unmarshal(content, &name); err != nil {
-		return err
-	}
-	*l = optionalName{name: name, given: true}
-	return nil
-}
-
-func (l optionalName) is(name string) bool {
-	return l.given && strings.EqualFold(name, l.name)
-}
-
-func (l optionalName) forms() []string {
-	if !l.given {
-		return nil
-	}
-	return []string{l.name}
+	return []string{n.localizedName}
 }
 
 func findMatches(name string, catalogue []fieldInfo) []int {
@@ -77,7 +50,7 @@ func findMatches(name string, catalogue []fieldInfo) []int {
 		switch {
 		case strings.EqualFold(name, field.name):
 			byName = append(byName, at)
-		case field.localizedName.is(name):
+		case field.translatedAs(name):
 			byTranslation = append(byTranslation, at)
 		}
 	}
@@ -98,7 +71,7 @@ func pick(catalogue []fieldInfo, places []int) []fieldInfo {
 func nearestNamed(name string, catalogue []fieldInfo) []string {
 	among := make([]suggestion, 0, len(catalogue))
 	for _, field := range catalogue {
-		among = append(among, suggestion{name: field.name, also: field.localizedName.forms()})
+		among = append(among, suggestion{name: field.name, also: field.translations()})
 	}
 	return nearest(name, among, canonical(catalogue))
 }
@@ -119,355 +92,49 @@ type customField struct {
 
 const (
 	brokenField     = "a custom field of the project is not a JSON object"
-	brokenID        = "the id of a custom field is not text"
 	brokenFieldInfo = "the name or the type of a custom field is not of the shape the specification gives it"
 )
 
-const (
-	BundleValuesFields = "bundle(values(name,archived))"
-	BundleUsersFields  = "bundle(aggregatedUsers(login))"
-)
-
-const (
-	asString   = "text"
-	asText     = "prose"
-	asDuration = "duration"
-	asDay      = "day"
-	asDateTime = "moment"
-	asInteger  = "whole number"
-	asFloat    = "number"
-)
-
-const (
-	periodType  = "period"
-	dateType    = "date"
-	momentType  = "date and time"
-	integerType = "integer"
-	floatType   = "float"
-	stringType  = "string"
-	textType    = "text"
-)
-
-type valueKey struct {
-	member string
-	form   string
-}
-
-type fieldType struct {
-	valueType    string
-	isMultiValue bool
-	values       string
-	valueKey     valueKey
-	sent         string
-}
-
-func fieldTypes() []fieldType {
-	named := valueKey{member: nameKey, form: asString}
-	byLogin := valueKey{member: loginKey, form: asString}
-	return []fieldType{
-		{valueType: "enum", isMultiValue: false, values: BundleValuesFields, valueKey: named, sent: "SingleEnumIssueCustomField"},
-		{valueType: "enum", isMultiValue: true, values: BundleValuesFields, valueKey: named, sent: "MultiEnumIssueCustomField"},
-		{valueType: "state", isMultiValue: false, values: BundleValuesFields, valueKey: named, sent: "StateIssueCustomField"},
-		{valueType: "version", isMultiValue: false, values: BundleValuesFields, valueKey: named, sent: "SingleVersionIssueCustomField"},
-		{valueType: "version", isMultiValue: true, values: BundleValuesFields, valueKey: named, sent: "MultiVersionIssueCustomField"},
-		{valueType: "build", isMultiValue: false, values: BundleValuesFields, valueKey: named, sent: "SingleBuildIssueCustomField"},
-		{valueType: "build", isMultiValue: true, values: BundleValuesFields, valueKey: named, sent: "MultiBuildIssueCustomField"},
-		{valueType: "ownedField", isMultiValue: false, values: BundleValuesFields, valueKey: named, sent: "SingleOwnedIssueCustomField"},
-		{valueType: "ownedField", isMultiValue: true, values: BundleValuesFields, valueKey: named, sent: "MultiOwnedIssueCustomField"},
-		{valueType: "user", isMultiValue: false, values: BundleUsersFields, valueKey: byLogin, sent: "SingleUserIssueCustomField"},
-		{valueType: "user", isMultiValue: true, values: BundleUsersFields, valueKey: byLogin, sent: "MultiUserIssueCustomField"},
-		{valueType: "group", isMultiValue: false, valueKey: named, sent: "SingleGroupIssueCustomField"},
-		{valueType: "group", isMultiValue: true, valueKey: named, sent: "MultiGroupIssueCustomField"},
-		{valueType: periodType, isMultiValue: false, valueKey: valueKey{member: "minutes", form: asDuration}, sent: "PeriodIssueCustomField"},
-		{valueType: textType, isMultiValue: false, valueKey: valueKey{member: "text", form: asText}, sent: "TextIssueCustomField"},
-		{valueType: dateType, isMultiValue: false, valueKey: valueKey{form: asDay}, sent: "DateIssueCustomField"},
-		{valueType: momentType, isMultiValue: false, valueKey: valueKey{form: asDateTime}, sent: "SimpleIssueCustomField"},
-		{valueType: integerType, isMultiValue: false, valueKey: valueKey{form: asInteger}, sent: "SimpleIssueCustomField"},
-		{valueType: floatType, isMultiValue: false, valueKey: valueKey{form: asFloat}, sent: "SimpleIssueCustomField"},
-		{valueType: stringType, isMultiValue: false, valueKey: valueKey{form: asString}, sent: "SimpleIssueCustomField"},
-	}
-}
-
-func typeOf(n fieldInfo) (fieldType, bool) {
-	for _, t := range fieldTypes() {
-		if t.valueType == n.valueType && t.isMultiValue == n.isMultiValue {
-			return t, true
-		}
-	}
-	return fieldType{}, false
-}
-
-func typeNamed(valueType string) (fieldType, bool) {
-	for _, t := range fieldTypes() {
-		if t.valueType == valueType {
-			return t, true
-		}
-	}
-	return fieldType{}, false
-}
-
-type encodedValue struct {
-	body     any
-	valueKey string
-}
-
-func (t fieldType) encodeValue(text string) (encodedValue, string) {
+func encodeValue(kind yt.FieldType, text string) (yt.Encoded, string) {
 	if text == "" {
-		return encodedValue{}, t.emptyValueReason()
+		return yt.Encoded{}, emptyValueReason(kind)
 	}
-	switch t.valueType {
-	case periodType:
-		return encodePeriod(text)
-	case dateType:
-		return encodeDate(text)
-	case momentType:
-		return encodeDateTime(text)
-	case integerType:
-		return encodeInteger(text)
-	case floatType:
-		return encodeFloat(text)
-	case stringType:
-		return encodeString(text)
-	case textType:
-		return encodeText(text)
+	encoded, err := kind.Encode(text)
+	var argument *yt.ArgumentError
+	switch {
+	case errors.As(err, &argument):
+		return yt.Encoded{}, argument.Reason
+	case err != nil:
+		return yt.Encoded{}, err.Error()
 	}
-	return encodedValue{body: map[string]string{t.valueKey.member: text}, valueKey: text}, ""
+	return encoded, ""
 }
 
-func (t fieldType) emptyValueReason() string {
+func emptyValueReason(kind yt.FieldType) string {
 	const leftAlone = "; a field is emptied by --clear Name and a field the call does not name is left as it stands"
 	switch {
-	case t.valueType == stringType || t.valueType == textType:
+	case kind.ValueType == yt.StringType || kind.ValueType == yt.TextType:
 		return fmt.Sprintf("YouTrack keeps a %s field it is given nothing for as holding nothing at all",
-			t.valueType) + leftAlone
-	case t.isNamedValue():
-		return fmt.Sprintf("a value of a %s field is a name, and no value is named by nothing", t.valueType) + leftAlone
+			kind.ValueType) + leftAlone
+	case kind.Named():
+		return fmt.Sprintf("a value of a %s field is a name, and no value is named by nothing", kind.ValueType) + leftAlone
 	}
-	return fmt.Sprintf("no value of a %s field is empty", t.valueType) + leftAlone
+	return fmt.Sprintf("no value of a %s field is empty", kind.ValueType) + leftAlone
 }
 
-func encodePeriod(text string) (encodedValue, string) {
-	minutes, read := periodMinutes(text)
+func (n converter) readValue(kind yt.FieldType, item any) (*render.Node, bool, error) {
+	value, present, err := kind.ReadValue(item)
+	if err != nil || !present {
+		return nil, present, err
+	}
+	number, isNumber := item.(json.Number)
 	switch {
-	case !read:
-		return encodedValue{}, "a period is written in hours and minutes, as in PT1H30M, PT90M or PT0M: a day of " +
-			"YouTrack is the working day of the instance, and a second is no part of what a period field holds"
-	case minutes > math.MaxInt32:
-		return encodedValue{}, fmt.Sprintf("a period field holds at most %d minutes", math.MaxInt32)
+	case isNumber && (kind.ValueType == yt.IntegerType || kind.ValueType == yt.FloatType):
+		return render.NewNumber(number), true, nil
+	case kind.ValueType == yt.TextType:
+		return n.textNode(value.Text), true, nil
 	}
-	return encodedValue{body: minutesBody{Minutes: minutes}, valueKey: duration(minutes)}, ""
-}
-
-type minutesBody struct {
-	Minutes int64 `json:"minutes"`
-}
-
-func periodMinutes(text string) (int64, bool) {
-	rest, isPeriod := strings.CutPrefix(text, "PT")
-	if !isPeriod {
-		return 0, false
-	}
-	hours, rest, hoursGiven, read := countBefore(rest, 'H')
-	if !read {
-		return 0, false
-	}
-	minutes, rest, minutesGiven, read := countBefore(rest, 'M')
-	if !read || rest != "" || (!hoursGiven && !minutesGiven) {
-		return 0, false
-	}
-	return min(hours*60, pastMaxInt32) + minutes, true
-}
-
-const pastMaxInt32 = math.MaxInt32 + 1
-
-func countBefore(text string, mark byte) (count int64, rest string, given, read bool) {
-	before, after, marked := strings.Cut(text, string(mark))
-	if !marked {
-		return 0, text, false, true
-	}
-	if before == "" {
-		return 0, "", false, false
-	}
-	for _, digit := range []byte(before) {
-		if digit < '0' || digit > '9' {
-			return 0, "", false, false
-		}
-		count = min(count*10+int64(digit-'0'), pastMaxInt32)
-	}
-	return count, after, true, true
-}
-
-func encodeDate(text string) (encodedValue, string) {
-	day, err := time.Parse(time.DateOnly, text)
-	if err != nil {
-		return encodedValue{}, "a date field holds a day, written as in 2026-09-16"
-	}
-	return encodedValue{body: noonUTC(day), valueKey: day.Format(time.DateOnly)}, ""
-}
-
-func noonUTC(day time.Time) int64 {
-	return time.Date(day.Year(), day.Month(), day.Day(), 12, 0, 0, 0, time.UTC).UnixMilli()
-}
-
-func encodeDateTime(text string) (encodedValue, string) {
-	moment, err := time.Parse(time.RFC3339, text)
-	switch {
-	case err != nil:
-		return encodedValue{}, "a date and time field holds a moment, written as in 2026-08-31T03:00:00.123+03:00, " +
-			"with the offset from UTC on it"
-	case moment.Nanosecond()%int(time.Millisecond) != 0:
-		return encodedValue{}, "YouTrack keeps a moment to the millisecond, and this one is written finer than that"
-	}
-	milliseconds := moment.UnixMilli()
-	return encodedValue{body: milliseconds, valueKey: formatDateTime(milliseconds)}, ""
-}
-
-func formatDateTime(milliseconds int64) string {
-	return time.UnixMilli(milliseconds).UTC().Format(time.RFC3339Nano)
-}
-
-func encodeInteger(text string) (encodedValue, string) {
-	count, err := strconv.ParseInt(text, 10, 32)
-	if err != nil {
-		return encodedValue{}, fmt.Sprintf("an integer field holds a whole number between %d and %d",
-			math.MinInt32, math.MaxInt32)
-	}
-	return encodedValue{body: count, valueKey: strconv.FormatInt(count, 10)}, ""
-}
-
-func encodeFloat(text string) (encodedValue, string) {
-	number, isNumber := jsonNumber(text)
-	if !isNumber {
-		return encodedValue{}, "a float field holds a number written the way JSON writes one, as in 1.5, -0.25 or 1e3"
-	}
-	held, err := number.Float64()
-	if err != nil || math.IsInf(held, 0) || math.IsNaN(held) {
-		return encodedValue{}, "a float field holds a finite number, and this one is past the largest one there is"
-	}
-	return encodedValue{body: held, valueKey: shortestDecimal(held)}, ""
-}
-
-func shortestDecimal(number float64) string {
-	return strconv.FormatFloat(number, 'g', -1, 64)
-}
-
-func jsonNumber(text string) (json.Number, bool) {
-	value, isJSON := decode([]byte(text))
-	number, isNumber := value.(json.Number)
-	nothingAround := number.String() == text
-	return number, isJSON && isNumber && nothingAround
-}
-
-func encodeString(text string) (encodedValue, string) {
-	if !utf8.ValidString(text) {
-		return encodedValue{}, noUTF8("the value")
-	}
-	for _, rewritten := range stringFieldRewrites() {
-		if strings.ContainsRune(text, rewritten.rune) {
-			return encodedValue{}, rewrittenAs("the value", rewritten)
-		}
-	}
-	if strings.TrimFunc(text, trimmedByYouTrack) != text {
-		return encodedValue{}, "YouTrack trims the spaces off a string, so it would keep less than what was written"
-	}
-	return encodedValue{body: text, valueKey: text}, ""
-}
-
-func stringFieldRewrites() []charReplacement {
-	return []charReplacement{
-		{rune: 0x85, into: "nothing at all"},
-		{rune: 0x2028, into: "a space"},
-		{rune: 0x2029, into: "a space"},
-	}
-}
-
-func trimmedByYouTrack(r rune) bool {
-	return unicode.IsSpace(r) || isInformationSeparator(r)
-}
-
-func isInformationSeparator(r rune) bool {
-	return r >= '\x1c' && r <= '\x1f'
-}
-
-func encodeText(text string) (encodedValue, string) {
-	if !utf8.ValidString(text) {
-		return encodedValue{}, noUTF8("the value")
-	}
-	return encodedValue{body: textBody{Text: text}, valueKey: text}, ""
-}
-
-type textBody struct {
-	Text string `json:"text"`
-}
-
-func (i valueKey) text(held any) (string, bool) {
-	switch i.form {
-	case asDuration:
-		minutes, isWhole := parseInt64(held)
-		return duration(minutes), isWhole
-	case asDay, asDateTime:
-		count, isWhole := parseInt64(held)
-		if !isWhole {
-			return "", false
-		}
-		if i.form == asDay {
-			return time.UnixMilli(count).UTC().Format(time.DateOnly), true
-		}
-		return formatDateTime(count), true
-	case asInteger:
-		count, isWhole := parseInt64(held)
-		return strconv.FormatInt(count, 10), isWhole
-	case asFloat:
-		number, isNumber := held.(json.Number)
-		if !isNumber {
-			return "", false
-		}
-		count, err := number.Float64()
-		return shortestDecimal(count), err == nil
-	}
-	text, isText := held.(string)
-	return text, isText
-}
-
-func (n converter) keyValueNode(i valueKey, held any) (*render.Node, bool) {
-	if i.form == asInteger || i.form == asFloat {
-		number, isNumber := held.(json.Number)
-		if !isNumber {
-			return nil, false
-		}
-		return render.NewNumber(number), true
-	}
-	text, read := i.text(held)
-	switch {
-	case !read:
-		return nil, false
-	case i.form == asText:
-		return n.textNode(text), true
-	}
-	return render.NewString(text), true
-}
-
-func (t fieldType) isNamedValue() bool {
-	return t.valueKey.member != "" && t.valueKey.form == asString
-}
-
-func (t fieldType) sameValue(written, received string) bool {
-	if t.isNamedValue() {
-		return strings.EqualFold(written, received)
-	}
-	return written == received
-}
-
-func (i valueKey) shape() string {
-	switch i.form {
-	case asDuration:
-		return "a whole number of minutes"
-	case asDay, asDateTime:
-		return "a whole number of milliseconds since the epoch"
-	case asInteger, asFloat:
-		return "a number"
-	}
-	return "text"
+	return render.NewString(value.Text), true, nil
 }
 
 func (n converter) valueKeys(f issueCustomField) ([]string, *diag.Fault) {
@@ -476,19 +143,14 @@ func (n converter) valueKeys(f issueCustomField) ([]string, *diag.Fault) {
 		return nil, fault
 	}
 	texts := make([]string, 0, len(values))
-	for _, value := range values {
-		held, present, fault := n.rawKeyValue(f, value)
-		if fault != nil {
-			return nil, fault
+	for _, item := range values {
+		value, present, err := f.kind.ReadValue(item)
+		if err != nil {
+			return nil, n.unreadableValue(f, err)
 		}
-		if !present {
-			continue
+		if present {
+			texts = append(texts, value.Text)
 		}
-		text, read := f.kind.valueKey.text(held)
-		if !read {
-			return nil, n.wrongShapeFault(f)
-		}
-		texts = append(texts, text)
 	}
 	return texts, nil
 }
@@ -505,7 +167,7 @@ func customFieldsAsked(translated bool) []requestedField {
 	}
 	return []requestedField{
 		{name: nameKey},
-		{name: "value", children: identityMembers()},
+		{name: "value", children: valueKeyFields()},
 		{name: "projectCustomField", children: []requestedField{
 			{name: idKey},
 			{name: "ordinal"},
@@ -514,13 +176,10 @@ func customFieldsAsked(translated bool) []requestedField {
 	}
 }
 
-func identityMembers() []requestedField {
+func valueKeyFields() []requestedField {
 	var members []requestedField
-	for _, t := range fieldTypes() {
-		if t.valueKey.member == "" {
-			continue
-		}
-		members = merge(members, requestedField{name: t.valueKey.member})
+	for _, key := range yt.ValueKeys() {
+		members = append(members, requestedField{name: key})
 	}
 	return members
 }
@@ -528,10 +187,10 @@ func identityMembers() []requestedField {
 type issueCustomField struct {
 	name          string
 	value         any
-	kind          fieldType
+	kind          yt.FieldType
 	ordinal       int64
 	binding       string
-	localizedName optionalName
+	localizedName string
 }
 
 func (n converter) customFields(asked requestedField, value any) (*render.Node, *diag.Fault) {
@@ -605,8 +264,8 @@ func (n converter) selectedFieldsNode(asked []requestedField, fields []issueCust
 	return render.NewMap(pairs...), nil
 }
 
-func emptyValue(kind fieldType) *render.Node {
-	if kind.isMultiValue {
+func emptyValue(kind yt.FieldType) *render.Node {
+	if kind.Multi {
 		return render.NewList()
 	}
 	return render.NewNull()
@@ -657,11 +316,10 @@ func (n converter) readCustomField(item any) (issueCustomField, *diag.Fault) {
 		message := fmt.Sprintf("the place of the custom field %s among the fields of the project is no whole number", render.Quote(name))
 		return issueCustomField{}, n.malformed(message)
 	}
-	kind, modelled := typeOf(named)
-	if !modelled {
-		return issueCustomField{}, unmodelledType(named, n.response)
+	if !named.kind.Known() {
+		return issueCustomField{}, n.malformed(unmodelledType(named))
 	}
-	return issueCustomField{name: name, value: object["value"], kind: kind, ordinal: ordinal,
+	return issueCustomField{name: name, value: object["value"], kind: named.kind, ordinal: ordinal,
 		binding: binding, localizedName: named.localizedName}, nil
 }
 
@@ -692,7 +350,8 @@ func readBinding(place map[string]any) (binding string, named fieldInfo, ok bool
 	if !isName {
 		return "", fieldInfo{}, false
 	}
-	return binding, fieldInfo{localizedName: translated, valueType: valueType, isMultiValue: isMultiValue}, true
+	fieldType := yt.FieldType{ValueType: yt.ValueType(valueType), Multi: isMultiValue}
+	return binding, fieldInfo{localizedName: translated, kind: fieldType}, true
 }
 
 func (n converter) valuesOf(f issueCustomField) ([]any, *diag.Fault) {
@@ -700,9 +359,9 @@ func (n converter) valuesOf(f issueCustomField) ([]any, *diag.Fault) {
 	switch {
 	case f.value == nil:
 		return nil, nil
-	case isList && !f.kind.isMultiValue:
+	case isList && !f.kind.Multi:
 		return nil, n.malformed(fmt.Sprintf("the custom field %s holds one value by its type and arrived as a list", render.Quote(f.name)))
-	case !isList && f.kind.isMultiValue:
+	case !isList && f.kind.Multi:
 		message := fmt.Sprintf("the custom field %s holds more than one value by its type and arrived as "+
 			"something other than a list", render.Quote(f.name))
 		return nil, n.malformed(message)
@@ -730,69 +389,22 @@ func (n converter) valueNode(f issueCustomField) (*render.Node, bool, *diag.Faul
 	switch {
 	case len(items) == 0:
 		return nil, false, nil
-	case !f.kind.isMultiValue:
+	case !f.kind.Multi:
 		return items[0], true, nil
 	}
 	return render.NewList(items...), true, nil
 }
 
-func (n converter) rawKeyValue(f issueCustomField, value any) (any, bool, *diag.Fault) {
-	member := f.kind.valueKey.member
-	if member == "" {
-		return value, true, nil
+func (n converter) valueKeyNode(f issueCustomField, item any) (*render.Node, bool, *diag.Fault) {
+	node, present, err := n.readValue(f.kind, item)
+	if err != nil {
+		return nil, false, n.unreadableValue(f, err)
 	}
-	object, isObject := value.(map[string]any)
-	if !isObject {
-		return nil, false, n.missingKeyFault(f, member)
-	}
-	inside, ok := object[member]
-	if !ok {
-		return nil, false, n.missingKeyFault(f, member)
-	}
-	if inside == nil {
-		return nil, false, nil
-	}
-	return inside, true, nil
+	return node, present, nil
 }
 
-func (n converter) valueKeyNode(f issueCustomField, value any) (*render.Node, bool, *diag.Fault) {
-	held, present, fault := n.rawKeyValue(f, value)
-	if fault != nil || !present {
-		return nil, false, fault
-	}
-	node, read := n.keyValueNode(f.kind.valueKey, held)
-	if !read {
-		return nil, false, n.wrongShapeFault(f)
-	}
-	return node, true, nil
-}
-
-func (n converter) missingKeyFault(f issueCustomField, member string) *diag.Fault {
-	message := fmt.Sprintf("the value of the custom field %s holds no %s, which is what a field of its type "+
-		"is named by", render.Quote(f.name), member)
-	return n.malformed(message)
-}
-
-func (n converter) wrongShapeFault(f issueCustomField) *diag.Fault {
-	held := fmt.Sprintf("the value of the custom field %s", render.Quote(f.name))
-	if member := f.kind.valueKey.member; member != "" {
-		held = fmt.Sprintf("the %s of the custom field %s", member, render.Quote(f.name))
-	}
-	return n.malformed(held + " is not " + f.kind.valueKey.shape())
-}
-
-func duration(minutes int64) string {
-	written := ""
-	if hours := minutes / 60; hours != 0 {
-		written += strconv.FormatInt(hours, 10) + "H"
-	}
-	if rest := minutes % 60; rest != 0 {
-		written += strconv.FormatInt(rest, 10) + "M"
-	}
-	if written == "" {
-		written = "0M"
-	}
-	return "PT" + written
+func (n converter) unreadableValue(f issueCustomField, err error) *diag.Fault {
+	return n.malformed(fmt.Sprintf("custom field %s: %v", render.Quote(f.name), err))
 }
 
 const customFieldCatalogue = "[]CustomField"
@@ -895,12 +507,13 @@ func resolveNames(a decodedResponse, requested, asked []requestedField, catalogu
 
 func unresolvedNames(a decodedResponse, requested []requestedField, key, message string, entries []*render.Node) *diag.Fault {
 	against := render.Pair{Key: "fields", Value: render.NewString(formatFields(requested))}
-	return unknownNames(a.httpResponse, against, key, message, entries)
+	sent := requestDetail(a.httpResponse.Request.Method, a.httpResponse.Request.URL.Redacted())
+	return unknownNames(sent, against, key, message, entries)
 }
 
-func unknownNames(response *http.Response, against render.Pair, key, message string, entries []*render.Node) *diag.Fault {
+func unknownNames(sent, against render.Pair, key, message string, entries []*render.Node) *diag.Fault {
 	details := []render.Pair{
-		requestDetail(response.Request.Method, response.Request.URL.Redacted()),
+		sent,
 		against,
 		{Key: key, Value: render.NewList(entries...)},
 	}
@@ -918,14 +531,13 @@ func ambiguousEntry(field string, candidates []string) *render.Node {
 }
 
 func defaultFields(n fieldInfo) (string, bool) {
-	t, modelled := typeOf(n)
 	switch {
-	case !modelled:
+	case !n.kind.Known():
 		return "", false
-	case t.values == "":
+	case n.kind.BundleFields() == "":
 		return FieldListFields, true
 	}
-	return FieldListFields + "," + t.values, true
+	return FieldListFields + "," + n.kind.BundleFields(), true
 }
 
 func fieldsToPrint(expression *string, n fieldInfo) (requested []requestedField, modelled bool, fault *diag.Fault) {
@@ -939,10 +551,9 @@ func fieldsToPrint(expression *string, n fieldInfo) (requested []requestedField,
 	return requested, true, fault
 }
 
-func unmodelledType(n fieldInfo, a decodedResponse) *diag.Fault {
-	message := fmt.Sprintf("valueType %s with isMultiValue %t is not one of the twenty custom-field types ytrack models",
-		render.Quote(n.valueType), n.isMultiValue)
-	return shapeFailure(a.httpResponse, a.body, message)
+func unmodelledType(n fieldInfo) string {
+	return fmt.Sprintf("valueType %s with isMultiValue %t is not one of the twenty custom-field types ytrack models",
+		render.Quote(string(n.kind.ValueType)), n.kind.Multi)
 }
 
 func fieldInfoFields() requestedField {
@@ -951,38 +562,6 @@ func fieldInfoFields() requestedField {
 		{name: "localizedName"},
 		{name: fieldTypeKey, children: []requestedField{{name: valueTypeKey}, {name: "isMultiValue"}}},
 	}}
-}
-
-func metadataFields() []requestedField {
-	return []requestedField{{name: "customFields", children: []requestedField{{name: idKey}, fieldInfoFields()}}}
-}
-
-func metadataTarget(code string) string {
-	return "/api/admin/projects/" + code + "?fields=" + formatFields(metadataFields())
-}
-
-func readMetadata(a decodedResponse) ([]customField, *diag.Fault) {
-	items, isList := a.objects[0]["customFields"].([]any)
-	if !isList {
-		return nil, shapeFailure(a.httpResponse, a.body, "the custom fields of the project are not a JSON array")
-	}
-	fields := make([]customField, 0, len(items))
-	for _, item := range items {
-		object, isObject := item.(map[string]any)
-		if !isObject {
-			return nil, shapeFailure(a.httpResponse, a.body, brokenField)
-		}
-		id, isText := object[idKey].(string)
-		if !isText {
-			return nil, shapeFailure(a.httpResponse, a.body, brokenID)
-		}
-		named, ok := readFieldInfo(object)
-		if !ok {
-			return nil, shapeFailure(a.httpResponse, a.body, brokenFieldInfo)
-		}
-		fields = append(fields, customField{id: id, info: named})
-	}
-	return fields, nil
 }
 
 func readFieldInfo(object map[string]any) (fieldInfo, bool) {
@@ -1010,7 +589,8 @@ func readFieldInfo(object map[string]any) (fieldInfo, bool) {
 	if !isName {
 		return fieldInfo{}, false
 	}
-	return fieldInfo{name: name, localizedName: translated, valueType: valueType, isMultiValue: isMultiValue}, true
+	fieldType := yt.FieldType{ValueType: yt.ValueType(valueType), Multi: isMultiValue}
+	return fieldInfo{name: name, localizedName: translated, kind: fieldType}, true
 }
 
 func lookUp(name string, fields []customField) (customField, bool) {
@@ -1021,19 +601,19 @@ func lookUp(name string, fields []customField) (customField, bool) {
 	return fields[places[0]], true
 }
 
-func unresolved(a decodedResponse, code, name string, fields []customField) *diag.Fault {
+func unresolved(sent yt.Request, code, name string, fields []customField) *diag.Fault {
 	catalogue := fieldInfos(fields)
 	if places := findMatches(name, catalogue); len(places) > 0 {
 		message := "the name under unknown belongs to more than one custom field of the project"
-		return unknownField(a.httpResponse, code, name, canonical(pick(catalogue, places)), message)
+		return unknownField(sent, code, name, canonical(pick(catalogue, places)), message)
 	}
 	message := "the name under unknown is not a custom field of the project"
-	return unknownField(a.httpResponse, code, name, nearestNamed(name, catalogue), message)
+	return unknownField(sent, code, name, nearestNamed(name, catalogue), message)
 }
 
-func unknownField(response *http.Response, code, name string, nearest []string, message string) *diag.Fault {
+func unknownField(sent yt.Request, code, name string, nearest []string, message string) *diag.Fault {
 	against := render.Pair{Key: "project", Value: render.NewString(code)}
-	return unknownNames(response, against, "unknown", message, []*render.Node{unknownEntry(name, nearest)})
+	return unknownNames(sentRequest(sent), against, "unknown", message, []*render.Node{unknownEntry(name, nearest)})
 }
 
 func fieldInfos(fields []customField) []fieldInfo {
@@ -1048,9 +628,8 @@ func (f customField) hasValidID() bool {
 	return isInternalID(f.id)
 }
 
-func invalidFieldIDFault(id string, a decodedResponse) *diag.Fault {
-	message := fmt.Sprintf("the id %s of a custom field is not two numbers with a dash between them", render.Quote(id))
-	return shapeFailure(a.httpResponse, a.body, message)
+func invalidFieldID(id string) string {
+	return fmt.Sprintf("the id %s of a custom field is not two numbers with a dash between them", render.Quote(id))
 }
 
 func (n fieldInfo) verifyUnchanged(a decodedResponse, code string) *diag.Fault {

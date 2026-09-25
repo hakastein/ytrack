@@ -6,17 +6,11 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/hakastein/ytrack/internal/ytapi"
+	"github.com/hakastein/youtrack/ytapi"
 )
 
-//go:generate go -C ../.. tool oapi-codegen -config api/oapi-codegen.yaml api/openapi.json
-
 func (c *Client) api() *ytapi.Client {
-	return &ytapi.Client{
-		Server:         c.address.JoinPath("api/").String(),
-		Client:         c.httpClient,
-		RequestEditors: []ytapi.RequestEditorFn{c.authorize},
-	}
+	return c.module.API()
 }
 
 func (c *Client) apiGetProject(ctx context.Context, code, fields string) (*http.Response, error) {

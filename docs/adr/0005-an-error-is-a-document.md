@@ -44,7 +44,9 @@ status: accepted, partly implemented
 - **`1` — ничего не произошло. `2` — неизвестно, произошло ли, или инстанс уже изменён.** `2` определяется по
   запросу, а не по коду ошибки: ошибка после записи, получившей `2xx`, выходит с `2`.
 - **Граница `write_uncertain` — `httptrace.WroteRequest`.** До неё сбой — `upstream_failed`, после —
-  `write_uncertain`. Оборванное тело под `2xx` и `5xx` — тоже `write_uncertain`.
+  `write_uncertain`. Оборванное тело под `2xx` и `5xx` — тоже `write_uncertain`. Границу ставит `youtrack.Send` модуля
+  (`TransportError.Written`,
+  [ADR-0002 модуля](https://github.com/hakastein/youtrack/blob/main/docs/adr/0002-the-transport-sends-once-and-an-error-is-a-type.md)).
 - **`5xx` на запись от YouTrack (JSON-объект со строковым `error`) — `upstream_failed`.** Иначе ответил
   промежуточный узел, и это `write_uncertain`.
 - **ytrack не повторяет ни запись, ни чтение**, потому что неверная догадка о повторе даёт двойную запись или

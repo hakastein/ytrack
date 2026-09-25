@@ -4,10 +4,9 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/hakastein/youtrack/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func removingAComment(t *testing.T, deletion http.HandlerFunc) *fake.Server {

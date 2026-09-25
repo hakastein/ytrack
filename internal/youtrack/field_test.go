@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hakastein/youtrack/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/hakastein/ytrack/internal/diag"
-	"github.com/hakastein/ytrack/internal/fake"
 	"github.com/hakastein/ytrack/internal/render"
 	"github.com/hakastein/ytrack/internal/youtrack"
 )
@@ -40,11 +40,15 @@ func fieldMetaEnum(name, localizedName string) string {
 }
 
 func fieldMetaBinding(id, naming string) string {
-	return fmt.Sprintf(`{"$type":"ProjectCustomField","id":%q,"field":%s}`, id, naming)
+	return fmt.Sprintf(`{"$type":"ProjectCustomField","id":%q,"ordinal":0,"canBeEmpty":true,"field":%s}`, id, naming)
 }
 
 func fieldMetaProject(bindings ...string) string {
-	return `{"$type":"Project","customFields":[` + strings.Join(bindings, ",") + `]}`
+	return fieldMetaProjectOf(`[` + strings.Join(bindings, ",") + `]`)
+}
+
+func fieldMetaProjectOf(customFields string) string {
+	return `{"$type":"Project","id":"0-1","shortName":"DEV","customFields":` + customFields + `}`
 }
 
 func fieldMetaAnswer(naming string) string {
@@ -314,16 +318,16 @@ func TestShowFieldAsksForTheFieldsOfItsType(t *testing.T) {
 func TestShowFieldRefusesMetadataItCannotRead(t *testing.T) {
 	t.Parallel()
 	naming := fieldMetaEnum("Field", `null`)
-	stateOfMany := fieldMetaOf("Field", `null`, "state", true)
 	tests := []struct {
-		name       string
-		metadata   string
-		expression *string
+		name     string
+		metadata string
 	}{
-		{name: "custom fields that are no array", metadata: `{"$type":"Project","customFields":` + fieldMetaBinding("1-1", naming) + `}`},
-		{name: "a custom field that is no object", metadata: `{"$type":"Project","customFields":[[]]}`},
-		{name: "an id that is no text", metadata: fieldMetaProject(`{"$type":"ProjectCustomField","id":5,"field":` + naming + `}`)},
-		{name: "an id no path can hold", metadata: fieldMetaProject(fieldMetaBinding("..", naming))},
+		{name: "custom fields that are no array", metadata: fieldMetaProjectOf(fieldMetaBinding("1-1", naming))},
+		{name: "a custom field that is no object", metadata: fieldMetaProjectOf(`[[]]`)},
+		{
+			name:     "an id that is no text",
+			metadata: fieldMetaProject(`{"$type":"ProjectCustomField","id":5,"ordinal":0,"canBeEmpty":true,"field":` + naming + `}`),
+		},
 		{name: "a field that is no object", metadata: fieldMetaProject(fieldMetaBinding("1-1", `null`))},
 		{
 			name: "a name that is no text",
@@ -346,6 +350,30 @@ func TestShowFieldRefusesMetadataItCannotRead(t *testing.T) {
 				`"fieldType":{"$type":"FieldType","valueType":"enum","isMultiValue":"no"}}`)),
 		},
 		{name: "a translation that is neither text nor null", metadata: fieldMetaProject(fieldMetaBinding("1-1", fieldMetaEnum("Field", `5`)))},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := fieldMetaServer(t, tc.metadata, nil)
+
+			_, fault := fieldMetaShow(t, client(t, server), "Field", nil)
+
+			assert.Equal(t, unreadable(lastRequest(t, server), tc.metadata), faultOf(t, fault))
+			assert.Equal(t, []string{fieldMetaPath}, server.Paths())
+		})
+	}
+}
+
+func TestShowFieldRefusesAFieldOfTheMetadataItCannotShow(t *testing.T) {
+	t.Parallel()
+	naming := fieldMetaEnum("Field", `null`)
+	stateOfMany := fieldMetaOf("Field", `null`, "state", true)
+	tests := []struct {
+		name       string
+		metadata   string
+		expression *string
+	}{
+		{name: "an id no path can hold", metadata: fieldMetaProject(fieldMetaBinding("..", naming))},
 		{name: "a type outside the ones ytrack models", metadata: fieldMetaProject(fieldMetaBinding("1-1", stateOfMany))},
 		{
 			name:       "a type outside the ones ytrack models, with fields added to its default",
@@ -360,7 +388,7 @@ func TestShowFieldRefusesMetadataItCannotRead(t *testing.T) {
 
 			_, fault := fieldMetaShow(t, client(t, server), "Field", tc.expression)
 
-			assert.Equal(t, unreadable(lastRequest(t, server), tc.metadata), faultOf(t, fault))
+			assert.Equal(t, diag.Fault{Code: diag.UpstreamInvalid, Details: []render.Pair{lastRequest(t, server)}}, faultOf(t, fault))
 			assert.Equal(t, []string{fieldMetaPath}, server.Paths())
 		})
 	}

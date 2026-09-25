@@ -4,8 +4,11 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"slices"
+
+	yt "github.com/hakastein/youtrack"
 
 	"github.com/hakastein/ytrack/internal/diag"
 	"github.com/hakastein/ytrack/internal/render"
@@ -58,79 +61,74 @@ func checkFieldsSyntax(expression *string) *diag.Fault {
 }
 
 func (c *Client) showField(ctx context.Context, spec *schemas, code, name string, expression *string) (*render.Node, *diag.Fault) {
-	target := metadataTarget(code)
-	if cached, hit := c.cache.load(target); hit {
-		node, fault, cacheStale := c.showFieldFrom(ctx, spec, code, name, expression, fromDisk(cached))
-		if !cacheStale {
-			return node, fault
-		}
+	metadata, err := c.module.Metadata(ctx, code)
+	if err != nil {
+		return nil, metadataFailure(err, code)
 	}
-	metadata, fault := c.request(ctx, spec, "Project", metadataFields(), func(ctx context.Context, fields string) (*http.Response, error) {
-		return c.apiGetProject(ctx, code, fields)
-	})
-	if fault != nil {
-		return nil, fault
+	node, fault, cacheStale := c.showFieldFrom(ctx, spec, code, name, expression, metadata)
+	if !cacheStale {
+		return node, fault
 	}
-	fields, fault := readMetadata(metadata)
-	if fault != nil {
-		return nil, fault
+	if metadata, err = c.module.ReadMetadata(ctx, code); err != nil {
+		return nil, metadataFailure(err, code)
 	}
-	if len(fields) == 0 {
-		return nil, noFields(metadata.httpResponse, code)
-	}
-	c.cache.store(target, fields)
-	node, fault, _ := c.showFieldFrom(ctx, spec, code, name, expression, fromServer(metadata, fields))
+	node, fault, _ = c.showFieldFrom(ctx, spec, code, name, expression, metadata)
 	return node, fault
 }
 
-type metadataSource struct {
-	fields   []customField
-	response *decodedResponse
-}
-
-func fromServer(decoded decodedResponse, fields []customField) metadataSource {
-	return metadataSource{fields: fields, response: &decoded}
-}
-
-func fromDisk(fields []customField) metadataSource {
-	return metadataSource{fields: fields}
-}
-
-func (s metadataSource) fromCache() bool {
-	return s.response == nil
-}
-
-func (s metadataSource) handleStale(reject func(decodedResponse) *diag.Fault) (*render.Node, *diag.Fault, bool) {
-	if s.fromCache() {
-		return nil, nil, true
-	}
-	return nil, reject(*s.response), false
-}
-
-func (c *Client) showFieldFrom(ctx context.Context, spec *schemas, code, name string, expression *string, from metadataSource) (*render.Node, *diag.Fault, bool) {
-	found, ok := lookUp(name, from.fields)
+func (c *Client) showFieldFrom(ctx context.Context, spec *schemas, code, name string, expression *string, metadata *yt.Metadata) (*render.Node, *diag.Fault, bool) {
+	fields := projectFieldsOf(metadata)
+	found, ok := lookUp(name, fields)
 	if !ok {
-		return from.handleStale(func(a decodedResponse) *diag.Fault { return unresolved(a, code, name, from.fields) })
+		return refuseUnlessCached(metadata, unresolved(metadata.Request, code, name, fields))
 	}
 	if !found.hasValidID() {
-		return from.handleStale(func(a decodedResponse) *diag.Fault { return invalidFieldIDFault(found.id, a) })
+		return refuseUnlessCached(metadata, metadataInvalid(metadata, invalidFieldID(found.id)))
 	}
 	requested, modelled, fault := fieldsToPrint(expression, found.info)
 	if fault != nil {
 		return nil, fault, false
 	}
 	if !modelled {
-		return from.handleStale(func(a decodedResponse) *diag.Fault { return unmodelledType(found.info, a) })
+		return refuseUnlessCached(metadata, metadataInvalid(metadata, unmodelledType(found.info)))
 	}
 	decoded, fault := c.getField(ctx, spec, code, found.id, requested)
 	if fault != nil {
-		return nil, fault, from.fromCache() && isStale(fault)
+		return nil, fault, metadata.FromCache && isStale(fault)
 	}
 	if fault := found.info.verifyUnchanged(decoded, code); fault != nil {
-		return nil, fault, from.fromCache()
+		return nil, fault, metadata.FromCache
 	}
 	node, fault := objectNode(decoded, requested, decoded.objects[0], nil)
 	return node, fault, false
+}
+
+func refuseUnlessCached(metadata *yt.Metadata, fault *diag.Fault) (*render.Node, *diag.Fault, bool) {
+	if metadata.FromCache {
+		return nil, nil, true
+	}
+	return nil, fault, false
+}
+
+func projectFieldsOf(metadata *yt.Metadata) []customField {
+	fields := make([]customField, 0, len(metadata.Fields))
+	for _, field := range metadata.Fields {
+		named := fieldInfo{name: field.Name, localizedName: field.LocalizedName, kind: field.Type}
+		fields = append(fields, customField{id: field.ID, info: named})
+	}
+	return fields
+}
+
+func metadataInvalid(metadata *yt.Metadata, message string) *diag.Fault {
+	return &diag.Fault{Code: diag.UpstreamInvalid, Message: message, Details: []render.Pair{sentRequest(metadata.Request)}}
+}
+
+func metadataFailure(err error, code string) *diag.Fault {
+	var denied *yt.PermissionError
+	if !errors.As(err, &denied) {
+		return moduleFailure(err)
+	}
+	return noFields(sentRequest(denied.Request), code)
 }
 
 func isStale(fault *diag.Fault) bool {
@@ -153,7 +151,8 @@ func (c *Client) listFields(ctx context.Context, spec *schemas, code string, req
 		return nil, fault
 	}
 	if len(decoded.objects) == 0 {
-		return nil, noFields(decoded.httpResponse, code)
+		sent := requestDetail(decoded.httpResponse.Request.Method, decoded.httpResponse.Request.URL.Redacted())
+		return nil, noFields(sent, code)
 	}
 	ordered, fault := sortedByOrdinal(decoded)
 	if fault != nil {
@@ -192,9 +191,9 @@ func sortedByOrdinal(decoded decodedResponse) ([]map[string]any, *diag.Fault) {
 	return ordered, nil
 }
 
-func noFields(response *http.Response, code string) *diag.Fault {
+func noFields(sent render.Pair, code string) *diag.Fault {
 	details := []render.Pair{
-		requestDetail(response.Request.Method, response.Request.URL.Redacted()),
+		sent,
 		{Key: "project", Value: render.NewString(code)},
 		{Key: "permission", Value: render.NewString(projectRead)},
 	}

@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 
+	yt "github.com/hakastein/youtrack"
+
 	"github.com/hakastein/ytrack/internal/diag"
 	"github.com/hakastein/ytrack/internal/render"
 )
@@ -25,12 +27,6 @@ func transportFailure(err error) *diag.Fault {
 
 func readFailure(response *http.Response, err error) *diag.Fault {
 	return &diag.Fault{Code: diag.UpstreamFailed, Message: err.Error(), Details: responseDetails(response)}
-}
-
-func uncertainWrite(err error) *diag.Fault {
-	fault := transportFailure(err)
-	fault.Code = diag.WriteUncertain
-	return fault
 }
 
 func truncatedWriteResponse(response *http.Response, body []byte, err error) *diag.Fault {
@@ -83,8 +79,11 @@ func is2xx(status int) bool {
 }
 
 func statusFailure(response *http.Response, tree any, body []byte) *diag.Fault {
-	code, named := statusCode(response.StatusCode)
-	details := responseDetails(response)
+	return statusFault(responseDetails(response), response.StatusCode, tree, body)
+}
+
+func statusFault(details []render.Pair, status int, tree any, body []byte) *diag.Fault {
+	code, named := statusCode(status)
 	said, _ := tree.(map[string]any)
 	carried := 0
 	for _, member := range []struct{ name, key string }{{"error", "upstream_error"}, {"error_description", "upstream_message"}} {
@@ -96,13 +95,16 @@ func statusFailure(response *http.Response, tree any, body []byte) *diag.Fault {
 	if !named || said == nil || len(said) > carried {
 		details = append(details, bodyDetail(body))
 	}
-	message := fmt.Sprintf("the server answered with status %d", response.StatusCode)
+	message := fmt.Sprintf("the server answered with status %d", status)
 	return &diag.Fault{Code: code, Message: message, Details: details}
 }
 
 func shapeFailure(response *http.Response, body []byte, message string) *diag.Fault {
-	details := append(responseDetails(response), bodyDetail(body))
-	return &diag.Fault{Code: diag.UpstreamInvalid, Message: message, Details: details}
+	return shapeFault(responseDetails(response), body, message)
+}
+
+func shapeFault(details []render.Pair, body []byte, message string) *diag.Fault {
+	return &diag.Fault{Code: diag.UpstreamInvalid, Message: message, Details: append(details, bodyDetail(body))}
 }
 
 func statusCode(status int) (code diag.Code, named bool) {
@@ -136,6 +138,42 @@ func responseDetails(response *http.Response) []render.Pair {
 		requestDetail(response.Request.Method, response.Request.URL.Redacted()),
 		{Key: "upstream_status", Value: intNode(response.StatusCode)},
 	}
+}
+
+func answerDetails(sent yt.Request, status int) []render.Pair {
+	return []render.Pair{sentRequest(sent), {Key: "upstream_status", Value: intNode(status)}}
+}
+
+func sentRequest(sent yt.Request) render.Pair {
+	return render.Pair{Key: requestKey, Value: render.NewString(sent.String())}
+}
+
+func moduleFailure(err error) *diag.Fault {
+	var (
+		argument  *yt.ArgumentError
+		transport *yt.TransportError
+		status    *yt.StatusError
+		response  *yt.ResponseError
+	)
+	switch {
+	case errors.As(err, &argument):
+		return &diag.Fault{Code: diag.BadUsage, Message: argument.Error()}
+	case errors.As(err, &transport):
+		fault := &diag.Fault{Code: diag.UpstreamFailed, Message: transport.Err.Error()}
+		if transport.Written {
+			fault.Code = diag.WriteUncertain
+		}
+		if transport.Request.Method != "" {
+			fault.Details = []render.Pair{sentRequest(transport.Request)}
+		}
+		return fault
+	case errors.As(err, &status):
+		tree, _ := decode(status.Body)
+		return statusFault(answerDetails(status.Request, status.Status), status.Status, tree, status.Body)
+	case errors.As(err, &response):
+		return shapeFault(answerDetails(response.Request, response.Status), response.Body, response.Reason)
+	}
+	return &diag.Fault{Code: diag.UpstreamFailed, Message: err.Error()}
 }
 
 func requestDetail(method, address string) render.Pair {

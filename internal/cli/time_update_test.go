@@ -4,9 +4,8 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/hakastein/youtrack/fake"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func workItemPath(issue, id string) string {

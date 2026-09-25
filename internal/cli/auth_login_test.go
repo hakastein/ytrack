@@ -17,12 +17,12 @@ import (
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/hakastein/youtrack/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
 
 	"github.com/hakastein/ytrack/internal/cli"
-	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const (

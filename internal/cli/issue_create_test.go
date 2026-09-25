@@ -9,9 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hakastein/youtrack/fake"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const projectWriteFields = "id,shortName,customFields(id,canBeEmpty,defaultValues(name)," +

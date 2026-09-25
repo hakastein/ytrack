@@ -7,14 +7,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hakastein/youtrack/fake"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const (
 	namingSent    = "field(name,localizedName,fieldType(valueType,isMultiValue))"
-	metadataSent  = "customFields(id," + namingSent + ")"
+	metadataSent  = "id,shortName,customFields(id,ordinal,canBeEmpty," + namingSent + ")"
 	enumFieldSent = fieldListDefault + ",bundle(values(name,archived))"
 )
 
@@ -45,13 +44,13 @@ func localizedNameOrNull(localized string) string {
 }
 
 func projectField(id, name, localized string) string {
-	return fmt.Sprintf(`{"$type":"EnumProjectCustomField","id":%q,"field":{"$type":"CustomField","name":%q,`+
+	return fmt.Sprintf(`{"$type":"EnumProjectCustomField","id":%q,"ordinal":0,"canBeEmpty":false,"field":{"$type":"CustomField","name":%q,`+
 		`"localizedName":%s,"fieldType":{"$type":"FieldType","valueType":"enum","isMultiValue":false}}}`,
 		id, name, localizedNameOrNull(localized))
 }
 
 func projectMetadata(fields ...string) string {
-	return `{"$type":"Project","customFields":[` + strings.Join(fields, ",") + `]}`
+	return `{"$type":"Project","id":"0-1","shortName":"DEV","customFields":[` + strings.Join(fields, ",") + `]}`
 }
 
 func oneField(name, localized string, canBeEmpty bool) string {
@@ -110,12 +109,8 @@ func TestFieldShowRefusesAnIdItCannotAddress(t *testing.T) {
 	got := runWith(t, server.Env(), "field", "show", "DEV", "Type")
 
 	want := faultDocument{
-		code: "upstream_invalid",
-		details: []detail{
-			{"request", metadataRequest(server.URL, "DEV")},
-			{"upstream_status", 200},
-			{"upstream_body", metadata},
-		},
+		code:    "upstream_invalid",
+		details: []detail{{"request", metadataRequest(server.URL, "DEV")}},
 	}
 	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{"/api/admin/projects/DEV"}, server.Paths())

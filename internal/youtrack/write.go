@@ -12,6 +12,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	yt "github.com/hakastein/youtrack"
+
 	"github.com/hakastein/ytrack/internal/diag"
 	"github.com/hakastein/ytrack/internal/render"
 )
@@ -1155,7 +1157,8 @@ type issueWrite struct {
 
 type resolvedField struct {
 	field    projectField
-	kind     fieldType
+	kind     yt.FieldType
+	class    string
 	values   []string
 	sent     []any
 	sentKeys []string
@@ -1203,12 +1206,12 @@ func (w issueWrite) bodies() []customFieldBody {
 func (f resolvedField) body() customFieldBody {
 	var value any
 	switch {
-	case f.kind.isMultiValue:
+	case f.kind.Multi:
 		value = f.sent
 	case len(f.sent) > 0:
 		value = f.sent[0]
 	}
-	return customFieldBody{Type: f.kind.sent, Name: f.field.info.name, Value: value}
+	return customFieldBody{Type: f.class, Name: f.field.info.name, Value: value}
 }
 
 func (w issueWrite) verifyFields() []requestedField {
@@ -1282,13 +1285,13 @@ func (w issueWrite) verifyCustomFields(a decodedResponse, wrong []mismatch) ([]m
 	return wrong, nil
 }
 
-func sameValueSet(kind fieldType, sent, received []string) bool {
+func sameValueSet(kind yt.FieldType, sent, received []string) bool {
 	return covers(kind, sent, received) && covers(kind, received, sent)
 }
 
-func covers(kind fieldType, all, some []string) bool {
+func covers(kind yt.FieldType, all, some []string) bool {
 	for _, value := range some {
-		if !slices.ContainsFunc(all, func(held string) bool { return kind.sameValue(held, value) }) {
+		if !slices.ContainsFunc(all, func(held string) bool { return kind.Same(held, value) }) {
 			return false
 		}
 	}
@@ -1299,13 +1302,13 @@ func (f resolvedField) node() *render.Node {
 	return valueNode(f.values, f.kind)
 }
 
-func valueNode(values []string, kind fieldType) *render.Node {
+func valueNode(values []string, kind yt.FieldType) *render.Node {
 	items := make([]*render.Node, 0, len(values))
 	for _, value := range values {
 		items = append(items, render.NewString(value))
 	}
 	switch {
-	case kind.isMultiValue:
+	case kind.Multi:
 		return render.NewList(items...)
 	case len(items) == 0:
 		return render.NewNull()
@@ -1649,14 +1652,15 @@ func (p projectMetadata) encodeValues(given [][]string, emptied []bool, issueFie
 			continue
 		}
 		field := p.fields[at]
-		kind, modelled := typeOf(field.info)
-		if !modelled {
-			return nil, unmodelledType(field.info, p.response)
+		kind := field.info.kind
+		if !kind.Known() {
+			return nil, shapeFailure(p.response.httpResponse, p.response.body, unmodelledType(field.info))
 		}
+		class := kind.Class()
 		if typeOnIssue, onTheIssue := issueFieldTypes[field.id]; onTheIssue {
-			kind.sent = typeOnIssue
+			class = typeOnIssue
 		}
-		written := resolvedField{field: field, kind: kind, values: values, cleared: emptied[at]}
+		written := resolvedField{field: field, kind: kind, class: class, values: values, cleared: emptied[at]}
 		switch {
 		case emptied[at] && len(values) > 0:
 			invalid = append(invalid, invalidEntry(field.info.name, values[0], setAndClearedMessage))
@@ -1665,19 +1669,19 @@ func (p projectMetadata) encodeValues(given [][]string, emptied []bool, issueFie
 			written.sent = []any{}
 			fields = append(fields, written)
 			continue
-		case !kind.isMultiValue && len(values) > 1:
+		case !kind.Multi && len(values) > 1:
 			reason := fmt.Sprintf("the custom field holds one value by its type, and the call gives it %d", len(values))
 			invalid = append(invalid, invalidEntry(field.info.name, values[1], reason))
 			continue
 		}
 		for _, value := range values {
-			sent, reason := kind.encodeValue(value)
+			sent, reason := encodeValue(kind, value)
 			if reason != "" {
 				invalid = append(invalid, invalidEntry(field.info.name, value, reason))
 				continue
 			}
-			written.sent = append(written.sent, sent.body)
-			written.sentKeys = append(written.sentKeys, sent.valueKey)
+			written.sent = append(written.sent, sent.Body)
+			written.sentKeys = append(written.sentKeys, sent.Key)
 		}
 		fields = append(fields, written)
 	}
@@ -1766,7 +1770,7 @@ func (w issueWrite) hiddenReason(field projectField) (string, bool) {
 		return "", false
 	}
 	watched, found := fieldByID(w.project.fields, c.controls)
-	if !found || watched.info.isMultiValue {
+	if !found || watched.info.kind.Multi {
 		return "", false
 	}
 	held, filled := w.effectiveValue(watched)

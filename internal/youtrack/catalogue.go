@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-//go:generate go run ../../scripts/catalogue.go ../../api/openapi.json catalogue.gen.go
+//go:generate sh -c "go mod download github.com/hakastein/youtrack && go run ../../scripts/catalogue.go \"$(go list -m -f {{.Dir}} github.com/hakastein/youtrack)/api/openapi.json\" catalogue.gen.go"
 
 type schema struct {
 	parent     string
