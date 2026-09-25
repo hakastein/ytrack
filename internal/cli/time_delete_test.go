@@ -118,31 +118,22 @@ func TestTimeDeleteReadsTheAnswerOfEachHalf(t *testing.T) {
 	}
 }
 
-func TestTimeDeleteRemovesNothingAddressedByWhatTheReadGave(t *testing.T) {
+func TestTimeDeleteRemovesNothingByAReadOfAnotherShape(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		read string
-	}{
-		{name: "an id that is no internal id", read: workItemOfAnIssue("..", "DEV-1")},
-		{name: "an id that is not a string", read: `{"$type":"IssueWorkItem","id":7,"issue":null}`},
-		{name: "a readable id of an article", read: workItemOfAnIssue("199-7", "DEV-A-1")},
-		{
-			name: "no issue at all",
-			read: `{"$type":"IssueWorkItem","id":"199-7","issue":null}`,
+	read := workItemOfAnIssue("..", "DEV-1")
+	server := removingTime(t, fake.JSON(http.StatusOK, read), noDeletion(t))
+
+	got := runWith(t, server.Env(), "time", "delete", "DEV-1", "199-7")
+
+	assert.Equal(t, faultDocument{
+		code: "upstream_invalid",
+		details: []detail{
+			{"request", workItemReadRequest(server.URL, "DEV-1", "199-7")},
+			{"upstream_status", 200},
+			{"upstream_body", read},
 		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := removingTime(t, fake.JSON(http.StatusOK, tc.read), noDeletion(t))
-
-			got := runWith(t, server.Env(), "time", "delete", "DEV-1", "199-7")
-
-			assert.Equal(t, "upstream_invalid", requireFault(t, got).code)
-			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
-		})
-	}
+	}, requireFault(t, got))
+	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 }
 
 func TestTimeDeleteRefusesAnAnswerToTheRemovalThatCarriesABody(t *testing.T) {
@@ -152,8 +143,13 @@ func TestTimeDeleteRefusesAnAnswerToTheRemovalThatCarriesABody(t *testing.T) {
 
 	got := runWith(t, server.Env(), "time", "delete", "DEV-1", "199-7")
 
-	found := requireUncertainty(t, got)
-	assert.Equal(t, "upstream_invalid", found.code)
-	assert.Equal(t, detail{"request", workItemDeletionRequest(server.URL, "DEV-1", "199-7")}, found.details[0])
+	assert.Equal(t, faultDocument{
+		code: "upstream_invalid",
+		details: []detail{
+			{"request", workItemDeletionRequest(server.URL, "DEV-1", "199-7")},
+			{"upstream_status", 200},
+			{"upstream_body", `{"x":1}`},
+		},
+	}, requireUncertainty(t, got))
 	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
 }

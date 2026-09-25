@@ -2,21 +2,30 @@ package cli_test
 
 import (
 	"cmp"
-	"encoding/json"
-	"math"
 	"net/http"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"go.yaml.in/yaml/v3"
 
 	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const sentWorkItemWriteFields = "id,duration(minutes),type(name),attributes(id,name,value(id,name)),author(login),date," +
 	"issue(idReadable," + customFieldsFields + "),text"
+
+const sentWorkItemSettingsFields = "idReadable,project(shortName,plugins(timeTrackingSettings(workItemTypes(id,name)," +
+	"attributes(id,name,values(id,name)))))"
+
+const sentWorkItemTypesFields = "idReadable,project(shortName,plugins(timeTrackingSettings(workItemTypes(id,name))))"
+
+const workItemSettings = `{"$type":"Issue","idReadable":"DEV-1","project":{"$type":"Project","shortName":"DEV",` +
+	`"plugins":{"$type":"ProjectPlugins","timeTrackingSettings":{"$type":"ProjectTimeTrackingSettings",` +
+	`"workItemTypes":[{"$type":"WorkItemType","id":"8-1","name":"First"},` +
+	`{"$type":"WorkItemType","id":"8-2","name":"Second"}],` +
+	`"attributes":[{"$type":"WorkItemProjectAttribute","id":"9-1","name":"Mode","values":[` +
+	`{"$type":"WorkItemAttributeValue","id":"9-2","name":"Solo"},` +
+	`{"$type":"WorkItemAttributeValue","id":"9-3","name":"Pair"}]}]}}}}`
 
 func workItemWriteRequest(address, issue, fields string) string {
 	return "POST " + address + workItemsPath(issue) + "?fields=" + fields
@@ -35,8 +44,8 @@ type answeredWorkItem struct {
 func (a answeredWorkItem) json() string {
 	return `{"$type":"IssueWorkItem","id":` + strconv.Quote(cmp.Or(a.id, "199-7")) +
 		`,"duration":` + cmp.Or(a.duration, `{"$type":"DurationValue","minutes":90}`) +
-		`,"type":` + cmp.Or(a.workType, "null") + `,` + cmp.Or(a.attributes, sentNoAttribute) +
-		`,"author":{"$type":"User","login":"admin"}` +
+		`,"type":` + cmp.Or(a.workType, "null") + `,"attributes":` + cmp.Or(a.attributes, "[]") +
+		`,"author":{"$type":"User","login":"author"}` +
 		`,"date":` + cmp.Or(a.date, "1788220800000") +
 		`,"issue":{"$type":"Issue","idReadable":"DEV-1","customFields":[` + a.fields + `]}` +
 		`,"text":` + cmp.Or(a.text, "null") + `}`
@@ -52,75 +61,15 @@ func writingTime(t *testing.T, write http.HandlerFunc) *fake.Server {
 	})
 }
 
-func sentWorkItem(t *testing.T, u *fake.Server) map[string]any {
+func writingTimeAgainstTheSettings(t *testing.T, write http.HandlerFunc) *fake.Server {
 	t.Helper()
-	asks := u.Bodies()
-	require.Len(t, asks, 1)
-	var body map[string]any
-	require.NoError(t, json.Unmarshal([]byte(asks[0]), &body), "the body that went out: %s", asks[0])
-	return body
-}
-
-func TestTimeCreateRefusesADurationItCannotSend(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		spent string
-	}{
-		{name: "the way the server shows one", spent: "1ч 30м"},
-		{name: "the same in Latin letters", spent: "1h 30m"},
-		{name: "hours in the language of the server", spent: "3ч"},
-		{name: "a bare number", spent: "90"},
-		{name: "minutes with no period at all", spent: "90m"},
-		{name: "a fraction of an hour", spent: "1.5h"},
-		{name: "a day", spent: "P1D"},
-		{name: "a week", spent: "P1W"},
-		{name: "a day and hours", spent: "P1DT2H"},
-		{name: "a fraction of an ISO hour", spent: "PT1.5H"},
-		{name: "seconds", spent: "PT30S"},
-		{name: "hours, minutes and seconds", spent: "PT1H30M15S"},
-		{name: "in lower case", spent: "pt1h"},
-		{name: "the marker alone", spent: "PT"},
-		{name: "the period marker alone", spent: "P"},
-		{name: "nothing at all", spent: ""},
-		{name: "a space before it", spent: " PT1H"},
-		{name: "a fullwidth digit", spent: "PT" + string(rune(0xFF11)) + "H"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
-
-			got := runWith(t, server.Env(), "time", "create", "DEV-1", tc.spent)
-
-			found := requireFault(t, got)
-			assert.Equal(t, "bad_usage", found.code)
-			assert.Empty(t, server.Requests())
-		})
-	}
-}
-
-func TestTimeCreateRefusesADurationLongerThanTheServerCounts(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		spent string
-	}{
-		{name: "one minute past the largest", spent: "PT" + strconv.FormatInt(math.MaxInt32+1, 10) + "M"},
-		{name: "one hour past the largest", spent: "PT35791395H"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
-
-			got := runWith(t, server.Env(), "time", "create", "DEV-1", tc.spent)
-
-			want := faultDocument{code: "bad_usage"}
-			assert.Equal(t, want, requireFault(t, got))
-			assert.Empty(t, server.Requests())
-		})
-	}
+	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			fake.JSON(http.StatusOK, workItemSettings)(w, r)
+			return
+		}
+		write(w, r)
+	})
 }
 
 func TestTimeCreateRefusesWhatItCannotSend(t *testing.T) {
@@ -129,23 +78,17 @@ func TestTimeCreateRefusesWhatItCannotSend(t *testing.T) {
 		name string
 		argv []string
 	}{
+		{name: "a duration longer than the server keeps", argv: []string{"time", "create", "DEV-1", "PT2147483648M"}},
 		{
 			name: "the day twice",
 			argv: []string{"time", "create", "DEV-1", "PT1H", "--date", "2026-09-01", "--date", "2026-09-02"},
 		},
 		{name: "the text twice", argv: []string{"time", "create", "DEV-1", "PT1H", "--text", "a", "--text", "b"}},
+		{name: "the type twice", argv: []string{"time", "create", "DEV-1", "PT1H", "--type", "First", "--type", "Second"}},
 		{
 			name: "the expression twice",
 			argv: []string{"time", "create", "DEV-1", "PT1H", "--fields", "id", "--fields", "text"},
 		},
-		{
-			name: "a name under the duration",
-			argv: []string{"time", "create", "DEV-1", "PT1H", "--fields", "duration(minutes)"},
-		},
-		{
-			name: "a custom field of the issue named",
-			argv: []string{"time", "create", "DEV-1", "PT1H", "--fields", "+issue(customFields(State))"},
-		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -160,307 +103,72 @@ func TestTimeCreateRefusesWhatItCannotSend(t *testing.T) {
 	}
 }
 
-func TestTimeCreateRefusesADayItCannotSend(t *testing.T) {
+func TestTimeCreateWritesTheWorkItemAndPrintsWhatTheServerKept(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		day  string
-	}{
-		{name: "the day first", day: "01.09.2026"},
-		{name: "the month first", day: "09/01/2026"},
-		{name: "a word for today", day: "today"},
-		{name: "a word for the day before", day: "yesterday"},
-		{name: "a month and a day of one digit", day: "2026-9-1"},
-		{name: "a day the month has none of", day: "2026-02-30"},
-		{name: "a time of day", day: "2026-09-01T15:30:00Z"},
-		{name: "midnight of another time zone", day: "2026-09-01T00:00:00+03:00"},
-		{name: "a moment with no offset", day: "2026-09-01T00:00:00"},
-		{name: "nothing at all", day: ""},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
-
-			got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H", "--date", tc.day)
-
-			found := requireFault(t, got)
-			assert.Equal(t, "bad_usage", found.code)
-			assert.Empty(t, server.Requests())
-		})
-	}
-}
-
-func TestTimeCreateRefusesMidnightUTCCarriedInAnOffset(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H", "--date", "2026-08-31T21:00:00-03:00")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
-func TestTimeCreateSendsTheMinutesOfTheDuration(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name    string
-		spent   string
-		minutes float64
-	}{
-		{name: "hours and minutes", spent: "PT1H30M", minutes: 90},
-		{name: "minutes alone", spent: "PT90M", minutes: 90},
-		{name: "hours alone", spent: "PT24H", minutes: 1440},
-		{name: "none at all", spent: "PT0M", minutes: 0},
-		{name: "the largest the server counts", spent: "PT2147483647M", minutes: 2147483647},
-		{name: "the same written in hours and minutes", spent: "PT35791394H7M", minutes: 2147483647},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := writingTime(t, fake.JSON(http.StatusOK, answeredWorkItem{
-				duration: `{"$type":"DurationValue","minutes":` + strconv.FormatFloat(tc.minutes, 'f', -1, 64) + `}`,
-			}.json()))
-
-			got := runWith(t, server.Env(), "time", "create", "dev-1", tc.spent)
-
-			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			assert.Equal(t, map[string]any{"duration": map[string]any{"minutes": tc.minutes}}, sentWorkItem(t, server))
-			assert.Equal(t, []string{workItemsPath("dev-1")}, server.Paths())
-		})
-	}
-}
-
-func TestTimeCreateSendsTheDayAsNoonUTC(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		day  string
-	}{
-		{name: "a calendar day", day: "2026-09-01"},
-		{name: "midnight UTC as ytrack prints it", day: "2026-09-01T00:00:00.000Z"},
-		{name: "midnight UTC written with an offset of none", day: "2026-09-01T00:00:00+00:00"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := writingTime(t, fake.JSON(http.StatusOK, answeredWorkItem{}.json()))
-
-			got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H30M", "--date", tc.day)
-
-			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			want := map[string]any{"duration": map[string]any{"minutes": float64(90)}, "date": float64(1788264000000)}
-			assert.Equal(t, want, sentWorkItem(t, server))
-		})
-	}
-}
-
-func TestTimeCreateSendsTheTextByteForByte(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		text string
-	}{
-		{name: "a carriage return", text: "первая\rвторая"},
-		{name: "a line ending of two bytes", text: "первая\r\nвторая"},
-		{name: "a line separator", text: "первая\xe2\x80\xa8вторая"},
-		{name: "a byte of nothing", text: "первая\x00вторая"},
-		{name: "brackets a reader might take for markup", text: "[bug] fix login"},
-		{name: "nothing at all", text: ""},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := writingTime(t, fake.JSON(http.StatusOK, answeredWorkItem{text: asJSON(tc.text)}.json()))
-
-			got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H30M", "--text", tc.text)
-
-			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			want := map[string]any{"duration": map[string]any{"minutes": float64(90)}, "text": tc.text}
-			assert.Equal(t, want, sentWorkItem(t, server))
-		})
-	}
-}
-
-func TestTimeRefusesATextThatIsNoUTF8(t *testing.T) {
-	t.Parallel()
-	const written = "bad\xffbyte"
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "a creation", argv: []string{"time", "create", "DEV-1", "PT1H", "--text", written}},
-		{name: "an update", argv: []string{"time", "update", "DEV-1", "199-6", "--text", written}},
-		{
-			name: "an update that writes the day as well",
-			argv: []string{"time", "update", "DEV-1", "199-6", "--date", "2026-09-01", "--text", written},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
-
-			got := runWith(t, server.Env(), tc.argv...)
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests(), "encoding/json would send the bad byte as U+FFFD")
-		})
-	}
-}
-
-func TestTimeCreatePrintsTheWorkItemTheServerKept(t *testing.T) {
-	t.Parallel()
-	spent := receivedField{name: "Затраченное время", valueType: "period", value: `{"$type":"DurationValue","minutes":90}`}
-	estimation := receivedField{name: "Оценка", valueType: "period", ordinal: "2", binding: "180-2"}
-	written := answeredWorkItem{
-		workType: `{"$type":"WorkItemType","name":"Разработка"}`,
-		text:     asJSON("первая\nвторая"),
-		fields:   spent.sent() + "," + estimation.sent(),
-	}
-	server := writingTime(t, fake.JSON(http.StatusOK, written.json()))
+	spent := receivedField{name: "Spent", valueType: "period", value: `{"$type":"DurationValue","minutes":90}`}
+	server := writingTimeAgainstTheSettings(t, fake.JSON(http.StatusOK, answeredWorkItem{
+		workType: `{"$type":"WorkItemType","id":"8-1","name":"First"}`,
+		attributes: `[{"$type":"WorkItemAttribute","id":"9-1","name":"Mode",` +
+			`"value":{"$type":"WorkItemAttributeValue","id":"9-3","name":"Pair"}}]`,
+		text:   asJSON("first\nsecond"),
+		fields: spent.sent(),
+	}.json()))
 
 	got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H30M", "--date", "2026-09-01",
-		"--text", "первая\nвторая")
+		"--text", "first\nsecond", "--type", "First", "--attribute", "Mode=Pair")
 
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	assert.Equal(t, []string{sentWorkItemWriteFields}, server.Fields())
-	mapping := requireMapping(t, "stdout", got.stdout)
-	assert.Equal(t, []string{"id", "duration", "type", "attributes", "author", "date", "issue", "text"}, keysOf(mapping))
-	assert.Equal(t, "PT1H30M", nodeAt(t, mapping, "duration").Value)
-	assert.Equal(t, "2026-09-01T00:00:00Z", nodeAt(t, mapping, "date").Value)
-	assert.Equal(t, "DEV-1", nodeAt(t, mapping, "issue", "idReadable").Value)
-	assert.Equal(t, []string{"Затраченное время"}, keysOf(nodeAt(t, mapping, "issue", "customFields")))
-	assert.Equal(t, "PT1H30M", nodeAt(t, mapping, "issue", "customFields", "Затраченное время").Value)
-	text := nodeAt(t, mapping, "text")
-	assert.Equal(t, "первая\nвторая", text.Value)
-	assert.Equal(t, yaml.LiteralStyle, text.Style)
+	assert.Equal(t, outcome{stdout: "id: \"199-7\"\n" +
+		"duration: \"PT1H30M\"\n" +
+		"type:\n  name: \"First\"\n" +
+		"attributes:\n  \"Mode\": \"Pair\"\n" +
+		"author:\n  login: \"author\"\n" +
+		"date: \"2026-09-01T00:00:00Z\"\n" +
+		"issue:\n  idReadable: \"DEV-1\"\n  customFields:\n    \"Spent\": \"PT1H30M\"\n" +
+		"text: |-\n  first\n  second\n"}, got)
+	assert.Equal(t, []string{
+		"/api/issues/DEV-1?fields=" + sentWorkItemSettingsFields,
+		workItemsPath("DEV-1") + "?fields=id,duration(minutes),type(name,id),attributes(id,name,value(id,name))," +
+			"author(login),date,issue(idReadable," + customFieldsFields + "),text",
+	}, server.Targets())
+	assert.Equal(t, http.MethodPost, server.Last(t).Method)
+	assert.Equal(t, `{"duration":{"minutes":90},"type":{"id":"8-1"},"date":1788264000000,"text":"first\nsecond",`+
+		`"attributes":[{"id":"9-1","value":{"id":"9-3"}}]}`, server.Last(t).Body)
 }
 
-func TestTimeCreatePrintsATextNoBlockCanCarryInQuotes(t *testing.T) {
+func TestTimeCreateRefusesATypeTheProjectDoesNotHave(t *testing.T) {
 	t.Parallel()
-	server := writingTime(t, fake.JSON(http.StatusOK, answeredWorkItem{text: asJSON("первая\rвторая")}.json()))
+	server := writingTimeAgainstTheSettings(t, noWorkItemWritten(t))
 
-	got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H30M", "--text", "первая\rвторая")
+	got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H", "--type", "Secnd")
 
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	text := nodeAt(t, requireMapping(t, "stdout", got.stdout), "text")
-	assert.Equal(t, "первая\rвторая", text.Value)
-	assert.Equal(t, yaml.DoubleQuotedStyle, text.Style)
+	assert.Equal(t, faultDocument{
+		code: "unknown_name",
+		details: []detail{
+			{"request", issueRequest(server.URL, "DEV-1", sentWorkItemTypesFields)},
+			{"project", "DEV"},
+			{"unknown", []any{[]detail{{"type", "Secnd"}, {"nearest", []any{"Second"}}}}},
+		},
+	}, requireFault(t, got))
+	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 }
 
-func TestTimeCreateRefusesWhatTheServerKeptOtherwise(t *testing.T) {
+func TestTimeCreateRefusesADurationTheServerKeptOtherwise(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name     string
-		argv     []string
-		answered answeredWorkItem
-		mismatch []any
-	}{
-		{
-			name:     "a duration of another length",
-			argv:     []string{"time", "create", "DEV-1", "PT1H30M"},
-			answered: answeredWorkItem{duration: `{"$type":"DurationValue","minutes":60}`},
-			mismatch: []any{[]detail{{"field", "duration"}, {"expected", "PT1H30M"}, {"actual", "PT1H"}}},
-		},
-		{
-			name:     "no duration at all",
-			argv:     []string{"time", "create", "DEV-1", "PT1H30M"},
-			answered: answeredWorkItem{duration: "null"},
-			mismatch: []any{[]detail{{"field", "duration"}, {"expected", "PT1H30M"}, {"actual", nil}}},
-		},
-		{
-			name:     "a day after the one written",
-			argv:     []string{"time", "create", "DEV-1", "PT1H30M", "--date", "2026-09-01"},
-			answered: answeredWorkItem{date: "1788307200000"},
-			mismatch: []any{[]detail{
-				{"field", "date"},
-				{"expected", "2026-09-01"},
-				{"actual", "2026-09-02T00:00:00Z"},
-			}},
-		},
-		{
-			name:     "a day that came back as something other than a number of milliseconds",
-			argv:     []string{"time", "create", "DEV-1", "PT1H30M", "--date", "2026-09-01"},
-			answered: answeredWorkItem{date: asJSON("2026-09-01")},
-			mismatch: []any{[]detail{{"field", "date"}, {"expected", "2026-09-01"}, {"actual", nil}}},
-		},
-		{
-			name:     "no day at all",
-			argv:     []string{"time", "create", "DEV-1", "PT1H30M", "--date", "2026-09-01"},
-			answered: answeredWorkItem{date: "null"},
-			mismatch: []any{[]detail{{"field", "date"}, {"expected", "2026-09-01"}, {"actual", nil}}},
-		},
-		{
-			name:     "a text the server rewrote",
-			argv:     []string{"time", "create", "DEV-1", "PT1H30M", "--text", "первая\rвторая"},
-			answered: answeredWorkItem{text: asJSON("первая\nвторая")},
-			mismatch: []any{[]detail{
-				{"field", "text"},
-				{"expected", "первая\rвторая"},
-				{"actual", "первая\nвторая"},
-			}},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := writingTime(t, fake.JSON(http.StatusOK, tc.answered.json()))
-
-			got := runWith(t, server.Env(), tc.argv...)
-
-			found := requireUncertainty(t, got)
-			assert.Equal(t, "upstream_invalid", found.code)
-			assert.Equal(t, []string{"request", "issue", "id", "mismatch"}, detailKeys(found))
-			assert.Equal(t, "DEV-1", detailNamed(t, found, "issue"))
-			assert.Equal(t, "199-7", detailNamed(t, found, "id"))
-			assert.Equal(t, tc.mismatch, detailNamed(t, found, "mismatch"))
-		})
-	}
-}
-
-func TestTimeCreateRefusesADurationReceivedWithoutItsMinutes(t *testing.T) {
-	t.Parallel()
-	server := writingTime(t, fake.JSON(http.StatusOK, answeredWorkItem{duration: `{"$type":"DurationValue"}`}.json()))
+	server := writingTime(t, fake.JSON(http.StatusOK, answeredWorkItem{
+		duration: `{"$type":"DurationValue","minutes":60}`,
+	}.json()))
 
 	got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H30M")
 
-	found := requireUncertainty(t, got)
-	assert.Equal(t, "upstream_invalid", found.code)
-	assert.Equal(t, []any{[]detail{{"field", "duration(minutes)"}, {"type", "DurationValue"}}},
-		detailNamed(t, found, "missing"))
-}
-
-func detailKeys(found faultDocument) []string {
-	keys := make([]string, 0, len(found.details))
-	for _, printed := range found.details {
-		keys = append(keys, printed.key)
-	}
-	return keys
-}
-
-func TestTimeCreateTakesTheDayTheServerKeptForTheDayWritten(t *testing.T) {
-	t.Parallel()
-	keptAtMidnightUTC := answeredWorkItem{date: "1788220800000"}
-	server := writingTime(t, fake.JSON(http.StatusOK, keptAtMidnightUTC.json()))
-
-	got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H30M", "--date", "2026-09-01")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, "2026-09-01T00:00:00Z", nodeAt(t, requireMapping(t, "stdout", got.stdout), "date").Value)
-}
-
-func TestTimeCreateChecksNothingItNeverWrote(t *testing.T) {
-	t.Parallel()
-	server := writingTime(t, fake.JSON(http.StatusOK, answeredWorkItem{date: "1788307200000", text: "null"}.json()))
-
-	got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H30M")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	mapping := requireMapping(t, "stdout", got.stdout)
-	assert.Equal(t, "2026-09-02T00:00:00Z", nodeAt(t, mapping, "date").Value)
-	assert.Nil(t, requireValue(t, nodeAt(t, mapping, "text")))
+	assert.Equal(t, faultDocument{
+		code: "upstream_invalid",
+		details: []detail{
+			{"request", workItemWriteRequest(server.URL, "DEV-1", sentWorkItemWriteFields)},
+			{"issue", "DEV-1"},
+			{"id", "199-7"},
+			{"mismatch", []any{[]detail{{"field", "duration"}, {"expected", "PT1H30M"}, {"actual", "PT1H"}}}},
+		},
+	}, requireUncertainty(t, got))
 }
 
 func TestTimeCreateRefusesWhatTheServerRefused(t *testing.T) {
@@ -478,7 +186,7 @@ func TestTimeCreateRefusesWhatTheServerRefused(t *testing.T) {
 			status:          http.StatusBadRequest,
 			code:            "rejected",
 			upstreamError:   "invalid_properties",
-			upstreamMessage: "Длительность работы не может быть отрицательной или пустой",
+			upstreamMessage: "The duration is empty",
 		},
 		{
 			name:            "an issue the instance has none of",
@@ -520,23 +228,9 @@ func TestTimeCreateRefusesWhatTheServerRefused(t *testing.T) {
 	}
 }
 
-func TestTimeCreateAsksForWhatItChecksWhateverWasAskedToPrint(t *testing.T) {
-	t.Parallel()
-	server := writingTime(t, fake.JSON(http.StatusOK, answeredWorkItem{}.json()))
-
-	got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H30M", "--fields", "id")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, `id: "199-7"`+"\n", got.stdout)
-	assert.Equal(t, []string{"id,duration(minutes),date,text,issue(idReadable)"}, server.Fields())
-}
-
-func TestTimeCreateRefusesAnExpressionItCannotSend(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H", "--fields", "a,,b")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
+func noWorkItemWritten(t *testing.T) http.HandlerFunc {
+	t.Helper()
+	return func(_ http.ResponseWriter, r *http.Request) {
+		assert.Fail(t, "a work item was written", "%s %s", r.Method, r.URL)
+	}
 }

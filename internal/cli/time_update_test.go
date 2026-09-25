@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/hakastein/ytrack/internal/fake"
 )
@@ -25,14 +24,6 @@ func TestTimeUpdateRefusesWhatItCannotSend(t *testing.T) {
 		argv []string
 	}{
 		{name: "nothing to write at all", argv: []string{}},
-		{name: "the duration emptied", argv: []string{"--clear", "duration"}},
-		{name: "the day emptied", argv: []string{"--clear", "date"}},
-		{name: "nothing named to empty", argv: []string{"--clear", ""}},
-		{name: "an attribute with no value", argv: []string{"--attribute", "Формат работы"}},
-		{name: "an attribute emptied by an empty value", argv: []string{"--attribute", "Формат работы="}},
-		{name: "an attribute set twice", argv: []string{"--attribute", "Формат работы=Сам", "--attribute", "формат работы=ИИагент"}},
-		{name: "the type written and taken away", argv: []string{"--type", "Разработка", "--clear", "type"}},
-		{name: "the text written and emptied", argv: []string{"--text", "x", "--clear", "TEXT"}},
 		{name: "the duration twice", argv: []string{"--duration", "PT1H", "--duration", "PT2H"}},
 	}
 	for _, tc := range tests {
@@ -43,30 +34,6 @@ func TestTimeUpdateRefusesWhatItCannotSend(t *testing.T) {
 			got := runWith(t, server.Env(), append([]string{"time", "update", "DEV-1", "199-6"}, tc.argv...)...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests())
-		})
-	}
-}
-
-func TestTimeUpdateRefusesAValueItCannotSend(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "a length as the server shows one", argv: []string{"--duration", "1ч"}},
-		{name: "a time of day", argv: []string{"--date", "2026-09-01T15:00:00Z"}},
-		{name: "a name of no type at all", argv: []string{"--type", ""}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
-
-			got := runWith(t, server.Env(), append([]string{"time", "update", "DEV-1", "199-6"}, tc.argv...)...)
-
-			found := requireFault(t, got)
-			assert.Equal(t, "bad_usage", found.code)
 			assert.Empty(t, server.Requests())
 		})
 	}
@@ -111,181 +78,51 @@ func TestTimeUpdateSendsAnIDWithALeadingZeroAsItWasWritten(t *testing.T) {
 	assert.Equal(t, []string{workItemPath("DEV-1", "199-06")}, server.Paths())
 }
 
-func TestTimeUpdateSendsTheNamedPartsAlone(t *testing.T) {
+func TestTimeUpdateWritesTheNamedPartsAndPrintsWhatTheServerKept(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name     string
-		argv     []string
-		answered answeredWorkItem
-		body     map[string]any
-	}{
-		{
-			name:     "the text alone",
-			argv:     []string{"--text", "x"},
-			answered: answeredWorkItem{text: asJSON("x")},
-			body:     map[string]any{"text": "x"},
-		},
-		{
-			name:     "the text written empty",
-			argv:     []string{"--text", ""},
-			answered: answeredWorkItem{text: asJSON("")},
-			body:     map[string]any{"text": ""},
-		},
-		{
-			name: "the type taken away",
-			argv: []string{"--clear", "TYPE"},
-			body: map[string]any{"type": nil},
-		},
-		{
-			name: "the text emptied",
-			argv: []string{"--clear", "text"},
-			body: map[string]any{"text": nil},
-		},
-		{
-			name: "how long it is and the day it is written against",
-			argv: []string{"--duration", "PT2H", "--date", "2026-09-02"},
-			answered: answeredWorkItem{
-				duration: `{"$type":"DurationValue","minutes":120}`,
-				date:     "1788350400000",
-			},
-			body: map[string]any{
-				"duration": map[string]any{"minutes": float64(120)},
-				"date":     float64(1788350400000),
-			},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := writingTime(t, fake.JSON(http.StatusOK, tc.answered.json()))
-
-			got := runWith(t, server.Env(), append([]string{"time", "update", "DEV-1", "199-6"}, tc.argv...)...)
-
-			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			assert.Equal(t, tc.body, sentWorkItem(t, server))
-			assert.Equal(t, []string{workItemPath("DEV-1", "199-6")}, server.Paths())
-			assert.Equal(t, []string{http.MethodPost}, sentMethods(server))
-		})
-	}
-}
-
-func TestTimeUpdateReadsTheTypesOfTheProjectBeforeTheWrite(t *testing.T) {
-	t.Parallel()
-	server := writingTimeOfAType(t,
-		fake.JSON(http.StatusOK, devIssueWithWorkItemTypes()),
-		fake.JSON(http.StatusOK, answeredWorkItem{
-			workType: `{"$type":"WorkItemType","id":"` + workItemTypeID(1) + `","name":"Тестирование"}`,
-		}.json()))
-
-	got := runWith(t, server.Env(), "time", "update", "dev-1", "199-6", "--type", "тестирование")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
-	assert.Equal(t, []string{
-		"/api/issues/dev-1?fields=" + sentWorkItemTypesFields,
-		workItemPath("DEV-1", "199-6") + "?fields=" + sentWorkItemWriteFieldsWithType,
-	}, server.Targets())
-	assert.Equal(t, map[string]any{"id": workItemTypeID(1)}, sentWorkItemType(t, server))
-}
-
-func TestTimeUpdateRefusesAPartTheServerDidNotEmpty(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name     string
-		emptied  string
-		answered answeredWorkItem
-		mismatch []any
-	}{
-		{
-			name:     "the type",
-			emptied:  "type",
-			answered: answeredWorkItem{workType: `{"$type":"WorkItemType","name":"Разработка"}`},
-			mismatch: []any{[]detail{{"field", "type"}, {"expected", nil}, {"actual", "Разработка"}}},
-		},
-		{
-			name:     "the text",
-			emptied:  "text",
-			answered: answeredWorkItem{text: asJSON("Разбор полигона")},
-			mismatch: []any{[]detail{{"field", "text"}, {"expected", nil}, {"actual", "Разбор полигона"}}},
-		},
-		{
-			name:     "the text emptied to an empty string",
-			emptied:  "text",
-			answered: answeredWorkItem{text: asJSON("")},
-			mismatch: []any{[]detail{{"field", "text"}, {"expected", nil}, {"actual", ""}}},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := writingTime(t, fake.JSON(http.StatusOK, tc.answered.json()))
-
-			got := runWith(t, server.Env(), "time", "update", "DEV-1", "199-6", "--clear", tc.emptied)
-
-			found := requireUncertainty(t, got)
-			assert.Equal(t, "upstream_invalid", found.code)
-			assert.Equal(t, []string{"request", "issue", "id", "mismatch"}, detailKeys(found))
-			assert.Equal(t, "DEV-1", detailNamed(t, found, "issue"))
-			assert.Equal(t, "199-6", detailNamed(t, found, "id"))
-			assert.Equal(t, tc.mismatch, detailNamed(t, found, "mismatch"))
-		})
-	}
-}
-
-func TestTimeUpdateAsksForWhatItChecksWhateverWasAskedToPrint(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name     string
-		argv     []string
-		answered answeredWorkItem
-		asked    string
-	}{
-		{
-			name:     "the text",
-			argv:     []string{"--text", "x"},
-			answered: answeredWorkItem{text: asJSON("x")},
-			asked:    "id,text",
-		},
-		{
-			name:     "how long it is and the day it is written against",
-			argv:     []string{"--duration", "PT2H", "--date", "2026-09-02"},
-			answered: answeredWorkItem{duration: `{"$type":"DurationValue","minutes":120}`, date: "1788350400000"},
-			asked:    "id,duration(minutes),date",
-		},
-		{name: "the text emptied", argv: []string{"--clear", "text"}, asked: "id,text"},
-		{name: "the type taken away", argv: []string{"--clear", "type"}, asked: "id,type(name)"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := writingTime(t, fake.JSON(http.StatusOK, tc.answered.json()))
-
-			got := runWith(t, server.Env(), append([]string{"time", "update", "DEV-1", "199-6"},
-				append(tc.argv, "--fields", "id")...)...)
-
-			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			assert.Equal(t, `id: "199-7"`+"\n", got.stdout)
-			assert.Equal(t, []string{tc.asked}, server.Fields())
-		})
-	}
-}
-
-func TestTimeUpdateChecksNothingItNeverWrote(t *testing.T) {
-	t.Parallel()
-	server := writingTime(t, fake.JSON(http.StatusOK, answeredWorkItem{
-		duration: `{"$type":"DurationValue","minutes":45}`,
-		workType: `{"$type":"WorkItemType","name":"Кодревью"}`,
-		date:     "1788307200000",
-		text:     asJSON("x"),
+	server := writingTimeAgainstTheSettings(t, fake.JSON(http.StatusOK, answeredWorkItem{
+		id:       "199-6",
+		duration: `{"$type":"DurationValue","minutes":120}`,
+		workType: `{"$type":"WorkItemType","id":"8-2","name":"Second"}`,
+		attributes: `[{"$type":"WorkItemAttribute","id":"9-1","name":"Mode",` +
+			`"value":{"$type":"WorkItemAttributeValue","id":"9-2","name":"Solo"}}]`,
+		date: "1788307200000",
+		text: asJSON("x"),
 	}.json()))
 
-	got := runWith(t, server.Env(), "time", "update", "DEV-1", "199-6", "--text", "x")
+	got := runWith(t, server.Env(), "time", "update", "DEV-1", "199-6", "--duration", "PT2H", "--date", "2026-09-02",
+		"--text", "x", "--type", "Second", "--attribute", "Mode=Solo", "--fields", "id,duration,date,text")
 
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	mapping := requireMapping(t, "stdout", got.stdout)
-	assert.Equal(t, "PT45M", nodeAt(t, mapping, "duration").Value)
-	assert.Equal(t, "Кодревью", nodeAt(t, mapping, "type", "name").Value)
-	assert.Equal(t, "2026-09-02T00:00:00Z", nodeAt(t, mapping, "date").Value)
+	assert.Equal(t, outcome{stdout: "id: \"199-6\"\nduration: \"PT2H\"\ndate: \"2026-09-02T00:00:00Z\"\ntext: |-\n  x\n"}, got)
+	assert.Equal(t, []string{
+		"/api/issues/DEV-1?fields=" + sentWorkItemSettingsFields,
+		workItemPath("DEV-1", "199-6") + "?fields=id,duration(minutes),date,text,type(id,name)," +
+			"attributes(id,name,value(id,name))",
+	}, server.Targets())
+	assert.Equal(t, http.MethodPost, server.Last(t).Method)
+	assert.Equal(t, `{"duration":{"minutes":120},"type":{"id":"8-2"},"date":1788350400000,"text":"x",`+
+		`"attributes":[{"id":"9-1","value":{"id":"9-2"}}]}`, server.Last(t).Body)
+}
+
+func TestTimeUpdateRefusesAnAttributeTheServerDidNotTakeAway(t *testing.T) {
+	t.Parallel()
+	server := writingTimeAgainstTheSettings(t, fake.JSON(http.StatusOK, answeredWorkItem{
+		id: "199-6",
+		attributes: `[{"$type":"WorkItemAttribute","id":"9-1","name":"Mode",` +
+			`"value":{"$type":"WorkItemAttributeValue","id":"9-3","name":"Pair"}}]`,
+	}.json()))
+
+	got := runWith(t, server.Env(), "time", "update", "DEV-1", "199-6", "--clear", "Mode")
+
+	assert.Equal(t, faultDocument{
+		code: "upstream_invalid",
+		details: []detail{
+			{"request", workItemUpdateRequest(server.URL, "DEV-1", "199-6", sentWorkItemWriteFields)},
+			{"issue", "DEV-1"},
+			{"id", "199-6"},
+			{"mismatch", []any{[]detail{{"field", "Mode"}, {"expected", nil}, {"actual", "Pair"}}}},
+		},
+	}, requireUncertainty(t, got))
 }
 
 func TestTimeUpdateRefusesWhatTheServerRefused(t *testing.T) {

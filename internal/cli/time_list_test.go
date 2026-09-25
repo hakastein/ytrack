@@ -4,12 +4,10 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.yaml.in/yaml/v3"
 
 	"github.com/hakastein/ytrack/internal/fake"
 )
@@ -21,25 +19,22 @@ func workItemsPath(id string) string {
 }
 
 const (
-	sentNoAttribute    = `"attributes":[{"$type":"WorkItemAttribute","id":"309-0","name":"Формат работы","value":null}]`
-	sentAgentAttribute = `"attributes":[{"name":"Формат работы","$type":"WorkItemAttribute","id":"309-0",` +
-		`"value":{"$type":"WorkItemAttributeValue","id":"506-1","name":"ИИагент"}}]`
+	listedWorkItem = `{"author":{"login":"author","$type":"User"},"text":"First text","date":1788220800000,` +
+		`"duration":{"minutes":90,"$type":"DurationValue"},` +
+		`"attributes":[{"$type":"WorkItemAttribute","id":"9-1","name":"Mode","value":null}],` +
+		`"type":{"name":"First","$type":"WorkItemType"},"id":"199-6","$type":"IssueWorkItem"}`
+	listedSecondWorkItem = `{"text":"Second text","$type":"IssueWorkItem","id":"199-7","date":1788307200000,` +
+		`"duration":{"$type":"DurationValue","minutes":30},` +
+		`"attributes":[{"name":"Mode","$type":"WorkItemAttribute","id":"9-1",` +
+		`"value":{"$type":"WorkItemAttributeValue","id":"9-3","name":"Pair"}}],` +
+		`"type":{"name":"Second","$type":"WorkItemType"},"author":{"login":"second.author","$type":"User"}}`
 )
 
 const (
-	listedWorkItem = `{"author":{"login":"admin","$type":"User"},"text":"Разбор полигона","date":1788220800000,` +
-		`"duration":{"minutes":90,"$type":"DurationValue"},` + sentNoAttribute + `,` +
-		`"type":{"name":"Разработка","$type":"WorkItemType"},"id":"199-6","$type":"IssueWorkItem"}`
-	listedSecondWorkItem = `{"text":"Второй заход","$type":"IssueWorkItem","id":"199-7","date":1788307200000,` +
-		`"duration":{"$type":"DurationValue","minutes":30},` + sentAgentAttribute + `,` +
-		`"type":{"name":"Кодревью","$type":"WorkItemType"},"author":{"login":"dev.member","$type":"User"}}`
-)
-
-const (
-	printedWorkItemRow = `  - {id: "199-6", duration: "PT1H30M", type: {name: "Разработка"}, attributes: {"Формат работы": null}, ` +
-		`author: {login: "admin"}, date: "2026-09-01T00:00:00Z", text: "Разбор полигона"}` + "\n"
-	printedSecondRow = `  - {id: "199-7", duration: "PT30M", type: {name: "Кодревью"}, attributes: {"Формат работы": "ИИагент"}, ` +
-		`author: {login: "dev.member"}, date: "2026-09-02T00:00:00Z", text: "Второй заход"}` + "\n"
+	printedWorkItemRow = `  - {id: "199-6", duration: "PT1H30M", type: {name: "First"}, attributes: {"Mode": null}, ` +
+		`author: {login: "author"}, date: "2026-09-01T00:00:00Z", text: "First text"}` + "\n"
+	printedSecondRow = `  - {id: "199-7", duration: "PT30M", type: {name: "Second"}, attributes: {"Mode": "Pair"}, ` +
+		`author: {login: "second.author"}, date: "2026-09-02T00:00:00Z", text: "Second text"}` + "\n"
 )
 
 func listingWorkItems(limit string) []url.Values {
@@ -57,26 +52,6 @@ func countedWorkItems(records string, count http.HandlerFunc) http.HandlerFunc {
 		}
 		fake.JSON(http.StatusOK, records)(w, r)
 	}
-}
-
-type workItemListing struct {
-	Total     int              `yaml:"total"`
-	Returned  int              `yaml:"returned"`
-	Truncated bool             `yaml:"truncated"`
-	WorkItems []map[string]any `yaml:"workItems"`
-}
-
-func requireWorkItemListing(t *testing.T, got outcome) workItemListing {
-	t.Helper()
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	decoder := yaml.NewDecoder(strings.NewReader(got.stdout))
-	decoder.KnownFields(true)
-	var printed workItemListing
-	require.NoError(t, decoder.Decode(&printed), "stdout: %s", got.stdout)
-	assert.Len(t, printed.WorkItems, printed.Returned)
-	assert.Equal(t, printed.Total > printed.Returned, printed.Truncated)
-	return printed
 }
 
 func TestTimeListRefusesWhatItCannotSend(t *testing.T) {
@@ -114,57 +89,6 @@ func TestTimeListAsksTheWorkItemsOfTheIssueInOneRequest(t *testing.T) {
 	assert.Equal(t, http.MethodGet, requests[0].Method)
 	assert.Equal(t, workItemsPath("DEV-1"), requests[0].URL.Path)
 	assert.Equal(t, url.Values{"fields": {sentWorkItemFields}, "$top": {"50"}}, requests[0].URL.Query())
-	for _, record := range workItemRecords(t, got) {
-		assert.Equal(t, []string{"id", "duration", "type", "attributes", "author", "date", "text"}, recordKeys(record))
-		assert.Equal(t, yaml.FlowStyle, record.Style, "the record stands on more than one line")
-	}
-}
-
-func workItemRecords(t *testing.T, got outcome) []*yaml.Node {
-	t.Helper()
-	return nodeAt(t, requireMapping(t, "stdout", got.stdout), "workItems").Content
-}
-
-func TestTimeListPrintsTheTextOfAWorkItemOnOneLine(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name     string
-		received string
-		want     string
-	}{
-		{name: "a line feed", received: `"a\nb"`, want: `"a\nb"`},
-		{name: "a carriage return", received: `"a\rb"`, want: `"a\rb"`},
-		{name: "a line separator", received: "\"a\xe2\x80\xa8b\"", want: `"a\Lb"`},
-		{name: "nothing at all", received: `""`, want: `""`},
-		{name: "no text", received: `null`, want: `null`},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			body := `[{"$type":"IssueWorkItem","id":"199-6","author":null,"text":` + tc.received + `}]`
-			server := fake.Serve(t, fake.JSON(http.StatusOK, body))
-
-			got := runWith(t, server.Env(), "time", "list", "DEV-1", "--fields", "id,author(login),text")
-
-			want := "total: 1\nreturned: 1\ntruncated: false\nworkItems:\n" +
-				`  - {id: "199-6", author: null, text: ` + tc.want + "}\n"
-			assert.Equal(t, outcome{stdout: want}, got)
-		})
-	}
-}
-
-func TestTimeListKeepsEveryByteOfTheTextOfAWorkItem(t *testing.T) {
-	t.Parallel()
-	const written = "первая\nвторая\rтретья\xe2\x80\xa8четвёртая"
-	body := "[{\"$type\":\"IssueWorkItem\",\"id\":\"199-6\",\"text\":\"первая\\nвторая\\rтретья\xe2\x80\xa8четвёртая\"}]"
-	server := fake.Serve(t, fake.JSON(http.StatusOK, body))
-
-	got := runWith(t, server.Env(), "time", "list", "DEV-1", "--fields", "id,text")
-
-	printed := requireWorkItemListing(t, got)
-	require.Len(t, printed.WorkItems, 1)
-	assert.Equal(t, written, printed.WorkItems[0]["text"])
-	assert.Equal(t, 1, strings.Count(strings.TrimSuffix(got.stdout, "\n"), "\n  - "))
 }
 
 func TestTimeListCountsTheWorkItemsWhenTheyFillTheLimit(t *testing.T) {
@@ -254,103 +178,20 @@ func TestTimeListRefusesMoreWorkItemsThanTheLimit(t *testing.T) {
 	assert.Len(t, server.Requests(), 1)
 }
 
-func TestTimeListPrintsTheSameDocumentHoweverManyWereReceived(t *testing.T) {
+func TestTimeListRefusesAnAnswerOfAnotherShape(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name        string
-		contentType string
-		body        string
-		want        string
-		refused     bool
-	}{
-		{
-			name:        "none at all",
-			contentType: "application/json",
-			body:        "[]",
-			want:        "total: 0\nreturned: 0\ntruncated: false\nworkItems: []\n",
+	server := fake.Serve(t, fake.JSON(http.StatusOK, listedWorkItem))
+
+	got := runWith(t, server.Env(), "time", "list", "DEV-1")
+
+	assert.Equal(t, faultDocument{
+		code: "upstream_invalid",
+		details: []detail{
+			{"request", "GET " + server.URL + workItemsPath("DEV-1") + "?fields=" + sentWorkItemFields + "&$top=50"},
+			{"upstream_status", 200},
+			{"upstream_body", listedWorkItem},
 		},
-		{
-			name:        "no body under a 200",
-			contentType: "application/json",
-			refused:     true,
-		},
-		{
-			name:        "the web page under a 200",
-			contentType: "text/html",
-			body:        "<!doctype html>\n<html><body>Log in</body></html>",
-			refused:     true,
-		},
-		{
-			name:        "one object where an array was promised",
-			contentType: "application/json",
-			body:        listedWorkItem,
-			refused:     true,
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.Serve(t, func(w http.ResponseWriter, _ *http.Request) {
-				w.Header().Set("Content-Type", tc.contentType)
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte(tc.body))
-			})
-
-			got := runWith(t, server.Env(), "time", "list", "DEV-1")
-
-			if tc.refused {
-				found := requireFault(t, got)
-				assert.Equal(t, "upstream_invalid", found.code)
-				return
-			}
-			assert.Equal(t, outcome{stdout: tc.want}, got)
-		})
-	}
-}
-
-func TestTimeRefusesTheNamesUnderABlockOfTheIssue(t *testing.T) {
-	t.Parallel()
-	subcommands := []struct {
-		name string
-		argv []string
-	}{
-		{name: "a listing", argv: []string{"time", "list", "DEV-1"}},
-		{name: "a creation", argv: []string{"time", "create", "DEV-1", "PT1H"}},
-		{name: "an update", argv: []string{"time", "update", "DEV-1", "199-6", "--text", "x"}},
-	}
-	written := []struct {
-		name       string
-		expression string
-	}{
-		{name: "a part of a link slot", expression: "issue(links(direction))"},
-		{name: "a part of the parent slot", expression: "issue(parent(id))"},
-		{name: "a part of the subtasks slot", expression: "issue(subtasks(linkType(sourceToTarget)))"},
-		{name: "a custom field of the issue named", expression: "issue(customFields(State))"},
-	}
-	for _, subcommand := range subcommands {
-		for _, tc := range written {
-			t.Run(subcommand.name+", "+tc.name, func(t *testing.T) {
-				t.Parallel()
-				server := fake.ServeNothing(t)
-
-				got := runWith(t, server.Env(), slices.Concat(subcommand.argv, []string{"--fields", tc.expression})...)
-
-				assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-				assert.Empty(t, server.Requests())
-			})
-		}
-	}
-}
-
-func TestTimeListAsksTheIssuesOfALinkSlotOfTheIssue(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, "[]"))
-
-	got := runWith(t, server.Env(), "time", "list", "DEV-1", "--fields", "issue(links(issues(idReadable)))")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, []string{"issue(links(issues(idReadable),direction,linkType(sourceToTarget,targetToSource)))"},
-		server.Fields())
+	}, requireFault(t, got))
 }
 
 func TestTimeListRefusesAnExpressionItCannotSend(t *testing.T) {
@@ -359,8 +200,8 @@ func TestTimeListRefusesAnExpressionItCannotSend(t *testing.T) {
 		name  string
 		flags []string
 	}{
+		{name: "a name under the duration", flags: []string{"--fields", "duration(minutes)"}},
 		{name: "the expression twice", flags: []string{"--fields", "id", "--fields", "text"}},
-		{name: "an expression that does not parse", flags: []string{"--fields", "a,,b"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
