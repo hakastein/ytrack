@@ -11,13 +11,10 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// DEV under the default expression of the list, $type added and the keys in an order other than asked: the server
-// keeps an order of its own.
 const listedDEV = `{"name":"DEVELOPMENT","$type":"Project","shortName":"DEV"}`
 
 const printedListedDEV = `  - {shortName: "DEV", name: "DEVELOPMENT"}` + "\n"
 
-// listDocument is the document project list prints, read back.
 type listDocument struct {
 	Total     int              `yaml:"total"`
 	Returned  int              `yaml:"returned"`
@@ -38,12 +35,10 @@ func requireListing(t *testing.T, got outcome) listDocument {
 	return printed
 }
 
-// A refusal names the request project list sends, with its fields= expression as it was written.
 func listRequest(address, fields, top string) string {
 	return "GET " + address + "/api/admin/projects?fields=" + fields + "&$top=" + top
 }
 
-// countedBy answers a request for projects with records, and the request that counts them, $top=-1, with count.
 func countedBy(records string, count http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("$top") == "-1" {
@@ -54,7 +49,6 @@ func countedBy(records string, count http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// countingQueries is what project list sends for a selection of limit projects that it goes on to count.
 func countingQueries(limit string) []url.Values {
 	return []url.Values{
 		{"fields": {"shortName,name"}, "$top": {limit}},
@@ -68,7 +62,7 @@ func TestProjectListTakesNoArgument(t *testing.T) {
 
 	got := runWith(t, server.env(), "project", "list", "DEV")
 
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 }
 
 func TestProjectListRefusesALimitItCannotSend(t *testing.T) {
@@ -89,7 +83,7 @@ func TestProjectListRefusesALimitItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), "project", "list", "--limit", tc.limit)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 		})
 	}
 }
@@ -100,7 +94,7 @@ func TestProjectListRefusesALimitGivenTwice(t *testing.T) {
 
 	got := runWith(t, server.env(), "project", "list", "--limit", "1", "--limit", "2")
 
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 }
 
 func TestProjectListRefusesFieldsThatDoNotParse(t *testing.T) {
@@ -109,7 +103,7 @@ func TestProjectListRefusesFieldsThatDoNotParse(t *testing.T) {
 
 	got := runWith(t, server.env(), "project", "list", "--fields", "a,,b")
 
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 }
 
 func TestProjectListAddsFieldsToTheDefaultOfTheList(t *testing.T) {
@@ -205,7 +199,7 @@ func TestProjectListRefusesMoreProjectsThanTheLimit(t *testing.T) {
 		code:    "upstream_invalid",
 		details: []detail{{"limit", 1}, {"returned", 2}},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Len(t, server.requests(), 1)
 }
 
@@ -219,7 +213,7 @@ func TestProjectListRefusesACountBelowTheProjectsReceived(t *testing.T) {
 		code:    "upstream_failed",
 		details: []detail{{"total", 0}, {"returned", 1}},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, countingQueries("1"), server.sentQueries())
 }
 
@@ -235,8 +229,7 @@ func TestProjectListRefusesACountWhoseAnswerBreaksOff(t *testing.T) {
 	got := runWith(t, server.env(), "project", "list", "--limit", "1")
 
 	want := faultDocument{code: "upstream_failed", details: []detail{{"request", listRequest(server.url, "id", "-1")}}}
-	assert.Equal(t, want, requireRefusal(t, got))
-	// net/http repeats on its own a request whose reused connection breaks.
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Len(t, server.requests(), 2)
 }
 
@@ -266,7 +259,7 @@ func TestProjectListRefusesAnAnswerOfAnotherShape(t *testing.T) {
 					{"upstream_body", tc.body},
 				},
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Len(t, server.requests(), 1)
 		})
 	}
@@ -278,7 +271,6 @@ func TestProjectListRefusesAFieldAProjectDidNotBring(t *testing.T) {
 		name    string
 		limit   string
 		handler http.HandlerFunc
-		// Of the request the refusal names.
 		fields  string
 		top     string
 		missing []any
@@ -331,7 +323,7 @@ func TestProjectListRefusesAFieldAProjectDidNotBring(t *testing.T) {
 					{"missing", tc.missing},
 				},
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 		})
 	}
 }
@@ -427,7 +419,6 @@ func TestProjectListRefusesANameTheSchemasOfTheDevInstanceDoNotDeclare(t *testin
 
 	got := runWith(t, dev.env(), "project", "list", "--fields", "shortName,bogus")
 
-	// Every project lacks the name, and the name is listed once.
 	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{
@@ -436,6 +427,6 @@ func TestProjectListRefusesANameTheSchemasOfTheDevInstanceDoNotDeclare(t *testin
 			{"unknown", []any{unknownEntry("bogus", projectNames()...)}},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Len(t, dev.requests(), 1)
 }

@@ -10,10 +10,6 @@ import (
 	"github.com/hakastein/ytrack/internal/render"
 )
 
-// The members more than one command of the tool asks for and reads a value by: an entity of YouTrack goes by
-// its id, a field of a project and a value of a bundle by the name the project gave them, a user by a login,
-// and the two under a field say what one value of it looks like. A member one command alone reads is written
-// as the text it is.
 const (
 	idKey        = "id"
 	nameKey      = "name"
@@ -22,38 +18,24 @@ const (
 	valueTypeKey = "valueType"
 )
 
-// A name of a fields= expression with the names asked of its value, in the order given.
 type requestedField struct {
-	name     string
-	children []requestedField
-	// The name stood in double quotes, which is how a name of the data is written: the custom fields of an
-	// issue are named that way and the specification's own names never are.
-	quoted bool
-	// The name was written last with no list after it, so everything under it was asked for. Where a merge
-	// puts two spellings of one name together, this is the one the later of them had.
-	bare       bool
-	fromCaller bool
-	// ytrack reads what stands at this name by a rule of its own and prints one value for it, so the names it
-	// asked below are held to that rule rather than to the catalogue.
+	name         string
+	children     []requestedField
+	quoted       bool
+	bare         bool
+	fromCaller   bool
 	normalized   bool
 	extraSchemas []string
 }
 
-// parseFields is the expression of a command whose names are all the specification's own, where a double
-// quote is a character the grammar has no place for.
 func parseFields(expression, defaults string) ([]requestedField, *diag.Fault) {
 	return readFields(expression, defaults, false)
 }
 
-// parseDefault is the default of a command read as an expression of its own, which is what a caller who wrote no
-// --fields is answered: nothing in it reached the tree through them.
 func parseDefault(defaults string, named bool) ([]requestedField, *diag.Fault) {
 	return (&fieldsReader{text: defaults, named: named}).expression(nil)
 }
 
-// fieldsOrDefault is where a command takes its names from: the expression the caller wrote, or the default of the
-// command where they wrote none, and the text of the one that stood, which is what a refusal quotes back. named
-// is whether a name the project gave a custom field may be written in it.
 func fieldsOrDefault(expression *string, defaults string, named bool) (string, []requestedField, *diag.Fault) {
 	if expression == nil {
 		requested, fault := parseDefault(defaults, named)
@@ -79,9 +61,6 @@ func readExpression(expression, defaults string, named bool) ([]requestedField, 
 	if !given.take('+') {
 		return given.expression(nil)
 	}
-	// Read first into the same tree, so the default keeps its names in their places and new names follow them.
-	// They are ytrack's own until the caller writes one of them again: a name that reached the expression
-	// through the default alone is not theirs to answer for.
 	tree, fault := parseDefault(defaults, named)
 	if fault != nil {
 		return nil, fault
@@ -89,17 +68,11 @@ func readExpression(expression, defaults string, named bool) ([]requestedField, 
 	return given.expression(tree)
 }
 
-// The name the file itself arrives under: the server answers it with the bytes of the attachment as a data URL.
 const fileContentKey = "base64Content"
 
-// Why the content of a file is asked for nowhere: ytrack downloads nothing, and this name is a download.
 const fileContentMessage = "is the file itself, which ytrack does not download; the url printed with an " +
 	"attachment is a signed link, and whoever holds it fetches the file with any client"
 
-// rejectFileContent holds an expression to naming no file content, at any depth and under any name above
-// it. The catalogue is asked nothing, unlike the refusal of comments: the specification declares the name on
-// the two schemas of an attachment and on nothing else, so it names the same thing wherever it is written, and
-// the places the caller may write it at are not worth a walk of the schemas.
 func rejectFileContent(expression string, requested []requestedField) *diag.Fault {
 	path, written := findField(fileContentKey, requested, nil)
 	if !written {
@@ -109,8 +82,6 @@ func rejectFileContent(expression string, requested []requestedField) *diag.Faul
 	return &diag.Fault{Code: diag.BadUsage, Message: message}
 }
 
-// findField is the first place the caller wrote name at, in the syntax of fields=. A name of the data stands in
-// double quotes and is a name a project gave a field of its own, so it is another name than this one.
 func findField(name string, requested []requestedField, parents []string) (string, bool) {
 	for _, field := range requested {
 		if field.name == name && !field.quoted {
@@ -124,14 +95,10 @@ func findField(name string, requested []requestedField, parents []string) (strin
 	return "", false
 }
 
-// A caller who wrote a leading + leans on the default of the command, and field show settles its own default
-// only once it knows what the field holds.
 func extendsDefault(expression string) bool {
 	return (&fieldsReader{text: expression}).take('+')
 }
 
-// formatFields writes the tree the way the expression is written: as the fields= that goes out, and, for a tree still
-// holding names of the data, as what the caller typed.
 func formatFields(fields []requestedField) string {
 	names := make([]string, 0, len(fields))
 	for _, field := range fields {
@@ -144,8 +111,6 @@ func formatFields(fields []requestedField) string {
 	return strings.Join(names, ",")
 }
 
-// formatName is the name as the grammar carries it: bare, or in double quotes with the two characters the
-// quotes cannot hold raw put back the way they were written.
 func formatName(field requestedField) string {
 	if !field.quoted {
 		return field.name
@@ -153,17 +118,12 @@ func formatName(field requestedField) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(field.name) + `"`
 }
 
-// The server answers a name given twice by its last form alone, dropping what the first asked of it,
-// so a repeat is merged into the first.
 func merge(fields []requestedField, field requestedField) []requestedField {
 	for i := range fields {
 		if fields[i].name == field.name {
 			for _, child := range field.children {
 				fields[i].children = merge(fields[i].children, child)
 			}
-			// The last spelling says whether the whole of the field was asked for: written bare after names,
-			// it takes the block back whole. Whose name it is follows the same hand: a name of the default
-			// the caller wrote as well reached the expression through them too.
 			fields[i].bare = field.bare
 			fields[i].fromCaller = fields[i].fromCaller || field.fromCaller
 			fields[i].normalized = fields[i].normalized || field.normalized
@@ -178,9 +138,6 @@ func merge(fields []requestedField, field requestedField) []requestedField {
 	return append(fields, field)
 }
 
-// withFields is what a command sends: the caller's expression with the names ytrack needs of its own merged into
-// it. merge changes the tree it merges into and the caller's is still needed as they wrote it — it says what is
-// printed — so the merging happens over a copy, down to the children of a name they both ask for.
 func withFields(requested []requestedField, own ...requestedField) []requestedField {
 	asked := cloneFields(requested)
 	for _, field := range own {
@@ -201,10 +158,6 @@ func cloneFields(fields []requestedField) []requestedField {
 	return copied
 }
 
-// walkFields hands visit every place the caller wrote: the schema it stands on, what the specification declares
-// for it there, the names it stands under, and the field itself, which visit may fill in — a place filled in is
-// then walked as visit left it. The tree stands at the schema of at, and a place is walked below as well, since
-// the same name may stand under it again: the issues at the other end of a link carry links of their own.
 func walkFields(c *schemas, at string, requested []requestedField, parents []string, visit func(declaringSchema string, decl typeRef, path []string, field *requestedField)) {
 	for i := range requested {
 		field := &requested[i]
@@ -218,7 +171,6 @@ func walkFields(c *schemas, at string, requested []requestedField, parents []str
 	}
 }
 
-// fieldsNamed hands visit each place the caller wrote name at where the specification declares the place of schema.
 func fieldsNamed(c *schemas, at, schema, name string, requested []requestedField, parents []string, visit func(parents []string, field *requestedField)) {
 	walkFields(c, at, requested, parents, func(declaringSchema string, _ typeRef, path []string, field *requestedField) {
 		if declaringSchema == schema && field.name == name {
@@ -227,10 +179,6 @@ func fieldsNamed(c *schemas, at, schema, name string, requested []requestedField
 	})
 }
 
-// fieldsOfType hands visit every place the caller wrote where the specification declares a value of schema,
-// wherever it stands below the schema of at. A place is found by the type declared for it rather than by the
-// name it goes by, so one rule reaches every name the same type stands under: the duration of a work item and
-// the two a change of one is written as are the same place three times over.
 func fieldsOfType(c *schemas, at, schema string, requested []requestedField, parents []string, visit func(parents []string, field *requestedField)) {
 	walkFields(c, at, requested, parents, func(_ string, decl typeRef, path []string, field *requestedField) {
 		if decl.schema == schema {
@@ -250,12 +198,9 @@ func firstFieldNamed(c *schemas, at, schema, name string, requested []requestedF
 }
 
 type fieldsReader struct {
-	text string
-	at   int
-	// Names of the data are read here: without this a double quote is a character the grammar has no place for.
-	named bool
-	// Whose text this is. The reader is the one place a name of the caller's can enter a tree, so it is the one
-	// place the mark is put on.
+	text       string
+	at         int
+	named      bool
 	fromCaller bool
 }
 
@@ -316,7 +261,6 @@ func (r *fieldsReader) itemName() (requestedField, *diag.Fault) {
 		return requestedField{}, r.unexpected()
 	}
 	field := requestedField{name: r.text[start:r.at], fromCaller: r.fromCaller}
-	// A name asked for is printed as a key, so a name the renderer would refuse is refused before any request.
 	if err := render.CheckKey(field.name); err != nil {
 		message := fmt.Sprintf("fields %s: the name at column %d cannot be printed: %v", render.Quote(r.text), r.column(start), err)
 		return requestedField{}, &diag.Fault{Code: diag.BadUsage, Message: message}
@@ -349,7 +293,6 @@ func (r *fieldsReader) quotedName() (requestedField, *diag.Fault) {
 	return requestedField{}, r.unexpected()
 }
 
-// take moves past the spaces ahead and past c, if c follows them.
 func (r *fieldsReader) take(c byte) bool {
 	r.skipSpace()
 	if r.at < len(r.text) && r.text[r.at] == c {
@@ -359,7 +302,6 @@ func (r *fieldsReader) take(c byte) bool {
 	return false
 }
 
-// The server reads a space as a part of the name, so spaces and tabs are skipped and the walk writes none.
 func (r *fieldsReader) skipSpace() {
 	for r.at < len(r.text) && (r.text[r.at] == ' ' || r.text[r.at] == '\t') {
 		r.at++
@@ -380,7 +322,6 @@ func (r *fieldsReader) column(at int) int {
 	return utf8.RuneCountInString(r.text[:at]) + 1
 }
 
-// The characters of the specification's property names.
 func isNameByte(c byte) bool {
 	return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || c == '_' || c == '$'
 }

@@ -9,12 +9,8 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// Both places a bundle could keep the users a field allows, asked of every field of the project at once.
 const allowedUsersAsked = "customFields(field(name),bundle(values(name),aggregatedUsers(login)))"
 
-// The users a user field allows are bundle.aggregatedUsers. Under bundle.values lie the individuals and the
-// groups the bundle was built from, so a login asked there answers a team instead. The spec declares no values
-// on UserBundle at all, and the server sends the key anyway.
 func TestProjectShowFindsTheUsersAUserFieldOfTheDevInstanceAllowsUnderAggregatedUsers(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -27,17 +23,16 @@ func TestProjectShowFindsTheUsersAUserFieldOfTheDevInstanceAllowsUnderAggregated
 
 	assignee := bundleOfField(t, fields, "Assignee")
 	assert.Contains(t, assignee["aggregatedUsers"], map[string]any{"login": "admin"})
-	assert.Contains(t, assignee["values"], map[string]any{"name": "DEVELOPMENT Team"})
+	assert.Contains(t, assignee["values"], map[string]any{"name": "DEVELOPMENT Team"},
+		"values of a user bundle holds the users and groups it draws from")
 	assert.NotContains(t, assignee["values"], map[string]any{"name": "admin"})
 
-	// An empty bundle allows everyone rather than no one, and its values are empty just the same.
-	together := bundleOfField(t, fields, "Соисполнители")
-	assert.Contains(t, together, "aggregatedUsers")
-	assert.Empty(t, together["aggregatedUsers"])
-	assert.Contains(t, together, "values")
-	assert.Empty(t, together["values"])
+	allowsEveryone := bundleOfField(t, fields, "Соисполнители")
+	assert.Contains(t, allowsEveryone, "aggregatedUsers")
+	assert.Empty(t, allowsEveryone["aggregatedUsers"])
+	assert.Contains(t, allowsEveryone, "values")
+	assert.Empty(t, allowsEveryone["values"])
 
-	// An enum bundle declares no aggregatedUsers, so the key is left out rather than refused.
 	enum := bundleOfField(t, fields, "Type")
 	assert.Contains(t, enum, "values")
 	assert.NotContains(t, enum, "aggregatedUsers")
@@ -48,8 +43,6 @@ func TestProjectShowFindsTheUsersAUserFieldOfTheDevInstanceAllowsUnderAggregated
 	assert.Len(t, dev.requests(), 1)
 }
 
-// customFieldsByName reads the printed document and indexes the custom fields by the name of the field each
-// one carries.
 func customFieldsByName(t *testing.T, stdout string) map[string]map[string]any {
 	t.Helper()
 	var printed struct {

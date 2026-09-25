@@ -11,8 +11,6 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// A fields expression that fails to parse is refused rather than crashing the parser, whatever shape the
-// malformed input takes.
 func TestProjectShowRefusesFieldsThatDoNotParse(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -39,13 +37,11 @@ func TestProjectShowRefusesFieldsThatDoNotParse(t *testing.T) {
 
 			got := runWith(t, server.env(), "project", "show", "DEV", "--fields", tc.fields)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 		})
 	}
 }
 
-// A name that reads as a bool, null, or starting with a digit cannot be printed as a YAML key, so it is
-// refused rather than filed.
 func TestProjectShowRefusesANameItCannotPrintAsAKey(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -64,7 +60,7 @@ func TestProjectShowRefusesANameItCannotPrintAsAKey(t *testing.T) {
 
 			got := runWith(t, server.env(), "project", "show", "DEV", "--fields", tc.fields)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 		})
 	}
 }
@@ -91,7 +87,7 @@ func TestProjectShowRefusesFieldsGivenTwice(t *testing.T) {
 
 			got := runWith(t, server.env(), slices.Concat([]string{"project", "show", "DEV"}, tc.flags)...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 		})
 	}
 }
@@ -147,14 +143,15 @@ func TestProjectShowPrintsTheTypeWhenAskedFor(t *testing.T) {
 
 func TestProjectShowPrintsScalarsAsReceived(t *testing.T) {
 	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, `{"name":"[bug] fix login","archived":true,"startingNumber":9007199254740993,"issues":[],"leader":null,"$type":"Project"}`))
+	const pastFloat64Precision = "9007199254740993"
+	server := serve(t, respondWith(http.StatusOK, `{"name":"[bug] fix login","archived":true,"startingNumber":`+
+		pastFloat64Precision+`,"issues":[],"leader":null,"$type":"Project"}`))
 
 	got := runWith(t, server.env(), "project", "show", "DEV", "--fields", "name,archived,startingNumber,issues(idReadable),leader(login)")
 
-	// Read as a float64, the number would print as 9007199254740992.
 	const want = `name: "[bug] fix login"
 archived: true
-startingNumber: 9007199254740993
+startingNumber: ` + pastFloat64Precision + `
 issues: []
 leader: null
 `
@@ -187,7 +184,6 @@ codes:
   - {}
 `
 	assert.Equal(t, outcome{stdout: want}, got)
-	// Every key of the answer was asked for, so the document reads back as the answer itself.
 	var printed, received any
 	require.NoError(t, yaml.Unmarshal([]byte(got.stdout), &printed))
 	require.NoError(t, yaml.Unmarshal([]byte(body), &received))
@@ -249,7 +245,7 @@ func TestProjectShowRefusesAFieldTheDevInstanceFailsOn(t *testing.T) {
 
 	got := runWith(t, dev.env(), "project", "show", "DEV", "--fields", "startingNumber")
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "upstream_failed", found.code)
 	require.Len(t, found.details, 4, "details: %v", found.details)
 	want := []detail{
@@ -259,7 +255,6 @@ func TestProjectShowRefusesAFieldTheDevInstanceFailsOn(t *testing.T) {
 	}
 	assert.Equal(t, want, found.details[:3])
 	assert.Equal(t, "upstream_message", found.details[3].key)
-	// The rest of the text names the server's own classes, which belong to its build.
 	assert.Contains(t, found.details[3].value, `Cannot invoke "java.lang.Number.longValue()"`)
 	assert.Len(t, dev.requests(), 1)
 }

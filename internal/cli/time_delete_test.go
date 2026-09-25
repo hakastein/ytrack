@@ -9,11 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The one thing the read before a removal asks for, and the whole of what a removal prints: a work item
-// carries no readable id of its own, so the pair it is addressed by is its identity.
 const removedWorkItemFields = "id,issue(idReadable)"
 
-// The two requests a removal of a work item goes out as, which are the ones a refusal about it names.
 func workItemReadRequest(address, issue, id string) string {
 	return "GET " + address + workItemPath(issue, id) + "?fields=" + removedWorkItemFields
 }
@@ -22,22 +19,16 @@ func workItemDeletionRequest(address, issue, id string) string {
 	return "DELETE " + address + workItemPath(issue, id)
 }
 
-// The work item as the read before a removal sees it: the id it goes by and the issue it hangs from.
 func workItemOfAnIssue(id, issue string) string {
 	return `{"$type":"IssueWorkItem","id":` + strconv.Quote(id) +
 		`,"issue":{"$type":"Issue","idReadable":` + strconv.Quote(issue) + `}}`
 }
 
-// removingTime is the server of a removal of a work item: read answers the GET that settles what is printed
-// and where the removal goes, and deletion the DELETE that follows it.
 func removingTime(t *testing.T, read, deletion http.HandlerFunc) *upstream {
 	t.Helper()
 	return serve(t, readThenDeletion(read, deletion))
 }
 
-// What a removal takes: the issue and the id, both as arguments, and nothing else at all. A single id is
-// no address, so a call carrying one is short of an argument rather than given a bad one, and there is no flag
-// to say the removal twice.
 func TestTimeDeleteRefusesBeforeAnyRequest(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -61,14 +52,12 @@ func TestTimeDeleteRefusesBeforeAnyRequest(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// Nothing in the help offers a way to say the removal twice: ytrack removes what it was told to remove,
-// once, and what a caller reads the work item with first stands there instead.
 func TestTimeDeleteHelpOffersNoConfirmation(t *testing.T) {
 	t.Parallel()
 
@@ -81,9 +70,6 @@ func TestTimeDeleteHelpOffersNoConfirmation(t *testing.T) {
 	assert.NotContains(t, got.stdout, "--force")
 }
 
-// The whole of the command: the work item is read while it is still there, and the removal that follows
-// goes out to the readable id that read gave, carrying no body and no query at all. What the read brought back
-// is the document — nothing is read after a write.
 func TestTimeDeleteReadsTheWorkItemAndThenRemovesIt(t *testing.T) {
 	t.Parallel()
 	server := removingTime(t, respondWith(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1")), deletionDone())
@@ -101,9 +87,6 @@ func TestTimeDeleteReadsTheWorkItemAndThenRemovesIt(t *testing.T) {
 	assert.Equal(t, []string{"", ""}, server.asks())
 }
 
-// What the server says passes on word for word, whichever half of the command it was answering: a work
-// item the read does not find is a refusal with nothing destroyed, and one the removal is refused is the
-// server's word about a work item that is still there.
 func TestTimeDeleteReadsTheAnswerOfEachHalf(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -146,15 +129,12 @@ func TestTimeDeleteReadsTheAnswerOfEachHalf(t *testing.T) {
 
 			got := runWith(t, server.env(), "time", "delete", "DEV-1", "199-7")
 
-			assert.Equal(t, tc.code, requireRefusal(t, got).code)
+			assert.Equal(t, tc.code, requireFault(t, got).code)
 			assert.Equal(t, tc.methods, sentMethods(server))
 		})
 	}
 }
 
-// What the read brought back becomes two path segments of the removal, so both are held to the form ytrack
-// sends before anything is destroyed: ".." for an id would turn the removal of a work item into a write to the
-// work items of the issue, and the readable id of an article names no issue at all.
 func TestTimeDeleteRemovesNothingAddressedByWhatTheReadGave(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -176,15 +156,12 @@ func TestTimeDeleteRemovesNothingAddressedByWhatTheReadGave(t *testing.T) {
 
 			got := runWith(t, server.env(), "time", "delete", "DEV-1", "199-7")
 
-			assert.Equal(t, "upstream_invalid", requireRefusal(t, got).code)
+			assert.Equal(t, "upstream_invalid", requireFault(t, got).code)
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 		})
 	}
 }
 
-// A removal is answered with nothing at all, so a 200 carrying anything is the answer of something other
-// than the endpoint that was asked: the work item may well be gone, and the exit code says the caller cannot
-// answer it by sending the call again.
 func TestTimeDeleteRefusesAnAnswerToTheRemovalThatCarriesABody(t *testing.T) {
 	t.Parallel()
 	server := removingTime(t, respondWith(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1")),
@@ -225,12 +202,10 @@ func TestTimeDeleteRemovesAWorkItemOfTheDevInstance(t *testing.T) {
 
 	before := len(dev.requests())
 	again := runWith(t, dev.env(), "time", "delete", issue, item)
-	assert.Equal(t, "not_found", requireRefusal(t, again).code)
+	assert.Equal(t, "not_found", requireFault(t, again).code)
 	assert.Equal(t, []string{workItemPath(issue, item)}, pathsSince(dev, before))
 }
 
-// A token that may not see the issue is answered as if the work item were not there, on the read, so the
-// removal never goes out and the admin finds the work item where it was.
 func TestTimeDeleteRefusesAnIssueTheLimitedUserMayNotSee(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -241,7 +216,7 @@ func TestTimeDeleteRefusesAnIssueTheLimitedUserMayNotSee(t *testing.T) {
 	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited},
 		"time", "delete", issue, item)
 
-	assert.Equal(t, "not_found", requireRefusal(t, got).code)
+	assert.Equal(t, "not_found", requireFault(t, got).code)
 	assert.Equal(t, []string{workItemPath(issue, item)}, pathsSince(dev, before))
 
 	listed := theWorkItemsOf(t, dev, issue)

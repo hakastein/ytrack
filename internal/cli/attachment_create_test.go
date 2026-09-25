@@ -16,30 +16,22 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// The one part an upload is written as, under the name the specification declares for it.
 const uploadedField = "files[0]"
 
-// The request an upload of an issue goes out as, which is the one a refusal about it names.
 func attachmentWriteRequest(address, owner, fields string) string {
 	return "POST " + address + "/api/issues/" + owner + "/attachments?fields=" + fields
 }
 
-// filed is what a server answers an upload with: the array of what the write filed, holding the one
-// attachment, with the name and the size of it as the scenario says the server kept them.
 func filed(name string, size int) string {
 	return filedAs(strconv.Quote(name), strconv.Itoa(size))
 }
 
-// filedAs is the same answer for a scenario about the shape of what came back rather than its value: the name
-// and the size stand in the body as the JSON written here, whatever kind of value that is.
 func filedAs(name, size string) string {
 	return `[{"$type":"IssueAttachment","id":"12-9","name":` + name +
 		`,"size":` + size + `,"mimeType":"application/octet-stream",` +
 		`"url":"/api/files/12-9?sign=s&updated=1"}]`
 }
 
-// fileWith writes a file of that name into a directory of the test's own and gives back its path. The
-// bytes are the scenario's, so a name and a content that would each go wrong on their own are told apart.
 func fileWith(t *testing.T, name string, content []byte) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
@@ -47,14 +39,11 @@ func fileWith(t *testing.T, name string, content []byte) string {
 	return path
 }
 
-// aFileToAttach is a file whose name and content matter to nothing: a scenario about the owner, the flags or
-// the answer of the server still needs one to send.
 func aFileToAttach(t *testing.T) string {
 	t.Helper()
 	return fileWith(t, "attached.txt", []byte("ytrack"))
 }
 
-// requireOnePart holds the body of the upload to being the one part it is written as and gives that part back.
 func requireOnePart(t *testing.T, server *upstream) formPart {
 	t.Helper()
 	parts := sentParts(t, server, 0)
@@ -63,8 +52,6 @@ func requireOnePart(t *testing.T, server *upstream) formPart {
 	return parts[0]
 }
 
-// What a creation is given is two arguments, and the refusal names which of the two is missing before any
-// file is opened and any request is built.
 func TestAttachmentCreateRefusesACallOfAnyOtherShape(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -74,7 +61,6 @@ func TestAttachmentCreateRefusesACallOfAnyOtherShape(t *testing.T) {
 		{name: "nothing at all", argv: nil},
 		{name: "an owner alone", argv: []string{"DEV-1"}},
 		{name: "a third argument", argv: []string{"DEV-1", "a.txt", "b.txt"}},
-		// pflag reads a leading dash as a flag wherever the word stands, so such a path is written ./-x.txt.
 		{name: "a path beginning with a dash", argv: []string{"DEV-1", "-x.txt"}},
 	}
 	for _, tc := range tests {
@@ -84,14 +70,12 @@ func TestAttachmentCreateRefusesACallOfAnyOtherShape(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"attachment", "create"}, tc.argv...)...)
 
-			assert.Equal(t, "bad_usage", requireRefusal(t, got).code)
+			assert.Equal(t, "bad_usage", requireFault(t, got).code)
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// An attachment is the bytes of one regular file, so what the path stands for is settled before anything
-// is opened and before anything is sent. The refusal names the path as the caller wrote it.
 func TestAttachmentCreateRefusesAPathThatIsNoRegularFile(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -126,15 +110,12 @@ func TestAttachmentCreateRefusesAPathThatIsNoRegularFile(t *testing.T) {
 
 			got := runWith(t, server.env(), "attachment", "create", "DEV-1", path)
 
-			assert.Equal(t, "bad_usage", requireRefusal(t, got).code)
+			assert.Equal(t, "bad_usage", requireFault(t, got).code)
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The help says a lone dash is a file of that name and that nothing is ever read from standard input, and
-// both halves are the same argument: the word reaches the command as the path it was written as, and the
-// stream handed to Run holds a file's worth of bytes it is never asked for.
 func TestAttachmentCreateReadsALoneDashAsAFileOfThatName(t *testing.T) {
 	t.Parallel()
 
@@ -147,7 +128,7 @@ func TestAttachmentCreateReadsALoneDashAsAFileOfThatName(t *testing.T) {
 
 		got := runOn(t, stdin, server.env(), "attachment", "create", "DEV-1", "-")
 
-		assert.Equal(t, "bad_usage", requireRefusal(t, got).code)
+		assert.Equal(t, "bad_usage", requireFault(t, got).code)
 		assert.Empty(t, server.requests())
 		read, err := stdin.Seek(0, io.SeekCurrent)
 		require.NoError(t, err)
@@ -169,9 +150,6 @@ func TestAttachmentCreateReadsALoneDashAsAFileOfThatName(t *testing.T) {
 	})
 }
 
-// Every name here YouTrack would keep as another, and it would do so after the file is stored: the write
-// would have happened and the name could not be taken back. So each is refused before anything is sent, and
-// the refusal names the rule, quotes the name, and says what to do instead.
 func TestAttachmentCreateRefusesANameTheServerWouldRewrite(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -196,13 +174,12 @@ func TestAttachmentCreateRefusesANameTheServerWouldRewrite(t *testing.T) {
 
 			got := runWith(t, server.env(), "attachment", "create", "DEV-1", path)
 
-			assert.Equal(t, "bad_usage", requireRefusal(t, got).code)
+			assert.Equal(t, "bad_usage", requireFault(t, got).code)
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The help says what a caller gets unasked, so the default is read off it rather than off this repository.
 func TestAttachmentCreateHelpNamesTheDefaultFields(t *testing.T) {
 	t.Parallel()
 
@@ -213,10 +190,6 @@ func TestAttachmentCreateHelpNamesTheDefaultFields(t *testing.T) {
 	assert.Contains(t, got.stdout, attachmentFields)
 }
 
-// What goes on the wire for one upload: one part under the name the specification declares, the name of
-// the file byte for byte in the header, and the bytes of the file as they stand on disk. The form is written
-// as it is sent, so its length is unknown and the request is chunked — a body gathered into a buffer first
-// would carry a Content-Length and would have to fit in memory.
 func TestAttachmentCreateSendsTheFileAsOneStreamedPart(t *testing.T) {
 	t.Parallel()
 	const name = "[bug] заметка; 100%.bin"
@@ -247,9 +220,6 @@ func TestAttachmentCreateSendsTheFileAsOneStreamedPart(t *testing.T) {
 		"the content type names no boundary: %q", asked[0].Header.Get("Content-Type"))
 }
 
-// Everything the rules of the name leave alone goes out byte for byte, in the header of the part as well
-// as in the document: a space, a semicolon, a tab inside the name, a line separator, a non-breaking space,
-// three dots, a name of 254 bytes and a name with no extension at all.
 func TestAttachmentCreateSendsEveryOtherNameUnchanged(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -264,8 +234,6 @@ func TestAttachmentCreateSendsEveryOtherNameUnchanged(t *testing.T) {
 		{name: "three dots", file: "..."},
 		{name: "254 bytes of Cyrillic", file: strings.Repeat("я", 127)},
 		{name: "no extension", file: "README"},
-		// A path whose name begins with a dash reaches the argument through ./, and the name itself
-		// keeps the dash.
 		{name: "a leading dash", file: "-x.txt"},
 	}
 	for _, tc := range tests {
@@ -280,15 +248,11 @@ func TestAttachmentCreateSendsEveryOtherNameUnchanged(t *testing.T) {
 			sent := requireOnePart(t, server)
 			assert.Equal(t, tc.file, sent.file)
 			assert.Equal(t, `form-data; name="`+uploadedField+`"; filename="`+tc.file+`"`, sent.disposition)
-			// The document escapes what a double-quoted string may not carry raw, so the name is read back
-			// rather than looked for in the text of stdout.
 			assert.Equal(t, tc.file, requireAttachmentPrinted(t, got.stdout).Name)
 		})
 	}
 }
 
-// A relative path is resolved by the kernel against the directory the call was made from, so it reaches
-// the very file the absolute one does and the request is the same request.
 func TestAttachmentCreateReadsARelativePathAgainstTheWorkingDirectory(t *testing.T) {
 	t.Parallel()
 	const name = "relative.bin"
@@ -315,8 +279,6 @@ func TestAttachmentCreateReadsARelativePathAgainstTheWorkingDirectory(t *testing
 	}
 }
 
-// The name and the size are the tool's own to ask for: they are what the answer is held against, so they
-// go out whatever the caller wrote, and the document still holds only what the caller asked to print.
 func TestAttachmentCreateAsksForTheNameAndTheSizeItChecks(t *testing.T) {
 	t.Parallel()
 	server := serve(t, respondWith(http.StatusOK, filed("one.txt", 1)))
@@ -328,8 +290,6 @@ func TestAttachmentCreateAsksForTheNameAndTheSizeItChecks(t *testing.T) {
 	assert.Equal(t, []string{"id,name,size"}, server.sentFields())
 }
 
-// A 200 says the server took the file, not that it kept the file that was sent. Every answer here leaves
-// an attachment behind, so none of them is a document and the exit code says the instance changed.
 func TestAttachmentCreateRefusesAnAnswerThatIsNotTheFileThatWentOut(t *testing.T) {
 	t.Parallel()
 	const name = "one.txt"
@@ -365,8 +325,6 @@ func TestAttachmentCreateRefusesAnAnswerThatIsNotTheFileThatWentOut(t *testing.T
 				{"mismatch", []any{[]detail{{"field", "size"}, {"expected", len(content)}, {"actual", len(content) + 1}}}},
 			},
 		},
-		// A size that is no number at all is a disagreement like any other, and what stands under arrived is
-		// what the server sent rather than a null of ytrack's own: ADR-0005 asks for what arrived word for word.
 		{
 			name: "a size that arrived as text",
 			body: filedAs(strconv.Quote(name), strconv.Quote(strconv.Itoa(len(content)))),
@@ -375,7 +333,6 @@ func TestAttachmentCreateRefusesAnAnswerThatIsNotTheFileThatWentOut(t *testing.T
 				{"mismatch", []any{[]detail{{"field", "size"}, {"expected", len(content)}, {"actual", "6"}}}},
 			},
 		},
-		// The same for the name, which is held to text: a number came back, and the refusal names that number.
 		{
 			name: "a name that arrived as a number",
 			body: filedAs("7", strconv.Itoa(len(content))),
@@ -403,9 +360,6 @@ func TestAttachmentCreateRefusesAnAnswerThatIsNotTheFileThatWentOut(t *testing.T
 	}
 }
 
-// What the server refuses the upload with is read the way a status is read everywhere, and the words it
-// used pass on as they are: ytrack sets no limit of its own, so the one the instance holds — and the one the
-// project holds on how many files an issue carries — are the server's to name.
 func TestAttachmentCreateRefusesWhatTheServerAnswered(t *testing.T) {
 	t.Parallel()
 	const overTheLimit = "the request was rejected because its size (10485761) exceeds the configured maximum (10485760)"
@@ -445,7 +399,7 @@ func TestAttachmentCreateRefusesWhatTheServerAnswered(t *testing.T) {
 
 			got := runWith(t, server.env(), "attachment", "create", "DEV-1", path)
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.message, detailNamed(t, found, "upstream_message"))
 			assert.Equal(t, detail{"request", attachmentWriteRequest(server.url, "DEV-1", attachmentFields)},
@@ -455,15 +409,11 @@ func TestAttachmentCreateRefusesWhatTheServerAnswered(t *testing.T) {
 	}
 }
 
-// twice is an array of two of what an answer of one carries: a server that filed the file more than once, or
-// answered about something other than the write.
 func twice(one string) string {
 	inside := strings.TrimSuffix(strings.TrimPrefix(one, "["), "]")
 	return "[" + inside + "," + inside + "]"
 }
 
-// repeatedBytes is a file of every byte there is, over and over: a content no text encoding would survive, so
-// a part that arrived whole is told from one that was read as text somewhere on the way.
 func repeatedBytes(size int) []byte {
 	content := make([]byte, size)
 	for i := range content {
@@ -472,10 +422,7 @@ func repeatedBytes(size int) []byte {
 	return content
 }
 
-// everyLatinRune is repeatedBytes for a scenario whose request and answer are written into a cassette: every
-// rune from U+0001 to U+00FF, which covers both halves of the byte range and breaks under any transcoding,
-// while staying valid UTF-8 so the cassette keeps the bodies as text rather than as base64.
-func everyLatinRune(times int) []byte {
+func everyLatin1RuneAsUTF8(times int) []byte {
 	runes := make([]rune, 0, 0xFF)
 	for r := rune(1); r <= 0xFF; r++ {
 		runes = append(runes, r)
@@ -488,7 +435,7 @@ func TestAttachmentCreateAttachesAFileToAnIssueOfTheDevInstance(t *testing.T) {
 	dev := devInstance(t)
 	issue := attachedIssue(t, dev)
 	const name = "заметка контракта; 100%.bin"
-	content := everyLatinRune(2)
+	content := everyLatin1RuneAsUTF8(2)
 	path := fileWith(t, name, content)
 
 	got := runWith(t, dev.env(), "attachment", "create", issue, path)
@@ -528,8 +475,6 @@ func TestAttachmentCreateAttachesAnEmptyFileToAnIssueOfTheDevInstance(t *testing
 	assert.Equal(t, 0, written.Size)
 }
 
-// An issue nobody filed is answered 404 by the server itself, and nothing about the file was asked
-// beforehand: one request is the whole call.
 func TestAttachmentCreateRefusesAnIssueTheDevInstanceHasNoneOf(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -537,15 +482,13 @@ func TestAttachmentCreateRefusesAnIssueTheDevInstanceHasNoneOf(t *testing.T) {
 
 	got := runWith(t, dev.env(), "attachment", "create", "DEV-99999", path)
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "not_found", found.code)
 	assert.Equal(t, "Entity with id DEV-99999 not found", detailNamed(t, found, "upstream_message"))
 	require.Len(t, dev.requests(), 1)
 	assert.Equal(t, "/api/issues/DEV-99999/attachments", dev.sentPaths()[0])
 }
 
-// An issue the token may not see is the same 404 as an issue nobody filed, and it is a 404 the server
-// gives instead of writing: the issue holds no attachment afterwards.
 func TestAttachmentCreateRefusesAnIssueTheTokenIsNotAnsweredFor(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -556,7 +499,7 @@ func TestAttachmentCreateRefusesAnIssueTheTokenIsNotAnsweredFor(t *testing.T) {
 	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited},
 		"attachment", "create", issue, path)
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "not_found", found.code)
 	assert.Equal(t, "Entity with id "+issue+" not found", detailNamed(t, found, "upstream_message"))
 	assert.Len(t, dev.requests()[before:], 1)
@@ -566,9 +509,6 @@ func TestAttachmentCreateRefusesAnIssueTheTokenIsNotAnsweredFor(t *testing.T) {
 	assert.Empty(t, listed.Attachments)
 }
 
-// attachedIssue is the fixture of a contract test that needs an issue of its own to attach files to: it is
-// filed by the command that files issues, with the custom fields DEV requires, and taken away afterwards with
-// everything hanging from it.
 func attachedIssue(t *testing.T, dev *upstream) string {
 	t.Helper()
 	summary := "ytrack contract " + t.Name()
@@ -577,12 +517,10 @@ func attachedIssue(t *testing.T, dev *upstream) string {
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	readable := nodeAt(t, requireMapping(t, "stdout", got.stdout), "idReadable").Value
 	require.Regexp(t, `^DEV-[0-9]+$`, readable)
-	// Registered after the recorder's own cleanup, so the deletion runs first and the cassette records it.
 	t.Cleanup(func() { removeIssue(t, dev, readable) })
 	return readable
 }
 
-// requireAttachmentPrinted is the one attachment a creation printed, read back off stdout.
 func requireAttachmentPrinted(t *testing.T, stdout string) printedAttachment {
 	t.Helper()
 	decoder := yaml.NewDecoder(strings.NewReader(stdout))

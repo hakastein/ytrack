@@ -12,12 +12,11 @@ type Client struct {
 	cache      metaCache
 }
 
-// cache is the directory the metadata of projects is kept in between calls, empty where it is to be kept nowhere.
-func New(address *url.URL, token, cache string) *Client {
+func New(address *url.URL, token, cacheDir string) *Client {
 	return &Client{
 		address:    address,
 		token:      token,
-		httpClient: newHTTPClient(),
-		cache:      newMetaCache(cache, address.String(), token),
+		httpClient: newSendOnceHTTPClient(),
+		cache:      newMetaCache(cacheDir, address.String(), token),
 	}
 }

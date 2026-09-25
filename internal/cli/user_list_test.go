@@ -12,8 +12,6 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// Records of the list under its default expression, with $type and the keys in an order other than the one asked
-// for: the server keeps an order of its own.
 const (
 	listedAdmin   = `{"fullName":"admin","$type":"User","banned":false,"login":"admin"}`
 	listedLimited = `{"banned":false,"login":"dev.limited","$type":"User","fullName":"Ограниченный"}`
@@ -29,14 +27,10 @@ const (
 
 const printedListedUsers = "total: 2\nreturned: 2\ntruncated: false\nusers:\n" + printedAdminRow + printedLimitedRow
 
-// A refusal names the request user list sends: the fields= expression reads as written, while search is the
-// text the server received, escaped.
-func userListRequest(address, fields, top, search string) string {
-	return "GET " + address + "/api/users?fields=" + fields + "&$top=" + top + "&query=" + search
+func userListRequest(address, fields, top, escapedSearch string) string {
+	return "GET " + address + "/api/users?fields=" + fields + "&$top=" + top + "&query=" + escapedSearch
 }
 
-// searchingQueries is what user list sends for a selection of limit users that it goes on to count: the same
-// search goes out both times, so the count is of the users found rather than of the catalogue.
 func searchingQueries(search, limit string) []url.Values {
 	return []url.Values{
 		{"fields": {"login,fullName,banned"}, "$top": {limit}, "query": {search}},
@@ -44,7 +38,6 @@ func searchingQueries(search, limit string) []url.Values {
 	}
 }
 
-// userListing is the document user list prints, read back.
 type userListing struct {
 	Total     int              `yaml:"total"`
 	Returned  int              `yaml:"returned"`
@@ -83,7 +76,7 @@ func TestUserListTakesItsSearchFromTheQueryFlagAlone(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -108,7 +101,7 @@ func TestUserListRefusesALimitItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), slices.Concat([]string{"user", "list", "--query", ""}, tc.flags)...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -125,8 +118,6 @@ func TestUserListHelpNamesTheDefaultFieldsAndTheQueryFlag(t *testing.T) {
 	assert.Contains(t, got.stdout, "--query")
 }
 
-// The + of an expression adds to the default of this command, which is not the default of user show: banned
-// stays in the row and email does not appear.
 func TestUserListAddsFieldsToTheDefaultOfTheList(t *testing.T) {
 	t.Parallel()
 	server := serve(t, respondWith(http.StatusOK, `[{"id":"1-1","fullName":"admin","$type":"User","banned":false,"login":"admin"}]`))
@@ -138,18 +129,16 @@ func TestUserListAddsFieldsToTheDefaultOfTheList(t *testing.T) {
 	assert.Equal(t, []url.Values{{"fields": {"login,fullName,banned,id"}, "$top": {"50"}, "query": {"adm"}}}, server.sentQueries())
 }
 
-// An expression that does not parse is refused before the network here too.
 func TestUserListRefusesFieldsThatDoNotParse(t *testing.T) {
 	t.Parallel()
 	server := serveNothing(t)
 
 	got := runWith(t, server.env(), "user", "list", "--query", "adm", "--fields", "+")
 
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 	assert.Empty(t, server.requests())
 }
 
-// The search is the caller's text and reaches the server as it stands, whatever a query has to escape on the way.
 func TestUserListSendsTheSearchTheServerMustReadBack(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -176,8 +165,6 @@ func TestUserListSendsTheSearchTheServerMustReadBack(t *testing.T) {
 	}
 }
 
-// pflag reads the value of a flag as text wherever it starts, so a search needs no separator and a search that
-// spells a flag of cobra's own is still a search.
 func TestUserListSearchesForATextThatLooksLikeAFlag(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -197,7 +184,6 @@ func TestUserListSearchesForATextThatLooksLikeAFlag(t *testing.T) {
 
 			got := runWith(t, server.env(), slices.Concat([]string{"user", "list"}, tc.flag)...)
 
-			// Printed rather than the help of the command, which cobra prints for --help anywhere else.
 			assert.Equal(t, outcome{stdout: printedListedUsers}, got)
 			requests := server.requests()
 			require.Len(t, requests, 1)
@@ -218,7 +204,6 @@ func TestUserListCountsTheUsersWhenTheyFillTheLimit(t *testing.T) {
 	assert.Equal(t, searchingQueries("a", "1"), server.sentQueries())
 }
 
-// A count that fails takes the command with it: half a document would say the rest were not cut off.
 func TestUserListRefusesWhenTheCountFails(t *testing.T) {
 	t.Parallel()
 	const said = `{"error":"server_error","error_description":"java.lang.NullPointerException"}`
@@ -235,12 +220,10 @@ func TestUserListRefusesWhenTheCountFails(t *testing.T) {
 			{"upstream_message", "java.lang.NullPointerException"},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Len(t, server.requests(), 2)
 }
 
-// A page longer than the limit means $top went out wrong or the server ignored it, and the count that follows
-// would be of something else, so the refusal is of the users it names.
 func TestUserListRefusesMoreUsersThanTheLimit(t *testing.T) {
 	t.Parallel()
 	server := serve(t, respondWith(http.StatusOK, listedUsers))
@@ -251,12 +234,10 @@ func TestUserListRefusesMoreUsersThanTheLimit(t *testing.T) {
 		code:    "upstream_invalid",
 		details: []detail{{"limit", 1}, {"returned", 2}},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Len(t, server.requests(), 1)
 }
 
-// Fewer users counted than arrived is the selection changing between the two requests, and the document has no
-// way to say so: total below returned would print truncated: false over a page that was cut.
 func TestUserListRefusesACountBelowTheUsersReceived(t *testing.T) {
 	t.Parallel()
 	server := serve(t, countedBy(`[`+listedAdmin+`]`, respondWith(http.StatusOK, `[]`)))
@@ -267,7 +248,7 @@ func TestUserListRefusesACountBelowTheUsersReceived(t *testing.T) {
 		code:    "upstream_failed",
 		details: []detail{{"total", 0}, {"returned", 1}},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, searchingQueries("a", "1"), server.sentQueries())
 }
 
@@ -282,7 +263,6 @@ func TestUserListFindsTheLimitedUserOfTheDevInstanceByTheStartOfTheLogin(t *test
 	assert.Len(t, dev.requests(), 1)
 }
 
-// The search reads the full name as well as the login, so a user is found by the name a human knows them by.
 func TestUserListFindsTheLimitedUserOfTheDevInstanceByTheStartOfTheFullName(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -304,7 +284,6 @@ func TestUserListFindsNoUserOfTheDevInstanceByTheDomainOfAnEmail(t *testing.T) {
 	assert.Len(t, dev.requests(), 1)
 }
 
-// The server matches the start of a word and nothing inside one, so the tail of a full name finds nobody.
 func TestUserListFindsNoUserOfTheDevInstanceByATextInsideAWord(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -315,8 +294,6 @@ func TestUserListFindsNoUserOfTheDevInstanceByATextInsideAWord(t *testing.T) {
 	assert.Len(t, dev.requests(), 1)
 }
 
-// An empty search asks for the catalogue, which the limit alone cuts: one request, since fewer users arrived
-// than were asked for.
 func TestUserListFindsEveryUserOfTheDevInstanceForAnEmptySearch(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -345,8 +322,6 @@ func TestUserListCountsTheUsersOfTheDevInstanceBeyondTheLimit(t *testing.T) {
 	assert.Equal(t, searchingQueries("", "1"), dev.sentQueries())
 }
 
-// The catalogue of users is not filtered by the rights a token holds on projects: the limited token, which the
-// dev instance answers 404 for the project DEV, is sent the same users as the admin, byte for byte.
 func TestUserListPrintsTheAdminOfTheDevInstanceToTheLimitedTokenAsWell(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -356,7 +331,7 @@ func TestUserListPrintsTheAdminOfTheDevInstanceToTheLimitedTokenAsWell(t *testin
 
 	want := "total: 1\nreturned: 1\ntruncated: false\nusers:\n" + printedAdminRow
 	assert.Equal(t, outcome{stdout: want}, asAdmin)
-	assert.Equal(t, asAdmin, asLimited)
+	assert.Equal(t, asAdmin, asLimited, "the server does not filter users by project rights")
 	assert.Len(t, dev.requests(), 2)
 }
 
@@ -374,6 +349,6 @@ func TestUserListRefusesANameTheSchemasOfTheDevInstanceDoNotDeclare(t *testing.T
 			{"unknown", []any{unknownEntry("bogus", userNames()...)}},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Len(t, dev.requests(), 1)
 }

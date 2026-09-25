@@ -31,14 +31,10 @@ jobs:
         with:
           go-version-file: go.mod
       - run: make build VERSION="v0.0.0.$GITHUB_RUN_NUMBER"
-      # Утверждается выхлоп: бинарник обязан назвать версию, которой его проштамповали,
-      # и тот коммит, из которого собран.
       - run: |
           ./bin/ytrack --version | grep -qx "version: \"v0.0.0.$GITHUB_RUN_NUMBER\""
           ./bin/ytrack --version | grep -qx "revision: \"$GITHUB_SHA\""
 
-  # Каждый push в main — релиз: бинарники под все платформы уходят в GitHub Release,
-  # тег — календарная версия v<ГГ>.<М>.<Д>.<номер запуска>.
   release:
     needs: [go, ytapi, build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -50,8 +46,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      # Дата берётся с коммита, а не с часов джобы: перезапуск даёт ту же версию.
-      - run: echo "VERSION=v$(date -u -d "$(git show -s --format=%cI HEAD)" +%y.%-m.%-d).$GITHUB_RUN_NUMBER" >>"$GITHUB_ENV"
+      - run: |
+          commit_date=$(git show -s --format=%cI HEAD)
+          echo "VERSION=v$(date -u -d "$commit_date" +%y.%-m.%-d).$GITHUB_RUN_NUMBER" >>"$GITHUB_ENV"
       - run: make dist VERSION="$VERSION"
       - run: |
           ./dist/ytrack-linux-amd64 --version | grep -qx "version: \"$VERSION\""

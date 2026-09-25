@@ -13,15 +13,10 @@ import (
 const (
 	blockComment  = "\n первая   \n---\n~~~\nсмайл \xf0\x9f\x98\x80\nпоследняя"
 	quotedComment = "первая\r\nвторая\xe2\x80\xa8третья"
-	// A line of plain words, the one a reader of the list would call ordinary.
-	shortComment = "ytrack contract short"
-	voteComment  = "+1"
+	shortComment  = "ytrack contract short"
+	voteComment   = "+1"
 )
 
-// readComments is every comment the owner holds, as the show of the owner prints them, in the order it printed
-// them: the node of each, so a scenario reads the text and the style the emitter gave it and not only the id.
-// Comments stand last in the document whatever the caller asked of the owner, and that is asserted here rather
-// than in each scenario.
 func readComments(t *testing.T, dev *upstream, show ...string) []*yaml.Node {
 	t.Helper()
 	got := runWith(t, dev.env(), show...)
@@ -43,10 +38,7 @@ func idsOfComments(t *testing.T, held []*yaml.Node) []string {
 	return ids
 }
 
-// requireWrittenInOrder holds a list of comments to standing by the moment each was written, earliest first.
-// The order is the server's to give and the show's to keep, and nothing in the list itself says it: the ids
-// are the server's counters and no promise about time at all.
-func requireWrittenInOrder(t *testing.T, held []*yaml.Node) {
+func requireInCreationOrder(t *testing.T, held []*yaml.Node) {
 	t.Helper()
 	for i := 1; i < len(held); i++ {
 		earlier, later := createdAt(t, held[i-1]), createdAt(t, held[i])
@@ -74,7 +66,7 @@ func TestArticleShowReadsTheCommentsWrittenOnAnArticleOfTheDevInstance(t *testin
 	held := readComments(t, dev, show...)
 
 	require.Len(t, held, 3)
-	requireWrittenInOrder(t, held)
+	requireInCreationOrder(t, held)
 	assert.Equal(t, []string{block, quoted, short}, idsOfComments(t, held))
 	for i, text := range []string{blockComment, quotedComment, shortComment} {
 		assert.Equal(t, "admin", nodeAt(t, held[i], "author", "login").Value)
@@ -109,7 +101,7 @@ func TestIssueShowReadsTheCommentsWrittenOnAnIssueOfTheDevInstance(t *testing.T)
 	held := readComments(t, dev, show...)
 
 	require.Len(t, held, 4)
-	requireWrittenInOrder(t, held)
+	requireInCreationOrder(t, held)
 	assert.Equal(t, []string{block, quoted, short, vote}, idsOfComments(t, held))
 	for i, text := range []string{blockComment, quotedComment, shortComment, voteComment} {
 		assert.Equal(t, "admin", nodeAt(t, held[i], "author", "login").Value)

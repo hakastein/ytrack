@@ -3,6 +3,7 @@ package cli_test
 import (
 	"cmp"
 	"encoding/json"
+	"math"
 	"net/http"
 	"strconv"
 	"testing"
@@ -12,23 +13,15 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// What the answer to a write holds where the caller writes no expression of their own, which is what the help
-// of the command names.
 const workItemWriteFields = "id,duration,type(name),attributes,author(login),date,issue(idReadable,customFields),text"
 
-// What goes out for the same expression: the minutes filled in under the duration, and the custom fields of the
-// issue composed the way a show of an issue composes them.
 const sentWorkItemWriteFields = "id,duration(minutes),type(name),attributes(id,name,value(id,name)),author(login),date," +
 	"issue(idReadable," + customFieldsFields + "),text"
 
-// The request a work item goes out as, which is the one a refusal about it names.
 func workItemWriteRequest(address, issue, fields string) string {
 	return "POST " + address + workItemsPath(issue) + "?fields=" + fields
 }
 
-// The work item a write answers with, under the expression that goes out. The members are JSON already, so a
-// scenario may send a shape the specification does not allow; what a scenario leaves out is what a work item
-// written by the admin comes back as.
 type answeredWorkItem struct {
 	id         string
 	duration   string
@@ -49,8 +42,6 @@ func (a answeredWorkItem) json() string {
 		`,"text":` + cmp.Or(a.text, "null") + `}`
 }
 
-// writingTime is the server of a work item write: the POST is the whole command, so a scenario says what that
-// one request was answered with.
 func writingTime(t *testing.T, write http.HandlerFunc) *upstream {
 	t.Helper()
 	return serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -61,8 +52,6 @@ func writingTime(t *testing.T, write http.HandlerFunc) *upstream {
 	})
 }
 
-// sentWorkItem is the body of the one request that went out, read as JSON reads it: the keys are held to what
-// the body carries rather than to the bytes of it, since the order of members is the encoder's business.
 func sentWorkItem(t *testing.T, u *upstream) map[string]any {
 	t.Helper()
 	asks := u.asks()
@@ -72,8 +61,6 @@ func sentWorkItem(t *testing.T, u *upstream) map[string]any {
 	return body
 }
 
-// Every form of a duration YouTrack itself would show, or would take as something other than hours and
-// minutes, is refused before the network, and the refusal names both the value and the form that is written.
 func TestTimeCreateRefusesADurationItCannotSend(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -97,8 +84,7 @@ func TestTimeCreateRefusesADurationItCannotSend(t *testing.T) {
 		{name: "the period marker alone", spent: "P"},
 		{name: "nothing at all", spent: ""},
 		{name: "a space before it", spent: " PT1H"},
-		// A fullwidth digit is written in bytes: it looks like the ASCII one it is not.
-		{name: "a fullwidth digit", spent: "PT\xef\xbc\x91H"},
+		{name: "a fullwidth digit", spent: "PT" + string(rune(0xFF11)) + "H"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -107,23 +93,20 @@ func TestTimeCreateRefusesADurationItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), "time", "create", "DEV-1", tc.spent)
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "bad_usage", found.code)
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// A duration longer than the minutes YouTrack counts them in is refused here rather than sent: the server
-// would overflow the number and answer that the duration is negative or empty, which names neither the value
-// nor what is wrong with it.
 func TestTimeCreateRefusesADurationLongerThanTheServerCounts(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
 		spent string
 	}{
-		{name: "one minute past the largest", spent: "PT2147483648M"},
+		{name: "one minute past the largest", spent: "PT" + strconv.FormatInt(math.MaxInt32+1, 10) + "M"},
 		{name: "one hour past the largest", spent: "PT35791395H"},
 	}
 	for _, tc := range tests {
@@ -134,14 +117,12 @@ func TestTimeCreateRefusesADurationLongerThanTheServerCounts(t *testing.T) {
 			got := runWith(t, server.env(), "time", "create", "DEV-1", tc.spent)
 
 			want := faultDocument{code: "bad_usage"}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// What a write takes: the issue and the duration as arguments, and the day, the text and the expression as
-// flags written once each. There is no flag under which a duration reaches the server the way it shows one.
 func TestTimeCreateRefusesWhatItCannotSend(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -178,14 +159,12 @@ func TestTimeCreateRefusesWhatItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// A day is written as a calendar day or as midnight UTC of one, and nothing else reaches the server: a
-// moment of a day would be filed under the calendar day of a time zone the caller has no way to know.
 func TestTimeCreateRefusesADayItCannotSend(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -210,22 +189,20 @@ func TestTimeCreateRefusesADayItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H", "--date", tc.day)
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "bad_usage", found.code)
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// Midnight UTC carried in an offset of its own names no time of day, so the refusal hands back the two forms
-// a day is written in instead of saying it does.
 func TestTimeCreateRefusesMidnightUTCCarriedInAnOffset(t *testing.T) {
 	t.Parallel()
 	server := serveNothing(t)
 
 	got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H", "--date", "2026-08-31T21:00:00-03:00")
 
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 	assert.Empty(t, server.requests())
 }
 
@@ -239,8 +216,6 @@ func TestTimeCreateHelpNamesItsDefault(t *testing.T) {
 	assert.Contains(t, got.stdout, workItemWriteFields)
 }
 
-// The body is the minutes and nothing else: the ISO period is the caller's way of saying a length and the
-// minutes are the server's, and the id and the presentation YouTrack writes beside them are never sent.
 func TestTimeCreateSendsTheMinutesOfTheDuration(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -271,8 +246,6 @@ func TestTimeCreateSendsTheMinutesOfTheDuration(t *testing.T) {
 	}
 }
 
-// A day goes out as noon UTC of it, whichever of the two forms it was written in: every time zone from
-// UTC−12 to UTC+11:59 reads that moment as the day that was written.
 func TestTimeCreateSendsTheDayAsNoonUTC(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -297,8 +270,6 @@ func TestTimeCreateSendsTheDayAsNoonUTC(t *testing.T) {
 	}
 }
 
-// The text reaches the server byte for byte, whatever stands in it: YouTrack keeps every one of them, so
-// nothing here is rewritten on the way out and nothing here is refused.
 func TestTimeCreateSendsTheTextByteForByte(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -328,13 +299,8 @@ func TestTimeCreateSendsTheTextByteForByte(t *testing.T) {
 	}
 }
 
-// The one byte of a text a work item does not keep is a byte that is no UTF-8: the encoder would write it
-// as U+FFFD, so the rewriting would be ytrack's own and the check of the write would report it over a work item
-// that by then holds the rewritten text. It is refused before the network at either verb, as it is at a
-// comment, and an empty text goes out all the same.
 func TestTimeRefusesATextThatIsNoUTF8(t *testing.T) {
 	t.Parallel()
-	// A byte no rune of UTF-8 begins with, written as the byte it is.
 	const written = "bad\xffbyte"
 	tests := []struct {
 		name string
@@ -354,14 +320,12 @@ func TestTimeRefusesATextThatIsNoUTF8(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
-			assert.Empty(t, server.requests())
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+			assert.Empty(t, server.requests(), "encoding/json would send the bad byte as U+FFFD")
 		})
 	}
 }
 
-// The document is the keys of the default in their order, with the duration read out of the minutes, the
-// day printed as midnight UTC and the time spent on the issue among its custom fields.
 func TestTimeCreatePrintsTheWorkItemTheServerKept(t *testing.T) {
 	t.Parallel()
 	spent := receivedField{name: "Затраченное время", valueType: "period", value: `{"$type":"DurationValue","minutes":90}`}
@@ -384,7 +348,6 @@ func TestTimeCreatePrintsTheWorkItemTheServerKept(t *testing.T) {
 	assert.Equal(t, "PT1H30M", nodeAt(t, mapping, "duration").Value)
 	assert.Equal(t, "2026-09-01T00:00:00Z", nodeAt(t, mapping, "date").Value)
 	assert.Equal(t, "DEV-1", nodeAt(t, mapping, "issue", "idReadable").Value)
-	// A field the issue holds nothing in is left out of the block, so only the one that moved stands there.
 	assert.Equal(t, []string{"Затраченное время"}, keysOf(nodeAt(t, mapping, "issue", "customFields")))
 	assert.Equal(t, "PT1H30M", nodeAt(t, mapping, "issue", "customFields", "Затраченное время").Value)
 	text := nodeAt(t, mapping, "text")
@@ -404,9 +367,6 @@ func TestTimeCreatePrintsATextNoBlockCanCarryInQuotes(t *testing.T) {
 	assert.Equal(t, yaml.DoubleQuotedStyle, text.Style)
 }
 
-// A 200 says the server took the body, not that it kept what went out, so every part the call wrote is held
-// against the answer and a disagreement is a refusal naming both. The work item exists by then, which is what
-// the exit code says without the document being read.
 func TestTimeCreateRefusesWhatTheServerKeptOtherwise(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -438,8 +398,6 @@ func TestTimeCreateRefusesWhatTheServerKeptOtherwise(t *testing.T) {
 			}},
 		},
 		{
-			// The day is read off the milliseconds the server keeps it in, so a date said any other way is a
-			// day that never arrived rather than a day of its own.
 			name:     "a day that came back as something other than a number of milliseconds",
 			argv:     []string{"time", "create", "DEV-1", "PT1H30M", "--date", "2026-09-01"},
 			answered: answeredWorkItem{date: asJSON("2026-09-01")},
@@ -491,7 +449,6 @@ func TestTimeCreateRefusesADurationReceivedWithoutItsMinutes(t *testing.T) {
 		detailNamed(t, found, "missing"))
 }
 
-// detailKeys is the keys a refusal printed after the message, in order.
 func detailKeys(found faultDocument) []string {
 	keys := make([]string, 0, len(found.details))
 	for _, printed := range found.details {
@@ -500,11 +457,10 @@ func detailKeys(found faultDocument) []string {
 	return keys
 }
 
-// The day is held to the calendar day of UTC and not to the millisecond: the body carries noon of it and
-// the server keeps midnight, so the two moments differ and the day does not.
 func TestTimeCreateTakesTheDayTheServerKeptForTheDayWritten(t *testing.T) {
 	t.Parallel()
-	server := writingTime(t, respondWith(http.StatusOK, answeredWorkItem{date: "1788220800000"}.json()))
+	keptAtMidnightUTC := answeredWorkItem{date: "1788220800000"}
+	server := writingTime(t, respondWith(http.StatusOK, keptAtMidnightUTC.json()))
 
 	got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M", "--date", "2026-09-01")
 
@@ -512,8 +468,6 @@ func TestTimeCreateTakesTheDayTheServerKeptForTheDayWritten(t *testing.T) {
 	assert.Equal(t, "2026-09-01T00:00:00Z", nodeAt(t, requireMapping(t, "stdout", got.stdout), "date").Value)
 }
 
-// What the call named nothing for is held to nothing: the day YouTrack chose itself and the text it left
-// empty are its answer about a work item, not a disagreement with a write that said neither.
 func TestTimeCreateChecksNothingItNeverWrote(t *testing.T) {
 	t.Parallel()
 	server := writingTime(t, respondWith(http.StatusOK, answeredWorkItem{date: "1788307200000", text: "null"}.json()))
@@ -526,8 +480,6 @@ func TestTimeCreateChecksNothingItNeverWrote(t *testing.T) {
 	assert.Nil(t, requireValue(t, nodeAt(t, mapping, "text")))
 }
 
-// What the server says about a write it refused passes on word for word, and the code is the status read
-// as ADR-0005 reads one: nothing was written in any of these, so the caller may fix the call and send it again.
 func TestTimeCreateRefusesWhatTheServerRefused(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -579,14 +531,12 @@ func TestTimeCreateRefusesWhatTheServerRefused(t *testing.T) {
 					{"upstream_message", tc.upstreamMessage},
 				}, tc.details...),
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Equal(t, []string{http.MethodPost}, sentMethods(server))
 		})
 	}
 }
 
-// What the tool needs of the answer goes out whatever the caller asked to print: the parts the check holds
-// against what was written, and the pair a refusal names the work item by. The document is theirs alone.
 func TestTimeCreateAsksForWhatItChecksWhateverWasAskedToPrint(t *testing.T) {
 	t.Parallel()
 	server := writingTime(t, respondWith(http.StatusOK, answeredWorkItem{}.json()))
@@ -598,8 +548,6 @@ func TestTimeCreateAsksForWhatItChecksWhateverWasAskedToPrint(t *testing.T) {
 	assert.Equal(t, []string{"id,duration(minutes),date,text,issue(idReadable)"}, server.sentFields())
 }
 
-// The issue a work item is written against is held to the form of an issue like any other, and the work item
-// this scenario files is taken away with the issue it hangs from.
 func contractWorkItemIssue(t *testing.T, dev *upstream, role string) string {
 	t.Helper()
 	argv := append([]string{"issue", "create", "DEV", "--summary",
@@ -608,7 +556,6 @@ func contractWorkItemIssue(t *testing.T, dev *upstream, role string) string {
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	readable := nodeAt(t, requireMapping(t, "stdout", got.stdout), "idReadable").Value
 	require.Regexp(t, `^DEV-[0-9]+$`, readable)
-	// Registered after the recorder's own cleanup, so the deletion runs first and the cassette records it.
 	t.Cleanup(func() { removeIssue(t, dev, readable) })
 	return readable
 }
@@ -639,8 +586,8 @@ func TestTimeCreateWritesTimeAgainstAnIssueOfTheDevInstance(t *testing.T) {
 	require.Equal(t, 0, second.code, "stderr: %s", second.stderr)
 	again := requireMapping(t, "stdout", second.stdout)
 	assert.Equal(t, "PT2H", nodeAt(t, again, "issue", "customFields", "Затраченное время").Value)
-	// The day nobody named is today of the server, which is a moving number: only the form of it is held.
-	assert.Regexp(t, `^[0-9]{4}-[0-9]{2}-[0-9]{2}T00:00:00Z$`, nodeAt(t, again, "date").Value)
+	assert.Regexp(t, `^[0-9]{4}-[0-9]{2}-[0-9]{2}T00:00:00Z$`, nodeAt(t, again, "date").Value,
+		"without --date the server takes its own today")
 
 	listed := runWith(t, dev.env(), "time", "list", issue, "--limit", "1")
 	printed := requireWorkItemListing(t, listed)
@@ -648,10 +595,6 @@ func TestTimeCreateWritesTimeAgainstAnIssueOfTheDevInstance(t *testing.T) {
 	assert.True(t, printed.Truncated)
 }
 
-// A day written by a token whose profile stands ten hours east of UTC is kept as the day that was named:
-// what goes out is noon UTC of it, which is 22:00 of that profile's zone and so still the same calendar day.
-// Nothing but a token of another zone can say this — an instance where every profile sits at UTC+3 reads
-// noon UTC and midnight UTC as one and the same day.
 func TestTimeCreateWritesTheDayNamedByTheMemberOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -662,7 +605,8 @@ func TestTimeCreateWritesTheDayNamedByTheMemberOfTheDevInstance(t *testing.T) {
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	mapping := requireMapping(t, "stdout", got.stdout)
-	assert.Equal(t, "2026-09-01T00:00:00Z", nodeAt(t, mapping, "date").Value)
+	assert.Equal(t, "2026-09-01T00:00:00Z", nodeAt(t, mapping, "date").Value,
+		"the member's profile is UTC+10, where noon UTC is 22:00 of the named day")
 	assert.Equal(t, "dev.member", nodeAt(t, mapping, "author", "login").Value)
 }
 
@@ -681,11 +625,6 @@ func atThreePM(_ *http.Request, body []byte) []byte {
 
 const threePMUTC = 1788274800000
 
-// Whose time zone a moment is filed under: the profile of the token that writes, not the zone of the
-// instance. The same moment goes out twice — 15:00 UTC of 1 September — and comes back the day that
-// was written for the admin, whose profile is Europe/Moscow, and the day after for the member, whose profile is
-// Asia/Vladivostok. ytrack itself never sends such a moment, and the check of the write is what says so out
-// loud on the second run.
 func TestTimeCreateFindsTheDayOfAMomentComesFromTheProfileOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -696,7 +635,8 @@ func TestTimeCreateFindsTheDayOfAMomentComesFromTheProfileOfTheDevInstance(t *te
 	got := runWith(t, dev.env(), "time", "create", issue, "PT15M", "--date", "2026-09-01")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, "2026-09-01T00:00:00Z", nodeAt(t, requireMapping(t, "stdout", got.stdout), "date").Value)
+	assert.Equal(t, "2026-09-01T00:00:00Z", nodeAt(t, requireMapping(t, "stdout", got.stdout), "date").Value,
+		"15:00 UTC falls on 1 September in the admin's Europe/Moscow")
 
 	byTheMember := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).member},
 		"time", "create", issue, "PT15M", "--date", "2026-09-01")
@@ -707,12 +647,10 @@ func TestTimeCreateFindsTheDayOfAMomentComesFromTheProfileOfTheDevInstance(t *te
 		{"field", "date"},
 		{"expected", "2026-09-01"},
 		{"actual", "2026-09-02T00:00:00Z"},
-	}}, detailNamed(t, found, "mismatch"))
+	}}, detailNamed(t, found, "mismatch"), "15:00 UTC falls on 2 September in the member's Asia/Vladivostok")
 }
 
-// The issue a scenario about a project with time tracking off files for itself. DOCS requires no custom field
-// of a new issue, so nothing is named here: the defaults of the project are what DOCS-1 carries as well.
-func contractDocsIssue(t *testing.T, dev *upstream) string {
+func contractIssueWithTimeTrackingOff(t *testing.T, dev *upstream) string {
 	t.Helper()
 	got := runWith(t, dev.env(), "issue", "create", "DOCS", "--summary",
 		"ytrack contract "+t.Name())
@@ -723,18 +661,15 @@ func contractDocsIssue(t *testing.T, dev *upstream) string {
 	return readable
 }
 
-// A project whose time tracking is off answers a write with 403, and the admin is answered it as well: it
-// is the project's setting rather than the caller's rights, so nothing ytrack could ask for would change it.
-// The refusal passes on word for word, in one request, and the issue keeps no work item.
 func TestTimeCreateWritesNoTimeInTheProjectOfTheDevInstanceThatHasTimeTrackingOff(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
-	issue := contractDocsIssue(t, dev)
+	issue := contractIssueWithTimeTrackingOff(t, dev)
 	before := len(dev.requests())
 
 	got := runWith(t, dev.env(), "time", "create", issue, "PT30M")
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "denied", found.code)
 	assert.Equal(t, 403, detailNamed(t, found, "upstream_status"))
 	assert.Equal(t, "Forbidden", detailNamed(t, found, "upstream_error"))
@@ -743,17 +678,12 @@ func TestTimeCreateWritesNoTimeInTheProjectOfTheDevInstanceThatHasTimeTrackingOf
 
 	byTheMember := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).member},
 		"time", "create", issue, "PT30M")
-	assert.Equal(t, "denied", requireRefusal(t, byTheMember).code)
+	assert.Equal(t, "denied", requireFault(t, byTheMember).code)
 
 	listed := runWith(t, dev.env(), "time", "list", issue)
 	assert.Equal(t, 0, requireWorkItemListing(t, listed).Total)
 }
 
-// The server counts the minutes of an issue in an int32, so the largest duration ytrack will send passes and a
-// single minute on top of it overflows the sum: Затраченное время comes back null, which the block of custom
-// fields prints by leaving the key out altogether. Both writes answer 200 and exit 0 — the cascade is printed
-// as it arrived and held against nothing, so this is what the overflow looks like from outside rather than a
-// refusal.
 func TestTimeCreateBreaksTheSumOfTheDevInstanceOnePastTheLargestDuration(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -772,7 +702,8 @@ func TestTimeCreateBreaksTheSumOfTheDevInstanceOnePastTheLargestDuration(t *test
 	assert.Empty(t, oneMore.stderr)
 	broken := requireMapping(t, "stdout", oneMore.stdout)
 	assert.Equal(t, "PT1M", nodeAt(t, broken, "duration").Value)
-	assert.NotContains(t, keysOf(nodeAt(t, broken, "issue", "customFields")), "Затраченное время")
+	assert.NotContains(t, keysOf(nodeAt(t, broken, "issue", "customFields")), "Затраченное время",
+		"the server sums the minutes in an int32 and sends null past it")
 
 	afterwards := runWith(t, dev.env(), "issue", "show", issue, "--fields", "customFields", "--comments=0")
 	require.Equal(t, 0, afterwards.code, "stderr: %s", afterwards.stderr)
@@ -780,8 +711,6 @@ func TestTimeCreateBreaksTheSumOfTheDevInstanceOnePastTheLargestDuration(t *test
 		"Затраченное время")
 }
 
-// A duration of no length passes the grammar and the server refuses it in its own words: the refusal is
-// not doubled locally, and nothing is written.
 func TestTimeCreateWritesNoWorkItemOfNoLength(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -789,7 +718,7 @@ func TestTimeCreateWritesNoWorkItemOfNoLength(t *testing.T) {
 
 	got := runWith(t, dev.env(), "time", "create", issue, "PT0M")
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "rejected", found.code)
 	assert.Equal(t, "Длительность работы не может быть отрицательной или пустой",
 		detailNamed(t, found, "upstream_message"))
@@ -823,7 +752,7 @@ func TestTimeCreateIsRefusedTheDurationWrittenAsAnID(t *testing.T) {
 
 	got := runWith(t, dev.env(), "time", "create", issue, "PT2H")
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "rejected", found.code)
 	assert.Equal(t, "Для единицы работы должна быть задана длительность",
 		detailNamed(t, found, "upstream_message"))
@@ -872,7 +801,7 @@ func TestTimeCreateWritesNothingForAnIssueTheDevInstanceDoesNotShow(t *testing.T
 			got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + tc.token(t)},
 				"time", "create", tc.issue, "PT1H")
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "not_found", found.code)
 			assert.Equal(t, "Entity with id "+tc.issue+" not found", detailNamed(t, found, "upstream_message"))
 			assert.Equal(t, []string{workItemsPath(tc.issue)}, dev.sentPaths())
@@ -880,13 +809,12 @@ func TestTimeCreateWritesNothingForAnIssueTheDevInstanceDoesNotShow(t *testing.T
 	}
 }
 
-// An expression that does not parse is refused where every other one is: before the network.
 func TestTimeCreateRefusesAnExpressionItCannotSend(t *testing.T) {
 	t.Parallel()
 	server := serveNothing(t)
 
 	got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H", "--fields", "a,,b")
 
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 	assert.Empty(t, server.requests())
 }

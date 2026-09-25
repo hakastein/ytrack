@@ -13,8 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The token of a login record, next to the token of the environment: a handler answers with the name of the token
-// it was sent, so a document shows which of the two went out without printing either.
 const recordToken = "perm-ytrack-test-record"
 
 const (
@@ -22,8 +20,6 @@ const (
 	recordUser = "from.record"
 )
 
-// homeWith is a home directory of its own holding a file of login records, and the path of that file, which is
-// what a document names.
 func homeWith(t *testing.T, records string) (home, path string) {
 	t.Helper()
 	home, path = emptyHome(t)
@@ -32,15 +28,12 @@ func homeWith(t *testing.T, records string) (home, path string) {
 	return home, path
 }
 
-// emptyHome is a home directory with no file of login records, and the path that file would have.
 func emptyHome(t *testing.T) (home, path string) {
 	t.Helper()
 	home = t.TempDir()
 	return home, filepath.Join(home, ".ytrack", "auth.json")
 }
 
-// recordFile is the file with the records in the order given, which is not the order they are
-// chosen in.
 func recordFile(records ...string) string {
 	return "[" + strings.Join(records, ",") + "]"
 }
@@ -57,8 +50,6 @@ func globalRecord(address, secret string) string {
 	return recordFile(unscopedRecord(address, secret))
 }
 
-// serveUserOfTheToken answers as the user each token belongs to, and fails the test on a token no scenario handed
-// out: that is how a scenario tells which token a command chose.
 func serveUserOfTheToken(t *testing.T, users map[string]string) *upstream {
 	t.Helper()
 	return serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -81,8 +72,6 @@ func fileDetail(path string) detail {
 	return detail{"file", path}
 }
 
-// directoryDetail is the directory ytrack keeps its things in, which a refusal of the system names in place of the
-// file inside it.
 func directoryDetail(path string) detail {
 	return detail{"directory", filepath.Dir(path)}
 }
@@ -99,9 +88,6 @@ func TestAuthStatusTakesBothValuesFromTheGlobalRecord(t *testing.T) {
 	assertNoToken(t, got, recordToken)
 }
 
-// A login is an address and a token together. Half an environment is refused rather than completed from the
-// settings: the variable the caller did set would otherwise be dropped without a word, and the call would go to
-// the very instance the prefix was meant to move it off.
 func TestNoCommandTakesHalfALoginFromTheEnvironment(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -119,7 +105,7 @@ func TestNoCommandTakesHalfALoginFromTheEnvironment(t *testing.T) {
 
 			got := runWith(t, []string{"HOME=" + home, tc.set(asked)}, "auth", "status")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assertNoToken(t, got, recordToken)
 			assertNoToken(t, got, token)
 			assert.Empty(t, asked.requests())
@@ -128,8 +114,6 @@ func TestNoCommandTakesHalfALoginFromTheEnvironment(t *testing.T) {
 	}
 }
 
-// A file nobody had to read cannot make a command fail: an environment holding a whole login is the whole of
-// what is read, and a caller working from one has no stake in the state of their record file.
 func TestAuthStatusDoesNotReadTheFileWhenTheEnvironmentHasBothValues(t *testing.T) {
 	t.Parallel()
 	server := serveUserOfTheToken(t, map[string]string{token: envUser})
@@ -150,7 +134,6 @@ func TestNoCommandUsesAFileOfLoginRecordsItCannotRead(t *testing.T) {
 	}{
 		{name: "not JSON", records: `[{"url":`},
 		{name: "one record rather than an array of them", records: `{"url":"http://h","token":"perm-x"}`},
-		// A file a script or an editor emptied to null is a file to put back, not a file of no logins.
 		{name: "null rather than an array of records", records: "null"},
 		{name: "a second value after the array", records: `[{"url":"http://h","token":"perm-x"}] []`},
 		{name: "a record that is not an object", records: `[5]`},
@@ -173,13 +156,11 @@ func TestNoCommandUsesAFileOfLoginRecordsItCannotRead(t *testing.T) {
 			got := runWith(t, []string{"HOME=" + home}, "auth", "status")
 
 			want := faultDocument{code: "bad_usage", details: []detail{fileDetail(path)}}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 		})
 	}
 }
 
-// withoutTheRightToWrite takes the right to write in dir away for the length of the test and gives it back, so
-// that the temporary directory can still be taken away. No mode holds root back, so there is nothing to see there.
 func withoutTheRightToWrite(t *testing.T, dir string) {
 	t.Helper()
 	if os.Geteuid() == 0 {
@@ -189,8 +170,6 @@ func withoutTheRightToWrite(t *testing.T, dir string) {
 	require.NoError(t, os.Chmod(dir, 0o500))
 }
 
-// The operating system refusing the file is not a mistake in the file, and no wording of the call would mend it:
-// what the caller has to look at is the rights, which is what denied says.
 func TestNoCommandMendsAFileOfLoginRecordsTheSystemKeepsFromIt(t *testing.T) {
 	t.Parallel()
 	t.Run("a .ytrack that is a file rather than a directory", func(t *testing.T) {
@@ -201,7 +180,7 @@ func TestNoCommandMendsAFileOfLoginRecordsTheSystemKeepsFromIt(t *testing.T) {
 		got := runWith(t, []string{"HOME=" + home}, "auth", "status")
 
 		want := faultDocument{code: "denied", details: []detail{directoryDetail(path)}}
-		assert.Equal(t, want, requireRefusal(t, got))
+		assert.Equal(t, want, requireFault(t, got))
 	})
 	t.Run("a directory the last record cannot be taken out of", func(t *testing.T) {
 		t.Parallel()
@@ -212,7 +191,7 @@ func TestNoCommandMendsAFileOfLoginRecordsTheSystemKeepsFromIt(t *testing.T) {
 		got := runWith(t, []string{"HOME=" + home}, "auth", "logout", "--global")
 
 		want := faultDocument{code: "denied", details: []detail{directoryDetail(path)}}
-		assert.Equal(t, want, requireRefusal(t, got))
+		assert.Equal(t, want, requireFault(t, got))
 		assertNoRecordedToken(t, got)
 		assert.FileExists(t, path)
 	})
@@ -226,7 +205,7 @@ func TestNoCommandMendsAFileOfLoginRecordsTheSystemKeepsFromIt(t *testing.T) {
 
 		got := runWith(t, []string{"HOME=" + home, "PWD=" + stated}, "auth", "logout")
 
-		found := requireRefusal(t, got)
+		found := requireFault(t, got)
 		assert.Equal(t, "denied", found.code)
 		assert.Equal(t, []detail{directoryDetail(path)}, found.details)
 		assert.Equal(t, held, fileBytes(t, path))
@@ -234,7 +213,6 @@ func TestNoCommandMendsAFileOfLoginRecordsTheSystemKeepsFromIt(t *testing.T) {
 	})
 }
 
-// ytrack writes no token a header cannot carry, so a saved one holding a line ending is damage to the file.
 func TestNoCommandSendsATokenARecordCannotCarry(t *testing.T) {
 	t.Parallel()
 	server := serveNothing(t)
@@ -242,7 +220,7 @@ func TestNoCommandSendsATokenARecordCannotCarry(t *testing.T) {
 
 	got := runWith(t, []string{"HOME=" + home}, "auth", "status")
 
-	assert.Equal(t, faultDocument{code: "bad_usage", details: []detail{fileDetail(path)}}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage", details: []detail{fileDetail(path)}}, requireFault(t, got))
 	assertNoToken(t, got, recordToken)
 	assert.Empty(t, server.requests())
 }
@@ -256,7 +234,7 @@ func TestNoCommandFindsAValueWithoutAFileToFindItIn(t *testing.T) {
 		got := runWith(t, []string{"HOME=" + home}, "auth", "status")
 
 		want := faultDocument{code: "denied", details: []detail{lookedIn("YTRACK_URL", "YTRACK_TOKEN", "settings")}}
-		assert.Equal(t, want, requireRefusal(t, got))
+		assert.Equal(t, want, requireFault(t, got))
 	})
 	t.Run("no home directory", func(t *testing.T) {
 		t.Parallel()
@@ -264,7 +242,7 @@ func TestNoCommandFindsAValueWithoutAFileToFindItIn(t *testing.T) {
 		got := runWith(t, nil, "auth", "status")
 
 		want := faultDocument{code: "denied", details: []detail{lookedIn("YTRACK_URL", "YTRACK_TOKEN")}}
-		assert.Equal(t, want, requireRefusal(t, got))
+		assert.Equal(t, want, requireFault(t, got))
 	})
 	t.Run("a home directory that is not an absolute path", func(t *testing.T) {
 		t.Parallel()
@@ -272,12 +250,10 @@ func TestNoCommandFindsAValueWithoutAFileToFindItIn(t *testing.T) {
 		got := runWith(t, []string{"HOME=home"}, "auth", "status")
 
 		want := faultDocument{code: "denied", details: []detail{lookedIn("YTRACK_URL", "YTRACK_TOKEN")}}
-		assert.Equal(t, want, requireRefusal(t, got))
+		assert.Equal(t, want, requireFault(t, got))
 	})
 }
 
-// A shell clears a variable for a single call by setting it to nothing, and that call is meant to fall back on the
-// record rather than to fail.
 func TestAuthStatusTakesTheRecordWhenTheVariablesAreEmpty(t *testing.T) {
 	t.Parallel()
 	server := serveUserOfTheToken(t, map[string]string{recordToken: recordUser})
@@ -290,7 +266,6 @@ func TestAuthStatusTakesTheRecordWhenTheVariablesAreEmpty(t *testing.T) {
 	assertNoToken(t, got, recordToken)
 }
 
-// Every command reads the address and the token the same way, so the record reaches one that never mentions it.
 func TestProjectShowGoesToTheAddressOfTheGlobalRecordWithItsToken(t *testing.T) {
 	t.Parallel()
 	server := serve(t, respondWith(http.StatusOK, projectDEV))
@@ -309,8 +284,7 @@ func TestProjectShowGoesToTheAddressOfTheGlobalRecordWithItsToken(t *testing.T) 
 func TestNoCommandPrintsThePasswordOfAnAddressItCannotUse(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		// A record holds the address when inRecord is set, and YTRACK_URL holds it otherwise.
+		name     string
 		inRecord bool
 		address  string
 	}{
@@ -336,7 +310,7 @@ func TestNoCommandPrintsThePasswordOfAnAddressItCannotUse(t *testing.T) {
 
 			got := runWith(t, env, "auth", "status")
 
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.NotContains(t, got.stdout, "secret")
 			assert.NotContains(t, got.stderr, "secret")
 		})

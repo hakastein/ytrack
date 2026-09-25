@@ -6,17 +6,13 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// The five verbs of tags take one shape each, and cobra settles that before ytrack runs anything, so
-// no call of another shape costs a request. What the table is really for is the two pairs that would otherwise
-// read as one another: a deletion given an owner is not a removal, and a removal given none is not a deletion.
-// The owner is the one thing any of them takes as an argument, and every name goes in --name.
 func TestTagRefusesEveryCallOfTheWrongShape(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
 		argv []string
 	}{
-		{name: "the group with no verb", argv: []string{"tag"}},
+		{name: "the command with no subcommand", argv: []string{"tag"}},
 		{name: "an argument to the list", argv: []string{"tag", "list", "x"}},
 		{name: "a creation with no name", argv: []string{"tag", "create"}},
 		{name: "a creation given an argument", argv: []string{"tag", "create", "a", "--name", "b"}},
@@ -36,7 +32,7 @@ func TestTagRefusesEveryCallOfTheWrongShape(t *testing.T) {
 			name: "a removal given a flag of the list",
 			argv: []string{"tag", "remove", "DEV-7", "--name", "x", "--limit", "5"},
 		},
-		{name: "a tagging given a flag no verb has", argv: []string{"tag", "add", "DEV-7", "--name", "x", "--yes"}},
+		{name: "a tagging given a flag no subcommand has", argv: []string{"tag", "add", "DEV-7", "--name", "x", "--yes"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -45,7 +41,7 @@ func TestTagRefusesEveryCallOfTheWrongShape(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}

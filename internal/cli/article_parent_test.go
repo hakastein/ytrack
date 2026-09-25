@@ -11,30 +11,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// What the read before a write asks of the article: the id a body carries it by, the id the answer is held
-// against, and the project no article may be filed across. A creation asks it of the parent and an update of
-// the article it writes into.
 const articleToWriteFields = "id,idReadable,project(shortName)"
 
-// The request that read goes out as, which is the one a refusal raised before the write names.
 func articleToWriteRequest(address, id string) string {
 	return "GET " + address + "/api/articles/" + url.PathEscape(id) + "?fields=" + articleToWriteFields
 }
 
-// An article of DEV as the read before a write finds it: the internal id a body addresses it by, the readable
-// id it is held against, and the project it stands in.
 func articleOfDEVToWrite(id, readable string) string {
 	return `{"$type":"Article","id":` + strconv.Quote(id) + `,"idReadable":` + strconv.Quote(readable) +
 		`,"project":{"$type":"Project","shortName":"DEV"}}`
 }
 
-// The parent as it stands on the article the creation answers with, which carries the readable id alone.
 func parentNamed(readable string) string {
 	return `{"$type":"Article","idReadable":` + strconv.Quote(readable) + `,"summary":"Родительская статья"}`
 }
 
-// filingUnderAParent is the server of a creation that names a parent: the read of the parent and the creation
-// itself, each answered by the scenario, and nothing else reaches it.
 func filingUnderAParent(t *testing.T, read, creation http.HandlerFunc) *upstream {
 	t.Helper()
 	return serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -49,9 +40,6 @@ func filingUnderAParent(t *testing.T, read, creation http.HandlerFunc) *upstream
 	})
 }
 
-// The id of the parent is held to the form of an article before anything is sent, the same way the id a
-// command is given as an argument is: the API of articles answers for an issue and for an internal id too, and
-// that answer would name the wrong reason.
 func TestArticleCreateRefusesAParentOfAnyOtherFormBeforeAnyRequest(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -71,14 +59,12 @@ func TestArticleCreateRefusesAParentOfAnyOtherFormBeforeAnyRequest(t *testing.T)
 
 			got := runWith(t, server.env(), append([]string{"article", "create", "DEV", "--summary", "x"}, tc.argv...)...)
 
-			assert.Equal(t, "bad_usage", requireRefusal(t, got).code)
+			assert.Equal(t, "bad_usage", requireFault(t, got).code)
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The help names the flag a parent is filed under, since a caller reading --help has nothing else to find
-// the option by.
 func TestArticleCreateHelpNamesTheParentFlag(t *testing.T) {
 	t.Parallel()
 
@@ -89,8 +75,6 @@ func TestArticleCreateHelpNamesTheParentFlag(t *testing.T) {
 	assert.Contains(t, got.stdout, "--parent")
 }
 
-// The whole of a creation under a parent: the parent is read first, and the body addresses it by the
-// internal id that read gave rather than by the string the caller typed, which the server resolves anew.
 func TestArticleCreateAddressesTheParentByTheIDTheReadGave(t *testing.T) {
 	t.Parallel()
 	filed := answeredArticle{readable: "DEV-A-8", summary: "x", parent: parentNamed("DEV-A-1")}
@@ -118,8 +102,6 @@ func TestArticleCreateAddressesTheParentByTheIDTheReadGave(t *testing.T) {
 	assert.Equal(t, "DEV-A-1", nodeAt(t, mapping, "parentArticle", "idReadable").Value)
 }
 
-// A parent the server has none of is a refusal and nothing else: YouTrack would file the article at the
-// root of the knowledge base under a 200, and the caller would be told about an article they did not ask for.
 func TestArticleCreateRefusesAParentTheServerDoesNotHave(t *testing.T) {
 	t.Parallel()
 	said := `{"error":"Not Found","error_description":"Can't find article with id DEV-A-99999"}`
@@ -136,13 +118,10 @@ func TestArticleCreateRefusesAParentTheServerDoesNotHave(t *testing.T) {
 			{"upstream_message", "Can't find article with id DEV-A-99999"},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 }
 
-// A call that names one project as its argument and another through its parent is refused before the
-// write: YouTrack files the article in the parent's project, so the one the caller wrote would be the one
-// ignored.
 func TestArticleCreateRefusesAParentOfAnotherProject(t *testing.T) {
 	t.Parallel()
 	found := `{"$type":"Article","id":"177-50","idReadable":"DEMO-A-1",` +
@@ -160,7 +139,7 @@ func TestArticleCreateRefusesAParentOfAnotherProject(t *testing.T) {
 			{"parent_project", "DEMO"},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 }
 
@@ -200,15 +179,12 @@ func TestArticleCreateRefusesAParentLeftEmptyInTheResponse(t *testing.T) {
 					{"upstream_body", tc.found},
 				},
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 		})
 	}
 }
 
-// The server reads dev for DEV and answers with the code as it keeps it, which the help of the command
-// promises: an argument and a parent that differ only in letter case name one project, and the article is
-// filed rather than refused for standing across one.
 func TestArticleCreateFilesUnderAParentOfTheProjectInAnotherLetterCase(t *testing.T) {
 	t.Parallel()
 	filed := answeredArticle{readable: "DEV-A-8", summary: "x", parent: parentNamed("DEV-A-1")}
@@ -230,9 +206,6 @@ func TestArticleCreateFilesUnderAParentOfTheProjectInAnotherLetterCase(t *testin
 	}, body)
 }
 
-// The read before the write settles what is there before the write, not what the write did: an article
-// that came back at the root of the tree, or under another parent than the one that was read, is the write
-// disagreeing with itself and the article exists either way.
 func TestArticleCreateRefusesAnAnswerCarryingAnotherParent(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -269,10 +242,6 @@ func TestArticleCreateRefusesAnAnswerCarryingAnotherParent(t *testing.T) {
 	}
 }
 
-// The parent is asked for whatever the caller asks to print, since the check of the write has nothing to
-// hold the answer against otherwise. The name is ytrack's own, so an answer that carries no readable id under
-// the parent is the server disagreeing with the request rather than the caller writing a name that is not
-// there.
 func TestArticleCreateAsksForTheParentWhateverTheExpressionSays(t *testing.T) {
 	t.Parallel()
 	filed := `{"$type":"Article","idReadable":"DEV-A-8","summary":"x","content":null,` +
@@ -312,7 +281,7 @@ func TestArticleCreateFilesAnArticleUnderAParentOfTheDevInstance(t *testing.T) {
 	removed := runWith(t, dev.env(), "article", "delete", parent)
 	assert.Equal(t, outcome{stdout: "idReadable: " + strconv.Quote(parent) + "\n"}, removed)
 	gone := runWith(t, dev.env(), "article", "show", child, "--comments=0")
-	assert.Equal(t, "not_found", requireRefusalDocument(t, gone).code,
+	assert.Equal(t, "not_found", requireFaultDocument(t, gone).code,
 		"a deletion takes the whole subtree, the child among it")
 }
 
@@ -332,7 +301,7 @@ func TestArticleCreateFilesNothingUnderAParentTheDevInstanceDoesNotHave(t *testi
 			{"upstream_message", "Can't find article with id DEV-A-99999"},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(dev))
 }
 
@@ -352,6 +321,6 @@ func TestArticleCreateFilesNothingUnderAParentOfAnotherProjectOfTheDevInstance(t
 			{"parent_project", "DEMO"},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(dev))
 }

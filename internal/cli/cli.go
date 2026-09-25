@@ -1,5 +1,3 @@
-// Package cli is every command of ytrack behind one entry point, Run; the process
-// itself is touched only by cmd/ytrack.
 package cli
 
 import (
@@ -21,12 +19,6 @@ import (
 	"github.com/hakastein/ytrack/internal/youtrack"
 )
 
-// Run takes argv without the program name and env as KEY=value pairs. build is the stamp go build left in the
-// binary, read by cmd/ytrack and handed over here like the environment: the image of the process is the
-// process's, and nothing below this seam reads it (ADR-0006). A caller with no stamp to hand — a binary the Go
-// toolchain did not build — hands nil. stdin is a file rather than a reader because the one thing done with it
-// is asking whether it is a terminal, and only auth login asks. The commands are built anew on every call, so
-// calls may run in parallel.
 func Run(ctx context.Context, argv, env []string, build *debug.BuildInfo, stdin *os.File, stdout, stderr io.Writer) int {
 	renderer := render.YAML{}
 	stream := diag.NewStream(stderr, renderer)
@@ -39,8 +31,6 @@ func Run(ctx context.Context, argv, env []string, build *debug.BuildInfo, stdin 
 	if err == nil {
 		return 0
 	}
-	// Every function ytrack hands cobra returns a *diag.Fault, so any other error is
-	// cobra or pflag refusing the call.
 	var fault *diag.Fault
 	if !errors.As(err, &fault) {
 		fault = &diag.Fault{Code: diag.BadUsage, Message: cobraMessage(err)}
@@ -49,10 +39,7 @@ func Run(ctx context.Context, argv, env []string, build *debug.BuildInfo, stdin 
 	return fault.ExitCode()
 }
 
-// execute is the tree answering argv, which is cobra's work but for the completion protocol. A shell asks for
-// it by the name of a hidden command cobra builds on its own, and cobra's answer to it reads the process's
-// environment and writes to the process's stderr and to a file named by it, so ytrack answers first. The
-// command is not put in the tree instead: cobra adds its own under that name whatever else stands there.
+// cobra's own __complete reads the process env and writes to its stderr and a debug file.
 func execute(ctx context.Context, root *cobra.Command, argv []string, stdout io.Writer) error {
 	if len(argv) > 0 {
 		switch argv[0] {
@@ -67,8 +54,6 @@ func execute(ctx context.Context, root *cobra.Command, argv []string, stdout io.
 	return root.ExecuteContext(ctx)
 }
 
-// The tree gets no stderr, so nothing in it writes there; the stream reaches the one group
-// holding a command that warns, and every other command is built without it.
 func newRoot(env []string, build *debug.BuildInfo, stdin *os.File, stdout io.Writer, renderer render.Renderer,
 	stream *diag.Stream,
 ) *cobra.Command {
@@ -77,49 +62,27 @@ func newRoot(env []string, build *debug.BuildInfo, stdin *os.File, stdout io.Wri
 		if version {
 			return printNode(stdout, renderer, versionNode(build))
 		}
-		return rejectGroup(cmd, args)
+		return requireSubcommand(cmd, args)
 	})
 	root.SilenceErrors = true
 	root.SilenceUsage = true
-	// cobra builds a "completion" of its own on the spot when argv names it, subcommands and all;
-	// ytrack's own stands in the tree instead.
 	root.CompletionOptions.DisableDefaultCmd = true
-	// That leaves the hidden completion protocol, which argv reaches even behind a flag,
-	// where Run does not answer it and cobra would; no shell writes such a call.
-	root.PersistentPreRunE = runE(func(cmd *cobra.Command, _ []string) *diag.Fault {
-		switch cmd.CalledAs() {
-		case cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
-			return unknownCommand(cmd.Root(), cmd.CalledAs())
-		}
-		return nil
-	})
-	// cobra's own help command, added once there are subcommands, answers an unknown topic
-	// with exit code 0 and exits the process when it cannot print. The stand-in is not called
-	// help: the template lists a command of that name even when it is hidden, so only a name of
-	// its own keeps it out of the list, and ytrack help then meets the refusal of any unknown
-	// command. The name is kept short because cobra pads the whole column by the longest name
-	// among the commands, the hidden ones with them.
+	root.PersistentPreRunE = runE(refuseCobraCompletion)
+	// cobra's help exits 0 on an unknown topic and lists a hidden "help"; a hidden long name still widens the list.
 	help := newCommand("no-help", func(cmd *cobra.Command, _ []string) *diag.Fault {
 		return unknownCommand(cmd.Root(), cmd.CalledAs())
 	})
 	help.Hidden = true
 	root.SetHelpCommand(help)
-	// SetHelpCommand only remembers it; the tree gets it inside ExecuteC, which the completion protocol never
-	// reaches. It is put there at once instead, so that the tree the protocol answers from is the tree that
-	// runs the commands, and the one command hidden in it is hidden from the shell as it is from the help.
+	// SetHelpCommand takes effect only inside ExecuteC, which the completion protocol never reaches.
 	root.AddCommand(help)
 	root.SetOut(stdout)
-	// With errors silenced and the completion protocol refused, cobra has nothing left
-	// to write to its error writer; the error itself reaches Run as a refusal.
 	root.SetErr(io.Discard)
 	root.SetFlagErrorFunc(runE(func(_ *cobra.Command, err error) *diag.Fault {
 		return &diag.Fault{Code: diag.BadUsage, Message: flagMessage(err)}
 	}))
-	// Local and not persistent, so the flag stands on ytrack alone. cobra's own Version field is left
-	// unset: it prints a template of its own past the renderer, and it takes -v while -v is free.
+	// A flag of its own: cobra's Version field prints its own template past the renderer and takes -v.
 	root.Flags().BoolVar(&version, "version", false, "print the version and the revision this binary was built from")
-	// The tree gets no reader either: asked for one it was never given, cobra answers with the process's own
-	// standard input, which nothing here may touch, so the file Run was handed goes to the one command that reads.
 	root.AddCommand(newActivity(env, stdout, renderer), newArticle(env, stdout, renderer),
 		newAttachment(env, stdout, renderer), newAuth(env, stdin, stdout, renderer),
 		newComment(env, stdout, renderer), newCompletion(stdout), newField(env, stdout, renderer),
@@ -129,8 +92,16 @@ func newRoot(env []string, build *debug.BuildInfo, stdin *os.File, stdout io.Wri
 	return root
 }
 
+func refuseCobraCompletion(cmd *cobra.Command, _ []string) *diag.Fault {
+	switch cmd.CalledAs() {
+	case cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
+		return unknownCommand(cmd.Root(), cmd.CalledAs())
+	}
+	return nil
+}
+
 func newTag(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {
-	tag := newCommand("tag", rejectGroup)
+	tag := newCommand("tag", requireSubcommand)
 	tag.Short = "Manage tags"
 	tag.AddCommand(newTagList(env, stdout, renderer), newTagCreate(env, stdout, renderer),
 		newTagDelete(env, stdout, renderer), newTagAdd(env, stdout, renderer),
@@ -240,9 +211,6 @@ func newTagDelete(env []string, stdout io.Writer, renderer render.Renderer) *cob
 	return remove
 }
 
-// The value of the flag reaches the call by written, like the value of every other flag that may go unwritten:
-// an empty login names a user YouTrack keeps none of and is refused, while no flag at all is the caller naming
-// the tag by its name alone.
 func ownedByFlagOf(cmd *cobra.Command, login *string) {
 	cmd.Flags().StringVar(login, ownedByFlag, "", "owner `login`, when names clash")
 	rejectRepeat(cmd.Flags().Lookup(ownedByFlag))
@@ -325,14 +293,14 @@ func newLink(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Co
 			render.Pair{Key: "removed", Value: render.NewMap(render.FromData("depends on",
 				render.NewList(render.NewMap(render.Pair{Key: "idReadable", Value: render.NewString("DEV-2")}))))}))
 
-	link := newCommand("link", rejectGroup)
+	link := newCommand("link", requireSubcommand)
 	link.Short = "Manage issue links"
 	link.AddCommand(list, add, remove)
 	return link
 }
 
 func newArticle(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {
-	article := newCommand("article", rejectGroup)
+	article := newCommand("article", requireSubcommand)
 	article.Short = "Manage articles"
 	article.AddCommand(newArticleShow(env, stdout, renderer), newArticleList(env, stdout, renderer),
 		newArticleCreate(env, stdout, renderer), newArticleUpdate(env, stdout, renderer),
@@ -343,7 +311,6 @@ func newArticle(env []string, stdout io.Writer, renderer render.Renderer) *cobra
 func newArticleCreate(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {
 	var fields, summary, content, parent string
 	create := newCommand("create <project>", func(cmd *cobra.Command, args []string) *diag.Fault {
-		// Пустой --summary и отсутствие флага — разные ошибки, различает только Changed.
 		if !cmd.Flags().Changed(summaryFlag) {
 			message := "no --summary was given: it carries the title of the article, which YouTrack files none without"
 			return &diag.Fault{Code: diag.BadUsage, Message: message}
@@ -473,7 +440,7 @@ func newArticleShow(env []string, stdout io.Writer, renderer render.Renderer) *c
 }
 
 func newAttachment(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {
-	attachment := newCommand("attachment", rejectGroup)
+	attachment := newCommand("attachment", requireSubcommand)
 	attachment.Short = "Manage attachments"
 	attachment.AddCommand(newAttachmentCreate(env, stdout, renderer), newAttachmentDelete(env, stdout, renderer),
 		newAttachmentList(env, stdout, renderer))
@@ -510,9 +477,7 @@ func newAttachmentCreate(env []string, stdout io.Writer, renderer render.Rendere
 		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	create.Args = cobra.ExactArgs(2)
-	// The one command of ytrack an argument of which is a file, and it is the second argument: the shell
-	// completes names where the path stands, and nowhere else.
-	create.Annotations = map[string]string{completesPathAt: "2"}
+	create.Annotations = map[string]string{pathIsArgumentNumber: "2"}
 	create.Short = "Attach a file"
 	create.Long = "Attach a local file.\n\n" +
 		"<owner> is a readable id such as DEV-1 or DEV-A-1.\n\n" +
@@ -544,7 +509,7 @@ func newAttachmentList(env []string, stdout io.Writer, renderer render.Renderer)
 }
 
 func newComment(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {
-	comment := newCommand("comment", rejectGroup)
+	comment := newCommand("comment", requireSubcommand)
 	comment.Short = "Manage comments"
 	comment.AddCommand(newCommentList(env, stdout, renderer), newCommentCreate(env, stdout, renderer),
 		newCommentUpdate(env, stdout, renderer), newCommentDelete(env, stdout, renderer))
@@ -577,20 +542,15 @@ func newCommentList(env []string, stdout io.Writer, renderer render.Renderer) *c
 	return list
 }
 
-// A write of a comment does not print its owner, and the key the owner goes by depends on its kind.
 const commentOwner = "--fields +issue(...) on a comment of an article, or +article(...) on one of an issue, is " +
 	"refused only after the comment is written."
 
-// The refusal a write of a comment gives where the flag carrying its text was not written at all, which is a
-// different mistake from writing it empty and is told from it by the flag alone.
 const noCommentText = "no --text was given: it carries the text of the comment, which is the whole of what a " +
 	"comment is"
 
 func newCommentCreate(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {
 	var fields, text string
 	create := newCommand("create <owner>", func(cmd *cobra.Command, args []string) *diag.Fault {
-		// Read before the owner, so that a call giving neither is answered about the text: an empty text and no
-		// text at all are different mistakes, and only the flag tells them apart.
 		if !cmd.Flags().Changed(textFlag) {
 			return &diag.Fault{Code: diag.BadUsage, Message: noCommentText}
 		}
@@ -653,7 +613,7 @@ func newCommentDelete(env []string, stdout io.Writer, renderer render.Renderer) 
 }
 
 func newIssue(env []string, stdout io.Writer, renderer render.Renderer, stream *diag.Stream) *cobra.Command {
-	issue := newCommand("issue", rejectGroup)
+	issue := newCommand("issue", requireSubcommand)
 	issue.Short = "Manage issues"
 	issue.AddCommand(newIssueShow(env, stdout, renderer), newIssueList(env, stdout, renderer, stream),
 		newIssueCreate(env, stdout, renderer), newIssueUpdate(env, stdout, renderer),
@@ -718,7 +678,6 @@ func newIssueCreate(env []string, stdout io.Writer, renderer render.Renderer) *c
 	var fields, summary, description string
 	var filled []string
 	create := newCommand("create <project>", func(cmd *cobra.Command, args []string) *diag.Fault {
-		// An empty title and no title at all are different mistakes, and only the flag itself tells them apart.
 		if !cmd.Flags().Changed(summaryFlag) {
 			message := "no --summary was given: it carries the title of the issue, which YouTrack files none without"
 			return &diag.Fault{Code: diag.BadUsage, Message: message}
@@ -800,8 +759,8 @@ func newActivity(env []string, stdout io.Writer, renderer render.Renderer) *cobr
 		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	list.Args = cobra.ExactArgs(1)
-	list.Short = "List the journal of an issue"
-	list.Long = "List the journal of an issue, newest first.\n\n" +
+	list.Short = "List activities of an issue"
+	list.Long = "List activities of an issue, newest first.\n\n" +
 		example(listed(uncounted, true, "activities",
 			render.NewMap(render.Pair{Key: "timestamp", Value: moment()}, render.Pair{Key: "author", Value: byLogin()}, render.Pair{Key: "category", Value: render.NewString("CustomFieldCategory")},
 				render.Pair{Key: "field", Value: render.NewString("State")},
@@ -814,22 +773,18 @@ func newActivity(env []string, stdout io.Writer, renderer render.Renderer) *cobr
 		"Changes of a description, a summary or a comment carry the whole text before and after. Narrow with " +
 		"--category, or leave added and removed out of --fields.\n\n" +
 		"--category takes " + strings.Join(youtrack.ActivityCategories(), ", ") + "."
-	// A comma is part of the name: `LinksCategory,CommentsCategory` is a misspelling to report, not two
-	// categories.
 	list.Flags().StringArrayVar(&categories, "category", nil,
 		"`category` to print; repeatable; default all")
 	closedSet(list.Flags().Lookup("category"), youtrack.ActivityCategories())
 	fieldsFlag(list, &fields, youtrack.ActivityListFields)
 	pageFlags(list, &page, "activities")
 
-	activity := newCommand("activity", rejectGroup)
-	activity.Short = "Read issue journals"
+	activity := newCommand("activity", requireSubcommand)
+	activity.Short = "Read issue activities"
 	activity.AddCommand(list)
 	return activity
 }
 
-// flagValue is the value of a flag the caller wrote, and nothing where they wrote no such flag: an empty value
-// and no flag at all are two different things to say, and pflag holds the same empty string for both.
 func flagValue(cmd *cobra.Command, flag string, value *string) *string {
 	if !cmd.Flags().Changed(flag) {
 		return nil
@@ -837,32 +792,23 @@ func flagValue(cmd *cobra.Command, flag string, value *string) *string {
 	return value
 }
 
-// The free text of an issue goes by one name wherever it is written, so a caller who knows how to file an
-// issue knows how to change one.
 const (
-	summaryFlag     = "summary"
-	descriptionFlag = "description"
-	contentFlag     = "content"
-	textFlag        = "text"
-	fieldFlag       = "field"
-	attributeFlag   = "attribute"
-	clearFlag       = "clear"
-	parentFlag      = "parent"
-	// The name of a tag is free text: a tag called --help or -x is a tag like any other, and text a caller wrote
-	// reaches ytrack whole only as the value of a flag.
-	nameFlag = "name"
-	// The three sets of sharing a creation writes, each named after what a group in it may do rather than after
-	// the member it goes into: being shown a tag, renaming it and hanging it are three rights YouTrack keeps
-	// apart, and --taggable-by is the only one of the three that grants the last.
+	summaryFlag      = "summary"
+	descriptionFlag  = "description"
+	contentFlag      = "content"
+	textFlag         = "text"
+	fieldFlag        = "field"
+	attributeFlag    = "attribute"
+	clearFlag        = "clear"
+	parentFlag       = "parent"
+	nameFlag         = "name"
 	visibleForFlag   = "visible-for"
 	updateableByFlag = "updateable-by"
 	taggableByFlag   = "taggable-by"
-	// The other half of what tells one tag from another: the login of the user the tag belongs to, which is
-	// what a name two tags carry is settled by.
-	ownedByFlag  = "owned-by"
-	dateFlag     = "date"
-	typeFlag     = "type"
-	durationFlag = "duration"
+	ownedByFlag      = "owned-by"
+	dateFlag         = "date"
+	typeFlag         = "type"
+	durationFlag     = "duration"
 )
 
 func newUser(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {
@@ -905,7 +851,7 @@ func newUser(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Co
 	fieldsFlag(list, &listFields, youtrack.UserListFields)
 	pageFlags(list, &page, "users")
 
-	user := newCommand("user", rejectGroup)
+	user := newCommand("user", requireSubcommand)
 	user.Short = "Find users"
 	user.AddCommand(show, list)
 	return user
@@ -928,8 +874,6 @@ func newField(env []string, stdout io.Writer, renderer render.Renderer) *cobra.C
 
 	var showFields string
 	show := newCommand("show <project> <field>", func(cmd *cobra.Command, args []string) *diag.Fault {
-		// What field show prints by default is a function of what the field holds, so no string stands in for
-		// it here.
 		call, fault := youtrack.ShowField(args[0], args[1], fieldsFlagValue(cmd, &showFields))
 		if fault != nil {
 			return fault
@@ -941,9 +885,9 @@ func newField(env []string, stdout io.Writer, renderer render.Renderer) *cobra.C
 	show.Long = "Show a custom field with its allowed values.\n\n" +
 		example(fieldOf(render.Pair{Key: "bundle", Value: render.NewMap(render.Pair{Key: "values", Value: render.NewList(render.NewMap(render.Pair{Key: "name", Value: render.NewString("Open")}, render.Pair{Key: "archived", Value: render.NewBool(false)}))})})) + "\n\n" +
 		"A field of users prints bundle.aggregatedUsers(login) instead, where an empty list means anyone."
-	fieldsFlag(show, &showFields, "")
+	fieldsFlag(show, &showFields, defaultFieldsDependOnFieldType)
 
-	field := newCommand("field", rejectGroup)
+	field := newCommand("field", requireSubcommand)
 	field.Short = "Read custom fields"
 	field.AddCommand(list, show)
 	return field
@@ -983,14 +927,14 @@ func newProject(env []string, stdout io.Writer, renderer render.Renderer) *cobra
 	fieldsFlag(list, &listFields, youtrack.ProjectListFields)
 	pageFlags(list, &page, "projects")
 
-	project := newCommand("project", rejectGroup)
+	project := newCommand("project", requireSubcommand)
 	project.Short = "Read projects"
 	project.AddCommand(show, list)
 	return project
 }
 
 func newTime(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {
-	tracking := newCommand("time", rejectGroup)
+	tracking := newCommand("time", requireSubcommand)
 	tracking.Short = "Manage logged time"
 	tracking.AddCommand(newTimeList(env, stdout, renderer), newTimeCreate(env, stdout, renderer),
 		newTimeUpdate(env, stdout, renderer), newTimeDelete(env, stdout, renderer))
@@ -1024,7 +968,6 @@ func newTimeCreate(env []string, stdout io.Writer, renderer render.Renderer) *co
 	var fields, date, text, workType string
 	var attributes []string
 	create := newCommand("create <issue> <duration>", func(cmd *cobra.Command, args []string) *diag.Fault {
-		// YouTrack itself defaults an omitted day to today, the type to none and the text to empty.
 		call, fault := youtrack.CreateWorkItem(args[0], args[1], flagValue(cmd, dateFlag, &date),
 			flagValue(cmd, textFlag, &text), flagValue(cmd, typeFlag, &workType), attributes, fieldsFlagValue(cmd, &fields))
 		if fault != nil {
@@ -1117,7 +1060,6 @@ func (v *commentsValue) Type() string {
 	return "count"
 }
 
-// How many records a list prints unasked. Every list of the tool takes the same number, so it is written once.
 const listLimit = 50
 
 func pageFlags(cmd *cobra.Command, page *youtrack.Page, plural string) {
@@ -1126,6 +1068,8 @@ func pageFlags(cmd *cobra.Command, page *youtrack.Page, plural string) {
 	cmd.Flags().IntVar(&page.Skip, "skip", 0, plural+" to pass over before the first")
 	rejectRepeat(cmd.Flags().Lookup("skip"))
 }
+
+const defaultFieldsDependOnFieldType = ""
 
 func fieldsFlag(cmd *cobra.Command, expression *string, defaults string) {
 	cmd.Flags().StringVar(expression, "fields", defaults, "YouTrack fields `expression`; +expr adds to the default")
@@ -1138,8 +1082,6 @@ func commentsFlag(cmd *cobra.Command, comments *commentsValue) {
 	rejectRepeat(cmd.Flags().Lookup("comments"))
 }
 
-// fieldsFlagValue is the expression the caller wrote, and nil where they wrote none: what pflag holds then is the
-// default of the command, which stands for no expression at all.
 func fieldsFlagValue(cmd *cobra.Command, expression *string) *string {
 	if !cmd.Flags().Changed("fields") {
 		return nil
@@ -1147,8 +1089,6 @@ func fieldsFlagValue(cmd *cobra.Command, expression *string) *string {
 	return expression
 }
 
-// An empty --query is the caller asking for every record there is, so only the flag itself tells a search from
-// none. carries is what the flag holds, and thing what one record of the command is.
 func rejectNoQuery(cmd *cobra.Command, carries, thing string) *diag.Fault {
 	if cmd.Flags().Changed("query") {
 		return nil
@@ -1157,7 +1097,6 @@ func rejectNoQuery(cmd *cobra.Command, carries, thing string) *diag.Fault {
 	return &diag.Fault{Code: diag.BadUsage, Message: message}
 }
 
-// runCall is a command that prints what the server answered and nothing besides.
 func runCall(ctx context.Context, env []string, stdout io.Writer, renderer render.Renderer, call youtrack.Call) *diag.Fault {
 	_, node, fault := connectAndCall(ctx, env, call)
 	if fault != nil {
@@ -1166,9 +1105,6 @@ func runCall(ctx context.Context, env []string, stdout io.Writer, renderer rende
 	return printNode(stdout, renderer, node)
 }
 
-// connectAndCall is the one place a command reaches YouTrack from, and the connection comes back out for the command whose
-// document says more than the answer did. Only a call that assembled reads the address and the token, so a call
-// that did not is bad_usage whatever env holds.
 func connectAndCall(ctx context.Context, env []string, call youtrack.Call) (connection, *render.Node, *diag.Fault) {
 	c, fault := connect(env)
 	if fault != nil {
@@ -1176,12 +1112,11 @@ func connectAndCall(ctx context.Context, env []string, call youtrack.Call) (conn
 	}
 	node, fault := call(ctx, c.client)
 	if fault != nil {
-		return connection{}, nil, c.withOrigin(fault)
+		return connection{}, nil, c.withLoginSource(fault)
 	}
 	return c, node, nil
 }
 
-// A failure ytrack has no code for goes under upstream_failed (ADR-0005).
 func printNode(stdout io.Writer, renderer render.Renderer, node *render.Node) *diag.Fault {
 	if err := renderer.Render(stdout, node); err != nil {
 		return &diag.Fault{Code: diag.UpstreamFailed, Message: err.Error()}
@@ -1189,7 +1124,6 @@ func printNode(stdout io.Writer, renderer render.Renderer, node *render.Node) *d
 	return nil
 }
 
-// pflag keeps the last of the values a flag is given, so a flag that takes one refuses the second.
 func rejectRepeat(flag *pflag.Flag) {
 	flag.Value = &onceValue{Value: flag.Value}
 }
@@ -1207,17 +1141,13 @@ func (v *onceValue) Set(value string) error {
 	return v.Value.Set(value)
 }
 
-// Without RunE, cobra answers a call that names none of a group's commands as it answers
-// --help, with exit code 0.
-func rejectGroup(cmd *cobra.Command, args []string) *diag.Fault {
+func requireSubcommand(cmd *cobra.Command, args []string) *diag.Fault {
 	if len(args) == 0 {
 		return &diag.Fault{Code: diag.BadUsage, Message: "no command given"}
 	}
 	return unknownCommand(cmd, args[0])
 }
 
-// flagMessage is the error of pflag with what it quotes in backticks rather than in the %q it writes, and with
-// a number that did not parse told by why alone: strconv names the function and quotes the text a second time.
 func flagMessage(err error) string {
 	var invalid *pflag.InvalidValueError
 	var required *pflag.ValueRequiredError
@@ -1244,8 +1174,7 @@ func flagMessage(err error) string {
 	return err.Error()
 }
 
-// cobra refuses a word under the root before a flag is parsed, and quotes it with %q in an error of no type of its
-// own; it is written again the way unknownCommand writes it under every group, whatever cobra adds after it kept.
+// cobra reports an unknown word under the root in an untyped error that quotes it with %q.
 var cobraUnknownCommand = regexp.MustCompile(`^unknown command ("(?:[^"\\]|\\.)*") for ("(?:[^"\\]|\\.)*")`)
 
 func cobraMessage(err error) string {
@@ -1262,8 +1191,6 @@ func cobraMessage(err error) string {
 	return "unknown command " + render.Quote(word) + " for " + render.Quote(path) + message[len(found[0]):]
 }
 
-// The words cobra's legacyArgs refuses an unknown command with, once there are
-// subcommands and Args is nil.
 func unknownCommand(parent *cobra.Command, word string) *diag.Fault {
 	message := fmt.Sprintf("unknown command %s for %s", render.Quote(word), render.Quote(parent.CommandPath()))
 	return &diag.Fault{Code: diag.BadUsage, Message: message}
@@ -1273,8 +1200,6 @@ func newCommand(use string, run func(cmd *cobra.Command, args []string) *diag.Fa
 	return &cobra.Command{Use: use, RunE: runE(run)}
 }
 
-// Every function ytrack hands cobra is built here, so it fails with a *diag.Fault or not
-// at all; a nil *diag.Fault handed on as an error would not be nil.
 func runE[T any](f func(cmd *cobra.Command, arg T) *diag.Fault) func(*cobra.Command, T) error {
 	return func(cmd *cobra.Command, arg T) error {
 		if fault := f(cmd, arg); fault != nil {

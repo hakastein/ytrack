@@ -11,12 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// How many steps of the line above an article one read asks for, which is what makes a deeper article cost
-// another request rather than one request per step.
 const ancestorsPerRequest = 10
 
-// The expression the read of a parent goes out with: what every read before a write asks, and above it the line
-// the parent hangs from, one nested member to a step.
 func articleLineFields() string {
 	line := "parentArticle(id,idReadable)"
 	for range ancestorsPerRequest - 1 {
@@ -25,7 +21,6 @@ func articleLineFields() string {
 	return articleToWriteFields + "," + line
 }
 
-// The request that read goes out as, which is the one a refusal raised before the write names.
 func articleLineRequest(address, id string) string {
 	return "GET " + address + "/api/articles/" + url.PathEscape(id) + "?fields=" + articleLineFields()
 }
@@ -34,19 +29,19 @@ func sentSince(u *upstream, mark int) []string {
 	return sentMethods(u)[mark:]
 }
 
-// One step of the line an answer carries: the internal id a cycle is settled by and the readable id a refusal
-// names it with.
 type ancestor struct{ id, readable string }
 
-// nestedLine is the parentArticle member of an answer, each step nested in the one below it. top stands at the
-// innermost: "null" is the root of the knowledge base, and "" is the expression running out before the line
-// did, which is how the server answers a line deeper than the read asked for.
-func nestedLine(top string, steps []ancestor) string {
-	nested := top
+const (
+	rootParent    = "null"
+	parentNotSent = ""
+)
+
+func nestedLine(topParent string, steps []ancestor) string {
+	nested := topParent
 	for at := len(steps) - 1; at >= 0; at-- {
 		body := `{"$type":"Article","id":` + strconv.Quote(steps[at].id) +
 			`,"idReadable":` + strconv.Quote(steps[at].readable)
-		if nested != "" {
+		if nested != parentNotSent {
 			body += `,"parentArticle":` + nested
 		}
 		nested = body + `}`
@@ -54,25 +49,19 @@ func nestedLine(top string, steps []ancestor) string {
 	return nested
 }
 
-// articleAbove is an article as the read of a parent finds it: what every read before a write asks, and the
-// line it hangs from above that.
-func articleAbove(id, readable, project, top string, steps ...ancestor) string {
+func articleAbove(id, readable, project, topParent string, steps ...ancestor) string {
 	body := `{"$type":"Article","id":` + strconv.Quote(id) + `,"idReadable":` + strconv.Quote(readable) +
 		`,"project":{"$type":"Project","shortName":` + strconv.Quote(project) + `}`
-	if line := nestedLine(top, steps); line != "" {
+	if line := nestedLine(topParent, steps); line != parentNotSent {
 		body += `,"parentArticle":` + line
 	}
 	return body + `}`
 }
 
-// A root of DEV as the read of a parent finds it: nothing above it at all.
 func rootOfDEV(id, readable string) string {
-	return articleAbove(id, readable, "DEV", "null")
+	return articleAbove(id, readable, "DEV", rootParent)
 }
 
-// movingAnArticle is the server of an update that names a parent: every read is answered by the id in its path,
-// so a scenario says what the article, the parent and each step of the line above it come back as, and the
-// write is answered on its own.
 func movingAnArticle(t *testing.T, reads map[string]http.HandlerFunc, update http.HandlerFunc) *upstream {
 	t.Helper()
 	return serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -92,9 +81,6 @@ func movingAnArticle(t *testing.T, reads map[string]http.HandlerFunc, update htt
 	})
 }
 
-// What --parent and --clear parent settle before the network: that the two do not say opposite things about
-// the same part, and that the id of the parent is of the form of an article, which the API of articles answers
-// for an issue and for an internal id too.
 func TestArticleUpdateRefusesAParentBeforeAnyRequest(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -119,7 +105,7 @@ func TestArticleUpdateRefusesAParentBeforeAnyRequest(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"article", "update", "DEV-A-7"}, tc.argv...)...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -136,9 +122,6 @@ func TestArticleUpdateHelpNamesTheParentFlagAndWhatClearTakes(t *testing.T) {
 	assert.Contains(t, got.stdout, "content or parent")
 }
 
-// The whole of a move: the article is read, the parent is read with the line above it, and the body
-// addresses the parent by the internal id that read gave rather than by the string the caller typed. Both reads
-// go to the articles, since the form of the id settled that before either went out.
 func TestArticleUpdateMovesAnArticleUnderTheIDTheReadGave(t *testing.T) {
 	t.Parallel()
 	filed := answeredArticle{readable: "DEV-A-7", summary: "x", parent: parentNamed("DEV-A-1")}
@@ -159,9 +142,6 @@ func TestArticleUpdateMovesAnArticleUnderTheIDTheReadGave(t *testing.T) {
 	assert.Equal(t, "DEV-A-1", nodeAt(t, requireMapping(t, "stdout", got.stdout), "parentArticle", "idReadable").Value)
 }
 
-// The parent is asked for whatever the caller asks to print, since the check of the write has nothing to
-// hold the answer against otherwise: the move is held by the readable id the read gave it, and that name is
-// ytrack's own to ask for.
 func TestArticleUpdateAsksForTheParentWhateverTheExpressionSays(t *testing.T) {
 	t.Parallel()
 	filed := answeredArticle{readable: "DEV-A-7", summary: "x", parent: parentNamed("DEV-A-1")}
@@ -178,9 +158,6 @@ func TestArticleUpdateAsksForTheParentWhateverTheExpressionSays(t *testing.T) {
 		server.sentFields())
 }
 
-// A parent the server has none of is a refusal and nothing else: YouTrack would take the parent the article
-// hangs from off it under a 200 and without a word, so the caller would be told about a move they never asked
-// for and the old parent would be gone.
 func TestArticleUpdateRefusesAParentTheServerDoesNotHave(t *testing.T) {
 	t.Parallel()
 	said := `{"error":"Not Found","error_description":"Can't find article with id DEV-A-99999"}`
@@ -200,17 +177,11 @@ func TestArticleUpdateRefusesAParentTheServerDoesNotHave(t *testing.T) {
 			{"upstream_message", "Can't find article with id DEV-A-99999"},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet, http.MethodGet}, sentMethods(server))
-	// The id of the parent comes by a flag, so this is where the table of forms cannot reach: two reads go out
-	// where every other command of articles sends one, and the 404 of the second is an answer rather than a
-	// reason to ask the issues about it.
 	assert.Equal(t, []string{"/api/articles/DEV-A-7", "/api/articles/DEV-A-99999"}, server.sentPaths())
 }
 
-// A move that would close the line into a ring is settled off the line the read brought back, not sent:
-// YouTrack answers an article moved under itself honestly and one moved under its own descendant with a 500 of
-// a servlet, which would be a write_uncertain over an instance nothing touched.
 func TestArticleUpdateRefusesAParentThatClosesTheLine(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -224,14 +195,14 @@ func TestArticleUpdateRefusesAParentThatClosesTheLine(t *testing.T) {
 			name:     "the article itself",
 			parent:   "dev-A-7",
 			readable: "DEV-A-7",
-			found:    articleAbove("177-7", "DEV-A-7", "DEV", "null"),
+			found:    articleAbove("177-7", "DEV-A-7", "DEV", rootParent),
 			chain:    []any{"DEV-A-7"},
 		},
 		{
 			name:     "an article written under it",
 			parent:   "DEV-A-9",
 			readable: "DEV-A-9",
-			found: articleAbove("177-9", "DEV-A-9", "DEV", "null",
+			found: articleAbove("177-9", "DEV-A-9", "DEV", rootParent,
 				ancestor{id: "177-8", readable: "DEV-A-8"}, ancestor{id: "177-7", readable: "DEV-A-7"}),
 			chain: []any{"DEV-A-9", "DEV-A-8", "DEV-A-7"},
 		},
@@ -239,7 +210,7 @@ func TestArticleUpdateRefusesAParentThatClosesTheLine(t *testing.T) {
 			name:     "an article written under it, with a root above them both",
 			parent:   "DEV-A-9",
 			readable: "DEV-A-9",
-			found: articleAbove("177-9", "DEV-A-9", "DEV", "null",
+			found: articleAbove("177-9", "DEV-A-9", "DEV", rootParent,
 				ancestor{id: "177-7", readable: "DEV-A-7"}, ancestor{id: "177-1", readable: "DEV-A-1"}),
 			chain: []any{"DEV-A-9", "DEV-A-7"},
 		},
@@ -263,15 +234,12 @@ func TestArticleUpdateRefusesAParentThatClosesTheLine(t *testing.T) {
 					{"chain", tc.chain},
 				},
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Equal(t, []string{http.MethodGet, http.MethodGet}, sentMethods(server))
 		})
 	}
 }
 
-// A line longer than one read asks for is read on: the deepest step of the answer carries no parent of its
-// own, which is what tells a line that ran out of the expression from one that reached the root, and the next
-// read starts from that step by the internal id it arrived under.
 func TestArticleUpdateReadsOnWhereTheLineIsDeeperThanOneRequest(t *testing.T) {
 	t.Parallel()
 	steps := make([]ancestor, 0, ancestorsPerRequest)
@@ -282,8 +250,8 @@ func TestArticleUpdateReadsOnWhereTheLineIsDeeperThanOneRequest(t *testing.T) {
 	filed := answeredArticle{readable: "DEV-A-7", summary: "x", parent: parentNamed("DEV-A-20")}
 	server := movingAnArticle(t, map[string]http.HandlerFunc{
 		"DEV-A-7":  respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		"DEV-A-20": respondWith(http.StatusOK, articleAbove("177-20", "DEV-A-20", "DEV", "", steps...)),
-		deepest.id: respondWith(http.StatusOK, articleAbove(deepest.id, deepest.readable, "DEV", "null",
+		"DEV-A-20": respondWith(http.StatusOK, articleAbove("177-20", "DEV-A-20", "DEV", parentNotSent, steps...)),
+		deepest.id: respondWith(http.StatusOK, articleAbove(deepest.id, deepest.readable, "DEV", rootParent,
 			ancestor{id: "177-2", readable: "DEV-A-2"})),
 	}, respondWith(http.StatusOK, filed.json()))
 
@@ -315,17 +283,15 @@ func TestArticleUpdateRefusesAnAncestorStepLeftEmptyInTheResponse(t *testing.T) 
 			{"upstream_body", found},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet, http.MethodGet}, sentMethods(server))
 }
 
-// An article standing twice in the line it hangs from is a tree the knowledge base cannot hold, so it is
-// the answer that is wrong: the line is read no further, since reading it further would not end.
 func TestArticleUpdateRefusesALineThatRepeatsAnArticle(t *testing.T) {
 	t.Parallel()
 	server := movingAnArticle(t, map[string]http.HandlerFunc{
 		"DEV-A-7": respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		"DEV-A-9": respondWith(http.StatusOK, articleAbove("177-9", "DEV-A-9", "DEV", "null",
+		"DEV-A-9": respondWith(http.StatusOK, articleAbove("177-9", "DEV-A-9", "DEV", rootParent,
 			ancestor{id: "177-8", readable: "DEV-A-8"}, ancestor{id: "177-9", readable: "DEV-A-9"})),
 	}, noUpdate(t))
 
@@ -338,17 +304,15 @@ func TestArticleUpdateRefusesALineThatRepeatsAnArticle(t *testing.T) {
 			{"article", "DEV-A-9"},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet, http.MethodGet}, sentMethods(server))
 }
 
-// A call that names one project through the article and another through the parent is refused before the
-// write, the way a creation of an article is: the rule is one for both verbs, whatever the server would answer.
 func TestArticleUpdateRefusesAParentOfAnotherProject(t *testing.T) {
 	t.Parallel()
 	server := movingAnArticle(t, map[string]http.HandlerFunc{
 		"DEV-A-7":  respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		"DEMO-A-1": respondWith(http.StatusOK, articleAbove("177-50", "DEMO-A-1", "DEMO", "null")),
+		"DEMO-A-1": respondWith(http.StatusOK, articleAbove("177-50", "DEMO-A-1", "DEMO", rootParent)),
 	}, noUpdate(t))
 
 	got := runWith(t, server.env(), "article", "update", "DEV-A-7", "--parent", "DEMO-A-1")
@@ -362,12 +326,10 @@ func TestArticleUpdateRefusesAParentOfAnotherProject(t *testing.T) {
 			{"parent_project", "DEMO"},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet, http.MethodGet}, sentMethods(server))
 }
 
-// Taking the parent away reads nothing of it: there is no parent to resolve, so the body says null outright
-// and the article goes to the root of the knowledge base.
 func TestArticleUpdateTakesTheParentAwayWithoutReadingOne(t *testing.T) {
 	t.Parallel()
 	filed := answeredArticle{readable: "DEV-A-7", summary: "x"}
@@ -384,9 +346,6 @@ func TestArticleUpdateTakesTheParentAwayWithoutReadingOne(t *testing.T) {
 	assert.Nil(t, requireValue(t, nodeAt(t, requireMapping(t, "stdout", got.stdout), "parentArticle")))
 }
 
-// A 200 says the server took the body, not that it kept what was in it: an article still hanging where it
-// hung, or hanging from another than the one that was read, is the write disagreeing with itself, and the move
-// happened either way.
 func TestArticleUpdateRefusesAnAnswerThatDisagreesAboutTheParent(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -447,14 +406,11 @@ func TestArticleUpdateMovesArticlesOfTheDevInstance(t *testing.T) {
 	t.Cleanup(func() { removeArticle(t, dev, root) })
 	parent := fileArticle(t, dev, title+" P", "--parent", root)
 	child := fileArticle(t, dev, title+" C", "--parent", parent)
-	// Taken out of the tree by the last step below, so it is deleted on its own rather than with the root.
-	t.Cleanup(func() { removeArticle(t, dev, child) })
 	grandchild := fileArticle(t, dev, title+" G", "--parent", child)
 
-	// The line above G runs G, C, P, so P cannot be moved under it while the tree stands that way.
 	mark := len(sentMethods(dev))
 	closing := runWith(t, dev.env(), "article", "update", parent, "--parent", grandchild)
-	found := requireRefusal(t, closing)
+	found := requireFault(t, closing)
 	assert.Equal(t, "bad_usage", found.code)
 	assert.Contains(t, found.details, detail{"chain", []any{grandchild, child, parent}})
 	assert.Equal(t, []string{http.MethodGet, http.MethodGet}, sentSince(dev, mark), "the write never went out")
@@ -465,7 +421,7 @@ func TestArticleUpdateMovesArticlesOfTheDevInstance(t *testing.T) {
 
 	mark = len(sentMethods(dev))
 	missing := runWith(t, dev.env(), "article", "update", child, "--parent", "DEV-A-99999")
-	assert.Equal(t, "not_found", requireRefusal(t, missing).code)
+	assert.Equal(t, "not_found", requireFault(t, missing).code)
 	assert.Equal(t, []string{http.MethodGet, http.MethodGet}, sentSince(dev, mark), "the write never went out")
 	standing := runWith(t, dev.env(), "article", "show", child, "--comments=0", "--fields", "parentArticle(idReadable)")
 	require.Equal(t, 0, standing.code, "stderr: %s", standing.stderr)
@@ -473,12 +429,11 @@ func TestArticleUpdateMovesArticlesOfTheDevInstance(t *testing.T) {
 		"a parent the dev instance has none of leaves the standing one where it was")
 
 	taken := runWith(t, dev.env(), "article", "update", child, "--clear", "parent")
+	t.Cleanup(func() { removeArticle(t, dev, child) })
 	require.Equal(t, 0, taken.code, "stderr: %s", taken.stderr)
 	assert.Nil(t, requireValue(t, nodeAt(t, requireMapping(t, "stdout", taken.stdout), "parentArticle")))
 }
 
-// DEMO-A-1 is a fixture of another project: the read of the parent finds the project before the write and
-// nothing is sent, so the article of DEV keeps the project and the parent it had.
 func TestArticleUpdateMovesNothingUnderAParentOfAnotherProjectOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -497,6 +452,6 @@ func TestArticleUpdateMovesNothingUnderAParentOfAnotherProjectOfTheDevInstance(t
 			{"parent_project", "DEMO"},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet, http.MethodGet}, sentSince(dev, mark), "the write never went out")
 }

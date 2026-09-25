@@ -9,8 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The environment holds an address and a token this command is not to use, and the file of login records is not to
-// be written: a refusal that reached either would show up here.
 func loginEnvironment(t *testing.T) (env []string, home, path string) {
 	t.Helper()
 	stated, _ := here(t)
@@ -54,7 +52,7 @@ func TestAuthLoginRefusesAStdinThatIsNotATerminal(t *testing.T) {
 
 			got := runOn(t, tc.stdin(t), env, tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assertNoToken(t, got, token)
 			assert.NoFileExists(t, path)
 			assert.Empty(t, entries(t, home))
@@ -62,12 +60,9 @@ func TestAuthLoginRefusesAStdinThatIsNotATerminal(t *testing.T) {
 	}
 }
 
-// Piping a token in is the thing the refusal exists to make impossible, and the proof is the pipe itself: after the
-// call every byte written to it is still there to be read, so nothing of it reached the command.
 func TestAuthLoginReadsNothingOfThePipeItIsHanded(t *testing.T) {
 	t.Parallel()
 	env, home, path := loginEnvironment(t)
-	// What a caller who thought the dialogue could be answered from a script would have written into it.
 	const dialogue = "http://h\n" + token + "\n"
 	read, write, err := os.Pipe()
 	require.NoError(t, err)
@@ -78,7 +73,7 @@ func TestAuthLoginReadsNothingOfThePipeItIsHanded(t *testing.T) {
 
 	got := runOn(t, read, env, "auth", "login")
 
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 	assertNoToken(t, got, token)
 	unread, err := io.ReadAll(read)
 	require.NoError(t, err)
@@ -106,7 +101,7 @@ func TestAuthLoginRefusesACallThatDoesNotAssemble(t *testing.T) {
 
 			got := runWith(t, env, tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assertNoToken(t, got, token)
 			assert.NoFileExists(t, path)
 			assert.Empty(t, entries(t, home))

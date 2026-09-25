@@ -12,11 +12,8 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// One of the thirteen types whose values are named by a name: the field of the project, what the call gives
-// it, the class the body names the field by and the member one value is written under.
 type namedRow struct {
-	name string
-	// The name the project gave the field of its own; where it stands, the flag addresses the field by it.
+	name      string
 	translate string
 	valueType string
 	isMulti   bool
@@ -24,7 +21,6 @@ type namedRow struct {
 	sent      string
 }
 
-// The thirteen rows of the table a value is written to by name, each in the order DEV binds such a field.
 func namedRows() []namedRow {
 	return []namedRow{
 		{name: "Type", translate: "Тип", valueType: "enum", written: []string{"Task"},
@@ -56,9 +52,7 @@ func namedRows() []namedRow {
 	}
 }
 
-// The name the flag addresses the field by: the name the project gave it where it gave it one, and in the
-// letter case nobody wrote it in, since a name is matched the way the server matches it.
-func (r namedRow) addressed() string {
+func (r namedRow) nameInLowerCase() string {
 	if r.translate != "" {
 		return strings.ToLower(r.translate)
 	}
@@ -69,7 +63,6 @@ func (r namedRow) id() string {
 	return "180-" + strconv.Itoa(len(r.name))
 }
 
-// The member one value of the field is written and read by: a user goes by login and everything else by name.
 func (r namedRow) member() string {
 	if r.valueType == "user" {
 		return "login"
@@ -77,8 +70,6 @@ func (r namedRow) member() string {
 	return "name"
 }
 
-// The element the body carries for the field: the class of the table, the name the project knows it by, and
-// the values, one object each and in a list where the field holds several.
 func (r namedRow) element() string {
 	values := make([]string, 0, len(r.written))
 	for _, value := range r.written {
@@ -91,13 +82,11 @@ func (r namedRow) element() string {
 	return `{"$type":` + strconv.Quote(r.sent) + `,"name":` + strconv.Quote(r.name) + `,"value":` + value + `}`
 }
 
-// The field of the project the row stands for, which a creation reads before it writes anything.
 func (r namedRow) writable() writableField {
 	return writableField{id: r.id(), kind: kindOfBinding(r.valueType), name: r.name, translate: r.translate,
 		valueType: r.valueType, isMultiValue: r.isMulti, canBeEmpty: true}
 }
 
-// The subtype of ProjectCustomField the binding arrives as, which settles whether defaultValues stands on it.
 func kindOfBinding(valueType string) string {
 	switch valueType {
 	case "state":
@@ -122,7 +111,6 @@ func kindOfBinding(valueType string) string {
 	return "EnumProjectCustomField"
 }
 
-// The field as it comes back on the issue, each value under the $type the server sends it with.
 func (r namedRow) received() receivedField {
 	values := make([]string, 0, len(r.written))
 	for _, value := range r.written {
@@ -146,8 +134,6 @@ func (r namedRow) valueJSON(value string) string {
 	return bundleElement(value)
 }
 
-// The project of the rows, and the issue they come back on: one table stands behind what is read, what is
-// sent and what arrives, so a row cannot be said one way in one place and another in the next.
 func projectOfRows(rows []namedRow) string {
 	fields := make([]writableField, 0, len(rows))
 	for _, row := range rows {
@@ -164,20 +150,17 @@ func issueOfRows(readable, summary string, rows []namedRow) string {
 	return createdIssueWith(readable, summary, "null", receivedFields(fields...))
 }
 
-// The flags of a creation that fills every row, written in an order of nobody's: the body is the project's
-// order whatever the caller wrote.
-func flagsOfRows(rows []namedRow) []string {
+func shuffledFlagsOfRows(rows []namedRow) []string {
 	var flags []string
 	for _, at := range []int{9, 2, 12, 0, 6, 11, 4, 8, 1, 10, 3, 7, 5} {
 		row := rows[at]
 		for _, value := range row.written {
-			flags = append(flags, "--field", row.addressed()+"="+value)
+			flags = append(flags, "--field", row.nameInLowerCase()+"="+value)
 		}
 	}
 	return flags
 }
 
-// What --field takes is a name, an = and a value, and the text of an issue is no custom field of it.
 func TestIssueCreateRefusesAFieldItCannotRead(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -196,23 +179,19 @@ func TestIssueCreateRefusesAFieldItCannotRead(t *testing.T) {
 
 			got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--field", tc.written)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// Every type whose values go by a name, single and multi-valued, written through one call: each element
-// of the body carries the $type of the table and the name the project knows the field by, the value is the
-// one member its type names a value with, and the elements stand in the order of the project while the values
-// of one field stand in the order of the flags.
 func TestIssueCreateWritesEveryTypeNamedByAName(t *testing.T) {
 	t.Parallel()
 	rows := namedRows()
 	server := creating(t, respondWith(http.StatusOK, projectOfRows(rows)),
 		respondWith(http.StatusOK, issueOfRows("DEV-7", "x", rows)))
 
-	got := runWith(t, server.env(), append([]string{"issue", "create", "DEV", "--summary", "x"}, flagsOfRows(rows)...)...)
+	got := runWith(t, server.env(), append([]string{"issue", "create", "DEV", "--summary", "x"}, shuffledFlagsOfRows(rows)...)...)
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
@@ -226,8 +205,6 @@ func TestIssueCreateWritesEveryTypeNamedByAName(t *testing.T) {
 	assert.JSONEq(t, want, server.asks()[1])
 }
 
-// A value is what stands after the first = of the flag, and nothing of it is read: a comma is a character of
-// a company's name and a second = is a character like any other.
 func TestIssueCreateSplitsAFieldAtTheFirstEquals(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -262,8 +239,6 @@ func TestIssueCreateSplitsAFieldAtTheFirstEquals(t *testing.T) {
 	}
 }
 
-// What the check reads is asked for whatever the caller asked to print: a custom field the call fills comes
-// back whole, and the parameter that would cut the answer down is never sent.
 func TestIssueCreateAsksForTheFieldsItChecks(t *testing.T) {
 	t.Parallel()
 	metadata := projectResponse(writableField{id: "180-15", name: "Type", valueType: "enum", canBeEmpty: true})
@@ -282,9 +257,6 @@ func TestIssueCreateAsksForTheFieldsItChecks(t *testing.T) {
 	}
 }
 
-// The values are held against the answer the way the server resolves them: a name in any letter case is
-// the same name, a set is a set however it comes back, and a value written twice comes back once. A value
-// that came back another is the write disagreeing with itself, and the issue exists by then.
 func TestIssueCreateChecksTheResponseAgainstTheValuesItWrote(t *testing.T) {
 	t.Parallel()
 	metadata := projectResponse(
@@ -316,8 +288,6 @@ func TestIssueCreateChecksTheResponseAgainstTheValuesItWrote(t *testing.T) {
 	})
 	t.Run("a set the answer holds one more value in", func(t *testing.T) {
 		t.Parallel()
-		// A write replaces what the field held rather than adding to it, so a value the write never sent is
-		// the answer disagreeing with it as much as one it sent and did not get back.
 		held := receivedFields(
 			receivedField{name: "Type", valueType: "enum", binding: "180-15", value: bundleElement("Task")},
 			receivedField{name: "Клиент", valueType: "enum", isMultiValue: true, binding: "180-18",
@@ -363,8 +333,6 @@ func TestIssueCreateChecksTheResponseAgainstTheValuesItWrote(t *testing.T) {
 	})
 }
 
-// A field the write filled and the answer holds nothing in is the write disagreeing with itself as much as a
-// value that came back another: empty is printed the way the type would have held it.
 func TestIssueCreateRefusesAnEmptyResponseValueWhereTheWriteSetOne(t *testing.T) {
 	t.Parallel()
 	metadata := projectResponse(
@@ -430,9 +398,6 @@ func invalidRow(t *testing.T, found faultDocument, index int, field string, valu
 	assert.NotEmpty(t, row[2].value)
 }
 
-// A value has to be one the field can be given, and ytrack says so before the write rather than sending
-// something the server would keep as something else. A type outside the twenty is the answer contradicting the
-// catalogue of the instance, which is no fault of the call.
 func TestIssueCreateRefusesAValueItCannotSend(t *testing.T) {
 	t.Parallel()
 	t.Run("a value of nothing at all", func(t *testing.T) {
@@ -442,7 +407,7 @@ func TestIssueCreateRefusesAValueItCannotSend(t *testing.T) {
 
 		got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--field", "Type=")
 
-		found := requireRefusal(t, got)
+		found := requireFault(t, got)
 		assert.Equal(t, "bad_usage", found.code)
 		invalidRow(t, found, 0, "Type", "")
 		assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
@@ -454,15 +419,12 @@ func TestIssueCreateRefusesAValueItCannotSend(t *testing.T) {
 
 		got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--field", "Type=Task")
 
-		found := requireRefusal(t, got)
+		found := requireFault(t, got)
 		assert.Equal(t, "upstream_invalid", found.code)
 		assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 	})
 }
 
-// What the metadata settles is refused once the metadata is in hand, all of it at once and before
-// anything is written: a name no field of the project answers to, and a field that holds one value given more
-// than one.
 func TestIssueCreateRefusesNamesAndRepeatsAfterTheMetadata(t *testing.T) {
 	t.Parallel()
 	metadata := projectResponse(
@@ -476,7 +438,7 @@ func TestIssueCreateRefusesNamesAndRepeatsAfterTheMetadata(t *testing.T) {
 		got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x",
 			"--field", "Type=Bug", "--field", "тип=Task")
 
-		found := requireRefusal(t, got)
+		found := requireFault(t, got)
 		assert.Equal(t, "bad_usage", found.code)
 		assert.Equal(t, []detail{
 			{"request", writeMetadataRequest(server.url, "DEV")},
@@ -503,7 +465,7 @@ func TestIssueCreateRefusesNamesAndRepeatsAfterTheMetadata(t *testing.T) {
 				}},
 			},
 		}
-		assert.Equal(t, want, requireRefusal(t, got))
+		assert.Equal(t, want, requireFault(t, got))
 		assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 	})
 	t.Run("a name more than one field of the project answers to", func(t *testing.T) {
@@ -524,14 +486,11 @@ func TestIssueCreateRefusesNamesAndRepeatsAfterTheMetadata(t *testing.T) {
 				{"ambiguous", []any{[]detail{{"field", "общее"}, {"candidates", []any{"Type", "Клиент"}}}}},
 			},
 		}
-		assert.Equal(t, want, requireRefusal(t, got))
+		assert.Equal(t, want, requireFault(t, got))
 		assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 	})
 }
 
-// A name no field of the project answers to stands in the refusal once, however many flags wrote it: a field
-// that holds several values takes --field once per value, and --field and --clear reach the same fields, so
-// one misspelling would otherwise be listed as many times as it was typed.
 func TestIssueWriteNamesAnUnresolvedNameOnce(t *testing.T) {
 	t.Parallel()
 	metadata := projectResponse(
@@ -588,7 +547,7 @@ func TestIssueWriteNamesAnUnresolvedNameOnce(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "unknown_name", found.code)
 			assert.Equal(t, tc.listed, detailNamed(t, found, tc.key))
 			assert.Equal(t, tc.requests, sentMethods(server))
@@ -596,15 +555,12 @@ func TestIssueWriteNamesAnUnresolvedNameOnce(t *testing.T) {
 	}
 }
 
-// A user is written by login and by nothing else, whatever the caller typed: the server reads an id, a
-// Hub id and me as logins too and answers that it has no such user, so the aliases are out of reach by
-// construction and ytrack checks no form of its own.
 func TestIssueCreateWritesAUserByLoginAlone(t *testing.T) {
 	t.Parallel()
 	metadata := projectResponse(writableField{id: "180-21", kind: "UserProjectCustomField", name: "Assignee",
 		valueType: "user", canBeEmpty: true})
-	logins := []string{"2-1", "me", "7fae4e41-01f8-42c0-9cc4-960c478d8a72", "Иван Иванов"}
-	for _, login := range logins {
+	loginsOfAnyForm := []string{"2-1", "me", "7fae4e41-01f8-42c0-9cc4-960c478d8a72", "Иван Иванов"}
+	for _, login := range loginsOfAnyForm {
 		t.Run("a login of "+strconv.Quote(login), func(t *testing.T) {
 			t.Parallel()
 			held := receivedFields(receivedField{name: "Assignee", valueType: "user", binding: "180-21",
@@ -627,7 +583,7 @@ func TestIssueCreateWritesAUserByLoginAlone(t *testing.T) {
 
 		got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--field", "Assignee=me")
 
-		found := requireRefusal(t, got)
+		found := requireFault(t, got)
 		assert.Equal(t, "rejected", found.code)
 		assert.Contains(t, found.details, detail{"upstream_message", "Не существует пользователя с именем me"})
 	})
@@ -642,7 +598,6 @@ func devRequired() []string {
 	}
 }
 
-// valuesAt is the values of the list standing under the keys of path.
 func valuesAt(t *testing.T, mapping *yaml.Node, path ...string) []string {
 	t.Helper()
 	node := nodeAt(t, mapping, path...)
@@ -654,7 +609,6 @@ func valuesAt(t *testing.T, mapping *yaml.Node, path ...string) []string {
 	return values
 }
 
-// sentFieldTypes is the $type each element of the body of a creation carried, by the name of its field.
 func sentFieldTypes(t *testing.T, body string) map[string]string {
 	t.Helper()
 	var sent struct {
@@ -686,7 +640,6 @@ func TestIssueCreateFillsTheFieldsOfTheDevProject(t *testing.T) {
 	mapping := requireMapping(t, "stdout", got.stdout)
 	readable := nodeAt(t, mapping, "idReadable").Value
 	require.Regexp(t, `^DEV-[0-9]+$`, readable)
-	// Registered after the recorder's own cleanup, so the deletion runs first and the cassette records it.
 	t.Cleanup(func() { removeIssue(t, dev, readable) })
 
 	assert.Equal(t, "Новая", nodeAt(t, mapping, "customFields", "State").Value)
@@ -710,21 +663,19 @@ func TestIssueCreateRefusesAValueTheDevInstanceDoesNotHave(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 	argv := append([]string{"issue", "create", "DEV", "--summary", contractTitle(t)}, devRequired()...)
-	// The с of реквест here is U+0441 and the one in the bundle is U+0063: one is read for the other and the
-	// server finds neither in the other's place.
-	argv = append(argv, "--field", "Статус разработки=Нужен рекве\xd1\x81т на выпуск")
+	const cyrillicS = "\xd1\x81"
+	notInBundle := "Нужен рекве" + cyrillicS + "т на выпуск"
+	argv = append(argv, "--field", "Статус разработки="+notInBundle)
 
 	got := runWith(t, dev.env(), argv...)
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "rejected", found.code)
 	assert.Contains(t, found.details, detail{"upstream_message",
-		"Сущность типа Нужен рекве\xd1\x81т на выпуск с указанным именем ({1}) не найдена"})
+		"Сущность типа " + notInBundle + " с указанным именем ({1}) не найдена"})
 	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(dev))
 }
 
-// A user field says who it allows, and the server holds the write to it: a user outside the field's own
-// source and a word that is no login at all are two refusals of its own, each passed on as it was said.
 func TestIssueCreateRefusesAUserTheFieldDoesNotAllow(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -744,7 +695,7 @@ func TestIssueCreateRefusesAUserTheFieldDoesNotAllow(t *testing.T) {
 
 			got := runWith(t, dev.env(), argv...)
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "rejected", found.code)
 			assert.Contains(t, found.details, detail{"upstream_message", tc.said})
 			assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(dev))

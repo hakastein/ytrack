@@ -1,5 +1,3 @@
-/** Первичная настройка YouTrack: всё, для чего ещё нет ни токена, ни API. */
-
 import { chmodSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -24,17 +22,12 @@ function fail(code: string, text: string): never {
   process.exit(1);
 }
 
-/**
- * Формы мастера и Ring написаны на AngularJS: их валидаторы слушают посимвольный
- * ввод, а после `fill` кнопка остаётся серой.
- */
+/** Валидаторы AngularJS в формах мастера и Ring слушают посимвольный ввод: после `fill` кнопка остаётся серой */
 async function retype(target: Locator, value: string): Promise<void> {
   const field = target.first();
   await field.click();
   await field.clear();
   await field.pressSequentially(value);
-  // Недобранное поле мастер принимает молча, а всплывает это через пять минут
-  // и на другом экране — «неверный логин или пароль» после перезапуска
   const actual = await field.inputValue();
   if (actual !== value) fail("field_not_set", `в поле осталось ${JSON.stringify(actual)}`);
 }
@@ -57,35 +50,27 @@ async function adminAccount(page: Page): Promise<void> {
   await page.locator('[anchor-id="nextButton"]').click();
 }
 
-/**
- * Ключ на странице уже стоит: это встроенная бесплатная лицензия на десять
- * пользователей, и dev-инстансу с тремя её хватает.
- */
 async function confirmLicense(page: Page): Promise<void> {
   step("шаг 4/5: лицензия");
   await page.waitForSelector('input[name="key"]', { timeout: STEP_TIMEOUT });
   await page.getByRole("button", { name: "Finish" }).click();
-  // Клик по ещё не связанной кнопке проходит молча и ничего не запускает
   await page.waitForURL(/\/wait\?/, { timeout: STEP_TIMEOUT });
 }
 
-/**
- * Инстанс уходит в перезапуск, и страница мастера этого не замечает: форму входа
- * надо запрашивать заново, а не ждать её на загруженной.
- */
+async function loginFormLoaded(page: Page): Promise<boolean> {
+  try {
+    await page.goto(`${URL}/login`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("input#username", { timeout: STEP_TIMEOUT });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function logIn(page: Page): Promise<void> {
   step("мастер закончил, инстанс перезапускается");
   const deadline = Date.now() + RESTART_TIMEOUT;
-  for (;;) {
-    try {
-      await page.goto(`${URL}/login`, { waitUntil: "domcontentloaded" });
-      // Форму отдаёт Hub после клиентского редиректа: проверка сразу после
-      // `goto` не находит её никогда, а повторный `goto` редирект отменяет
-      await page.waitForSelector("input#username", { timeout: STEP_TIMEOUT });
-      break;
-    } catch {
-      // Пока идёт перезапуск, порт не слушает вовсе, а не отвечает 503
-    }
+  while (!(await loginFormLoaded(page))) {
     if (Date.now() > deadline) {
       fail("restart_timeout", `за ${RESTART_TIMEOUT / 1000} с инстанс не отдал форму входа`);
     }
@@ -98,10 +83,6 @@ async function logIn(page: Page): Promise<void> {
   await page.waitForURL((url) => !url.pathname.startsWith("/hub/auth/login"), { timeout: STEP_TIMEOUT });
 }
 
-/**
- * Область доступа диалог проставляет сам — YouTrack и YouTrack Administration
- * уже стоят чипами, в выпадающем списке их поэтому нет.
- */
 async function createToken(page: Page): Promise<string> {
   await page.goto(`${URL}/users/me?tab=account-security`, { waitUntil: "domcontentloaded" });
   await page.getByText("Новый токен", { exact: true }).click({ timeout: STEP_TIMEOUT });
@@ -120,7 +101,6 @@ async function main(): Promise<void> {
   try {
     step("шаг 1/5: мастер настройки");
     await page.goto(`${URL}/?wizard_token=${WIZARD_TOKEN}`, { waitUntil: "domcontentloaded" });
-    // На `/welcome` уводит уже загруженное приложение, а не ответ сервера
     const setup = page.getByRole("link", { name: "Set up" });
     try {
       await setup.waitFor({ timeout: STEP_TIMEOUT });

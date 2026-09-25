@@ -14,16 +14,14 @@ import (
 )
 
 const (
-	linkSchema     = "IssueLink"
-	linksKey       = "links"
-	issuesKey      = "issues"
-	directionKey   = "direction"
-	linkTypeKey    = "linkType"
-	issuesSizeKey  = "issuesSize"
-	sourceToTarget = "sourceToTarget"
-	targetToSource = "targetToSource"
-	// What the instance calls the two ends of a type in the language of its own interface; a type the instance
-	// has no translation for sends null for one and an empty string for the other.
+	linkSchema              = "IssueLink"
+	linksKey                = "links"
+	issuesKey               = "issues"
+	directionKey            = "direction"
+	linkTypeKey             = "linkType"
+	issuesSizeKey           = "issuesSize"
+	sourceToTarget          = "sourceToTarget"
+	targetToSource          = "targetToSource"
 	localizedSourceToTarget = "localizedSourceToTarget"
 	localizedTargetToSource = "localizedTargetToSource"
 	inward                  = "INWARD"
@@ -31,18 +29,12 @@ const (
 	both                    = "BOTH"
 )
 
-// LinkListFields is what an issue at the other end of a link is printed by unasked: which issue it is and what
-// it is about. A user with no role on the project is sent both, so no key of the default costs a reader their
-// document.
 const LinkListFields = "idReadable,summary"
 
 func issueLinkFields() []string {
 	return []string{linksKey, "parent", "subtasks"}
 }
 
-// ListLinks is the call for the links of the issue of that id, with the fields of expression printed of every
-// issue at their other ends, or with them added to LinkListFields when it starts with +; nil is the caller
-// leaning on the default whole.
 func ListLinks(id string, expression *string) (Call, *diag.Fault) {
 	id, fault := parseIssueID(id)
 	if fault != nil {
@@ -60,16 +52,16 @@ func ListLinks(id string, expression *string) (Call, *diag.Fault) {
 
 func linkFields(spec *schemas, expression *string) ([]requestedField, *diag.Fault) {
 	written := LinkListFields
-	partner, fault := parseDefault(LinkListFields, false)
+	target, fault := parseDefault(LinkListFields, false)
 	if expression != nil {
 		written = *expression
-		partner, fault = parseFields(written, LinkListFields)
+		target, fault = parseFields(written, LinkListFields)
 	}
 	if fault != nil {
 		return nil, fault
 	}
 	requested := []requestedField{
-		{name: linksKey, children: []requestedField{{name: issuesKey, children: partner}}},
+		{name: linksKey, children: []requestedField{{name: issuesKey, children: target}}},
 	}
 	if fault := issueCommentTarget().reject(spec, written, requested, issueCommentTarget().commentsOfAList()); fault != nil {
 		return nil, fault
@@ -83,16 +75,12 @@ func linkFields(spec *schemas, expression *string) ([]requestedField, *diag.Faul
 	return requested, nil
 }
 
-// AddLink is the call that links the issue of id to the issue of partner under phrase, and prints the links of
-// the first issue as they stand afterwards, with the fields of expression printed of every issue at the other
-// end of one, or with them added to LinkListFields when it starts with +; nil is the caller leaning on the
-// default whole.
-func AddLink(id, phrase, partner string, expression *string) (Call, *diag.Fault) {
+func AddLink(id, phrase, target string, expression *string) (Call, *diag.Fault) {
 	id, fault := parseIssueID(id)
 	if fault != nil {
 		return nil, fault
 	}
-	partner, fault = parseIssueID(partner)
+	target, fault = parseIssueID(target)
 	if fault != nil {
 		return nil, fault
 	}
@@ -105,19 +93,16 @@ func AddLink(id, phrase, partner string, expression *string) (Call, *diag.Fault)
 		return nil, fault
 	}
 	return func(ctx context.Context, c *Client) (*render.Node, *diag.Fault) {
-		return c.addLink(ctx, spec, id, phrase, partner, requested)
+		return c.addLink(ctx, spec, id, phrase, target, requested)
 	}, nil
 }
 
-// RemoveLink is the call that takes the link under phrase between the issue of id and the issue of partner
-// away, and prints the link it took away. There is no expression: what is printed is the identity of that link
-// and the issues at its ends are gone from one another by the time anything could be asked of them.
-func RemoveLink(id, phrase, partner string) (Call, *diag.Fault) {
+func RemoveLink(id, phrase, target string) (Call, *diag.Fault) {
 	id, fault := parseIssueID(id)
 	if fault != nil {
 		return nil, fault
 	}
-	partner, fault = parseIssueID(partner)
+	target, fault = parseIssueID(target)
 	if fault != nil {
 		return nil, fault
 	}
@@ -126,12 +111,10 @@ func RemoveLink(id, phrase, partner string) (Call, *diag.Fault) {
 	}
 	spec := loadSchemas()
 	return func(ctx context.Context, c *Client) (*render.Node, *diag.Fault) {
-		return c.removeLink(ctx, spec, id, phrase, partner)
+		return c.removeLink(ctx, spec, id, phrase, target)
 	}, nil
 }
 
-// A phrase is held against the phrases of the issue itself and never reaches YouTrack, so one that matches
-// nothing there is to match is refused before the issue is read at all.
 func validatePhrase(phrase string) *diag.Fault {
 	switch {
 	case phrase == "":
@@ -151,7 +134,7 @@ func (c *Client) listLinks(ctx context.Context, spec *schemas, id string, reques
 	issueBlocks(spec, composedIssue(), asked)
 	for i := range asked {
 		if asked[i].name == linksKey {
-			asked[i].children = linkDocumentFields(asked[i].children, partnerFields(requested))
+			asked[i].children = linkDocumentFields(asked[i].children, targetFields(requested))
 		}
 	}
 	decoded, fault := c.request(ctx, spec, issueSchema, asked, func(ctx context.Context, fields string) (*http.Response, error) {
@@ -160,11 +143,11 @@ func (c *Client) listLinks(ctx context.Context, spec *schemas, id string, reques
 	if fault != nil {
 		return nil, fault
 	}
-	return newConverter(decoded, inlineLayout).linkDocument(partnerFields(requested), decoded.objects[0])
+	return newConverter(decoded, inlineLayout).linkDocument(targetFields(requested), decoded.objects[0])
 }
 
-func (n converter) linkDocument(partner []requestedField, issue map[string]any) (*render.Node, *diag.Fault) {
-	block, held, printed, fault := n.linkListing(partner, issue[linksKey])
+func (n converter) linkDocument(target []requestedField, issue map[string]any) (*render.Node, *diag.Fault) {
+	block, held, printed, fault := n.linkListing(target, issue[linksKey])
 	if fault != nil {
 		return nil, fault
 	}
@@ -172,29 +155,24 @@ func (n converter) linkDocument(partner []requestedField, issue map[string]any) 
 	return render.NewMap(append(pairs, render.Pair{Key: linksKey, Value: block})...), nil
 }
 
-// partnerBlocks is what goes out for an issue at the other end of a link: what the caller asked of it with the
-// custom fields and the links of an issue filled in, since a partner is an issue and those blocks are read
-// through a composition of the tool's own wherever one stands. link list fills them the same way, so one
-// command asks for a partner exactly as the other does.
-func partnerBlocks(spec *schemas, requested []requestedField) []requestedField {
+func targetBlocks(spec *schemas, requested []requestedField) []requestedField {
 	asked := []requestedField{{name: linksKey, children: []requestedField{
-		{name: issuesKey, children: partnerFields(requested)},
+		{name: issuesKey, children: targetFields(requested)},
 	}}}
 	issueBlocks(spec, composedIssue(), asked)
-	return partnerOutputFields(asked[0].children)
+	return targetOutputFields(asked[0].children)
 }
 
-// partnerFields is what the caller asked of the issues at the other end, out of the tree the request carries.
-func partnerFields(requested []requestedField) []requestedField {
+func targetFields(requested []requestedField) []requestedField {
 	for _, field := range requested {
 		if field.name == linksKey {
-			return partnerOutputFields(field.children)
+			return targetOutputFields(field.children)
 		}
 	}
 	return nil
 }
 
-func (n converter) linkListing(partner []requestedField, value any) (*render.Node, count, int, *diag.Fault) {
+func (n converter) linkListing(target []requestedField, value any) (*render.Node, count, int, *diag.Fault) {
 	links, fault := n.issueLinks(value)
 	if fault != nil {
 		return nil, count{}, 0, fault
@@ -207,7 +185,7 @@ func (n converter) linkListing(partner []requestedField, value any) (*render.Nod
 		}
 		held += int(size)
 	}
-	block, received, printed, fault := n.linkBlock(partner, links)
+	block, received, printed, fault := n.linkBlock(target, links)
 	if fault != nil {
 		return nil, count{}, 0, fault
 	}
@@ -242,7 +220,7 @@ func rejectLinkParts(spec *schemas, at, expression string, requested []requested
 }
 
 func linkRequestFields(callers []requestedField) []requestedField {
-	return withFields([]requestedField{{name: issuesKey, children: partnerOutputFields(callers)}}, phraseFields()...)
+	return withFields([]requestedField{{name: issuesKey, children: targetOutputFields(callers)}}, phraseFields()...)
 }
 
 func phraseFields() []requestedField {
@@ -255,14 +233,14 @@ func phraseFields() []requestedField {
 	}
 }
 
-func linkDocumentFields(asked, partner []requestedField) []requestedField {
+func linkDocumentFields(asked, target []requestedField) []requestedField {
 	own := append(phraseFields(),
 		requestedField{name: issuesSizeKey},
-		requestedField{name: issuesKey, children: partner})
+		requestedField{name: issuesKey, children: target})
 	return withFields(asked, own...)
 }
 
-func partnerOutputFields(callers []requestedField) []requestedField {
+func targetOutputFields(callers []requestedField) []requestedField {
 	for _, field := range callers {
 		if field.name == issuesKey && field.children != nil {
 			return cloneFields(field.children)
@@ -276,20 +254,20 @@ func (n converter) links(field requestedField, value any) (*render.Node, *diag.F
 	if fault != nil {
 		return nil, fault
 	}
-	block, _, _, fault := n.linkBlock(partnerOutputFields(field.children), links)
+	block, _, _, fault := n.linkBlock(targetOutputFields(field.children), links)
 	return block, fault
 }
 
-func (n converter) linkBlock(partner []requestedField, links []map[string]any) (*render.Node, int, int, *diag.Fault) {
+func (n converter) linkBlock(target []requestedField, links []map[string]any) (*render.Node, int, int, *diag.Fault) {
 	received, printed := 0, 0
 	printedBy := make(map[string]bool, len(links))
 	pairs := make([]render.Pair, 0, len(links))
 	for _, link := range links {
-		partners, fault := n.partners(link)
+		targets, fault := n.targets(link)
 		if fault != nil {
 			return nil, 0, 0, fault
 		}
-		if len(partners) == 0 {
+		if len(targets) == 0 {
 			continue
 		}
 		phrase, fault := n.phrase(link)
@@ -300,8 +278,8 @@ func (n converter) linkBlock(partner []requestedField, links []map[string]any) (
 			return nil, 0, 0, n.malformed(fmt.Sprintf("two links of the issue go by the phrase %s", render.Quote(phrase)))
 		}
 		printedBy[phrase] = true
-		received += len(partners)
-		records, fault := n.objectsAt(issueSchema, partner, partners)
+		received += len(targets)
+		records, fault := n.objectsAt(issueSchema, target, targets)
 		if fault != nil {
 			return nil, 0, 0, fault
 		}
@@ -330,20 +308,20 @@ func (n converter) issueLinks(value any) ([]map[string]any, *diag.Fault) {
 	return links, nil
 }
 
-func (n converter) partners(link map[string]any) ([]map[string]any, *diag.Fault) {
+func (n converter) targets(link map[string]any) ([]map[string]any, *diag.Fault) {
 	received, isList := link[issuesKey].([]any)
 	if !isList {
 		return nil, n.malformed("the issues of a link of the issue arrived as something other than an array")
 	}
-	partners := make([]map[string]any, 0, len(received))
+	targets := make([]map[string]any, 0, len(received))
 	for _, item := range received {
-		partner, isObject := item.(map[string]any)
+		target, isObject := item.(map[string]any)
 		if !isObject {
 			return nil, n.malformed("an issue at the other end of a link of the issue is not a JSON object")
 		}
-		partners = append(partners, partner)
+		targets = append(targets, target)
 	}
-	return partners, nil
+	return targets, nil
 }
 
 func (n converter) phrase(link map[string]any) (string, *diag.Fault) {
@@ -366,7 +344,7 @@ func (n converter) phrase(link map[string]any) (string, *diag.Fault) {
 	return phrase, nil
 }
 
-func (c *Client) prepareLinkWrite(ctx context.Context, spec *schemas, id, phrase, partner string) (linkWrite, *diag.Fault) {
+func (c *Client) prepareLinkWrite(ctx context.Context, spec *schemas, id, phrase, target string) (linkWrite, *diag.Fault) {
 	source, fault := c.readSourceIssue(ctx, spec, id)
 	if fault != nil {
 		return linkWrite{}, fault
@@ -375,49 +353,46 @@ func (c *Client) prepareLinkWrite(ctx context.Context, spec *schemas, id, phrase
 	if fault != nil {
 		return linkWrite{}, fault
 	}
-	other, fault := c.readTargetIssue(ctx, spec, partner)
+	other, fault := c.readTargetIssue(ctx, spec, target)
 	if fault != nil {
 		return linkWrite{}, fault
 	}
 	if other.id == source.id {
 		return linkWrite{}, linkFault(other.a, source.readable, diag.BadUsage, oneIssue,
-			render.Pair{Key: "partner", Value: render.NewString(other.readable)})
+			render.Pair{Key: "target", Value: render.NewString(other.readable)})
 	}
-	return linkWrite{source: source, partner: other, link: link}, nil
+	return linkWrite{source: source, target: other, link: link}, nil
 }
 
-func (c *Client) addLink(ctx context.Context, spec *schemas, id, phrase, partner string, requested []requestedField) (*render.Node, *diag.Fault) {
-	w, fault := c.prepareLinkWrite(ctx, spec, id, phrase, partner)
+func (c *Client) addLink(ctx context.Context, spec *schemas, id, phrase, target string, requested []requestedField) (*render.Node, *diag.Fault) {
+	w, fault := c.prepareLinkWrite(ctx, spec, id, phrase, target)
 	if fault != nil {
 		return nil, fault
 	}
-	// Marshalling a struct of one string cannot fail.
-	body, _ := json.Marshal(issueIDBody{ID: w.partner.id})
-	node, fault := c.write(ctx, spec, issueSchema, linkWriteFields(partnerBlocks(spec, requested)),
+	body, _ := json.Marshal(internalIssueIDBody{ID: w.target.id})
+	node, fault := c.write(ctx, spec, issueSchema, linkWriteFields(targetBlocks(spec, requested)),
 		func(ctx context.Context, fields string) (*http.Response, error) {
 			return c.apiAddLinkedIssue(ctx, w.source.readable, w.link.id, body, fields)
-		}, w.verify, w.renderResult(partnerFields(requested)))
+		}, w.verify, w.renderResult(targetFields(requested)))
 	if fault != nil {
 		return nil, w.withLinkDetails(fault)
 	}
 	return node, nil
 }
 
-func (c *Client) removeLink(ctx context.Context, spec *schemas, id, phrase, partner string) (*render.Node, *diag.Fault) {
-	w, fault := c.prepareLinkWrite(ctx, spec, id, phrase, partner)
+func (c *Client) removeLink(ctx context.Context, spec *schemas, id, phrase, target string) (*render.Node, *diag.Fault) {
+	w, fault := c.prepareLinkWrite(ctx, spec, id, phrase, target)
 	if fault != nil {
 		return nil, fault
 	}
 	if fault := writeEmpty(ctx, func(ctx context.Context) (*http.Response, error) {
-		return c.apiRemoveLinkedIssue(ctx, w.source.readable, w.link.id, w.partner.id)
+		return c.apiRemoveLinkedIssue(ctx, w.source.readable, w.link.id, w.target.id)
 	}); fault != nil {
 		return nil, w.withLinkDetails(noSuchLink(fault))
 	}
 	return w.removed(), nil
 }
 
-// What the server writes under that 404 names the partner, an issue that is there, so the message says what is
-// not: the link. The text it sent stands beside it in upstream_message word for word.
 func noSuchLink(fault *diag.Fault) *diag.Fault {
 	if fault.Code == diag.NotFound {
 		fault.Message = noLinkToRemove
@@ -425,16 +400,13 @@ func noSuchLink(fault *diag.Fault) *diag.Fault {
 	return fault
 }
 
-const noLinkToRemove = "the issue holds no link under that phrase to the partner, and a link is taken away " +
+const noLinkToRemove = "the issue holds no link under that phrase to the target issue, and a link is taken away " +
 	"from the end the phrase names"
 
-const oneIssue = "the issue and the partner are one issue, and YouTrack answers a link of an issue to itself " +
+const oneIssue = "the issue and the target issue are one issue, and YouTrack answers a link of an issue to itself " +
 	"with a 200 and writes nothing"
 
-// The body of the write. The partner is addressed by the internal id the read before it gave: YouTrack answers
-// an id of {"id": "DEV-15"} with 400 For input string: "DEV", and the readable id it does take goes under
-// another name, so one form goes out and it is the one every instance takes.
-type issueIDBody struct {
+type internalIssueIDBody struct {
 	ID string `json:"id"`
 }
 
@@ -484,9 +456,6 @@ func (c *Client) readSourceIssue(ctx context.Context, spec *schemas, id string) 
 	return read, nil
 }
 
-// The issue at the other end is read for its internal id and for nothing else: the server would answer a body
-// naming an issue it has none of with a 400 of three different texts, one of which sends the caller looking for
-// a field they never wrote.
 func (c *Client) readTargetIssue(ctx context.Context, spec *schemas, id string) (linkIssue, *diag.Fault) {
 	return c.readLinkedIssue(ctx, spec, id, []requestedField{{name: idKey}, {name: idReadableKey}})
 }
@@ -531,8 +500,6 @@ func (n converter) parseIssueLinks(value any) ([]issueLink, *diag.Fault) {
 	return links, nil
 }
 
-// A link of an issue as far as both readers of one read it alike: the end the issue stands at and the type,
-// which is the type's own id beside the whole of what the server sent for it.
 type parsedLink struct {
 	raw       map[string]any
 	direction string
@@ -711,16 +678,16 @@ func (s linkIssue) fault(code diag.Code, message string, own ...render.Pair) *di
 }
 
 type linkWrite struct {
-	source  linkIssue
-	partner linkIssue
-	link    issueLink
+	source linkIssue
+	target linkIssue
+	link   issueLink
 }
 
-func linkWriteFields(partner []requestedField) []requestedField {
+func linkWriteFields(target []requestedField) []requestedField {
 	source := []requestedField{
 		{name: idKey},
 		{name: linksKey, children: linkDocumentFields(responseLinkFields(),
-			withFields([]requestedField{{name: idKey}}, partner...))},
+			withFields([]requestedField{{name: idKey}}, target...))},
 	}
 	return []requestedField{
 		{name: idKey},
@@ -736,8 +703,6 @@ func responseLinkFields() []requestedField {
 	}
 }
 
-// A 200 says YouTrack took the body, not that it wrote the link the phrase named: a link written the other way
-// round comes back under a 200 as well, and the one answer holds both ends to tell them apart.
 func (w linkWrite) verify(a decodedResponse) *diag.Fault {
 	source, fault := w.findSource(a)
 	if fault != nil {
@@ -747,15 +712,15 @@ func (w linkWrite) verify(a decodedResponse) *diag.Fault {
 	if fault != nil {
 		return fault
 	}
-	if _, held := findIssue(links, w.link.kind, w.link.direction, w.partner.id); !held {
-		return linkMismatchFault(a, "the issue does not hold the partner at the end of the link the phrase names")
+	if _, held := findIssue(links, w.link.kind, w.link.direction, w.target.id); !held {
+		return linkMismatchFault(a, "the issue does not hold the target issue at the end of the link the phrase names")
 	}
 	return nil
 }
 
 func (w linkWrite) findSource(a decodedResponse) (map[string]any, *diag.Fault) {
-	if id, isText := a.objects[0][idKey].(string); !isText || id != w.partner.id {
-		return nil, linkMismatchFault(a, "the write was answered with an issue other than the partner it named")
+	if id, isText := a.objects[0][idKey].(string); !isText || id != w.target.id {
+		return nil, linkMismatchFault(a, "the write was answered with an issue other than the target issue it named")
 	}
 	links, fault := newConverter(a, inlineLayout).responseLinks(a.objects[0][linksKey])
 	if fault != nil {
@@ -763,24 +728,19 @@ func (w linkWrite) findSource(a decodedResponse) (map[string]any, *diag.Fault) {
 	}
 	source, held := findIssue(links, w.link.kind, opposite(w.link.direction), w.source.id)
 	if !held {
-		return nil, linkMismatchFault(a, "the partner does not hold the issue at the end the other side of the link is read from")
+		return nil, linkMismatchFault(a, "the target issue does not hold the issue at the end the other side of the link is read from")
 	}
 	return source, nil
 }
 
-// A removal is answered with nothing, so what it prints is the identity of the link it took away, read off the
-// two issues before it went: the shape is the one link list prints links in, under a key of its own, since a
-// reader who took removed for links would read a link that is gone as one the issue still holds.
 func (w linkWrite) removed() *render.Node {
-	record := render.NewMap(render.Pair{Key: idReadableKey, Value: render.NewString(w.partner.readable)})
+	record := render.NewMap(render.Pair{Key: idReadableKey, Value: render.NewString(w.target.readable)})
 	return render.NewMap(
 		render.Pair{Key: idReadableKey, Value: render.NewString(w.source.readable)},
 		render.Pair{Key: removedKey, Value: render.NewMap(
 			render.FromData(w.link.phrase, render.NewList(record)))})
 }
 
-// renderResult is how the answer to the write prints: the issue the call named first, as that answer carries
-// it, as the document link list prints by what the caller asked of the issues at the other end.
 func (w linkWrite) renderResult(printed []requestedField) func(decodedResponse) (*render.Node, *diag.Fault) {
 	return func(a decodedResponse) (*render.Node, *diag.Fault) {
 		source, fault := w.findSource(a)
@@ -804,7 +764,7 @@ func (n converter) responseLinks(value any) ([]responseLink, *diag.Fault) {
 	}
 	links := make([]responseLink, 0, len(received))
 	for _, link := range received {
-		issues, fault := n.partners(link.raw)
+		issues, fault := n.targets(link.raw)
 		if fault != nil {
 			return nil, fault
 		}
@@ -827,8 +787,6 @@ func findIssue(links []responseLink, kind, direction, id string) (map[string]any
 	return nil, false
 }
 
-// The link an issue stands at the source of is the one its partner stands at the target of. An undirected type
-// has one end, read the same from either side.
 func opposite(direction string) string {
 	switch direction {
 	case inward:
@@ -839,9 +797,6 @@ func opposite(direction string) string {
 	return direction
 }
 
-// What the answer left behind is the server's word by now, so the refusal names the request rather than sending
-// anything else to find out. Nothing of the write itself stands here: the issue, the phrase and the
-// partner are put into every refusal of a link command by named.
 func linkMismatchFault(a decodedResponse, message string) *diag.Fault {
 	details := []render.Pair{requestDetail(a.httpResponse.Request.Method, a.httpResponse.Request.URL.Redacted())}
 	return &diag.Fault{Code: diag.UpstreamInvalid, Message: message, Details: details}
@@ -855,6 +810,6 @@ func (w linkWrite) withLinkDetails(fault *diag.Fault) *diag.Fault {
 	fault.Details = slices.Insert(fault.Details, at,
 		render.Pair{Key: "issue", Value: render.NewString(w.source.readable)},
 		render.Pair{Key: "phrase", Value: render.NewString(w.link.phrase)},
-		render.Pair{Key: "partner", Value: render.NewString(w.partner.readable)})
+		render.Pair{Key: "target", Value: render.NewString(w.target.readable)})
 	return fault
 }

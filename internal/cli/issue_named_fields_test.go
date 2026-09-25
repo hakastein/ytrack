@@ -10,15 +10,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The catalogue of custom fields of the instance, which is the only thing a name of the caller's is resolved
-// against, and the one request that goes out before the issue itself.
 const (
 	cataloguePath   = "/api/admin/customFieldSettings/customFields"
 	catalogueFields = "name,localizedName"
 )
 
-// A custom field of the instance as the catalogue sends it: a project that calls it nothing of its own sends
-// null in place of the translation.
 type cataloguedField struct {
 	name      string
 	translate string
@@ -50,7 +46,6 @@ func devCatalogue() string {
 	)
 }
 
-// serveNamedFields is the instance the named mode reaches: the catalogue of custom fields, then the issue.
 func serveNamedFields(t *testing.T, catalogue string, issue http.HandlerFunc) *upstream {
 	t.Helper()
 	return serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -62,12 +57,10 @@ func serveNamedFields(t *testing.T, catalogue string, issue http.HandlerFunc) *u
 	})
 }
 
-// catalogueRequest is the request the reading of the catalogue names in a refusal.
 func catalogueRequest(address string) string {
 	return "GET " + address + cataloguePath + "?fields=" + catalogueFields + "&$top=-1"
 }
 
-// showNamedFields is the block one answer prints for the names of an expression.
 func showNamedFields(t *testing.T, expression, body string) (outcome, []detail) {
 	t.Helper()
 	server := serveNamedFields(t, devCatalogue(), respondWith(http.StatusOK, body))
@@ -85,8 +78,6 @@ func showNamedFields(t *testing.T, expression, body string) (outcome, []detail) 
 	return got, block
 }
 
-// A name is written bare where the grammar of an expression can carry it and in double quotes otherwise, and
-// nothing stands under it. Every shape outside that is refused before any request, the catalogue included.
 func TestIssueShowRefusesAnExpressionNoCustomFieldNameFits(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -108,14 +99,12 @@ func TestIssueShowRefusesAnExpressionNoCustomFieldNameFits(t *testing.T) {
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--fields", tc.expression)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// Each name goes out as a parameter of its own, under the name the instance keeps the field by, in the order
-// of the expression; what the fields= carries is the tool's own composition and no name of a project's.
 func TestIssueShowSendsEveryNamedCustomFieldAsAParameter(t *testing.T) {
 	t.Parallel()
 	expression := `customFields("Модуль системы",state,"Статус разработки")`
@@ -132,8 +121,6 @@ func TestIssueShowSendsEveryNamedCustomFieldAsAParameter(t *testing.T) {
 	assert.Equal(t, []string{"Модуль системы", "State", "Статус разработки"}, queries[1]["customFields"])
 }
 
-// A name that holds a quote or a backslash carries it behind a backslash, and the name the server is sent is
-// the name itself.
 func TestIssueShowSendsANamedCustomFieldWhoseNameContainsAQuote(t *testing.T) {
 	t.Parallel()
 	quoted := `a: b #c "d"`
@@ -149,7 +136,6 @@ func TestIssueShowSendsANamedCustomFieldWhoseNameContainsAQuote(t *testing.T) {
 	assert.Equal(t, []string{quoted}, queries[1]["customFields"])
 }
 
-// The order is the order of the names, not the order the server answers in.
 func TestIssueShowPrintsNamedCustomFieldsInTheOrderTheyWereNamed(t *testing.T) {
 	t.Parallel()
 	body := issueWithFields(
@@ -162,9 +148,6 @@ func TestIssueShowPrintsNamedCustomFieldsInTheOrderTheyWereNamed(t *testing.T) {
 	assert.Equal(t, []detail{{"State", "In Progress"}, {"Type", "Task"}}, block, "stdout: %q", got.stdout)
 }
 
-// A field the caller named is printed however empty it is: null where its type holds one value, an empty list
-// where it holds more than one. A field the issue does not hold at all gets no key, since null would say the
-// issue has the field and holds nothing in it.
 func TestIssueShowPrintsANamedCustomFieldTheIssueLeavesEmpty(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -220,8 +203,6 @@ func TestIssueShowPrintsANamedCustomFieldTheIssueLeavesEmpty(t *testing.T) {
 	}
 }
 
-// The instance matches a name the way the server does: letter case aside, against the name of a field first
-// and the translation of it after. Two names of one field are one key, where the first of them stood.
 func TestIssueShowResolvesANameAgainstBothNamesAFieldAnswersTo(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -297,8 +278,6 @@ func TestIssueShowResolvesANameToTheFieldItNamesRatherThanTheOneItTranslates(t *
 	assert.Equal(t, []detail{{"customFields", []detail{{"Состояние", "Новая"}}}}, requireDocument(t, got.stdout))
 }
 
-// A name no field of the instance answers to is the end of the call: nothing is asked of the issue, and the
-// refusal names the catalogue it was held against and the names nearest to what was written.
 func TestIssueShowRefusesANameNoCustomFieldOfTheInstanceAnswersTo(t *testing.T) {
 	t.Parallel()
 	server := serveNamedFields(t, devCatalogue(), func(_ http.ResponseWriter, r *http.Request) {
@@ -321,13 +300,10 @@ func TestIssueShowRefusesANameNoCustomFieldOfTheInstanceAnswersTo(t *testing.T) 
 				[]detail{{"field", "customFields(Stat)"}, {"nearest", []any{"State"}}},
 			}},
 		},
-	}, requireRefusal(t, got))
+	}, requireFault(t, got))
 	assert.Equal(t, []string{cataloguePath}, server.sentPaths())
 }
 
-// A name is measured against what a project calls a field as well as against the name the instance keeps it
-// under, so a typo in the translation is answered the field it is a typo of. A name near none of them at all
-// is answered every name of the catalogue, since a caller nowhere near a field has nothing to correct.
 func TestIssueShowSuggestsTheNamesNearestAMisspeltCustomField(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -337,7 +313,6 @@ func TestIssueShowSuggestsTheNamesNearestAMisspeltCustomField(t *testing.T) {
 	}{
 		{name: "a typo of the translation", written: "Состояни", nearest: []any{"State"}},
 		{
-			// The listing reads by name: the order the instance keeps its catalogue in is nobody's.
 			name:    "a name near none of them",
 			written: "zzzzzzzz",
 			nearest: []any{"Priority", "State", "Type", "Модуль системы", "Статус разработки"},
@@ -360,13 +335,12 @@ func TestIssueShowSuggestsTheNamesNearestAMisspeltCustomField(t *testing.T) {
 					{"fields", expression},
 					{"unknown", []any{[]detail{{"field", expression}, {"nearest", tc.nearest}}}},
 				},
-			}, requireRefusal(t, got))
+			}, requireFault(t, got))
 			assert.Equal(t, []string{cataloguePath}, server.sentPaths())
 		})
 	}
 }
 
-// Where more than one field answers to a name, which of them was meant is nothing ytrack may guess at.
 func TestIssueShowRefusesANameMoreThanOneCustomFieldAnswersTo(t *testing.T) {
 	t.Parallel()
 	catalogue := catalogueOf(
@@ -389,12 +363,10 @@ func TestIssueShowRefusesANameMoreThanOneCustomFieldAnswersTo(t *testing.T) {
 				{"candidates", []any{"Оценка", "оценка"}},
 			}}},
 		},
-	}, requireRefusal(t, got))
+	}, requireFault(t, got))
 	assert.Equal(t, []string{cataloguePath}, server.sentPaths())
 }
 
-// A token the catalogue is closed to cannot have a name of its own resolved, and what the server said about
-// that passes on as it stands.
 func TestIssueShowRefusesTheNamesTheCatalogueIsClosedTo(t *testing.T) {
 	t.Parallel()
 	body := `{"error":"Forbidden","error_description":"HTTP 403 Forbidden"}`
@@ -414,12 +386,10 @@ func TestIssueShowRefusesTheNamesTheCatalogueIsClosedTo(t *testing.T) {
 			{"upstream_message", "HTTP 403 Forbidden"},
 			authFromEnv(),
 		},
-	}, requireRefusal(t, got))
+	}, requireFault(t, got))
 	assert.Len(t, server.requests(), 1)
 }
 
-// The block taken whole costs no catalogue: only a name the caller wrote themselves is resolved, so a default
-// pays for no request and fails no token.
 func TestIssueShowReadsNoCatalogueWhereNoCustomFieldWasNamed(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -445,9 +415,6 @@ func TestIssueShowReadsNoCatalogueWhereNoCustomFieldWasNamed(t *testing.T) {
 	}
 }
 
-// The parameter cuts down every block of custom fields of an answer, so where the issues at the other end of
-// a link carry one of their own it is not sent at all: each block arrives whole and the names are picked out
-// before printing. A legal expression stays legal whatever the server's parameter can reach.
 func TestIssueShowSendsNoNamesWhereAnotherIssueCarriesCustomFieldsToo(t *testing.T) {
 	t.Parallel()
 	body := `{"$type":"Issue","customFields":` + receivedFields(
@@ -531,8 +498,6 @@ func TestIssueShowPrintsTheNamedCustomFieldsOfTheDevInstance(t *testing.T) {
 	}
 }
 
-// A name the instance has no custom field for is refused against the catalogue it was read from, and the
-// issue is never asked for.
 func TestIssueShowRefusesANameTheDevInstanceHasNoCustomFieldFor(t *testing.T) {
 	t.Parallel()
 	for _, who := range devInstanceReaders() {
@@ -543,7 +508,7 @@ func TestIssueShowRefusesANameTheDevInstanceHasNoCustomFieldFor(t *testing.T) {
 			got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + who.token(t)},
 				"issue", "show", "DEV-1", "--comments=0", "--fields", `customFields("Статус разрабтки")`)
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "unknown_name", found.code)
 			assert.Equal(t, []detail{
 				{"request", catalogueRequest(dev.url)},

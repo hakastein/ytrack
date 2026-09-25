@@ -11,8 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Where one tag of an owner stands, which is the path of the removal and the one place a DELETE about tags may
-// go: everything before the collection names the owner, and the id after it names the tag.
 func tagOnOwnerPath(collection, readable, tag string) string {
 	return tagsOfOwnerPath(collection, readable) + "/" + tag
 }
@@ -21,8 +19,6 @@ func tagRemovalRequest(address, collection, readable, tag string) string {
 	return "DELETE " + address + tagOnOwnerPath(collection, readable, tag)
 }
 
-// takingATagOff is the server of a removal: owner answers the read that settles the readable id, catalogue the
-// read that resolves the name, and removal the DELETE that follows the two.
 func takingATagOff(t *testing.T, owner, catalogue, removal http.HandlerFunc) *upstream {
 	t.Helper()
 	return serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -37,10 +33,6 @@ func takingATagOff(t *testing.T, owner, catalogue, removal http.HandlerFunc) *up
 	})
 }
 
-// The whole of the call on the wire, for each kind of owner: the removal goes to the tag under its
-// owner, and no request of it reaches /api/tags/{id}, which is the one address that would destroy the tag.
-// Nothing goes out with the DELETE — no body and no query — and what is printed comes from the read that
-// resolved the name, since the answer carries nothing at all.
 func TestTagRemoveTakesTheTagOffTheOwnerAndNotOutOfTheInstance(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -95,10 +87,6 @@ func TestTagRemoveTakesTheTagOffTheOwnerAndNotOutOfTheInstance(t *testing.T) {
 	}
 }
 
-// What the server answers the removal with is read the way a status is read everywhere, and the border of
-// ADR-0005 runs through it: a 404 is the owner carrying no such tag, which took nothing off and leaves the same
-// call to send again once the name is right, while an answer under a 200 carrying anything at all is the
-// instance changed without the document being read.
 func TestTagRemoveReadsWhatTheServerAnsweredTheRemovalWith(t *testing.T) {
 	t.Parallel()
 	const missing = `{"error":"Not Found","error_description":"Entity with id 10-5 not found"}`
@@ -138,7 +126,7 @@ func TestTagRemoveReadsWhatTheServerAnsweredTheRemovalWith(t *testing.T) {
 
 			got := runWith(t, server.env(), "tag", "remove", "DEV-7", "--name", "ready")
 
-			found := requireRefusalDocument(t, got)
+			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.exit, got.code)
 			want := faultDocument{
 				code: tc.code,
@@ -178,7 +166,7 @@ func TestTagRemoveLeavesTheTagStandingOnTheDevInstance(t *testing.T) {
 
 	before := len(dev.requests())
 	again := runWith(t, dev.env(), "tag", "remove", issue, "--name", name)
-	assert.Equal(t, "not_found", requireRefusal(t, again).code)
+	assert.Equal(t, "not_found", requireFault(t, again).code)
 	assert.Equal(t, []string{http.MethodGet, http.MethodGet, http.MethodDelete}, sentMethodsFrom(dev, before))
 
 	back := runWith(t, dev.env(), "tag", "add", issue, "--name", name)
@@ -190,8 +178,6 @@ func TestTagRemoveLeavesTheTagStandingOnTheDevInstance(t *testing.T) {
 	assert.False(t, tagIsListed(t, dev, name), "the tag stands in the list after it was destroyed")
 }
 
-// The same against an article, where the tag is shared with nothing and nobody: it comes off the article,
-// the second removal is the server's 404, and the list shows the tag standing all along.
 func TestTagRemoveTakesATagOffAnArticleOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -211,14 +197,12 @@ func TestTagRemoveTakesATagOffAnArticleOfTheDevInstance(t *testing.T) {
 	assert.Equal(t, name, nodeAt(t, taken, "removed", "name").Value)
 
 	again := runWith(t, dev.env(), "tag", "remove", article, "--name", name)
-	found := requireRefusal(t, again)
+	found := requireFault(t, again)
 	assert.Equal(t, "not_found", found.code)
 
 	assert.True(t, tagIsListed(t, dev, name), "the tag is gone from the list after it came off the article")
 }
 
-// tagIsListed is whether the list this token is shown carries a tag of that name, which is what says the tag
-// itself is still there.
 func tagIsListed(t *testing.T, dev *upstream, name string) bool {
 	t.Helper()
 	listed := requireTagListing(t, runWith(t, dev.env(), "tag", "list"))

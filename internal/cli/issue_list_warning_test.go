@@ -12,18 +12,14 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// The separator that heads every document of the stream but the first, on a line of its own in the zero column.
 const separator = "\n---\n"
 
-// The warning of a selection, read back: the code and the message every document of the stream opens with, the
-// search it is about and the parts of that search the server looks for as text.
 type warned struct {
 	Code     string   `yaml:"code"`
 	Query    string   `yaml:"query"`
 	FreeText []string `yaml:"free_text"`
 }
 
-// The documents stderr holds, each as the mapping at its root; a scenario says for itself how many it expects.
 func documentsOf(t *testing.T, text string) []*yaml.Node {
 	t.Helper()
 	decoder := yaml.NewDecoder(strings.NewReader(text))
@@ -40,8 +36,6 @@ func documentsOf(t *testing.T, text string) []*yaml.Node {
 	}
 }
 
-// requireWarning holds a document to the keys of a warning and to the order they are printed in, and reads it
-// back: neither a style, an offset nor styleRanges stands among them.
 func requireWarning(t *testing.T, document *yaml.Node) warned {
 	t.Helper()
 	require.Equal(t, yaml.MappingNode, document.Kind)
@@ -52,7 +46,6 @@ func requireWarning(t *testing.T, document *yaml.Node) warned {
 	return found
 }
 
-// requireWarned is the one warning a selection printed, and the whole of what it printed.
 func requireWarned(t *testing.T, got outcome) warned {
 	t.Helper()
 	documents := documentsOf(t, got.stderr)
@@ -60,25 +53,18 @@ func requireWarned(t *testing.T, got outcome) warned {
 	return requireWarning(t, documents[0])
 }
 
-// warningOf is the whole of the warning a search is answered with where the server looks for parts of it as text.
 func warningOf(query string, parts ...string) warned {
 	return warned{Code: "unknown_name", Query: query, FreeText: parts}
 }
 
-// A selection whose markup the scenario writes itself, answering the search with one issue.
 func markedUp(t *testing.T, marked string) *upstream {
 	t.Helper()
 	return marking(t, respondWith(http.StatusOK, marked), respondWith(http.StatusOK, `[`+listedDEV1()+`]`))
 }
 
-// A part of the search is a chain of the ranges the server styled as text, each beginning where the one before
-// it ended: the server marks a name it does not know and the colon after it as two ranges, and what the caller
-// wrote is one word. The offsets are counted in units of UTF-16, so the part cut by them is the caller's text
-// byte for byte.
 func TestIssueListWarnsOfTheTextOfASearch(t *testing.T) {
 	t.Parallel()
-	// A line separator inside a word: the server leaves it in the token, so one range carries it.
-	const wholeToken = "a\xe2\x80\xa8b"
+	const tokenHoldingLineSeparator = "a\xe2\x80\xa8b"
 	tests := []struct {
 		name   string
 		query  string
@@ -100,14 +86,14 @@ func TestIssueListWarnsOfTheTextOfASearch(t *testing.T) {
 		{
 			name:   "a character outside the basic plane and the word after it",
 			query:  markedSearch,
-			ranges: []string{styled(12, 2, "text"), styled(15, 6, "text")},
+			ranges: []string{styled(12, 2, "text"), styled(greetingUTF16Start, greetingUTF16Length, "text")},
 			parts:  []string{"\xf0\x9f\x98\x80", "привет"},
 		},
 		{
 			name:   "one range over a token holding a line separator",
-			query:  wholeToken,
+			query:  tokenHoldingLineSeparator,
 			ranges: []string{styled(0, 3, "text")},
-			parts:  []string{wholeToken},
+			parts:  []string{tokenHoldingLineSeparator},
 		},
 		{
 			name:  "every style but text",
@@ -147,8 +133,6 @@ func TestIssueListWarnsOfTheTextOfASearch(t *testing.T) {
 	}
 }
 
-// A warning is what a caller is told about a call that went through: the issues found are printed, the exit code
-// is the one of a selection that succeeded, and nothing of the markup itself reaches the document.
 func TestIssueListPrintsTheIssuesItWarnedAbout(t *testing.T) {
 	t.Parallel()
 	const query = "Задача в работе"
@@ -166,9 +150,6 @@ func TestIssueListPrintsTheIssuesItWarnedAbout(t *testing.T) {
 	requireMarkedUpFirst(t, server, query)
 }
 
-// The warning is about the search that was sent, so it is printed even where the server then refuses that
-// search; two documents of one stream are told apart by a --- on a line of its own, which no single document of
-// a refusal is headed by.
 func TestIssueListWarnsBeforeItRefusesTheSearchTheServerWouldNotRun(t *testing.T) {
 	t.Parallel()
 	const query = "State: Opne привет"
@@ -190,8 +171,6 @@ func TestIssueListWarnsBeforeItRefusesTheSearchTheServerWouldNotRun(t *testing.T
 	requireMarkedUpFirst(t, server, query)
 }
 
-// The search the warning carries is the one the caller wrote, whatever a reader of YAML would make of the
-// characters in it.
 func TestIssueListWarnsOfASearchThatReadsBackAsItWasWritten(t *testing.T) {
 	t.Parallel()
 	const query = "\"a\\b\nc\xe2\x80\xa8d"
@@ -212,7 +191,7 @@ func TestIssueListWarnsOfTheWordTheDevInstanceSearchesForAsText(t *testing.T) {
 	got := runWith(t, dev.env(), "issue", "list", "--query", query)
 
 	assert.Equal(t, warningOf(query, "работе"), requireWarned(t, got))
-	printed := requireListingPrinted(t, got)
+	printed := requireListingIgnoringStderr(t, got)
 	assert.Equal(t, 1, printed.Returned)
 	found := records(t, got)
 	require.Len(t, found, 1)

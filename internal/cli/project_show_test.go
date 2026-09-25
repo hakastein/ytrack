@@ -15,12 +15,8 @@ import (
 	"github.com/hakastein/ytrack/internal/cli"
 )
 
-// The fields= of project show where the caller wrote no --fields of their own.
 const defaultProjectFields = "shortName,name,plugins(timeTrackingSettings(enabled,workItemTypes(name)))"
 
-// DEV under the default expression, $type added and the keys in an order other than asked: the server keeps an
-// order of its own. The types of work stand under the settings of the project's time tracking, a place the
-// specification declares nothing of and the server answers from all the same.
 const projectDEV = `{"name":"DEVELOPMENT","plugins":{"timeTrackingSettings":{"workItemTypes":[` +
 	`{"name":"Разработка","$type":"WorkItemType"},{"name":"Дизайн/Прототипирование","$type":"WorkItemType"}],` +
 	`"enabled":true,"$type":"ProjectTimeTrackingSettings"},"$type":"ProjectPlugins"},"$type":"Project","shortName":"DEV"}`
@@ -58,7 +54,6 @@ plugins:
       - {name: "Уточнение требований"}
 `
 
-// Where a refusal says the login came from: the whole pair, never which variable or which record of it.
 func authFromEnv() detail {
 	return detail{"auth_from", "environment"}
 }
@@ -100,8 +95,7 @@ func TestProjectShowKeepsTheTypesOfWorkOutOfTheCustomFieldsOfTheDevInstance(t *t
 		} `yaml:"plugins"`
 		CustomFields []struct {
 			Field struct {
-				Name string `yaml:"name"`
-				// The name the project gives the field, which a caller may write instead of the name itself.
+				Name          string `yaml:"name"`
 				LocalizedName string `yaml:"localizedName"`
 			} `yaml:"field"`
 			Bundle struct {
@@ -133,11 +127,9 @@ func TestProjectShowKeepsTheTypesOfWorkOutOfTheCustomFieldsOfTheDevInstance(t *t
 			values = append(values, value.Name)
 		}
 	}
-	assert.Len(t, printed.CustomFields, 28)
-	// The names the types are held against, not the fields: six of the twenty-eight carry a localized name of
-	// the project as well, and it is a name a caller may write. Counted here so that a set that shrinks — a
-	// localizedName out of the expression, or one a token is not sent — cannot leave the scenario green.
-	assert.Len(t, names, 34)
+	const fieldsOfDEV, localizedNamesOfDEV = 28, 6
+	assert.Len(t, printed.CustomFields, fieldsOfDEV)
+	assert.Len(t, names, fieldsOfDEV+localizedNamesOfDEV)
 	assert.Len(t, values, 92)
 	taken := map[string]bool{}
 	for _, name := range append(names, values...) {
@@ -186,8 +178,6 @@ plugins:
 	assert.Len(t, dev.requests(), 1)
 }
 
-// The switch is printed as it arrived rather than standing in for the set: a project that has time
-// tracking off still lists its types, and a set the server sends empty is printed empty.
 func TestProjectShowPrintsTheTimeTrackingSettingsAsReceived(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -222,18 +212,16 @@ func TestProjectShowPrintsTheTimeTrackingSettingsAsReceived(t *testing.T) {
 	}
 }
 
-// The types of work are data of a project and nothing ytrack gives a noun or a verb of its own: a caller
-// who looks for one is refused where any other unknown command is, before the network.
 func TestNoCommandOfItsOwnReadsTheTypesOfWork(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
 		argv []string
 	}{
-		{name: "a group of its own", argv: []string{"worktype", "list"}},
-		{name: "a group named as the schema is", argv: []string{"work-item-type", "list"}},
-		{name: "a verb of the project group", argv: []string{"project", "types", "DEV"}},
-		{name: "a verb naming them as the settings do", argv: []string{"project", "worktypes", "DEV"}},
+		{name: "a command of its own", argv: []string{"worktype", "list"}},
+		{name: "a command named as the schema is", argv: []string{"work-item-type", "list"}},
+		{name: "a subcommand of the project command", argv: []string{"project", "types", "DEV"}},
+		{name: "a subcommand naming them as the settings do", argv: []string{"project", "worktypes", "DEV"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -242,15 +230,13 @@ func TestNoCommandOfItsOwnReadsTheTypesOfWork(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The group offers the two verbs it did before, and the types of work came with neither a third nor a
-// flag: they are printed by the show that was already there.
-func TestProjectHelpNamesTwoVerbs(t *testing.T) {
+func TestProjectHelpNamesTwoSubcommands(t *testing.T) {
 	t.Parallel()
 
 	got := run(t, []string{"project", "--help"})
@@ -270,8 +256,6 @@ func TestProjectShowPrintsTheFieldsTheMemberAsksFor(t *testing.T) {
 	assert.Len(t, dev.requests(), 1)
 }
 
-// The settings of a project's time tracking reach a member of it with no rights in its administration, so the
-// default is one document whoever reads the project.
 func TestProjectShowPrintsTheDefaultToTheMember(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -292,7 +276,7 @@ func TestProjectShowRefusesAFieldHiddenFromTheMember(t *testing.T) {
 		code:    "upstream_invalid",
 		details: missingFieldDetails(dev.url, defaultProjectFields+",archived", "missing", missingEntry("archived", "Project")),
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Len(t, dev.requests(), 1)
 }
 
@@ -390,7 +374,7 @@ func TestProjectShowTakesExactlyOneCode(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 		})
 	}
 }
@@ -413,13 +397,12 @@ func TestProjectShowRefusesAnAddressItCannotUse(t *testing.T) {
 
 			got := runWith(t, env, "project", "show", "DEV")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assertNoToken(t, got, token)
 		})
 	}
 }
 
-// Were it not refused, each address would be sent, so it names a server that fails the test on any request.
 func TestProjectShowRefusesAnAddressWithAQueryOrAFragment(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -439,18 +422,16 @@ func TestProjectShowRefusesAnAddressWithAQueryOrAFragment(t *testing.T) {
 
 			got := runWith(t, []string{"YTRACK_URL=" + address, "YTRACK_TOKEN=" + token}, "project", "show", "DEV")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assertNoToken(t, got, token)
 		})
 	}
 }
 
-// An address without a token is half a login, and a refusal that prints no address prints no password with it.
 func TestProjectShowRefusesWithoutAToken(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		// A format of the port the server listens on.
+		name    string
 		address string
 		token   []string
 	}{
@@ -468,7 +449,7 @@ func TestProjectShowRefusesWithoutAToken(t *testing.T) {
 
 			got := runWith(t, env, "project", "show", "DEV")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.NotContains(t, got.stderr, "secret")
 			assertNoToken(t, got, token)
 			assert.Empty(t, server.requests())
@@ -517,7 +498,7 @@ func TestProjectRefusesACallForTheFaultCheckedFirst(t *testing.T) {
 
 			got := runWith(t, tc.env, tc.argv...)
 
-			assert.Equal(t, tc.want, requireRefusal(t, got))
+			assert.Equal(t, tc.want, requireFault(t, got))
 			assertNoToken(t, got, token)
 		})
 	}
@@ -541,7 +522,7 @@ func TestProjectShowRefusesATokenItCannotSend(t *testing.T) {
 			got := runWith(t, []string{"YTRACK_URL=" + server.url, "YTRACK_TOKEN=" + tc.token}, "project", "show", "DEV")
 
 			want := faultDocument{code: "bad_usage"}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.NotContains(t, got.stderr, token)
 		})
 	}
@@ -575,7 +556,7 @@ func TestProjectShowRefusesWithoutThePasswordOfTheAddress(t *testing.T) {
 
 			got := runWith(t, []string{"YTRACK_URL=" + address.String(), "YTRACK_TOKEN=" + token}, "project", "show", "DEV")
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, tc.code, found.code)
 			require.NotEmpty(t, found.details)
 			assert.Equal(t, detail{"request", showRequest("http://svc:xxxxx@"+address.Host, "DEV")}, found.details[0])
@@ -592,7 +573,7 @@ func TestProjectShowRefusesWhenStdoutFails(t *testing.T) {
 	code := cli.Run(t.Context(), []string{"project", "show", "DEV"}, server.env(), nil, nil, failingWriter{}, &stderr)
 
 	got := outcome{code: code, stderr: stderr.String()}
-	assert.Equal(t, faultDocument{code: "upstream_failed"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "upstream_failed"}, requireFault(t, got))
 }
 
 type failingWriter struct{}

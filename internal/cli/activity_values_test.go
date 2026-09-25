@@ -12,8 +12,6 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// A change of a custom field of one type, as the server sends it: the field the record stands for says what the
-// values of it are, and the values themselves arrive in the shape that type comes in.
 func sentFieldChange(valueType, added, removed string) string {
 	field := `{"$type":"CustomFilterField","name":"Поле","customField":{"$type":"CustomField","name":"Field",` +
 		`"fieldType":{"$type":"FieldType","valueType":` + strconv.Quote(valueType) + `}}}`
@@ -23,7 +21,6 @@ func sentFieldChange(valueType, added, removed string) string {
 	}.sent()
 }
 
-// sentJSON is a value as the server would write it into an answer.
 func sentJSON(t *testing.T, value any) string {
 	t.Helper()
 	encoded, err := json.Marshal(value)
@@ -31,8 +28,6 @@ func sentJSON(t *testing.T, value any) string {
 	return string(encoded)
 }
 
-// The server sends null for a change that put nothing there, a bare value where one was put and a list where
-// several could be; the document holds each of the three as a list, so one reader reads every record alike.
 func TestActivityPrintsTheValuesOfAChangeAlwaysAsAList(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -83,9 +78,9 @@ func TestActivityPrintsTheValuesOfAChangeAlwaysAsAList(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := journal(t, respondWith(http.StatusOK, `[`+tc.activity+`]`))
+			server := activityServer(t, respondWith(http.StatusOK, `[`+tc.activity+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", journalIssue,
+			got := runWith(t, server.env(), "activity", "list", activityIssue,
 				"--fields", "added(id,idReadable),removed(id,idReadable)")
 
 			assert.Equal(t, outcome{stdout: oneRecord(tc.want)}, got)
@@ -93,10 +88,6 @@ func TestActivityPrintsTheValuesOfAChangeAlwaysAsAList(t *testing.T) {
 	}
 }
 
-// What a change of a custom field holds is read by the type of that field: a value that carries a name of its
-// own comes as an object and is printed as the tree asked of it, while a value ytrack reads itself arrives bare
-// and is printed as a scalar item of the list, written as the type writes it — the minutes of a period as the
-// ISO period, a day and a moment out of their milliseconds.
 func TestActivityPrintsTheValuesOfACustomFieldByTheTypeOfTheField(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -134,9 +125,9 @@ func TestActivityPrintsTheValuesOfACustomFieldByTheTypeOfTheField(t *testing.T) 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := journal(t, respondWith(http.StatusOK, `[`+sentFieldChange(tc.valueType, tc.added, "")+`]`))
+			server := activityServer(t, respondWith(http.StatusOK, `[`+sentFieldChange(tc.valueType, tc.added, "")+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "+added")
+			got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "+added")
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Contains(t, got.stdout, "added: "+tc.want+", removed: []}")
@@ -145,8 +136,6 @@ func TestActivityPrintsTheValuesOfACustomFieldByTheTypeOfTheField(t *testing.T) 
 	}
 }
 
-// A value of any type is an ordinary tree under --fields: the names written under added are what each value is
-// printed by, the default ones and the ones a caller adds alike.
 func TestActivityPrintsAValueByTheNamesAskedOfIt(t *testing.T) {
 	t.Parallel()
 	comment := sentActivity{
@@ -168,9 +157,9 @@ func TestActivityPrintsAValueByTheNamesAskedOfIt(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := journal(t, respondWith(http.StatusOK, `[`+comment+`]`))
+			server := activityServer(t, respondWith(http.StatusOK, `[`+comment+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", tc.fields)
+			got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", tc.fields)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Contains(t, got.stdout, tc.want)
@@ -178,9 +167,6 @@ func TestActivityPrintsAValueByTheNamesAskedOfIt(t *testing.T) {
 	}
 }
 
-// A journal mixes values of many types under one name, so a name one type declares and another does not is left
-// out of the values of the other: added(login,idReadable) prints the login of a user, the readable id of an
-// issue and nothing of a comment, and nothing is refused.
 func TestActivityLeavesOutOfAValueANameOnlyAnotherTypeDeclares(t *testing.T) {
 	t.Parallel()
 	assigned := sentActivity{
@@ -193,9 +179,9 @@ func TestActivityLeavesOutOfAValueANameOnlyAnotherTypeDeclares(t *testing.T) {
 		kind: "CommentActivityItem", category: "CommentsCategory", timestamp: oldest,
 		added: `[{"$type":"IssueComment"}]`,
 	}.sent()
-	server := journal(t, respondWith(http.StatusOK, `[`+assigned+`,`+sentLinkActivity(middle)+`,`+commented+`]`))
+	server := activityServer(t, respondWith(http.StatusOK, `[`+assigned+`,`+sentLinkActivity(middle)+`,`+commented+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "category,added(login,idReadable)")
+	got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "category,added(login,idReadable)")
 
 	want := "total: 3\nreturned: 3\ntruncated: false\nactivities:\n" +
 		`  - {category: "CustomFieldCategory", added: [{login: "admin"}]}` + "\n" +
@@ -228,32 +214,28 @@ func TestActivityRefusesANameNoTypeOfAValueDeclares(t *testing.T) {
 			t.Parallel()
 			server := serveNothing(t)
 
-			got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", tc.fields)
+			got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", tc.fields)
 
 			want := faultDocument{
 				code:    "unknown_name",
 				details: []detail{{"fields", tc.fields}, {"unknown", tc.unknown}},
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// Every name a value of any type declares passes, whether or not a value of that type arrives: the localized
-// name of a value of a bundle on a journal of links alone, the hash of a commit on a journal of comments.
 func TestActivityTakesANameAnyTypeOfAValueDeclares(t *testing.T) {
 	t.Parallel()
-	server := journal(t, respondWith(http.StatusOK, `[`+sentLinkActivity(middle)+`]`))
+	server := activityServer(t, respondWith(http.StatusOK, `[`+sentLinkActivity(middle)+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue,
+	got := runWith(t, server.env(), "activity", "list", activityIssue,
 		"--fields", "added(idReadable,localizedName,version),removed(text)")
 
 	assert.Equal(t, outcome{stdout: oneRecord(`added: [{idReadable: "DEV-3"}], removed: []`)}, got)
 }
 
-// A change of the duration of a work item holds the duration as an object of its own, and a duration is printed
-// out of its minutes wherever one stands: an item of the list like any other scalar.
 func TestActivityPrintsTheDurationOfAWorkItemAsAPeriod(t *testing.T) {
 	t.Parallel()
 	changed := sentActivity{
@@ -261,9 +243,9 @@ func TestActivityPrintsTheDurationOfAWorkItemAsAPeriod(t *testing.T) {
 		field: `{"$type":"WorkItemFilterField","name":"работа"}`,
 		added: `{"$type":"DurationValue","id":"120","minutes":120}`, removed: `{"$type":"DurationValue","id":"90","minutes":90}`,
 	}.sent()
-	server := journal(t, respondWith(http.StatusOK, `[`+changed+`]`))
+	server := activityServer(t, respondWith(http.StatusOK, `[`+changed+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "added,removed")
+	got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "added,removed")
 
 	assert.Equal(t, outcome{stdout: oneRecord(`added: ["PT2H"], removed: ["PT1H30M"]`)}, got)
 	assert.Contains(t, activitySent(t, server).Get("fields"), "added(minutes)")
@@ -278,9 +260,9 @@ func TestActivityPrintsTheTextOfAnEditOnTheOneLineOfTheRecord(t *testing.T) {
 				kind: "TextMarkupActivityItem", category: "DescriptionCategory", timestamp: middle,
 				added: sentJSON(t, tc.text), removed: "null",
 			}.sent()
-			server := journal(t, respondWith(http.StatusOK, `[`+edit+`]`))
+			server := activityServer(t, respondWith(http.StatusOK, `[`+edit+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "added,removed")
+			got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "added,removed")
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			record := requireMapping(t, "stdout", got.stdout)
@@ -294,8 +276,6 @@ func TestActivityPrintsTheTextOfAnEditOnTheOneLineOfTheRecord(t *testing.T) {
 	}
 }
 
-// What a change of a custom field holds is the type of the field's to say, so a value of the other shape is the
-// server answering something other than the journal it was asked for, and nothing of it is printed.
 func TestActivityRefusesValuesTheFieldOfTheChangeDoesNotReferTo(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -346,21 +326,17 @@ func TestActivityRefusesValuesTheFieldOfTheChangeDoesNotReferTo(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := journal(t, respondWith(http.StatusOK, `[`+tc.activity+`]`))
+			server := activityServer(t, respondWith(http.StatusOK, `[`+tc.activity+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", journalIssue)
+			got := runWith(t, server.env(), "activity", "list", activityIssue)
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Empty(t, got.stdout)
 		})
 	}
 }
 
-// Four changes of custom fields of DEV-451, captured from a live instance and kept whole save two things: the
-// record of the date of closing is left beside its three, and the custom field under each filter is written in,
-// since the capture asked for field(name) alone. They are the four shapes a change of a custom field comes in
-// on a live instance: a state, a moment, a period and a user.
 const capturedFieldActivities = `[` +
 	`{"removed":[{"name":"Готово к передаче","id":"150-65","$type":"StateBundleElement"}],"added":[{"name":"Реализовано","id":"150-80","$type":"StateBundleElement"}],"field":{"name":"Статус анализа","customField":{"name":"Статус анализа","fieldType":{"valueType":"state","$type":"FieldType"},"$type":"CustomField"},"$type":"CustomFilterField"},"id":"0-0.14-120311","timestamp":1766647197137,"author":{"login":"Сидорова.Анна","$type":"User"},"category":{"id":"CustomFieldCategory","$type":"ActivityCategory"},"$type":"CustomFieldActivityItem"},` +
 	`{"removed":null,"added":1764116587829,"field":{"name":"Дата закрытия","customField":{"name":"Дата закрытия","fieldType":{"valueType":"date and time","$type":"FieldType"},"$type":"CustomField"},"$type":"CustomFilterField"},"id":"0-0.14-65180","timestamp":1764116587937,"author":{"login":"Сидорова.Анна","$type":"User"},"category":{"id":"CustomFieldCategory","$type":"ActivityCategory"},"$type":"CustomFieldActivityItem"},` +
@@ -370,9 +346,9 @@ const capturedFieldActivities = `[` +
 
 func TestActivityPrintsTheChangesOfCustomFieldsOfALiveInstance(t *testing.T) {
 	t.Parallel()
-	server := journal(t, respondWith(http.StatusOK, capturedFieldActivities))
+	server := activityServer(t, respondWith(http.StatusOK, capturedFieldActivities))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue, "--category", "CustomFieldCategory")
+	got := runWith(t, server.env(), "activity", "list", activityIssue, "--category", "CustomFieldCategory")
 
 	want := "total: 4\nreturned: 4\ntruncated: false\nactivities:\n" +
 		`  - {timestamp: "2025-12-25T07:19:57.137Z", author: {login: "Сидорова.Анна"}, category: "CustomFieldCategory", ` +

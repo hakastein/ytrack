@@ -16,8 +16,6 @@ const (
 	attributeValueKey       = "value"
 )
 
-// A work item carries every attribute of its project, with a null value where it was given none; the ids are
-// what the check of a write holds the answer to.
 func attributesAsked() []requestedField {
 	return []requestedField{
 		{name: idKey},
@@ -43,8 +41,6 @@ func rejectAttributeNames(spec *schemas, at, expression string, requested []requ
 	return fault
 }
 
-// attributes is the block the attributes of a work item are printed as: the name each goes by against the name
-// of the value it holds, in the order the server sent them.
 func (n converter) attributes(value any) (*render.Node, *diag.Fault) {
 	received, isList := value.([]any)
 	if !isList {
@@ -74,8 +70,6 @@ func (n converter) attributes(value any) (*render.Node, *diag.Fault) {
 	return render.NewMap(pairs...), nil
 }
 
-// attributeValues reads --attribute. The split is at the first =, as it is for --field, and an attribute
-// named twice is refused: which of the two values the server kept would be its choice, not the caller's.
 func attributeValues(filled []string) ([]namedValue, *diag.Fault) {
 	named := make([]namedValue, 0, len(filled))
 	for _, flag := range filled {
@@ -101,22 +95,18 @@ func attributeValues(filled []string) ([]namedValue, *diag.Fault) {
 	return named, nil
 }
 
-// One attribute of the project a work item may be written against, with the values it takes.
 type projectAttribute struct {
 	id     string
 	name   string
 	values []workItemType
 }
 
-// An attribute as the read before the write resolved it: the id the body addresses it by, the name the project
-// gives it, which a disagreement is shown under, and the value, nil where the call takes the attribute away.
 type resolvedAttribute struct {
 	id    string
 	name  string
 	value *resolvedWorkType
 }
 
-// What goes out for one attribute: its id and the id of its value, or an explicit null that takes it away.
 type attributeBody struct {
 	ID    string          `json:"id"`
 	Value *workItemIDBody `json:"value"`
@@ -134,8 +124,6 @@ func attributeBodies(filed []resolvedAttribute) []attributeBody {
 	return written
 }
 
-// resolveAttributes resolves by the rule a type of work is resolved by, and refuses every name that answers to
-// no one attribute or value at once, before anything is written.
 func (p projectWorkItemTypes) resolveAttributes(set []namedValue, cleared []string) ([]resolvedAttribute, *diag.Fault) {
 	catalogue := make([]fieldInfo, 0, len(p.attributes))
 	for _, attribute := range p.attributes {
@@ -196,8 +184,6 @@ func unknownAttribute(name string, catalogue []fieldInfo) *render.Node {
 		render.Pair{Key: "nearest", Value: render.NewList(names(nearestNamed(name, catalogue))...)})
 }
 
-// matchName is the one entry of the catalogue a name answers to: letter case aside, and, where several
-// answer, the one written byte for byte, so the name an entry is printed under stays its address.
 func matchName(name string, catalogue []fieldInfo) (int, bool) {
 	places := findMatches(name, catalogue)
 	if len(places) > 1 {
@@ -209,7 +195,6 @@ func matchName(name string, catalogue []fieldInfo) (int, bool) {
 	return places[0], true
 }
 
-// The attributes of the project, read off the same settings as its types of work.
 func attributesOf(a decodedResponse, settings map[string]any) ([]projectAttribute, *diag.Fault) {
 	items, isList := settings[attributesKey].([]any)
 	if !isList {
@@ -239,8 +224,6 @@ func attributesOf(a decodedResponse, settings map[string]any) ([]projectAttribut
 
 const brokenAttribute = "an attribute of work items of the project, or a value of one, arrived without its id or its name"
 
-// attributeMismatches holds the attributes that went out against the ones that came back, by the id each went out
-// under; a value is shown by name, since a caller who wrote one has no id of theirs to read.
 func attributeMismatches(wrong []mismatch, filed []resolvedAttribute, value any) []mismatch {
 	received, _ := value.([]any)
 	for _, attribute := range filed {

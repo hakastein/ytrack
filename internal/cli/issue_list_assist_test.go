@@ -8,12 +8,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// A search of 20 runes and 21 units of UTF-16: 😀 takes two of them, so привет begins at 15 and the text ends
-// at 21 rather than at 20.
-const markedSearch = "State: Opne \xf0\x9f\x98\x80 привет"
+const (
+	markedSearch        = "State: Opne \xf0\x9f\x98\x80 привет"
+	greetingUTF16Start  = 15
+	greetingUTF16Length = 6
+)
 
-// marking is a server whose markup the scenario writes itself; everything the selection asks afterwards goes
-// to rest.
 func marking(t *testing.T, assist, rest http.HandlerFunc) *upstream {
 	t.Helper()
 	return serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -25,7 +25,6 @@ func marking(t *testing.T, assist, rest http.HandlerFunc) *upstream {
 	})
 }
 
-// notAsked stands for the requests a selection whose markup failed never gets to send.
 func notAsked(t *testing.T) http.HandlerFunc {
 	t.Helper()
 	return func(_ http.ResponseWriter, r *http.Request) {
@@ -33,14 +32,11 @@ func notAsked(t *testing.T) http.HandlerFunc {
 	}
 }
 
-// A sign-in page under a 200, which is what a proxy in front of YouTrack answers with.
-func signInPage(w http.ResponseWriter, _ *http.Request) {
+func proxySignInPage(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
 	_, _ = io.WriteString(w, "<html><body>Sign in</body></html>")
 }
 
-// A selection is never printed over a search nothing was said about, so a markup that fails takes the command
-// with it and the search itself is never run.
 func TestIssueListRefusesASearchThatCannotBeMarkedUp(t *testing.T) {
 	t.Parallel()
 	const said = `{"error":"server_error","error_description":"java.lang.NullPointerException"}`
@@ -55,7 +51,7 @@ func TestIssueListRefusesASearchThatCannotBeMarkedUp(t *testing.T) {
 			assist: respondWith(http.StatusUnauthorized, `{"error":"Unauthorized","error_description":"Not authorized"}`),
 			code:   "denied",
 		},
-		{name: "a page in place of an answer", assist: signInPage, code: "upstream_invalid"},
+		{name: "a page in place of an answer", assist: proxySignInPage, code: "upstream_invalid"},
 		{name: "an answer that breaks off", assist: breakOff, code: "upstream_failed"},
 	}
 	for _, tc := range tests {
@@ -65,16 +61,13 @@ func TestIssueListRefusesASearchThatCannotBeMarkedUp(t *testing.T) {
 
 			got := runWith(t, server.env(), "issue", "list", "--query", "project: DEV")
 
-			assert.Equal(t, tc.code, requireRefusal(t, got).code)
+			assert.Equal(t, tc.code, requireFault(t, got).code)
 			requireMarkedUpFirst(t, server, "project: DEV")
 			assert.Equal(t, 0, sentTo(server, issuesPath))
 		})
 	}
 }
 
-// styleRanges and the members of a range are names of ytrack's own, which the specification declares nowhere,
-// so an answer that lacks one is the server falling short of the request and never a name for the caller to
-// fix.
 func TestIssueListRefusesAMarkupShortOfWhatItAskedFor(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -109,15 +102,12 @@ func TestIssueListRefusesAMarkupShortOfWhatItAskedFor(t *testing.T) {
 					{"missing", []any{tc.missing}},
 				},
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Equal(t, 0, sentTo(server, issuesPath))
 		})
 	}
 }
 
-// The offsets of a markup are counted in units of UTF-16 and point into the text the server read back, so a
-// range outside that text, or a text other than the one that was sent, leaves the markup saying nothing about
-// the caller's search.
 func TestIssueListRefusesAMarkupThatDoesNotFitTheSearch(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -125,12 +115,22 @@ func TestIssueListRefusesAMarkupThatDoesNotFitTheSearch(t *testing.T) {
 		marked string
 		fits   bool
 	}{
-		{name: "a range that ends where the text ends", marked: markup(t, markedSearch, styled(15, 6, "text")), fits: true},
-		{name: "a range that runs past the end", marked: markup(t, markedSearch, styled(16, 6, "text"))},
-		{name: "a range that begins before the start", marked: markup(t, markedSearch, styled(-1, 6, "text"))},
+		{
+			name:   "a range that ends where the text ends",
+			marked: markup(t, markedSearch, styled(greetingUTF16Start, greetingUTF16Length, "text")),
+			fits:   true,
+		},
+		{
+			name:   "a range that runs past the end",
+			marked: markup(t, markedSearch, styled(greetingUTF16Start+1, greetingUTF16Length, "text")),
+		},
+		{
+			name:   "a range that begins before the start",
+			marked: markup(t, markedSearch, styled(-1, greetingUTF16Length, "text")),
+		},
 		{
 			name:   "a search that came back with a space of its own",
-			marked: markup(t, markedSearch+" ", styled(15, 6, "text")),
+			marked: markup(t, markedSearch+" ", styled(greetingUTF16Start, greetingUTF16Length, "text")),
 		},
 	}
 	for _, tc := range tests {
@@ -146,7 +146,7 @@ func TestIssueListRefusesAMarkupThatDoesNotFitTheSearch(t *testing.T) {
 				assert.Equal(t, 1, sentTo(server, issuesPath))
 				return
 			}
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Equal(t, 0, sentTo(server, issuesPath))
 		})
@@ -186,7 +186,7 @@ func TestIssueListRefusesAMarkupOfAShapeItCannotRead(t *testing.T) {
 
 			got := runWith(t, server.env(), "issue", "list", "--query", search)
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
 			requireMarkedUpFirst(t, server, search)
 			assert.Equal(t, 0, sentTo(server, issuesPath))

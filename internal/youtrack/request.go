@@ -16,9 +16,6 @@ import (
 
 const jsonContentType = "application/json"
 
-// searchBody is the body of a read that asks its question in JSON rather than in the query of a URL. The text
-// is encoded as a JSON value rather than spliced into one, so a quote or a backslash of the caller's reaches
-// the server as they wrote it; encoding a string is the one marshalling that cannot fail.
 func searchBody(query string) []byte {
 	body, _ := json.Marshal(struct {
 		Query string `json:"query"`
@@ -30,13 +27,9 @@ type decodedResponse struct {
 	objects      []map[string]any
 	httpResponse *http.Response
 	body         []byte
-	// The schema of the specification the objects stand at, "" where the call named none.
-	schema string
-	// The catalogue the command was built with, so that reading the objects needs no second one.
-	schemas *schemas
-	// The address the client was built from. An address YouTrack sends is a path of its own instance and no use
-	// to anyone not holding that address, so printing one takes both.
-	address *url.URL
+	schema       string
+	schemas      *schemas
+	address      *url.URL
 }
 
 func (c *Client) read(ctx context.Context, spec *schemas, responseSchema string, requested []requestedField, call func(ctx context.Context, fields string) (*http.Response, error)) ([]*render.Node, *diag.Fault) {
@@ -47,14 +40,11 @@ func (c *Client) read(ctx context.Context, spec *schemas, responseSchema string,
 	return newConverter(decoded, blockLayout).objectsAt(decoded.schema, requested, decoded.objects)
 }
 
-// The two trees of one request: what goes out, which may hold names the tool fills in itself, and what a record
-// of the answer prints, which is what the caller asked for.
 type requestFields struct {
 	sent   []requestedField
 	output []requestedField
 }
 
-// readList is pass for the readList of a list, and it settles that one record is one line of the document.
 func (c *Client) readList(ctx context.Context, spec *schemas, responseSchema string, of requestFields, call func(ctx context.Context, fields string) (*http.Response, error)) ([]*render.Node, *diag.Fault) {
 	decoded, fault := c.request(ctx, spec, responseSchema, of.sent, call)
 	if fault != nil {
@@ -83,16 +73,6 @@ func writeEmpty(ctx context.Context, call func(ctx context.Context) (*http.Respo
 	return nil
 }
 
-// write is pass for a write the server answers with the entity it wrote. The check of that answer and the
-// document it becomes are both parameters rather than steps the caller runs afterwards: ADR-0005 puts them on
-// the way back from a write, and here there is no way back around them.
-//
-// The answer never leaves this function, which is what makes the mark below impossible to forget: printing is
-// a refusal of its own — an instant of the wrong kind, a block of custom fields or of links of the wrong shape
-// — and a caller handed the answer to print would raise that one unmarked.
-//
-// Every refusal from the status onwards is marked as following a write the server carried out, so the exit
-// code says the instance changed without the document being read.
 func (c *Client) write(ctx context.Context, spec *schemas, responseSchema string, requested []requestedField, call func(ctx context.Context, fields string) (*http.Response, error), confirm func(decodedResponse) *diag.Fault, output func(decodedResponse) (*render.Node, *diag.Fault)) (*render.Node, *diag.Fault) {
 	response, fault := send(ctx, func(ctx context.Context) (*http.Response, error) {
 		return call(ctx, formatFields(requested))
@@ -126,18 +106,13 @@ func (c *Client) write(ctx context.Context, spec *schemas, responseSchema string
 	return node, nil
 }
 
-// send is where a write that never left is told from one that left with no answer coming back, and the
-// border is whether the request went out whole rather than what the error says: net/http draws it in the same
-// place to decide whether a request may be sent again, by a nothingWrittenError it does not export, so from
-// outside it is visible only through httptrace. WroteRequest runs once the body and the final flush are
-// through, and a request cut short before that is one no server acts on: its Content-Length does not add up.
+// net/http tells an unsent request only by an unexported error, and a server does not act on a partial one.
 func send(ctx context.Context, call func(ctx context.Context) (*http.Response, error)) (*http.Response, *diag.Fault) {
-	// Written by the goroutine of the transport, which outlives a call that failed.
-	var left atomic.Bool
+	var requestWritten atomic.Bool
 	traced := httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
 		WroteRequest: func(wrote httptrace.WroteRequestInfo) {
 			if wrote.Err == nil {
-				left.Store(true)
+				requestWritten.Store(true)
 			}
 		},
 	})
@@ -145,14 +120,12 @@ func send(ctx context.Context, call func(ctx context.Context) (*http.Response, e
 	switch {
 	case err == nil:
 		return response, nil
-	case left.Load():
+	case requestWritten.Load():
 		return nil, uncertainWrite(err)
 	}
 	return nil, transportFailure(err)
 }
 
-// request is pass for a command that needs the values of the answer as well: it asks for names of its own, and
-// what it prints is not one node per object.
 func (c *Client) request(ctx context.Context, spec *schemas, responseSchema string, requested []requestedField, call func(ctx context.Context, fields string) (*http.Response, error)) (decodedResponse, *diag.Fault) {
 	response, err := call(ctx, formatFields(requested))
 	if err != nil {
@@ -164,9 +137,7 @@ func (c *Client) request(ctx context.Context, spec *schemas, responseSchema stri
 		return decodedResponse{}, readFailure(response, err)
 	}
 	tree, isJSON := decode(body)
-	// Only a 5xx keeps its code over a body that is not JSON: it already says the server failed,
-	// while a 200 or a 404 over such a body may be a login page's or a proxy's.
-	if !isJSON && !is5xx(response.StatusCode) {
+	if !isJSON && bodyMustBeJSON(response.StatusCode) {
 		return decodedResponse{}, shapeFailure(response, body, notOneValue)
 	}
 	if response.StatusCode != http.StatusOK {
@@ -177,8 +148,6 @@ func (c *Client) request(ctx context.Context, spec *schemas, responseSchema stri
 
 const notOneValue = "the answer is not one JSON value"
 
-// validateResponse is what a decoded body under a 200 becomes once it stands where the call said it would and carries
-// every name that was asked of it.
 func (c *Client) validateResponse(spec *schemas, responseSchema string, requested []requestedField, response *http.Response, body []byte, tree any) (decodedResponse, *diag.Fault) {
 	expected := parseTypeRef(responseSchema)
 	objects, ok := decodeObjects(tree, expected.list)
@@ -214,11 +183,12 @@ func decodeObjects(tree any, isList bool) ([]map[string]any, bool) {
 	return objects, true
 }
 
-// JSON allows only space, tab, LF and CR around a value, so any other byte after it is a tail.
+const jsonWhitespace = " \t\r\n"
+
 func decode(body []byte) (tree any, isJSON bool) {
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
-	if decoder.Decode(&tree) != nil || len(bytes.TrimLeft(body[decoder.InputOffset():], " \t\r\n")) > 0 {
+	if decoder.Decode(&tree) != nil || len(bytes.TrimLeft(body[decoder.InputOffset():], jsonWhitespace)) > 0 {
 		return nil, false
 	}
 	return tree, true

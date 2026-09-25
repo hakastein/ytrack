@@ -33,26 +33,24 @@ func TestLinkOfTheDevInstanceWritesEveryPhraseAtTheEndItNames(t *testing.T) {
 			t.Parallel()
 			dev := devInstance(t)
 			source := aContractIssue(t, dev, "the one the phrase is written on")
-			partner := aContractIssue(t, dev, "the one at the other end")
+			target := aContractIssue(t, dev, "the one at the other end")
 
 			read := len(dev.requests())
-			got := runWith(t, dev.env(), "link", "add", source, tc.phrase, partner)
+			got := runWith(t, dev.env(), "link", "add", source, tc.phrase, target)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Empty(t, got.stderr)
-			assert.Equal(t, []string{partner}, partnersUnder(t, got.stdout, tc.phrase))
+			assert.Equal(t, []string{target}, targetsUnder(t, got.stdout, tc.phrase))
 
 			links := everyIssueLinkID(t, dev.answers()[read])
 			link := path.Base(strings.TrimSuffix(dev.sentPaths()[read+2], "/issues"))
 			assert.Regexp(t, `^[0-9]+-[0-9]+`+tc.suffix+`$`, link)
 			assert.Equal(t, issueLinkOfThePhrase(t, dev.answers()[read], endOfTheSuffix(tc.suffix), tc.phrase), link)
 
-			// The link stands on the partner under the phrase of the partner's own end, and a directed type is
-			// read by one phrase at each end, so the phrase the call was made with is nowhere on it.
-			other := runWith(t, dev.env(), "link", "list", partner)
+			other := runWith(t, dev.env(), "link", "list", target)
 
 			require.Equal(t, 0, other.code, "stderr: %s", other.stderr)
-			assert.Equal(t, []string{source}, partnersUnder(t, other.stdout, tc.reverse))
+			assert.Equal(t, []string{source}, targetsUnder(t, other.stdout, tc.reverse))
 			if tc.reverse != tc.phrase {
 				assert.NotContains(t, keysOf(nodeAt(t, requireMapping(t, "stdout", other.stdout), "links")),
 					tc.phrase)
@@ -62,19 +60,17 @@ func TestLinkOfTheDevInstanceWritesEveryPhraseAtTheEndItNames(t *testing.T) {
 			requireNoIssueLinkID(t, other.stdout, links)
 
 			taken := len(dev.requests())
-			away := runWith(t, dev.env(), "link", "remove", source, tc.phrase, partner)
+			away := runWith(t, dev.env(), "link", "remove", source, tc.phrase, target)
 
 			require.Equal(t, 0, away.code, "stderr: %s", away.stderr)
 			assert.Equal(t, []detail{
 				{"idReadable", source},
-				{"removed", []detail{{tc.phrase, []any{[]detail{{"idReadable", partner}}}}}},
+				{"removed", []detail{{tc.phrase, []any{[]detail{{"idReadable", target}}}}}},
 			}, requireDocument(t, away.stdout))
 			assert.Equal(t, link, path.Base(path.Dir(path.Dir(dev.sentPaths()[taken+2]))))
 			requireNoIssueLinkID(t, away.stdout, links)
 
-			// One link is one link from either end: taking it away from the end the phrase names leaves neither
-			// issue holding half of it.
-			for _, issue := range []string{source, partner} {
+			for _, issue := range []string{source, target} {
 				held := runWith(t, dev.env(), "link", "list", issue)
 
 				require.Equal(t, 0, held.code, "stderr: %s", held.stderr)
@@ -90,14 +86,14 @@ func TestLinkRemoveKeepsTheSlotIDToTheEvidenceOfWhatWentOut(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 	source := aContractIssue(t, dev, "the one the phrase is written on")
-	partner := aContractIssue(t, dev, "the one at the other end")
+	target := aContractIssue(t, dev, "the one at the other end")
 
 	read := len(dev.requests())
-	got := runWith(t, dev.env(), "link", "remove", source, "depends on", partner)
+	got := runWith(t, dev.env(), "link", "remove", source, "depends on", target)
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "not_found", found.code)
-	assert.Equal(t, []detail{{"issue", source}, {"phrase", "depends on"}, {"partner", partner}}, found.details[1:4])
+	assert.Equal(t, []detail{{"issue", source}, {"phrase", "depends on"}, {"target", target}}, found.details[1:4])
 
 	link := issueLinkOfThePhrase(t, dev.answers()[read], "INWARD", "depends on")
 	internal := internalIDOf(t, dev.answers()[read+1])
@@ -106,8 +102,6 @@ func TestLinkRemoveKeepsTheSlotIDToTheEvidenceOfWhatWentOut(t *testing.T) {
 	assert.Contains(t, sent, "/links/"+link+"/issues/"+internal)
 	assert.Contains(t, detailNamed(t, found, "upstream_message"), internal)
 
-	// Every other key of the refusal is the caller's own words back: nothing that names something names it by an
-	// identifier of this instance.
 	for _, printed := range found.details {
 		if printed.key == "request" || strings.HasPrefix(printed.key, "upstream_") {
 			continue
@@ -142,8 +136,6 @@ func everyIssueLinkID(t *testing.T, body []byte) []string {
 	return ids
 }
 
-// internalIDOf is the id of the instance's own the answer gave the issue, which is what a link addresses the
-// partner by and what a readable id is printed instead of.
 func internalIDOf(t *testing.T, body []byte) string {
 	t.Helper()
 	var read struct {

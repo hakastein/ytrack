@@ -17,17 +17,20 @@ import (
 const refPrefix = "#/components/schemas/"
 
 const (
-	int64Element  = "!int64"
-	stringElement = "!string"
-	timeElement   = "!time"
-	textElement   = "!text"
+	plainScalarElement      = ""
+	schemalessObjectElement = "{}"
+	listPrefix              = "[]"
+	int64Element            = "!int64"
+	stringElement           = "!string"
+	timeElement             = "!time"
+	textElement             = "!text"
 )
 
-// Every key the specification uses is named, those the catalogue ignores included, so that a key of a
-// shape it cannot read fails the generation instead of passing unread.
+type ignored = json.RawMessage
+
 type schemaObject struct {
 	Type          string                     `json:"type"`
-	Description   json.RawMessage            `json:"description"`
+	Description   ignored                    `json:"description"`
 	Properties    map[string]json.RawMessage `json:"properties"`
 	Discriminator *discriminator             `json:"discriminator"`
 	AllOf         []json.RawMessage          `json:"allOf"`
@@ -49,9 +52,9 @@ type property struct {
 	Type     string          `json:"type"`
 	Items    *items          `json:"items"`
 	Format   json.RawMessage `json:"format"`
-	Enum     json.RawMessage `json:"enum"`
-	Nullable json.RawMessage `json:"nullable"`
-	ReadOnly json.RawMessage `json:"readOnly"`
+	Enum     ignored         `json:"enum"`
+	Nullable ignored         `json:"nullable"`
+	ReadOnly ignored         `json:"readOnly"`
 }
 
 type items struct {
@@ -100,23 +103,23 @@ func run(specPath, outPath string) error {
 		}
 		objects[name] = object
 	}
-	names, err := typeNames(objects)
+	serverTypes, err := serverTypesOf(objects)
 	if err != nil {
 		return err
 	}
 	catalogue := map[string]schema{}
 	for _, name := range slices.Sorted(maps.Keys(objects)) {
-		s, err := read(objects[name], names, objects)
+		s, err := read(objects[name], serverTypes, objects)
 		if err != nil {
 			return fmt.Errorf("schema %s: %w", name, err)
 		}
 		if err := classify(name, s.properties); err != nil {
 			return err
 		}
-		if _, taken := catalogue[names[name]]; taken {
-			return fmt.Errorf("schema %s: $type %s names another schema too", name, names[name])
+		if _, taken := catalogue[serverTypes[name]]; taken {
+			return fmt.Errorf("schema %s: $type %s names another schema too", name, serverTypes[name])
 		}
-		catalogue[names[name]] = s
+		catalogue[serverTypes[name]] = s
 	}
 	for _, name := range slices.Sorted(maps.Keys(catalogue)) {
 		steps := 0
@@ -133,12 +136,10 @@ func run(specPath, outPath string) error {
 	return os.WriteFile(outPath, source, 0o644)
 }
 
-// A schema goes into the catalogue under what the server writes in $type, which a discriminator maps to
-// the schema: $type SingleValueIssueCustomField is the schema DatabaseSingleValueIssueCustomField.
-func typeNames(objects map[string]schemaObject) (map[string]string, error) {
-	names := map[string]string{}
+func serverTypesOf(objects map[string]schemaObject) (map[string]string, error) {
+	serverTypes := map[string]string{}
 	for name := range objects {
-		names[name] = name
+		serverTypes[name] = name
 	}
 	for _, owner := range slices.Sorted(maps.Keys(objects)) {
 		d := objects[owner].Discriminator
@@ -148,27 +149,27 @@ func typeNames(objects map[string]schemaObject) (map[string]string, error) {
 		if d.PropertyName != "$type" {
 			return nil, fmt.Errorf("schema %s: the discriminator is %q, not $type", owner, d.PropertyName)
 		}
-		for _, typeName := range slices.Sorted(maps.Keys(d.Mapping)) {
-			target, err := resolve(d.Mapping[typeName], objects)
+		for _, serverType := range slices.Sorted(maps.Keys(d.Mapping)) {
+			target, err := resolve(d.Mapping[serverType], objects)
 			if err != nil {
-				return nil, fmt.Errorf("schema %s: discriminator %s: %w", owner, typeName, err)
+				return nil, fmt.Errorf("schema %s: discriminator %s: %w", owner, serverType, err)
 			}
-			if typeName == target {
+			if serverType == target {
 				continue
 			}
-			if _, clash := objects[typeName]; clash {
-				return nil, fmt.Errorf("schema %s: discriminator %s: names schema %s, and schema %s has that name of its own", owner, typeName, target, typeName)
+			if _, clash := objects[serverType]; clash {
+				return nil, fmt.Errorf("schema %s: discriminator %s: names schema %s, and schema %s has that name of its own", owner, serverType, target, serverType)
 			}
-			if names[target] != target && names[target] != typeName {
-				return nil, fmt.Errorf("schema %s: discriminator %s: names schema %s, which is named %s already", owner, typeName, target, names[target])
+			if serverTypes[target] != target && serverTypes[target] != serverType {
+				return nil, fmt.Errorf("schema %s: discriminator %s: names schema %s, which is named %s already", owner, serverType, target, serverTypes[target])
 			}
-			names[target] = typeName
+			serverTypes[target] = serverType
 		}
 	}
-	return names, nil
+	return serverTypes, nil
 }
 
-func read(object schemaObject, names map[string]string, objects map[string]schemaObject) (schema, error) {
+func read(object schemaObject, serverTypes map[string]string, objects map[string]schemaObject) (schema, error) {
 	var s schema
 	properties := object.Properties
 	if object.AllOf != nil {
@@ -187,7 +188,7 @@ func read(object schemaObject, names map[string]string, objects map[string]schem
 				if err != nil {
 					return s, fmt.Errorf("allOf: %w", err)
 				}
-				s.parent, extended = names[parent], true
+				s.parent, extended = serverTypes[parent], true
 			case member.Ref == "" && member.Type == "object" && !own:
 				properties, own = member.Properties, true
 			default:
@@ -201,7 +202,7 @@ func read(object schemaObject, names map[string]string, objects map[string]schem
 		return s, fmt.Errorf("type %q, not object", object.Type)
 	}
 	for _, name := range slices.Sorted(maps.Keys(properties)) {
-		element, err := encode(properties[name], names, objects)
+		element, err := encode(properties[name], serverTypes, objects)
 		if err != nil {
 			return s, fmt.Errorf("property %s: %w", name, err)
 		}
@@ -245,25 +246,24 @@ func classify(owner string, properties map[string]string) error {
 	return nil
 }
 
-// "" is a scalar, "X" an object of schema X, "{}" an object of no schema, and "[]" before "" or "X" a list.
-func encode(raw json.RawMessage, names map[string]string, objects map[string]schemaObject) (string, error) {
+func encode(raw json.RawMessage, serverTypes map[string]string, objects map[string]schemaObject) (string, error) {
 	var p property
 	if err := decodeStrictly(raw, &p); err != nil {
 		return "", err
 	}
 	switch {
 	case p.Ref != "" && p.Type == "" && p.Items == nil:
-		return reference(p.Ref, names, objects)
+		return reference(p.Ref, serverTypes, objects)
 	case p.Ref == "" && p.Type == "array" && p.Items != nil:
 		switch {
 		case p.Items.Ref != "" && p.Items.Type == "":
-			element, err := reference(p.Items.Ref, names, objects)
-			return "[]" + element, err
+			element, err := reference(p.Items.Ref, serverTypes, objects)
+			return listPrefix + element, err
 		case p.Items.Ref == "" && scalar(p.Items.Type):
-			return "[]" + scalarElement(p.Items.Type, p.Items.Format), nil
+			return listPrefix + scalarElement(p.Items.Type, p.Items.Format), nil
 		}
 	case p.Ref == "" && p.Type == "object" && p.Items == nil:
-		return "{}", nil
+		return schemalessObjectElement, nil
 	case p.Ref == "" && scalar(p.Type) && p.Items == nil:
 		return scalarElement(p.Type, p.Format), nil
 	}
@@ -277,16 +277,16 @@ func scalarElement(kind string, format json.RawMessage) string {
 	case kind == "string":
 		return stringElement
 	}
-	return ""
+	return plainScalarElement
 }
 
 func scalar(t string) bool {
 	return t == "string" || t == "integer" || t == "number" || t == "boolean"
 }
 
-func reference(ref string, names map[string]string, objects map[string]schemaObject) (string, error) {
+func reference(ref string, serverTypes map[string]string, objects map[string]schemaObject) (string, error) {
 	target, err := resolve(ref, objects)
-	return names[target], err
+	return serverTypes[target], err
 }
 
 func resolve(ref string, objects map[string]schemaObject) (string, error) {

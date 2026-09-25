@@ -11,24 +11,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// An article as the read before a deletion sees it, with the $type the server names it by.
 func articleNamed(readable string) string {
 	return `{"$type":"Article","idReadable":` + strconv.Quote(readable) + `}`
 }
 
-// The request that read goes out as: the whole article is none of its business, so it asks for the one name the
-// deletion is addressed by and printed as.
 func articleReadRequest(address, id string) string {
 	return "GET " + address + "/api/articles/" + url.PathEscape(id) + "?fields=" + deletedFields
 }
 
-// The request the deletion itself goes out as, which is the one a refusal about it names.
 func articleDeletionRequest(address, readable string) string {
 	return "DELETE " + address + "/api/articles/" + readable
 }
 
-// The refusal an article the read does not find becomes: said is the server's own sentence about it, which is
-// one sentence for an article nobody wrote and another for one the token may not see.
 func noArticleToDelete(address, id, said string) faultDocument {
 	return faultDocument{
 		code: "not_found",
@@ -41,8 +35,6 @@ func noArticleToDelete(address, id, said string) faultDocument {
 	}
 }
 
-// Everything settled before the network: how many ids the command takes, what an id may look like, and that
-// no flag stands between the caller and the deletion.
 func TestArticleDeleteRefusesBeforeAnyRequest(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -63,14 +55,12 @@ func TestArticleDeleteRefusesBeforeAnyRequest(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// No --yes or --force flag exists: one would become a habit typed before every deletion, defeating the
-// confirmation it skips.
 func TestArticleDeleteHelpOffersNoConfirmation(t *testing.T) {
 	t.Parallel()
 
@@ -83,8 +73,6 @@ func TestArticleDeleteHelpOffersNoConfirmation(t *testing.T) {
 	}
 }
 
-// The whole of the command: the argument is read as the server resolves it, the deletion is addressed by
-// the id that came back, and that id is the document.
 func TestArticleDeleteReadsTheIDAndDeletesByIt(t *testing.T) {
 	t.Parallel()
 	server := deleting(t, respondWith(http.StatusOK, articleNamed("DEV-A-7")), deletionDone())
@@ -104,9 +92,6 @@ func TestArticleDeleteReadsTheIDAndDeletesByIt(t *testing.T) {
 	assert.Equal(t, []string{"", ""}, server.asks(), "neither request carries a body")
 }
 
-// An article the read does not find is a refusal and nothing else, and what the server says about it passes
-// on word for word: one sentence for an article nobody wrote, another for one hidden from the token, and ytrack
-// tells neither from the other.
 func TestArticleDeleteRefusesAnArticleTheReadDoesNotFind(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -124,14 +109,12 @@ func TestArticleDeleteRefusesAnArticleTheReadDoesNotFind(t *testing.T) {
 
 			got := runWith(t, server.env(), "article", "delete", "dev-A-7")
 
-			assert.Equal(t, noArticleToDelete(server.url, "dev-A-7", tc.said), requireRefusal(t, got))
+			assert.Equal(t, noArticleToDelete(server.url, "dev-A-7", tc.said), requireFault(t, got))
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 		})
 	}
 }
 
-// What the server says about the deletion itself passes on with the request it answered, which is the one
-// that carried the id out.
 func TestArticleDeleteRefusesWhatTheServerRefused(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -175,15 +158,12 @@ func TestArticleDeleteRefusesWhatTheServerRefused(t *testing.T) {
 					{"upstream_message", tc.upstreamMessage},
 				}, tc.details...),
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
 		})
 	}
 }
 
-// A deletion is answered with nothing, so a 200 carrying anything at all is something other than the
-// endpoint that was asked: a login page, a proxy, or an answer about another call entirely. Whatever answered,
-// it answered 2xx to a deletion that went out, so the tree may be gone and the exit code is 2.
 func TestArticleDeleteRefusesA200ThatCarriesABody(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -219,9 +199,6 @@ func TestArticleDeleteRefusesA200ThatCarriesABody(t *testing.T) {
 	}
 }
 
-// The id that came back is sent straight out as a path segment, so it is held to the form ytrack sends
-// before it goes: the generated client would resolve ".." against the endpoint and reach /api/, and the id of an
-// issue would carry the deletion to an entity of another kind entirely.
 func TestArticleDeleteRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -249,14 +226,12 @@ func TestArticleDeleteRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 					{"upstream_body", body},
 				},
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 		})
 	}
 }
 
-// The title every article a contract test files goes by: the name of the scenario, so an article left behind
-// names the test that left it.
 func contractArticleTitle(t *testing.T) string {
 	t.Helper()
 	return "ytrack contract " + t.Name()
@@ -271,7 +246,7 @@ func TestArticleDeleteDeletesAnArticleOfTheDevInstance(t *testing.T) {
 
 	assert.Equal(t, outcome{stdout: "idReadable: " + strconv.Quote(filed) + "\n"}, got)
 	gone := runWith(t, dev.env(), "article", "show", filed, "--comments=0")
-	assert.Equal(t, "not_found", requireRefusalDocument(t, gone).code)
+	assert.Equal(t, "not_found", requireFaultDocument(t, gone).code)
 	assert.Equal(t, []string{http.MethodPost, http.MethodGet, http.MethodDelete, http.MethodGet}, sentMethods(dev))
 }
 
@@ -282,12 +257,10 @@ func TestArticleDeleteRefusesAnArticleTheDevInstanceDoesNotHave(t *testing.T) {
 	got := runWith(t, dev.env(), "article", "delete", "DEV-A-99999")
 
 	assert.Equal(t, noArticleToDelete(dev.url, "DEV-A-99999", "Can't find article with id DEV-A-99999"),
-		requireRefusal(t, got))
+		requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(dev))
 }
 
-// An article hidden from a token is no article at all to it: the read answers the 404 of any missing entity,
-// and DEV-A-1 is left where it stands.
 func TestArticleDeleteSendsNoDeletionForAnArticleTheLimitedUserCannotSee(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -295,6 +268,6 @@ func TestArticleDeleteSendsNoDeletionForAnArticleTheLimitedUserCannotSee(t *test
 	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited},
 		"article", "delete", "DEV-A-1")
 
-	assert.Equal(t, noArticleToDelete(dev.url, "DEV-A-1", "Entity with id DEV-A-1 not found"), requireRefusal(t, got))
+	assert.Equal(t, noArticleToDelete(dev.url, "DEV-A-1", "Entity with id DEV-A-1 not found"), requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(dev))
 }

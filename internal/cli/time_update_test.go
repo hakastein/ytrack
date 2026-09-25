@@ -8,18 +8,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The path one work item of an issue stands under, which is where an update and a removal are addressed.
 func workItemPath(issue, id string) string {
 	return workItemsPath(issue) + "/" + id
 }
 
-// The request an update of a work item goes out as, which is the one a refusal about it names.
 func workItemUpdateRequest(address, issue, id, fields string) string {
 	return "POST " + address + workItemPath(issue, id) + "?fields=" + fields
 }
 
-// workItemOn writes one work item on the issue and hands back the id it goes by, which is what an update and a
-// removal address it with.
 func workItemOn(t *testing.T, dev *upstream, issue string, argv ...string) string {
 	t.Helper()
 	got := runWith(t, dev.env(), append([]string{"time", "create", issue}, argv...)...)
@@ -29,15 +25,11 @@ func workItemOn(t *testing.T, dev *upstream, issue string, argv ...string) strin
 	return id
 }
 
-// theWorkItemsOf is every work item of the issue as time list prints them, which is what a scenario holds a
-// write to without asking the server anything the command itself does not.
 func theWorkItemsOf(t *testing.T, dev *upstream, issue string) []map[string]any {
 	t.Helper()
 	return requireWorkItemListing(t, runWith(t, dev.env(), "time", "list", issue)).WorkItems
 }
 
-// What an update writes is the parts it names, so a call that names none is refused before the network,
-// and so is every part written two ways at once or written as something the server would not keep.
 func TestTimeUpdateRefusesWhatItCannotSend(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -62,15 +54,12 @@ func TestTimeUpdateRefusesWhatItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"time", "update", "DEV-1", "199-6"}, tc.argv...)...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The duration, the day and the name of the type are read the way a creation reads them, so a length written
-// as the server shows one, a moment of a day and a name of no type are refused here as well, before anything is
-// sent.
 func TestTimeUpdateRefusesAValueItCannotSend(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -88,16 +77,13 @@ func TestTimeUpdateRefusesAValueItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"time", "update", "DEV-1", "199-6"}, tc.argv...)...)
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "bad_usage", found.code)
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The id of the work item is held to the form of an internal id before anything is sent, and a readable id
-// of either kind is no address for one: the generated client resolves the segment against the server, so an
-// empty one would turn the update into a creation and ".." into a write to the issue itself.
 func TestTimeUpdateRefusesAnIDThatIsNoInternalID(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -120,28 +106,23 @@ func TestTimeUpdateRefusesAnIDThatIsNoInternalID(t *testing.T) {
 
 			got := runWith(t, server.env(), "time", "update", "--text", "x", "--", "DEV-1", tc.id)
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "bad_usage", found.code)
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// A leading zero is the server's to refuse and it does, by matching the id exactly: the form passes here,
-// the request goes out as it was written, and the answer is the server's word about an id it has none of.
 func TestTimeUpdateSendsAnIDWithALeadingZeroAsItWasWritten(t *testing.T) {
 	t.Parallel()
 	server := serve(t, respondWith(http.StatusNotFound, entityNotFound("199-06")))
 
 	got := runWith(t, server.env(), "time", "update", "DEV-1", "199-06", "--text", "x")
 
-	assert.Equal(t, "not_found", requireRefusal(t, got).code)
+	assert.Equal(t, "not_found", requireFault(t, got).code)
 	assert.Equal(t, []string{workItemPath("DEV-1", "199-06")}, server.sentPaths())
 }
 
-// The body carries the parts the call named and not one key more: a part it said nothing about keeps its
-// key out altogether, which is what leaves the work item holding what it held, and a part under --clear goes
-// out as an explicit null. Nothing of the work item is read first — the pair is the server's to check.
 func TestTimeUpdateSendsTheNamedPartsAlone(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -157,8 +138,6 @@ func TestTimeUpdateSendsTheNamedPartsAlone(t *testing.T) {
 			body:     map[string]any{"text": "x"},
 		},
 		{
-			// An empty string and no key at all are two different writes: YouTrack keeps an empty text as an
-			// empty text, so only a null empties one.
 			name:     "the text written empty",
 			argv:     []string{"--text", ""},
 			answered: answeredWorkItem{text: asJSON("")},
@@ -202,9 +181,6 @@ func TestTimeUpdateSendsTheNamedPartsAlone(t *testing.T) {
 	}
 }
 
-// A type named by a caller is resolved before the write, as it is in a creation, and the write that follows
-// goes out to the readable id that read gave: two requests, and the id of the type is the whole of what the
-// body says about it.
 func TestTimeUpdateReadsTheTypesOfTheProjectBeforeTheWrite(t *testing.T) {
 	t.Parallel()
 	server := writingTimeOfAType(t,
@@ -224,9 +200,6 @@ func TestTimeUpdateReadsTheTypesOfTheProjectBeforeTheWrite(t *testing.T) {
 	assert.Equal(t, map[string]any{"id": workItemTypeID(1)}, sentWorkItemType(t, server))
 }
 
-// A part the call emptied is a part the answer holds nothing in, and one still standing there is the server
-// disagreeing with the write as much as a value that came back another. The work item holds it by then, which
-// is what the exit code says without the document being read.
 func TestTimeUpdateRefusesAPartTheServerDidNotEmpty(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -248,8 +221,6 @@ func TestTimeUpdateRefusesAPartTheServerDidNotEmpty(t *testing.T) {
 			mismatch: []any{[]detail{{"field", "text"}, {"expected", nil}, {"actual", "Разбор полигона"}}},
 		},
 		{
-			// An empty string is not an empty text here: YouTrack keeps one, and --clear text sent the null
-			// that empties the part outright.
 			name:     "the text emptied to an empty string",
 			emptied:  "text",
 			answered: answeredWorkItem{text: asJSON("")},
@@ -273,9 +244,6 @@ func TestTimeUpdateRefusesAPartTheServerDidNotEmpty(t *testing.T) {
 	}
 }
 
-// What the tool needs of the answer goes out whatever the caller asked to print: the parts the check holds
-// against what was written, and those alone — the pair a refusal names the work item by is the caller's own
-// here, so nothing is asked for it. The document stays theirs.
 func TestTimeUpdateAsksForWhatItChecksWhateverWasAskedToPrint(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -314,8 +282,6 @@ func TestTimeUpdateAsksForWhatItChecksWhateverWasAskedToPrint(t *testing.T) {
 	}
 }
 
-// What the call named nothing for is held to nothing: the work item holds what it held, a workflow may have
-// moved it, and either way the answer is the only word there is on it. It is printed all the same.
 func TestTimeUpdateChecksNothingItNeverWrote(t *testing.T) {
 	t.Parallel()
 	server := writingTime(t, respondWith(http.StatusOK, answeredWorkItem{
@@ -334,8 +300,6 @@ func TestTimeUpdateChecksNothingItNeverWrote(t *testing.T) {
 	assert.Equal(t, "2026-09-02T00:00:00Z", nodeAt(t, mapping, "date").Value)
 }
 
-// What the server says about a write it refused passes on word for word: a work item of another issue and
-// one the instance has none of are the same 404, and nothing was written either way.
 func TestTimeUpdateRefusesWhatTheServerRefused(t *testing.T) {
 	t.Parallel()
 	server := writingTime(t, respondWith(http.StatusNotFound,
@@ -352,7 +316,7 @@ func TestTimeUpdateRefusesWhatTheServerRefused(t *testing.T) {
 			{"upstream_message", "Entity with id 199-6 not found"},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodPost}, sentMethods(server))
 }
 
@@ -383,9 +347,6 @@ func TestTimeUpdateWritesIntoAWorkItemOfTheDevInstance(t *testing.T) {
 	assert.Equal(t, "2026-09-05T00:00:00Z", nodeAt(t, requireMapping(t, "stdout", moved.stdout), "date").Value)
 }
 
-// The pair is the server's to check, and it does: a work item addressed through an issue it does not hang
-// from is answered as if it were not there, in the one request the command sends, and the work item is left
-// exactly as it was.
 func TestTimeUpdateRefusesAWorkItemOfAnotherIssueOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -396,7 +357,7 @@ func TestTimeUpdateRefusesAWorkItemOfAnotherIssueOfTheDevInstance(t *testing.T) 
 
 	got := runWith(t, dev.env(), "time", "update", other, item, "--text", "ytrack contract via-B")
 
-	assert.Equal(t, "not_found", requireRefusal(t, got).code)
+	assert.Equal(t, "not_found", requireFault(t, got).code)
 	assert.Equal(t, []string{workItemPath(other, item)}, pathsSince(dev, before))
 
 	kept := theWorkItemsOf(t, dev, issue)
@@ -414,7 +375,7 @@ func TestTimeUpdateIsRefusedTheDurationWrittenAsAnID(t *testing.T) {
 
 	got := runWith(t, dev.env(), "time", "update", issue, item, "--duration", "PT3H")
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "rejected", found.code)
 	assert.Equal(t, "Для единицы работы должна быть задана длительность",
 		detailNamed(t, found, "upstream_message"))
@@ -425,8 +386,6 @@ func TestTimeUpdateIsRefusedTheDurationWrittenAsAnID(t *testing.T) {
 	assert.Equal(t, "PT1H", kept[0]["duration"])
 }
 
-// A token that may not see the issue is answered as if the issue were not there, in the one request the
-// command sends, and the admin finds the work item exactly as it was.
 func TestTimeUpdateRefusesAnIssueTheLimitedUserMayNotSee(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -437,7 +396,7 @@ func TestTimeUpdateRefusesAnIssueTheLimitedUserMayNotSee(t *testing.T) {
 	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited},
 		"time", "update", issue, item, "--text", "ytrack contract x")
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "not_found", found.code)
 	assert.Equal(t, "Entity with id "+issue+" not found", detailNamed(t, found, "upstream_message"))
 	assert.Len(t, pathsSince(dev, before), 1)

@@ -10,14 +10,10 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// The request an update goes out as, which is the one a refusal about the write names. The id is the readable
-// one the read before it gave, so nothing of it needs escaping.
 func articleUpdateRequest(address, readable, fields string) string {
 	return "POST " + address + "/api/articles/" + readable + "?fields=" + fields
 }
 
-// updatingAnArticle is the server of an update: the read of the article and the write itself, each answered by
-// the scenario, and nothing else reaches it.
 func updatingAnArticle(t *testing.T, read, update http.HandlerFunc) *upstream {
 	t.Helper()
 	return serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -32,7 +28,6 @@ func updatingAnArticle(t *testing.T, read, update http.HandlerFunc) *upstream {
 	})
 }
 
-// The body of the write, read as JSON reads it, which is what tells a key left out from one sent null.
 func sentChanges(t *testing.T, u *upstream) map[string]any {
 	t.Helper()
 	var body map[string]any
@@ -40,8 +35,6 @@ func sentChanges(t *testing.T, u *upstream) map[string]any {
 	return body
 }
 
-// Everything an update settles before the network: how many ids it takes, what an id may look like, that it
-// writes something at all, and that no two flags say opposite things about one part.
 func TestArticleUpdateRefusesBeforeAnyRequest(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -77,7 +70,7 @@ func TestArticleUpdateRefusesBeforeAnyRequest(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"article", "update"}, tc.argv...)...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -101,14 +94,12 @@ func TestArticleUpdateHasNoFlagsBesidesItsOwn(t *testing.T) {
 
 			got := runWith(t, server.env(), "article", "update", "DEV-A-7", tc.flag, "y")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The help names what a caller gets where they write no expression, how text already written is passed in,
-// and the one way to take the text away.
 func TestArticleUpdateHelpNamesTheDefault(t *testing.T) {
 	t.Parallel()
 
@@ -120,8 +111,6 @@ func TestArticleUpdateHelpNamesTheDefault(t *testing.T) {
 	assert.NotContains(t, got.stdout, "-file")
 }
 
-// The whole of the command: the article is read first, the write goes to the id that read gave rather than
-// to the string the caller typed, and the body carries the one part the call named and not a key more.
 func TestArticleUpdateWritesOnlyThePartsItWasGiven(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -180,8 +169,6 @@ func TestArticleUpdateWritesOnlyThePartsItWasGiven(t *testing.T) {
 	}
 }
 
-// A title the call does not write leaves its key out of the body, and the answer is then held to nothing
-// about it: the article keeps the title it had, whatever that is.
 func TestArticleUpdateChecksTheResponseAgainstThePartsItWrote(t *testing.T) {
 	t.Parallel()
 	filed := answeredArticle{readable: "DEV-A-7", summary: "заголовок, которого никто не писал", content: "null"}
@@ -198,9 +185,6 @@ func TestArticleUpdateChecksTheResponseAgainstThePartsItWrote(t *testing.T) {
 	assert.Nil(t, requireValue(t, nodeAt(t, mapping, "content")))
 }
 
-// The title of an article is held to the runes an article keeps and not to the runes an issue keeps: a NEL,
-// the two separators and a tab are stored byte for byte here where an issue loses them, so an update carries
-// them out as they were typed.
 func TestArticleUpdateWritesTheTitleItWasGiven(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -230,9 +214,6 @@ func TestArticleUpdateWritesTheTitleItWasGiven(t *testing.T) {
 	}
 }
 
-// What the caller asks to print is one thing and what the check of the write needs is another: every part
-// that went out is asked for beside the expression, or the answer would carry nothing to hold the write
-// against, and a write that went through would be refused for a value the server never sent.
 func TestArticleUpdateChecksMoreThanItPrints(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -283,9 +264,6 @@ func TestArticleUpdateChecksMoreThanItPrints(t *testing.T) {
 	}
 }
 
-// A 200 says the server took the body, not that it kept what was in it. What came back other than as it
-// went out is a refusal naming both, and nothing is printed: the article holds something the caller did not
-// write, which is what the exit code of a write that happened is for.
 func TestArticleUpdateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -338,8 +316,6 @@ func TestArticleUpdateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 	}
 }
 
-// An article the read does not find is a refusal and nothing else: the write never goes out, so a number
-// nobody used is answered before anything is changed.
 func TestArticleUpdateRefusesAnArticleTheReadDoesNotFind(t *testing.T) {
 	t.Parallel()
 	said := `{"error":"Not Found","error_description":"Can't find article with id DEV-A-99999"}`
@@ -356,14 +332,10 @@ func TestArticleUpdateRefusesAnArticleTheReadDoesNotFind(t *testing.T) {
 			{"upstream_message", "Can't find article with id DEV-A-99999"},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 }
 
-// The id the read gave is sent straight out as the path segment of the write, so it is held to the form
-// ytrack sends before anything goes: the generated client would resolve ".." against the endpoint and reach
-// /api/, where the body would be written to something nobody addressed, and the id of an issue would carry the
-// write to an entity of another kind entirely.
 func TestArticleUpdateRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -393,19 +365,17 @@ func TestArticleUpdateRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 					{"upstream_body", body},
 				},
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 		})
 	}
 }
 
-// The parent of a move is named by the readable id the read gave in every refusal and in the check of the
-// write, so it is held to the form of an article there too, whatever the body addresses it by.
 func TestArticleUpdateRefusesAParentReadableIDItCannotAddressBy(t *testing.T) {
 	t.Parallel()
 	server := movingAnArticle(t, map[string]http.HandlerFunc{
 		"DEV-A-7": respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		"DEV-A-1": respondWith(http.StatusOK, articleAbove("177-1", "DEV-1", "DEV", "null")),
+		"DEV-A-1": respondWith(http.StatusOK, articleAbove("177-1", "DEV-1", "DEV", rootParent)),
 	}, noUpdate(t))
 
 	got := runWith(t, server.env(), "article", "update", "DEV-A-7", "--parent", "DEV-A-1")
@@ -415,16 +385,13 @@ func TestArticleUpdateRefusesAParentReadableIDItCannotAddressBy(t *testing.T) {
 		details: []detail{
 			{"request", articleLineRequest(server.url, "DEV-A-1")},
 			{"upstream_status", 200},
-			{"upstream_body", articleAbove("177-1", "DEV-1", "DEV", "null")},
+			{"upstream_body", articleAbove("177-1", "DEV-1", "DEV", rootParent)},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet, http.MethodGet}, sentMethods(server))
 }
 
-// The body left whole and the connection went away before an answer: the article may hold what was written
-// and may hold what it held, and nothing ytrack could send afterwards tells the two apart. So the caller is
-// told that much, and the exit code says the instance may have changed.
 func TestArticleUpdateIsUncertainWhereTheAnswerNeverCame(t *testing.T) {
 	t.Parallel()
 	server := updatingAnArticle(t, respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")), breakOff)
@@ -443,8 +410,6 @@ func TestArticleUpdateWritesIntoAnArticleOfTheDevInstance(t *testing.T) {
 	dev := devInstance(t)
 	filed := fileArticle(t, dev, contractArticleTitle(t), "--content", "Текст, который будет переписан.")
 	t.Cleanup(func() { removeArticle(t, dev, filed) })
-	// The title keeps the trailing whitespace and the tab YouTrack stores as they were written; the leading
-	// words stay as they are so that an article left behind is still found by the title every contract test uses.
 	title := contractArticleTitle(t) + " переписанный  \t"
 	text := "первая\rвторая\xe2\x80\xa8третья\n"
 
@@ -482,8 +447,6 @@ func TestArticleUpdateEmptiesTheContentOfAnArticleOfTheDevInstance(t *testing.T)
 	assert.Nil(t, requireValue(t, nodeAt(t, requireMapping(t, "stdout", read.stdout), "content")))
 }
 
-// An article the limited token may not see is a 404 to it, and the read before the write is where that
-// lands: one request goes out, the write never does, and the article keeps the title the admin gave it.
 func TestArticleUpdateWritesNothingForTheLimitedToken(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -494,7 +457,7 @@ func TestArticleUpdateWritesNothingForTheLimitedToken(t *testing.T) {
 	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited},
 		"article", "update", filed, "--summary", title+" переписанный урезанным токеном")
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "not_found", found.code)
 	assert.Equal(t, detail{"request", articleToWriteRequest(dev.url, filed)}, found.details[0])
 

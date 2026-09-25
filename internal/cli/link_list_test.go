@@ -11,10 +11,10 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-const linkListPartner = "idReadable,summary"
+const linkListTarget = "idReadable,summary"
 
-func linkListFields(partner string) string {
-	return "links(issues(" + partner + ")," + linkParts + ",issuesSize)"
+func linkListFields(target string) string {
+	return "links(issues(" + target + ")," + linkParts + ",issuesSize)"
 }
 
 type issueLinkEntry struct {
@@ -67,16 +67,14 @@ func issueLinksResponse(links ...issueLinkEntry) string {
 	return `{"$type":"Issue","links":[` + strings.Join(sent, ",") + `]}`
 }
 
-// Every form the argument of link list is refused for before any request, and every way of writing the call
-// that names no one issue.
 func TestLinkListRefusesACallThatNamesNoOneIssue(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
 		argv []string
 	}{
-		{name: "the group alone", argv: []string{"link"}},
-		{name: "a command the group has none of", argv: []string{"link", "bogus"}},
+		{name: "the command alone", argv: []string{"link"}},
+		{name: "a subcommand the command has none of", argv: []string{"link", "bogus"}},
 		{name: "no issue", argv: []string{"link", "list"}},
 		{name: "two issues", argv: []string{"link", "list", "DEV-1", "DEV-2"}},
 		{name: "a path that would reach another endpoint", argv: []string{"link", "list", ".."}},
@@ -90,7 +88,7 @@ func TestLinkListRefusesACallThatNamesNoOneIssue(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -103,11 +101,10 @@ func TestLinkListHelpNamesTheDefaultFields(t *testing.T) {
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, linkListPartner)
+	assert.Contains(t, got.stdout, linkListTarget)
 	assert.Contains(t, got.stdout, "ytrack link list")
 }
 
-// The links arrive whole in one answer and no request of them takes $skip, so the list takes no page at all.
 func TestLinkListRefusesAPage(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -124,23 +121,21 @@ func TestLinkListRefusesAPage(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"link", "list", "DEV-1"}, tc.argv...)...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// --fields is the expression of an issue at the other end of a link, and every issue printed is one: a name
-// that stands only on the issue asked for is refused before any request.
 func TestLinkListRefusesNamesThatExistOnlyOnTheIssueAskedFor(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name       string
 		expression string
 	}{
-		{name: "the comments of a partner", expression: "comments(text)"},
-		{name: "a custom field of a partner named bare", expression: "+customFields(State)"},
-		{name: "a custom field of a partner named in double quotes", expression: `+customFields("State")`},
+		{name: "the comments of a target issue", expression: "comments(text)"},
+		{name: "a custom field of a target issue named bare", expression: "+customFields(State)"},
+		{name: "a custom field of a target issue named in double quotes", expression: `+customFields("State")`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -149,13 +144,13 @@ func TestLinkListRefusesNamesThatExistOnlyOnTheIssueAskedFor(t *testing.T) {
 
 			got := runWith(t, server.env(), "link", "list", "DEV-1", "--fields", tc.expression)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-func TestLinkRefusesNamesWrittenUnderTheSlotOfAPartner(t *testing.T) {
+func TestLinkRefusesNamesWrittenUnderTheSlotOfATarget(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
@@ -171,7 +166,7 @@ func TestLinkRefusesNamesWrittenUnderTheSlotOfAPartner(t *testing.T) {
 
 			got := runWith(t, server.env(), append(tc.argv, "--fields", "+links(id)")...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -181,9 +176,9 @@ func TestLinkListPrintsThePhrasesOfAnIssueInTheOrderReceived(t *testing.T) {
 	t.Parallel()
 	links := issueLinkEntries()
 	links[2].id = "42-1t"
-	links[2].issues = []string{partnerIssue("DEV-3", "[bug] fix login")}
+	links[2].issues = []string{targetIssue("DEV-3", "[bug] fix login")}
 	links[0].id = "42-0"
-	links[0].issues = []string{partnerIssue("DEV-9", "Y"), partnerIssue("DEV-2", "X")}
+	links[0].issues = []string{targetIssue("DEV-9", "Y"), targetIssue("DEV-2", "X")}
 	links[0], links[2] = links[2], links[0]
 	body := issueLinksResponse(links...)
 	server := serve(t, respondWith(http.StatusOK, body))
@@ -208,14 +203,14 @@ func TestLinkListPrintsThePhrasesOfAnIssueInTheOrderReceived(t *testing.T) {
 		assert.NotContains(t, got.stdout, hidden)
 	}
 	assert.Equal(t, []string{"/api/issues/dev-1"}, server.sentPaths())
-	assert.Equal(t, []string{linkListFields(linkListPartner)}, server.sentFields())
+	assert.Equal(t, []string{linkListFields(linkListTarget)}, server.sentFields())
 }
 
 func TestLinkListPrintsNothingOfTheIssueAskedFor(t *testing.T) {
 	t.Parallel()
 	link := linked(receivedLink{
 		direction: "BOTH", sourceToTarget: "relates to",
-		issues: []string{partnerIssue("DEV-2", "Отклонённая задача")},
+		issues: []string{targetIssue("DEV-2", "Отклонённая задача")},
 	})
 	server := serve(t, respondWith(http.StatusOK, issueLinksResponse(link)))
 
@@ -226,7 +221,7 @@ func TestLinkListPrintsNothingOfTheIssueAskedFor(t *testing.T) {
 		keysOf(requireMapping(t, "stdout", got.stdout)))
 	assert.NotContains(t, got.stdout, "DEV-1")
 	assert.Equal(t, []string{"/api/issues/dev-1"}, server.sentPaths())
-	assert.Equal(t, []string{linkListFields(linkListPartner)}, server.sentFields())
+	assert.Equal(t, []string{linkListFields(linkListTarget)}, server.sentFields())
 }
 
 func TestLinkListPrintsAnIssueWithNoLinkAtAll(t *testing.T) {
@@ -246,15 +241,15 @@ func TestLinkListPrintsAnIssueWithNoLinkAtAll(t *testing.T) {
 
 func TestLinkListCountsByWhatTheServerSaysAnIssueLinkHas(t *testing.T) {
 	t.Parallel()
-	partners := []string{
-		partnerIssue("DEV-2", "Отклонённая задача"),
-		partnerIssue("DEV-3", "Блокирующая задача"),
-		partnerIssue("DEV-4", "Родительская задача"),
+	targets := []string{
+		targetIssue("DEV-2", "Отклонённая задача"),
+		targetIssue("DEV-3", "Блокирующая задача"),
+		targetIssue("DEV-4", "Родительская задача"),
 	}
 
 	t.Run("more than arrived", func(t *testing.T) {
 		t.Parallel()
-		link := issueLinkEntry{direction: "BOTH", sourceToTarget: "relates to", issues: partners, held: "5"}
+		link := issueLinkEntry{direction: "BOTH", sourceToTarget: "relates to", issues: targets, held: "5"}
 		server := serve(t, respondWith(http.StatusOK, issueLinksResponse(link)))
 
 		got := runWith(t, server.env(), "link", "list", "DEV-1")
@@ -266,27 +261,25 @@ func TestLinkListCountsByWhatTheServerSaysAnIssueLinkHas(t *testing.T) {
 
 	t.Run("fewer than arrived", func(t *testing.T) {
 		t.Parallel()
-		link := issueLinkEntry{direction: "BOTH", sourceToTarget: "relates to", issues: partners, held: "1"}
+		link := issueLinkEntry{direction: "BOTH", sourceToTarget: "relates to", issues: targets, held: "1"}
 		body := issueLinksResponse(link)
 		server := serve(t, respondWith(http.StatusOK, body))
 
 		got := runWith(t, server.env(), "link", "list", "DEV-1")
 
-		found := requireRefusal(t, got)
+		found := requireFault(t, got)
 		assert.Equal(t, "upstream_invalid", found.code)
 		assert.Equal(t, body, detailNamed(t, found, "upstream_body"))
 	})
 
-	// The count is ytrack's own name, asked for although the specification declares it nowhere, so a caller
-	// has nothing to fix and unknown_name would hand them a name they never wrote.
 	t.Run("no count at all", func(t *testing.T) {
 		t.Parallel()
-		link := issueLinkEntry{direction: "BOTH", sourceToTarget: "relates to", issues: partners, countless: true}
+		link := issueLinkEntry{direction: "BOTH", sourceToTarget: "relates to", issues: targets, countless: true}
 		server := serve(t, respondWith(http.StatusOK, issueLinksResponse(link)))
 
 		got := runWith(t, server.env(), "link", "list", "DEV-1")
 
-		found := requireRefusal(t, got)
+		found := requireFault(t, got)
 		assert.Equal(t, "upstream_invalid", found.code)
 		assert.Equal(t, []any{[]detail{{"field", "links(issuesSize)"}, {"type", "IssueLink"}}},
 			detailNamed(t, found, "missing"))
@@ -294,21 +287,19 @@ func TestLinkListCountsByWhatTheServerSaysAnIssueLinkHas(t *testing.T) {
 
 	t.Run("a count that is no whole number", func(t *testing.T) {
 		t.Parallel()
-		link := issueLinkEntry{direction: "BOTH", sourceToTarget: "relates to", issues: partners, held: "1.5"}
+		link := issueLinkEntry{direction: "BOTH", sourceToTarget: "relates to", issues: targets, held: "1.5"}
 		server := serve(t, respondWith(http.StatusOK, issueLinksResponse(link)))
 
 		got := runWith(t, server.env(), "link", "list", "DEV-1")
 
-		found := requireRefusal(t, got)
+		found := requireFault(t, got)
 		assert.Equal(t, "upstream_invalid", found.code)
 	})
 }
 
-// The block of phrases is the one normalization of links there is, and it ends the call on an answer it cannot
-// print as phrases wherever that answer is read from.
 func TestLinkListRefusesLinksTheServerNamesBadly(t *testing.T) {
 	t.Parallel()
-	partner := []string{partnerIssue("DEV-2", "Отклонённая задача")}
+	target := []string{targetIssue("DEV-2", "Отклонённая задача")}
 	tests := []struct {
 		name  string
 		links []issueLinkEntry
@@ -316,14 +307,14 @@ func TestLinkListRefusesLinksTheServerNamesBadly(t *testing.T) {
 		{
 			name: "two links of one phrase",
 			links: []issueLinkEntry{
-				{direction: "OUTWARD", sourceToTarget: "X", targetToSource: "Y", issues: partner},
-				{direction: "BOTH", sourceToTarget: "X", issues: partner},
+				{direction: "OUTWARD", sourceToTarget: "X", targetToSource: "Y", issues: target},
+				{direction: "BOTH", sourceToTarget: "X", issues: target},
 			},
 		},
 		{
 			name: "a link holding issues and going by no phrase",
 			links: []issueLinkEntry{
-				{direction: "INWARD", sourceToTarget: "is required for", targetToSource: "", issues: partner},
+				{direction: "INWARD", sourceToTarget: "is required for", targetToSource: "", issues: target},
 			},
 		},
 	}
@@ -334,24 +325,24 @@ func TestLinkListRefusesLinksTheServerNamesBadly(t *testing.T) {
 
 			got := runWith(t, server.env(), "link", "list", "DEV-1")
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
 		})
 	}
 }
 
-func TestLinkListPrintsTheTextOfAPartnerOnItsLine(t *testing.T) {
+func TestLinkListPrintsTheTextOfATargetOnItsLine(t *testing.T) {
 	t.Parallel()
 	const text = "первая\nвторая\xe2\x80\xa8третья"
-	partner := `{"$type":"Issue","idReadable":"DEV-2","summary":"Отклонённая задача","description":` +
+	target := `{"$type":"Issue","idReadable":"DEV-2","summary":"Отклонённая задача","description":` +
 		strconv.Quote(text) + `}`
-	link := issueLinkEntry{direction: "BOTH", sourceToTarget: "relates to", issues: []string{partner}}
+	link := issueLinkEntry{direction: "BOTH", sourceToTarget: "relates to", issues: []string{target}}
 	server := serve(t, respondWith(http.StatusOK, issueLinksResponse(link)))
 
 	got := runWith(t, server.env(), "link", "list", "DEV-1", "--fields", "+description")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, []string{linkListFields(linkListPartner + ",description")}, server.sentFields())
+	assert.Equal(t, []string{linkListFields(linkListTarget + ",description")}, server.sentFields())
 	record := nodeAt(t, requireMapping(t, "stdout", got.stdout), "links", "relates to")
 	require.Equal(t, yaml.SequenceNode, record.Kind, "stdout: %q", got.stdout)
 	assert.Equal(t, text, nodeAt(t, record.Content[0], "description").Value)
@@ -368,22 +359,19 @@ func TestLinkListPrintsTheLinksOfTheDevInstance(t *testing.T) {
 	printed := requireDocument(t, got.stdout)
 	assert.Equal(t, []detail{{"total", 5}, {"returned", 5}, {"truncated", false}}, printed[:3])
 	block := nodeAt(t, requireMapping(t, "stdout", got.stdout), "links")
-	for phrase, partner := range map[string]string{
+	for phrase, target := range map[string]string{
 		"relates to":       "DEV-2",
 		"depends on":       "DEV-3",
 		"is duplicated by": "DEV-5",
 		"subtask of":       "DEV-4",
 		"Скопирована в":    "DEV-6",
 	} {
-		assert.Equal(t, partner, nodeAt(t, block, phrase, "idReadable").Value, "under %q", phrase)
+		assert.Equal(t, target, nodeAt(t, block, phrase, "idReadable").Value, "under %q", phrase)
 	}
 	assert.NotContains(t, got.stdout, "163-")
 	assert.Len(t, dev.requests(), 1)
 }
 
-// Each of the five types is read from its other end as well: DEV-2 to DEV-6 each hold the one link DEV-1
-// holds, under the phrase of the end they stand at. Together with DEV-1 that is every phrase the instance has,
-// read from a live answer.
 func TestLinkListPrintsTheOtherEndOfEveryLinkOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -413,14 +401,11 @@ func TestLinkListPrintsTheOtherEndOfEveryLinkOfTheDevInstance(t *testing.T) {
 	}
 }
 
-// An issue the token has none of is the same 404 whether the instance never had it or the caller may not see
-// it, and ytrack says what the server said rather than guessing at rights.
 func TestLinkListRefusesAnIssueTheDevInstanceDoesNotShow(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		issue string
-		// Whose token the call goes out with; the admin's where it is empty.
+		name    string
+		issue   string
 		limited bool
 	}{
 		{name: "an issue nobody has", issue: "DEV-99999"},
@@ -440,12 +425,12 @@ func TestLinkListRefusesAnIssueTheDevInstanceDoesNotShow(t *testing.T) {
 			assert.Equal(t, faultDocument{
 				code: "not_found",
 				details: []detail{
-					{"request", issueRequest(dev.url, tc.issue, linkListFields(linkListPartner))},
+					{"request", issueRequest(dev.url, tc.issue, linkListFields(linkListTarget))},
 					{"upstream_status", 404},
 					{"upstream_error", "Not Found"},
 					{"upstream_message", "Entity with id " + tc.issue + " not found"},
 				},
-			}, requireRefusal(t, got))
+			}, requireFault(t, got))
 			assert.Len(t, dev.requests(), 1)
 		})
 	}

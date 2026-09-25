@@ -11,12 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// What the read before a write asks of the issue: the readable id the write is addressed by, and the types of
-// work of the project it is filed in, which is where a type of work comes from.
 const sentWorkItemTypesFields = "idReadable,project(shortName,plugins(timeTrackingSettings(workItemTypes(id,name))))"
 
-// What goes out for the write itself once a type was resolved: the id of it is asked for beside the name, since
-// the id is what the check holds the answer to and the name is what a refusal shows.
 const sentWorkItemWriteFieldsWithType = "id,duration(minutes),type(name,id),attributes(id,name,value(id,name)),author(login),date," +
 	"issue(idReadable," + customFieldsFields + "),text"
 
@@ -32,8 +28,6 @@ func workItemTypeID(at int) string {
 	return "178-" + strconv.Itoa(at)
 }
 
-// issueWithWorkItemTypes is the issue as the read before a write sees it: the readable id the write goes to and
-// the types of work of its project, with the $type the server puts on every object of the answer.
 func issueWithWorkItemTypes(readable, project string, types ...string) string {
 	items := make([]string, 0, len(types))
 	for at, name := range types {
@@ -50,8 +44,6 @@ func devIssueWithWorkItemTypes() string {
 	return issueWithWorkItemTypes("DEV-1", "DEV", devWorkItemTypes()...)
 }
 
-// writingTimeOfAType is the server of a write that names a type of work: the read of the issue is answered with
-// read and the write itself with write, so a scenario says what each of the two requests found.
 func writingTimeOfAType(t *testing.T, read, write http.HandlerFunc) *upstream {
 	t.Helper()
 	return serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -63,7 +55,6 @@ func writingTimeOfAType(t *testing.T, read, write http.HandlerFunc) *upstream {
 	})
 }
 
-// sentWorkItemType is the type the body of the write carried, read as JSON reads it.
 func sentWorkItemType(t *testing.T, u *upstream) any {
 	t.Helper()
 	var body map[string]any
@@ -71,17 +62,12 @@ func sentWorkItemType(t *testing.T, u *upstream) any {
 	return body[typeKeyName]
 }
 
-// The key a type of work stands under, in the body of a write and in the answer alike.
 const typeKeyName = "type"
 
-// pathsSince is what the server was sent after the count a scenario took before the command it holds to them:
-// a contract scenario files an issue of its own first, and those requests are not what it is about.
 func pathsSince(u *upstream, before int) []string {
 	return u.sentPaths()[before:]
 }
 
-// A name of no type at all is refused before the network. The read before the write would find out as much
-// from the server, and that read is a request sent to learn that an empty string names nothing.
 func TestTimeCreateRefusesATypeItCannotResolve(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -98,15 +84,12 @@ func TestTimeCreateRefusesATypeItCannotResolve(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"time", "create", "DEV-1", "PT1H"}, tc.argv...)...)
 
-			assert.Equal(t, "bad_usage", requireRefusal(t, got).code)
+			assert.Equal(t, "bad_usage", requireFault(t, got).code)
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The name is matched against the types of the project without regard to letter case, and what goes out is
-// the id: two requests, the read of the issue as the caller addressed it and the write to the readable id that
-// read gave.
 func TestTimeCreateResolvesATypeOfTheProjectWithoutRegardToLetterCase(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -143,8 +126,6 @@ func TestTimeCreateResolvesATypeOfTheProjectWithoutRegardToLetterCase(t *testing
 	}
 }
 
-// A name that answers to no one type of the project is a refusal naming the project it was held against and
-// the names nearest it, in one request: the write never goes out, and nothing of the name reaches the server.
 func TestTimeCreateRefusesATypeTheProjectDoesNotWriteAgainst(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -192,14 +173,12 @@ func TestTimeCreateRefusesATypeTheProjectDoesNotWriteAgainst(t *testing.T) {
 					{"unknown", []any{[]detail{{"type", tc.named}, {"nearest", tc.nearest}}}},
 				},
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 		})
 	}
 }
 
-// Where two types answer to the name in the same letter case, the one written byte for byte takes it: the
-// name a type is printed under stays the address, whatever else the project called another one.
 func TestTimeCreateTakesTheTypeWrittenByteForByte(t *testing.T) {
 	t.Parallel()
 	server := writingTimeOfAType(t,
@@ -212,9 +191,6 @@ func TestTimeCreateTakesTheTypeWrittenByteForByte(t *testing.T) {
 	assert.Equal(t, map[string]any{"id": "178-1"}, sentWorkItemType(t, server))
 }
 
-// The settings a type is resolved against are what ytrack asked for on its own behalf, so an answer that
-// carries none of them is the server saying something other than what was asked, not a name the caller can fix.
-// Nothing is written in any of these.
 func TestTimeCreateWritesNothingWhereTheSettingsWereNotReceived(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -241,8 +217,6 @@ func TestTimeCreateWritesNothingWhereTheSettingsWereNotReceived(t *testing.T) {
 			code: "upstream_invalid",
 		},
 		{
-			// A type of work is addressed by the id and matched by the name, so neither is a number the
-			// resolving could go on with: an id read off a number would send {"type":{"id":""}}.
 			name: "a type whose id is no text",
 			read: `{"$type":"Issue","idReadable":"DEV-1","project":{"$type":"Project","shortName":"DEV",` +
 				`"plugins":{"$type":"ProjectPlugins","timeTrackingSettings":{"$type":"ProjectTimeTrackingSettings",` +
@@ -274,16 +248,13 @@ func TestTimeCreateWritesNothingWhereTheSettingsWereNotReceived(t *testing.T) {
 
 			got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H", "--type", "Разработка")
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 		})
 	}
 }
 
-// The type is held against the id that went out, and a work item that came back written against another one
-// — or against none — is the server disagreeing with the write as much as a duration of another length is. The
-// work item exists by then, so the refusal names it and the code says the write is not to be sent again.
 func TestTimeCreateRefusesATypeTheServerKeptOtherwise(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -323,8 +294,6 @@ func TestTimeCreateRefusesATypeTheServerKeptOtherwise(t *testing.T) {
 	}
 }
 
-// Nothing is read where the call names no type: one POST is the whole command, and the body says nothing
-// about a type, which is what leaves YouTrack to write the work item against none.
 func TestTimeCreateReadsNothingWhereNoTypeIsNamed(t *testing.T) {
 	t.Parallel()
 	server := writingTime(t, respondWith(http.StatusOK, answeredWorkItem{}.json()))
@@ -336,21 +305,19 @@ func TestTimeCreateReadsNothingWhereNoTypeIsNamed(t *testing.T) {
 	assert.NotContains(t, sentWorkItem(t, server), typeKeyName)
 }
 
-// The instance holds seventeen types of work and DEV writes against fifteen of them: a name of one of the
-// other two is refused by the settings of the project, in the one request that read them, and no work item is
-// written. This is what says the set comes from the project and not from the catalogue of the instance.
 func TestTimeCreateWritesNoTimeAgainstATypeOutsideTheProjectOfTheDevInstance(t *testing.T) {
 	t.Parallel()
+	const typeOfTheInstanceDEVDoesNotUse = "ИИРазработка"
 	dev := devInstance(t)
 	issue := contractWorkItemIssue(t, dev, "issue")
 	before := len(dev.requests())
 
-	got := runWith(t, dev.env(), "time", "create", issue, "PT15M", "--type", "ИИРазработка")
+	got := runWith(t, dev.env(), "time", "create", issue, "PT15M", "--type", typeOfTheInstanceDEVDoesNotUse)
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "unknown_name", found.code)
 	assert.Equal(t, "DEV", detailNamed(t, found, "project"))
-	assert.Equal(t, []any{[]detail{{"type", "ИИРазработка"}, {"nearest", []any{"Разработка"}}}},
+	assert.Equal(t, []any{[]detail{{"type", typeOfTheInstanceDEVDoesNotUse}, {"nearest", []any{"Разработка"}}}},
 		detailNamed(t, found, "unknown"))
 	assert.Equal(t, []string{"/api/issues/" + issue}, pathsSince(dev, before))
 
@@ -358,8 +325,6 @@ func TestTimeCreateWritesNoTimeAgainstATypeOutsideTheProjectOfTheDevInstance(t *
 	assert.Equal(t, 0, requireWorkItemListing(t, listed).Total)
 }
 
-// A type of the project, named in another letter case, is resolved against the settings the read brought
-// back and written by id: two requests, and the work item comes back under the name the project prints.
 func TestTimeCreateWritesTimeAgainstATypeOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -373,7 +338,6 @@ func TestTimeCreateWritesTimeAgainstATypeOfTheDevInstance(t *testing.T) {
 	assert.Equal(t, []string{"/api/issues/" + issue, workItemsPath(issue)}, pathsSince(dev, before))
 }
 
-// A work item written against no type comes back with none, and nothing was read to find that out.
 func TestTimeCreateWritesTimeAgainstNoTypeOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

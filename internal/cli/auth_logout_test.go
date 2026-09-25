@@ -13,15 +13,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// logoutDocument is what auth logout prints: the login it took out, named by where it was held.
 func logoutDocument(address, scope string) string {
 	return fmt.Sprintf("url: %q\nscope: %q\n", address, scope)
 }
 
-// savedFile is the file as auth logout leaves it: the records it kept, each in the bytes the file held, the one
-// for everywhere first and the scoped ones by their scope.
-func savedFile(records ...string) string {
-	return "[\n  " + strings.Join(records, ",\n  ") + "\n]\n"
+func savedFile(recordsGlobalFirstThenByScope ...string) string {
+	return "[\n  " + strings.Join(recordsGlobalFirstThenByScope, ",\n  ") + "\n]\n"
 }
 
 func fileBytes(t *testing.T, path string) string {
@@ -70,7 +67,6 @@ func TestAuthLogoutGlobalTakesOutTheRecordForEverywhereAlone(t *testing.T) {
 			name: "called where a record of a directory is held",
 			env:  func(home string) []string { return []string{"HOME=" + home, "PWD=" + stated} },
 		},
-		// --global names the record itself, so which directory the call is in is nothing it has to work out.
 		{
 			name: "called with no PWD at all",
 			env:  func(home string) []string { return []string{"HOME=" + home} },
@@ -103,15 +99,11 @@ func TestAuthLogoutTakesTheFileAwayWithTheLastRecord(t *testing.T) {
 	assert.Equal(t, outcome{stdout: logoutDocument(server.url, "global")}, got)
 	assertNoRecordedToken(t, got)
 	assert.NoFileExists(t, path)
-	// The directory outlives the records it held: the metadata of projects is cached in it. Nothing else is left there,
-	// the file a rewrite renames from included.
 	assert.Empty(t, entries(t, filepath.Dir(path)))
 	assert.Equal(t, []string{".ytrack"}, entries(t, home))
 	assert.Empty(t, server.requests())
 }
 
-// A logout that changed nothing would leave the caller sure they had logged out while the token of another record
-// goes on being sent from here.
 func TestAuthLogoutRefusesWhereTheDirectoryHasNoRecordOfItsOwn(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
@@ -143,7 +135,7 @@ func TestAuthLogoutRefusesWhereTheDirectoryHasNoRecordOfItsOwn(t *testing.T) {
 			got := runWith(t, []string{"HOME=" + home, "PWD=" + stated}, "auth", "logout")
 
 			want := faultDocument{code: "bad_usage"}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assertNoRecordedToken(t, got)
 			assert.Equal(t, held, fileBytes(t, path))
 			assert.Empty(t, server.requests())
@@ -161,7 +153,7 @@ func TestAuthLogoutGlobalRefusesWithoutARecordForEverywhere(t *testing.T) {
 	got := runWith(t, []string{"HOME=" + home, "PWD=" + stated}, "auth", "logout", "--global")
 
 	want := faultDocument{code: "bad_usage"}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assertNoRecordedToken(t, got)
 	assert.Equal(t, held, fileBytes(t, path))
 	assert.Empty(t, server.requests())
@@ -177,7 +169,7 @@ func TestAuthLogoutRefusesWithoutAFileOrADirectoryToTakeARecordFrom(t *testing.T
 		got := runWith(t, []string{"HOME=" + home, "PWD=" + stated}, "auth", "logout")
 
 		want := faultDocument{code: "bad_usage"}
-		assert.Equal(t, want, requireRefusal(t, got))
+		assert.Equal(t, want, requireFault(t, got))
 		assert.NoFileExists(t, path)
 		assert.Empty(t, entries(t, home))
 	})
@@ -186,7 +178,7 @@ func TestAuthLogoutRefusesWithoutAFileOrADirectoryToTakeARecordFrom(t *testing.T
 
 		got := runWith(t, []string{"PWD=" + stated}, "auth", "logout")
 
-		assert.Equal(t, "bad_usage", requireRefusal(t, got).code)
+		assert.Equal(t, "bad_usage", requireFault(t, got).code)
 	})
 	t.Run("a PWD naming a directory the call is not in", func(t *testing.T) {
 		t.Parallel()
@@ -197,14 +189,12 @@ func TestAuthLogoutRefusesWithoutAFileOrADirectoryToTakeARecordFrom(t *testing.T
 
 		got := runWith(t, []string{"HOME=" + home, "PWD=" + stale}, "auth", "logout")
 
-		assert.Equal(t, "bad_usage", requireRefusal(t, got).code)
+		assert.Equal(t, "bad_usage", requireFault(t, got).code)
 		assertNoRecordedToken(t, got)
 		assert.Equal(t, held, fileBytes(t, path))
 	})
 }
 
-// JSON writes one string many ways, and a record nobody asked about comes back in the bytes its writer chose
-// rather than in the ones a JSON writer would have picked for the same string.
 func TestAuthLogoutLeavesEveryOtherRecordByteForByte(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
@@ -226,8 +216,6 @@ func TestAuthLogoutLeavesEveryOtherRecordByteForByte(t *testing.T) {
 	assert.Empty(t, server.requests())
 }
 
-// The address of the record taken out is printed back, and it may carry the password of a proxy in front of the
-// instance; a logout run from a pipeline puts what it prints into the job's log.
 func TestAuthLogoutPrintsTheAddressWithoutItsPassword(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
@@ -263,7 +251,6 @@ func TestAuthLogoutLeavesTheFileReadableByItsOwnerAlone(t *testing.T) {
 	assert.Empty(t, server.requests())
 }
 
-// Nothing of ytrack's is kept in the project a caller works in, and a logout made there is no exception.
 func TestAuthLogoutWritesNothingIntoTheDirectoryItWasCalledIn(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
@@ -286,7 +273,7 @@ func TestAuthLogoutUsesNoFileOfLoginRecordsItCannotRead(t *testing.T) {
 	got := runWith(t, []string{"HOME=" + home, "PWD=" + stated}, "auth", "logout")
 
 	want := faultDocument{code: "bad_usage", details: []detail{fileDetail(path)}}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, held, fileBytes(t, path))
 }
 
@@ -311,7 +298,7 @@ func TestAuthLogoutRefusesACallThatDoesNotAssemble(t *testing.T) {
 
 			got := runWith(t, []string{"HOME=" + home, "PWD=" + stated}, tc.argv...)
 
-			assert.Equal(t, "bad_usage", requireRefusal(t, got).code)
+			assert.Equal(t, "bad_usage", requireFault(t, got).code)
 			assertNoToken(t, got, token)
 			assertNoRecordedToken(t, got)
 			assert.Equal(t, held, fileBytes(t, path))

@@ -13,44 +13,35 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// What a comment holds where the caller writes no expression of their own, and, since the tool asks for the id
-// and the text it checks and both stand there already, the whole of what goes out on such a call.
 const writtenCommentFields = "id,author(login),created,updated,text"
 
-// The request a comment of an issue goes out as, which is the one a refusal about it names.
 func issueCommentRequest(address, owner, fields string) string {
 	return "POST " + address + "/api/issues/" + owner + "/comments?fields=" + fields
 }
 
-// The comment a write answers with, under the expression that goes out. The text is JSON already, so a scenario
-// may send null for it; a scenario that leaves the rest out gets what a comment written by the admin on an
-// issue comes back as.
 type answeredComment struct {
-	schema  string
-	id      string
-	text    string
-	author  string
-	updated string
+	schema   string
+	id       string
+	textJSON string
+	author   string
+	updated  string
 }
 
 func (a answeredComment) json() string {
 	return `{"$type":"` + cmp.Or(a.schema, "IssueComment") + `","id":` + strconv.Quote(a.id) +
 		`,"author":{"$type":"User","login":` + strconv.Quote(cmp.Or(a.author, "admin")) + `}` +
 		`,"created":1789035410875,"updated":` + cmp.Or(a.updated, "null") +
-		`,"text":` + cmp.Or(a.text, "null") + `}`
+		`,"text":` + cmp.Or(a.textJSON, "null") + `}`
 }
 
 func createdComment(id, text string) string {
-	return answeredComment{id: id, text: asJSON(text)}.json()
+	return answeredComment{id: id, textJSON: asJSON(text)}.json()
 }
 
 func writtenArticleComment(id, text string) string {
-	return answeredComment{schema: "ArticleComment", id: id, text: asJSON(text)}.json()
+	return answeredComment{schema: "ArticleComment", id: id, textJSON: asJSON(text)}.json()
 }
 
-// Every name the comment of an issue declares, and every name the comment of an article declares: the two
-// overlap in most of it and differ where each stands — an issue keeps a comment taken back and names the issue
-// it hangs from, an article names the article and keeps no comment taken back at all.
 func issueCommentNames() []any {
 	return []any{"$type", "attachments", "author", "created", "deleted", "id", "issue", "pinned", "reactions",
 		"text", "textPreview", "updated", "visibility"}
@@ -61,8 +52,6 @@ func articleCommentNames() []any {
 		"updated", "visibility"}
 }
 
-// commenting is the server of a comment write: the POST is the whole command, so a scenario says what that one
-// request was answered with.
 func commenting(t *testing.T, write http.HandlerFunc) *upstream {
 	t.Helper()
 	return serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -73,7 +62,6 @@ func commenting(t *testing.T, write http.HandlerFunc) *upstream {
 	})
 }
 
-// sentComment is the body of the one request that went out, read as JSON reads it.
 func sentComment(t *testing.T, u *upstream) map[string]any {
 	t.Helper()
 	asks := u.asks()
@@ -83,16 +71,14 @@ func sentComment(t *testing.T, u *upstream) map[string]any {
 	return body
 }
 
-// What a write takes: one owner, written as an argument, and the text, which is the value of a flag. The
-// text is looked for before the owner is read, so a call giving neither is answered about the text.
 func TestCommentCreateRefusesBeforeAnyRequest(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
 		argv []string
 	}{
-		{name: "no command of the group", argv: []string{"comment"}},
-		{name: "a command the group has none of", argv: []string{"comment", "bogus"}},
+		{name: "no subcommand", argv: []string{"comment"}},
+		{name: "a subcommand the command has none of", argv: []string{"comment", "bogus"}},
 		{name: "no owner", argv: []string{"comment", "create"}},
 		{name: "no text", argv: []string{"comment", "create", "DEV-1"}},
 		{name: "the text as an argument", argv: []string{"comment", "create", "DEV-1", "a"}},
@@ -109,14 +95,12 @@ func TestCommentCreateRefusesBeforeAnyRequest(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, "bad_usage", requireRefusal(t, got).code)
+			assert.Equal(t, "bad_usage", requireFault(t, got).code)
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The owner is held to the form of an issue or of an article before anything is sent, and the text to the
-// two things YouTrack would not keep as they were written.
 func TestCommentCreateRefusesAnOwnerOrATextItWillNotSend(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -140,14 +124,12 @@ func TestCommentCreateRefusesAnOwnerOrATextItWillNotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, "bad_usage", requireRefusal(t, got).code)
+			assert.Equal(t, "bad_usage", requireFault(t, got).code)
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The text is the value of a flag and of nothing else: an argument in its place is read as flags by pflag,
-// and no flag reads the text out of a file or out of anywhere the caller did not type it.
 func TestCommentCreateTakesTheTextByItsFlagAlone(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -167,15 +149,12 @@ func TestCommentCreateTakesTheTextByItsFlagAlone(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, "bad_usage", requireRefusal(t, got).code)
+			assert.Equal(t, "bad_usage", requireFault(t, got).code)
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The expression is read before anything goes out, so an expression that does not parse costs the caller
-// nothing: a write sent before the reading of it would leave a comment behind that the caller never meant to
-// write and has to take away by hand.
 func TestCommentCreateRefusesAnExpressionItCannotRead(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -194,15 +173,12 @@ func TestCommentCreateRefusesAnExpressionItCannotRead(t *testing.T) {
 
 			got := runWith(t, server.env(), "comment", "create", "DEV-7", "--text", "x", "--fields", tc.expression)
 
-			assert.Equal(t, "bad_usage", requireRefusal(t, got).code)
+			assert.Equal(t, "bad_usage", requireFault(t, got).code)
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The help names what a caller gets where they write no expression at all, how text already written is
-// passed in, and both forms of owner; nothing of it points at a file or at the standard input, since no flag
-// reads either.
 func TestCommentCreateHelpNamesTheDefaultAndNoFile(t *testing.T) {
 	t.Parallel()
 
@@ -213,25 +189,19 @@ func TestCommentCreateHelpNamesTheDefaultAndNoFile(t *testing.T) {
 	assert.Contains(t, got.stdout, writtenCommentFields)
 	assert.Contains(t, got.stdout, "--text")
 	assert.Contains(t, got.stdout, "DEV-A-1")
-	// One example of the owner would be an example that refuses on the other kind, after the comment is written.
-	assert.Contains(t, got.stdout, "+issue(")
-	assert.Contains(t, got.stdout, "+article(")
+	assert.Contains(t, got.stdout, "+issue(", "a wrong owner key fails after the comment is already written")
+	assert.Contains(t, got.stdout, "+article(", "a wrong owner key fails after the comment is already written")
 	assert.NotContains(t, got.stdout, "-file")
 	assert.NotContains(t, got.stdout, "stdin")
 }
 
-// The most text a comment was measured to keep at once, holding everything a comment keeps byte for byte: a
-// CRLF, a lone carriage return, trailing spaces, the fences of a literal block and of a tilde one, a NEL, a
-// line separator, a byte order mark and a character outside the basic plane. The description of an issue would
-// lose the carriage return and the title of one would lose more.
-const hostileComment = "Шаги:  \r\n1. открыть\rи закрыть   \n---\n~~~\n\xc2\x85\xe2\x80\xa8\xef\xbb\xbfи ещё " +
-	"\xf0\x9f\x98\x80\n"
+const hostileComment = "Шаги:  \r\n1. открыть\rи закрыть   \n---\n~~~\n\u0085\u2028\ufeffи ещё \U0001F600\n"
 
-// The whole of the command on an issue: one POST to the comments of that issue, a body of the text and
-// nothing else, and the answer as the document. The text is the most argv carries.
+const longestLinuxArgument = 131_071
+
 func TestCommentCreateWritesOnAnIssueInOneRequest(t *testing.T) {
 	t.Parallel()
-	text := textOfSize(hostileComment, 131_071)
+	text := textOfSize(hostileComment, longestLinuxArgument)
 	server := commenting(t, respondWith(http.StatusOK, createdComment("7-12", text)))
 
 	got := runWith(t, server.env(), "comment", "create", "DEV-7", "--text", text)
@@ -253,8 +223,6 @@ func TestCommentCreateWritesOnAnIssueInOneRequest(t *testing.T) {
 	assert.Equal(t, yaml.DoubleQuotedStyle, written.Style, "a carriage return keeps text out of a literal block")
 }
 
-// The same command on an article goes to the knowledge base and nowhere near the issues: the form of the
-// owner settles it, and a lower case code is that form as much as an upper case one.
 func TestCommentCreateWritesOnAnArticleInOneRequest(t *testing.T) {
 	t.Parallel()
 	const text = "первая\n  вторая   \n"
@@ -273,8 +241,6 @@ func TestCommentCreateWritesOnAnArticleInOneRequest(t *testing.T) {
 	assert.Equal(t, yaml.LiteralStyle, written.Style)
 }
 
-// The text is the value of a flag, so pflag hands it over whatever it starts with, and ytrack reads no word
-// of it: what goes out in the body is what was typed, down to the byte.
 func TestCommentCreateWritesTheTextItWasGiven(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -306,10 +272,6 @@ func TestCommentCreateWritesTheTextItWasGiven(t *testing.T) {
 	}
 }
 
-// A 200 says the server took the body, not that it kept what was in it. A text that came back other than as
-// it went out is a refusal naming both and nothing is printed: the comment exists and holds something the
-// caller did not write, which is what the exit code of a write that happened is for. Nothing is read back to
-// find out — the answer is the server's own word about what it kept.
 func TestCommentCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -324,7 +286,7 @@ func TestCommentCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 		},
 		{
 			name:     "a comment the server kept no text of",
-			written:  answeredComment{id: "7-12", text: "null"}.json(),
+			written:  answeredComment{id: "7-12", textJSON: "null"}.json(),
 			mismatch: []any{[]detail{{"field", "text"}, {"expected", "первая"}, {"actual", nil}}},
 		},
 	}
@@ -350,9 +312,6 @@ func TestCommentCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 	}
 }
 
-// What the caller asks to print and what the check of the write reads are two things: the text that went
-// out and the id the refusal names the comment by are asked for whatever the expression says, and only the
-// expression reaches the document.
 func TestCommentCreateChecksMoreThanItPrints(t *testing.T) {
 	t.Parallel()
 	server := commenting(t, respondWith(http.StatusOK, createdComment("7-12", "первая")))
@@ -364,19 +323,14 @@ func TestCommentCreateChecksMoreThanItPrints(t *testing.T) {
 	assert.Equal(t, []string{"author(login),id,text"}, server.sentFields())
 }
 
-// The owner stands in no document of a comment, and a caller who wants it there asks for it: the name of
-// the key differs between an issue and an article, so it is the caller's to write and it lands where they wrote
-// it. Both examples the help gives are here, each on the kind it names, since a caller copying one of them onto
-// the other kind would be refused over a comment that by then exists.
 func TestCommentCreatePrintsTheOwnerWhereItWasAskedFor(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name   string
 		owner  string
 		schema string
-		// The key the owner stands under in the comment, and the schema of the entity below it.
-		key   string
-		stood string
+		key    string
+		stood  string
 	}{
 		{name: "an issue", owner: "DEV-7", schema: "IssueComment", key: "issue", stood: "Issue"},
 		{name: "an article", owner: "DEV-A-3", schema: "ArticleComment", key: "article", stood: "Article"},
@@ -440,8 +394,6 @@ func TestCommentCreateChecksTheResponseAgainstTheSchemaOfTheOwner(t *testing.T) 
 	}
 }
 
-// What the server says about a write it refused passes on word for word, and no comment was written, so the
-// caller may fix the call and send it again.
 func TestCommentCreateRefusesWhatTheServerRefused(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -493,21 +445,17 @@ func TestCommentCreateRefusesWhatTheServerRefused(t *testing.T) {
 					{"upstream_message", tc.upstreamMessage},
 				}, tc.details...),
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Equal(t, []string{http.MethodPost}, sentMethods(server))
 		})
 	}
 }
 
-// The title every entity a contract test here files goes by: the name of the scenario and what the entity
-// stands for there, so anything left behind names the test that left it.
 func contractCommentOwner(t *testing.T, role string) string {
 	t.Helper()
 	return "ytrack contract " + t.Name() + " " + role
 }
 
-// commentedIssue is the fixture of a contract test that needs an issue of its own to write on: it is filed by
-// the command that files issues, with the custom fields DEV requires, and taken away again afterwards.
 func commentedIssue(t *testing.T, dev *upstream, role string) string {
 	t.Helper()
 	argv := append([]string{"issue", "create", "DEV", "--summary", contractCommentOwner(t, role)}, devRequired()...)
@@ -515,7 +463,6 @@ func commentedIssue(t *testing.T, dev *upstream, role string) string {
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	readable := nodeAt(t, requireMapping(t, "stdout", got.stdout), "idReadable").Value
 	require.Regexp(t, `^DEV-[0-9]+$`, readable)
-	// Registered after the recorder's own cleanup, so the deletion runs first and the cassette records it.
 	t.Cleanup(func() { removeIssue(t, dev, readable) })
 	return readable
 }
@@ -568,7 +515,6 @@ func TestCommentCreateAnswersTheMemberEveryKeyOfTheDefault(t *testing.T) {
 		"--fields", "idReadable")
 	require.Equal(t, 0, filed.code, "stderr: %s", filed.stderr)
 	article := nodeAt(t, requireMapping(t, "stdout", filed.stdout), "idReadable").Value
-	// The member may not delete an article even of their own, so the admin takes it away.
 	t.Cleanup(func() { removeArticle(t, dev, article) })
 
 	got := runWith(t, member, "comment", "create", article, "--text", "комментарий участника")
@@ -612,7 +558,7 @@ func TestCommentCreateRefusesAnOwnerTheDevInstanceDoesNotHave(t *testing.T) {
 
 			got := runWith(t, dev.env(), "comment", "create", tc.owner, "--text", "x")
 
-			assert.Equal(t, "not_found", requireRefusal(t, got).code)
+			assert.Equal(t, "not_found", requireFault(t, got).code)
 			assert.Equal(t, []string{tc.path}, dev.sentPaths())
 		})
 	}
@@ -626,7 +572,7 @@ func TestCommentCreateRefusesAnIssueTheLimitedUserMayNotSee(t *testing.T) {
 	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited},
 		"comment", "create", issue, "--text", "x")
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "not_found", found.code)
 	assert.Equal(t, detail{"upstream_message", "Entity with id " + issue + " not found"}, found.details[3])
 

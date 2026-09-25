@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// everyCategory is the whole list as a refusal prints it, which is what a caller near none of the names is
-// shown: the names by code point, the order the list itself stands in.
+const cyrillicCapitalEs = "\u0421"
+
 func everyCategory() []any {
 	names := []any{}
 	for _, category := range strings.Split(activityCategories, ",") {
@@ -19,8 +19,6 @@ func everyCategory() []any {
 	return names
 }
 
-// unknownCategories is the refusal a journal is stopped by before it reaches the network, with one entry per
-// name that resolved to nothing, in the order those names were written.
 func unknownCategories(entries ...[]detail) faultDocument {
 	unknown := []any{}
 	for _, entry := range entries {
@@ -36,21 +34,16 @@ func categoryEntry(written string, nearest []any) []detail {
 	return []detail{{"category", written}, {"nearest", nearest}}
 }
 
-// A caller nowhere near any of the names is shown the whole list: the names of the categories are ytrack's own
-// writing, and there is nowhere else to read them, the server listing none of them and the specification
-// declaring none either.
 func TestActivityShowsEveryCategoryToACallerNearNoneOfThem(t *testing.T) {
 	t.Parallel()
 	server := serveNothing(t)
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue, "--category", "Bogus")
+	got := runWith(t, server.env(), "activity", "list", activityIssue, "--category", "Bogus")
 
-	assert.Equal(t, unknownCategories(categoryEntry("Bogus", everyCategory())), requireRefusal(t, got))
+	assert.Equal(t, unknownCategories(categoryEntry("Bogus", everyCategory())), requireFault(t, got))
 	assert.Empty(t, server.requests())
 }
 
-// A category is resolved where it is written and not by the server: YouTrack answers a name of no category of
-// its own with an empty journal, so a misspelling sent on would read as an issue nothing ever happened to.
 func TestActivityRefusesANameOfNoCategoryBeforeItAsksForAnything(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -64,10 +57,9 @@ func TestActivityRefusesANameOfNoCategoryBeforeItAsksForAnything(t *testing.T) {
 			want:  unknownCategories(categoryEntry("LinksCategry", []any{"LinksCategory"})),
 		},
 		{
-			name: "a category holding a letter of another alphabet",
-			// The Cyrillic С of U+0421, which reads as the Latin C it stands in for.
-			flags: []string{"--category", "Links\xd0\xa1ategory"},
-			want:  unknownCategories(categoryEntry("Links\xd0\xa1ategory", []any{"LinksCategory"})),
+			name:  "a category holding a letter of another alphabet",
+			flags: []string{"--category", "Links" + cyrillicCapitalEs + "ategory"},
+			want:  unknownCategories(categoryEntry("Links"+cyrillicCapitalEs+"ategory", []any{"LinksCategory"})),
 		},
 		{
 			name:  "two categories written as one name",
@@ -96,22 +88,19 @@ func TestActivityRefusesANameOfNoCategoryBeforeItAsksForAnything(t *testing.T) {
 			t.Parallel()
 			server := serveNothing(t)
 
-			got := runWith(t, server.env(), slices.Concat([]string{"activity", "list", journalIssue}, tc.flags)...)
+			got := runWith(t, server.env(), slices.Concat([]string{"activity", "list", activityIssue}, tc.flags)...)
 
-			assert.Equal(t, tc.want, requireRefusal(t, got))
+			assert.Equal(t, tc.want, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The letter case a caller wrote is theirs and the letter case that goes out is YouTrack's, so the same category
-// written twice is asked for once, and the categories stand in the order of the list rather than in the order
-// they were written.
 func TestActivityAsksForEachCategoryOnceInTheOrderOfTheList(t *testing.T) {
 	t.Parallel()
-	server := journal(t, respondWith(http.StatusOK, noActivities))
+	server := activityServer(t, respondWith(http.StatusOK, noActivities))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue,
+	got := runWith(t, server.env(), "activity", "list", activityIssue,
 		"--category", "linkscategory", "--category", "LINKSCATEGORY", "--category", "CommentsCategory")
 
 	assert.Equal(t, outcome{stdout: "total: 0\nreturned: 0\ntruncated: false\nactivities: []\n"}, got)
@@ -150,11 +139,11 @@ func TestActivityRefusesAnActivityItCannotReadTheCategoryOf(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := journal(t, respondWith(http.StatusOK, `[`+tc.activity.sent()+`]`))
+			server := activityServer(t, respondWith(http.StatusOK, `[`+tc.activity.sent()+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", journalIssue)
+			got := runWith(t, server.env(), "activity", "list", activityIssue)
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Empty(t, got.stdout)
 		})

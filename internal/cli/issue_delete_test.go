@@ -11,17 +11,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The one name the read before a deletion asks for: the answer of the deletion itself carries nothing, so the
-// id it is addressed by and the id it prints are settled here.
 const deletedFields = "idReadable"
 
-// An issue as that read sees it, with the $type the server names it by.
 func issueNamed(readable string) string {
 	return `{"$type":"Issue","idReadable":` + strconv.Quote(readable) + `}`
 }
 
-// readThenDeletion is the handler of a deletion: read answers the GET that settles the id, and deletion
-// answers the DELETE that follows it, so a scenario says what each half of the command was told.
 func readThenDeletion(read, deletion http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
@@ -37,12 +32,10 @@ func deleting(t *testing.T, read, deletion http.HandlerFunc) *upstream {
 	return serve(t, readThenDeletion(read, deletion))
 }
 
-// What YouTrack answers a deletion it carried out with: 200, an empty body and no content type at all.
 func deletionDone() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }
 }
 
-// noDeletion stands for the request a refusal before the deletion must not send.
 func noDeletion(t *testing.T) http.HandlerFunc {
 	t.Helper()
 	return func(_ http.ResponseWriter, r *http.Request) {
@@ -50,7 +43,6 @@ func noDeletion(t *testing.T) http.HandlerFunc {
 	}
 }
 
-// The refusal an issue no token of the caller's may read becomes: the read answers 404 and nothing follows it.
 func noIssueToDelete(address, id string) faultDocument {
 	return faultDocument{
 		code: "not_found",
@@ -63,13 +55,10 @@ func noIssueToDelete(address, id string) faultDocument {
 	}
 }
 
-// What the server says about an issue it has none of, word for word.
 func entityNotFound(id string) string {
 	return `{"error":"Not Found","error_description":"Entity with id ` + id + ` not found"}`
 }
 
-// Everything settled before the network: how many ids the command takes, what an id may look like, and that
-// no flag stands between the caller and the deletion.
 func TestIssueDeleteRefusesBeforeAnyRequest(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -91,14 +80,12 @@ func TestIssueDeleteRefusesBeforeAnyRequest(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The help promises no way to say it again: a flag the command has none of would be read as a word of the
-// caller's, and one it had would be a habit of typing it before every deletion.
 func TestIssueDeleteHelpOffersNoConfirmation(t *testing.T) {
 	t.Parallel()
 
@@ -110,8 +97,6 @@ func TestIssueDeleteHelpOffersNoConfirmation(t *testing.T) {
 	assert.NotContains(t, got.stdout, "--force")
 }
 
-// The whole of the command: the argument is read as the server resolves it, the deletion is addressed by
-// the id that came back, and that id is the document.
 func TestIssueDeleteReadsTheIDAndDeletesByIt(t *testing.T) {
 	t.Parallel()
 	server := deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), deletionDone())
@@ -131,20 +116,16 @@ func TestIssueDeleteReadsTheIDAndDeletesByIt(t *testing.T) {
 	assert.Equal(t, []string{"", ""}, server.asks(), "neither request carries a body")
 }
 
-// An issue the read does not find is a refusal and nothing else: the deletion of an id that is not there
-// would be answered 404 as well, and this way the caller hears it before anything is destroyed.
 func TestIssueDeleteRefusesAnIssueTheReadDoesNotFind(t *testing.T) {
 	t.Parallel()
 	server := deleting(t, respondWith(http.StatusNotFound, entityNotFound("dev-7")), noDeletion(t))
 
 	got := runWith(t, server.env(), "issue", "delete", "dev-7")
 
-	assert.Equal(t, noIssueToDelete(server.url, "dev-7"), requireRefusal(t, got))
+	assert.Equal(t, noIssueToDelete(server.url, "dev-7"), requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 }
 
-// What the server says about the deletion itself passes on with the request it answered, which is the one
-// that carried the id out.
 func TestIssueDeleteRefusesWhatTheServerRefused(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -188,15 +169,12 @@ func TestIssueDeleteRefusesWhatTheServerRefused(t *testing.T) {
 					{"upstream_message", tc.upstreamMessage},
 				}, tc.details...),
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
 		})
 	}
 }
 
-// A deletion is answered with nothing, so a 200 carrying anything at all is something other than the
-// endpoint that was asked: a login page, a proxy, or an answer about another call entirely. Whatever answered,
-// it answered 2xx to a deletion that went out, so the issue may be gone and the exit code is 2.
 func TestIssueDeleteRefusesA200ThatCarriesABody(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -232,8 +210,6 @@ func TestIssueDeleteRefusesA200ThatCarriesABody(t *testing.T) {
 	}
 }
 
-// The id that came back is sent straight out as a path segment, so it is held to the form ytrack sends
-// before it goes: the generated client would resolve ".." against the endpoint and reach /api/.
 func TestIssueDeleteRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -261,7 +237,7 @@ func TestIssueDeleteRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 					{"upstream_body", body},
 				},
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 		})
 	}
@@ -273,24 +249,20 @@ func TestIssueDeleteRefusesAnIssueTheDevInstanceDoesNotHave(t *testing.T) {
 
 	got := runWith(t, dev.env(), "issue", "delete", "DEV-99999")
 
-	assert.Equal(t, noIssueToDelete(dev.url, "DEV-99999"), requireRefusal(t, got))
+	assert.Equal(t, noIssueToDelete(dev.url, "DEV-99999"), requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(dev))
 }
 
-// An issue hidden from a token is no issue at all to it: the read answers the same 404 it answers for an
-// issue nobody has, and DEV-1 is left where it stands.
 func TestIssueDeleteSendsNoDeletionForAnIssueTheLimitedUserCannotSee(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
 	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}, "issue", "delete", "DEV-1")
 
-	assert.Equal(t, noIssueToDelete(dev.url, "DEV-1"), requireRefusal(t, got))
+	assert.Equal(t, noIssueToDelete(dev.url, "DEV-1"), requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(dev))
 }
 
-// sentMethods is the method of each request the server was sent, in order: what a scenario holds a deletion to
-// is both which requests went out and which did not.
 func sentMethods(u *upstream) []string {
 	var methods []string
 	for _, request := range u.requests() {

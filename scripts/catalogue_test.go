@@ -14,11 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// generation is what scripts/catalogue.go answers a specification with.
 type generation struct {
 	code   int
 	stderr string
-	// What it wrote, "" where it wrote nothing.
 	source string
 }
 
@@ -35,7 +33,6 @@ func generate(t *testing.T, program, specification string) generation {
 	dir := t.TempDir()
 	input, output := filepath.Join(dir, "openapi.json"), filepath.Join(dir, "catalogue.gen.go")
 	require.NoError(t, os.WriteFile(input, []byte(specification), 0o600))
-	// Without its check a schema that extends itself is walked for ever.
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
 	var stderr bytes.Buffer

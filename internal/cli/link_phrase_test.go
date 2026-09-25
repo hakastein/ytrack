@@ -14,9 +14,7 @@ func everyDevInstancePhrase() []any {
 		"relates to", "subtask of", "Копия", "Скопирована в"}
 }
 
-// unknownPhraseRefusal is the whole document a phrase no link goes by is refused with: the read that settled
-// it, the issue the phrases were read off, and the phrase beside the ones nearest it.
-func unknownPhraseRefusal(address, phrase string, nearest []any) faultDocument {
+func unknownPhraseFault(address, phrase string, nearest []any) faultDocument {
 	return faultDocument{
 		code: "unknown_name",
 		details: []detail{
@@ -27,9 +25,6 @@ func unknownPhraseRefusal(address, phrase string, nearest []any) faultDocument {
 	}
 }
 
-// A phrase no link of the issue goes by is the caller's own to fix, so what they are handed is the
-// phrases of that very issue: the ones within two edits of what they wrote, measured against the translations
-// as well and shown as link list prints them, or every phrase there is where they wrote nothing near one.
 func TestLinkAddNamesThePhrasesNearestTheOneNoLinkGoesBy(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -39,16 +34,11 @@ func TestLinkAddNamesThePhrasesNearestTheOneNoLinkGoesBy(t *testing.T) {
 	}{
 		{name: "a phrase a letter short", phrase: "depnds on", nearest: []any{"depends on"}},
 		{
-			// The translation is what the phrase is measured against; the phrase link list prints is what
-			// comes back, since a caller handed a translation would write it back and be answered the same way.
 			name:    "a translation of that end a letter short",
 			phrase:  "завист от",
 			nearest: []any{"depends on"},
 		},
 		{
-			// Two letters off a translation written in Cyrillic, which is four bytes off it: the edits are
-			// counted in letters, so a caller writing a language of two bytes to the letter is measured the
-			// same way as one writing the phrase itself.
 			name:    "a translation of that end two letters short",
 			phrase:  "завист о",
 			nearest: []any{"depends on"},
@@ -63,11 +53,11 @@ func TestLinkAddNamesThePhrasesNearestTheOneNoLinkGoesBy(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := linking(t, devInstanceCatalogue(), addressedIssue(addedPartnerID, addedPartner), noLinkWritten(t))
+			server := linking(t, devInstanceCatalogue(), addressedIssue(addedTargetID, addedTarget), noLinkWritten(t))
 
-			got := runWith(t, server.env(), "link", "add", addedSource, tc.phrase, addedPartner)
+			got := runWith(t, server.env(), "link", "add", addedSource, tc.phrase, addedTarget)
 
-			assert.Equal(t, unknownPhraseRefusal(server.url, tc.phrase, tc.nearest), requireRefusal(t, got))
+			assert.Equal(t, unknownPhraseFault(server.url, tc.phrase, tc.nearest), requireFault(t, got))
 			assert.Equal(t, []string{"/api/issues/" + addedSource}, server.sentPaths())
 		})
 	}
@@ -88,10 +78,10 @@ func TestLinkAddResolvesThePhraseTwoSlotsAnswerToByItsOwnSpelling(t *testing.T) 
 
 	t.Run("the phrase of the slot it is the phrase of", func(t *testing.T) {
 		t.Parallel()
-		server := linking(t, catalogue, addressedIssue(addedPartnerID, addedPartner),
+		server := linking(t, catalogue, addressedIssue(addedTargetID, addedTarget),
 			respondWith(http.StatusOK, linkWritten(depends)))
 
-		got := runWith(t, server.env(), "link", "add", addedSource, "depends on", addedPartner)
+		got := runWith(t, server.env(), "link", "add", addedSource, "depends on", addedTarget)
 
 		require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 		assert.Equal(t, "/api/issues/"+addedSource+"/links/"+depends.id+"/issues", server.sentPaths()[2])
@@ -99,12 +89,12 @@ func TestLinkAddResolvesThePhraseTwoSlotsAnswerToByItsOwnSpelling(t *testing.T) 
 
 	t.Run("the same phrase in another letter case", func(t *testing.T) {
 		t.Parallel()
-		server := linking(t, catalogue, addressedIssue(addedPartnerID, addedPartner), noLinkWritten(t))
+		server := linking(t, catalogue, addressedIssue(addedTargetID, addedTarget), noLinkWritten(t))
 
-		got := runWith(t, server.env(), "link", "add", addedSource, "DEPENDS ON", addedPartner)
+		got := runWith(t, server.env(), "link", "add", addedSource, "DEPENDS ON", addedTarget)
 
-		assert.Equal(t, unknownPhraseRefusal(server.url, "DEPENDS ON", []any{"depends on", "mirrors"}),
-			requireRefusal(t, got))
+		assert.Equal(t, unknownPhraseFault(server.url, "DEPENDS ON", []any{"depends on", "mirrors"}),
+			requireFault(t, got))
 		assert.Equal(t, []string{"/api/issues/" + addedSource}, server.sentPaths())
 	})
 }
@@ -123,9 +113,9 @@ func TestLinkAddRefusesTwoSlotsUnderOnePhraseAndWritesEveryOther(t *testing.T) {
 
 	t.Run("the phrase both of them are printed under", func(t *testing.T) {
 		t.Parallel()
-		server := linking(t, catalogue, addressedIssue(addedPartnerID, addedPartner), noLinkWritten(t))
+		server := linking(t, catalogue, addressedIssue(addedTargetID, addedTarget), noLinkWritten(t))
 
-		got := runWith(t, server.env(), "link", "add", addedSource, "X", addedPartner)
+		got := runWith(t, server.env(), "link", "add", addedSource, "X", addedTarget)
 
 		assert.Equal(t, faultDocument{
 			code: "upstream_invalid",
@@ -134,16 +124,16 @@ func TestLinkAddRefusesTwoSlotsUnderOnePhraseAndWritesEveryOther(t *testing.T) {
 				{"issue", addedSource},
 				{"phrase", "X"},
 			},
-		}, requireRefusal(t, got))
+		}, requireFault(t, got))
 		assert.Equal(t, []string{"/api/issues/" + addedSource}, server.sentPaths())
 	})
 
 	t.Run("a phrase of that same issue one slot goes by", func(t *testing.T) {
 		t.Parallel()
-		server := linking(t, catalogue, addressedIssue(addedPartnerID, addedPartner),
+		server := linking(t, catalogue, addressedIssue(addedTargetID, addedTarget),
 			respondWith(http.StatusOK, linkWritten(depend)))
 
-		got := runWith(t, server.env(), "link", "add", addedSource, "depends on", addedPartner)
+		got := runWith(t, server.env(), "link", "add", addedSource, "depends on", addedTarget)
 
 		require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 		assert.Equal(t, "/api/issues/"+addedSource+"/links/"+depend.id+"/issues", server.sentPaths()[2])
@@ -170,12 +160,12 @@ func TestLinkAddNeverResolvesAnEndTheTypeLeavesUnnamed(t *testing.T) {
 			catalogue := issueLinksOf(addedSourceID, addedSource,
 				catalogueLink{id: relates.id, direction: "BOTH", kind: relates},
 				catalogueLink{id: "9-1t", direction: "INWARD", kind: nameless})
-			server := linking(t, catalogue, addressedIssue(addedPartnerID, addedPartner), noLinkWritten(t))
+			server := linking(t, catalogue, addressedIssue(addedTargetID, addedTarget), noLinkWritten(t))
 
-			got := runWith(t, server.env(), "link", "add", addedSource, "зависит от", addedPartner)
+			got := runWith(t, server.env(), "link", "add", addedSource, "зависит от", addedTarget)
 
-			assert.Equal(t, unknownPhraseRefusal(server.url, "зависит от", []any{"relates to"}),
-				requireRefusal(t, got))
+			assert.Equal(t, unknownPhraseFault(server.url, "зависит от", []any{"relates to"}),
+				requireFault(t, got))
 			assert.Equal(t, []string{"/api/issues/" + addedSource}, server.sentPaths())
 		})
 	}
@@ -203,11 +193,11 @@ func TestLinkAddRefusesANameOfAnEndThatIsNeitherTextNorNull(t *testing.T) {
 			t.Parallel()
 			server := linking(t, issueLinksOf(addedSourceID, addedSource,
 				catalogueLink{id: "9-1s", direction: "OUTWARD", kind: tc.kind}),
-				addressedIssue(addedPartnerID, addedPartner), noLinkWritten(t))
+				addressedIssue(addedTargetID, addedTarget), noLinkWritten(t))
 
-			got := runWith(t, server.env(), "link", "add", addedSource, "is required for", addedPartner)
+			got := runWith(t, server.env(), "link", "add", addedSource, "is required for", addedTarget)
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Equal(t, detail{"request", issueRequest(server.url, addedSource, addSourceFields)},
 				found.details[0])
@@ -264,9 +254,9 @@ func TestLinkAddRefusesASlotAddressedAgainstItsOwnEnd(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := linking(t, issueLinksOf(addedSourceID, addedSource, tc.link),
-				addressedIssue(addedPartnerID, addedPartner), noLinkWritten(t))
+				addressedIssue(addedTargetID, addedTarget), noLinkWritten(t))
 
-			got := runWith(t, server.env(), "link", "add", addedSource, tc.phrase, addedPartner)
+			got := runWith(t, server.env(), "link", "add", addedSource, tc.phrase, addedTarget)
 
 			assert.Equal(t, faultDocument{
 				code: "upstream_invalid",
@@ -275,28 +265,24 @@ func TestLinkAddRefusesASlotAddressedAgainstItsOwnEnd(t *testing.T) {
 					{"issue", addedSource},
 					{"phrase", tc.phrase},
 				},
-			}, requireRefusal(t, got))
+			}, requireFault(t, got))
 			assert.Equal(t, []string{"/api/issues/" + addedSource}, server.sentPaths())
 		})
 	}
 }
 
-// An issue is no partner of its own: YouTrack answers a link of an issue to itself with a 200 and writes
-// nothing at all. Which two arguments name one issue is only known once both have been read, so the refusal
-// names the read that settled it and the write never goes out.
 func TestLinkAddRefusesLinkingAnIssueToItself(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		partner string
+		name   string
+		target string
 	}{
-		{name: "the same id twice", partner: addedSource},
-		{name: "the same issue in another letter case", partner: strings.ToLower(addedSource)},
+		{name: "the same id twice", target: addedSource},
+		{name: "the same issue in another letter case", target: strings.ToLower(addedSource)},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			// One issue answers both reads, whichever of its ids the argument was written as.
 			server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodGet {
 					assert.Fail(t, "a write reached the server", "%s %s", r.Method, r.URL)
@@ -305,68 +291,64 @@ func TestLinkAddRefusesLinkingAnIssueToItself(t *testing.T) {
 				respondWith(http.StatusOK, devInstanceCatalogue())(w, r)
 			})
 
-			got := runWith(t, server.env(), "link", "add", addedSource, "relates to", tc.partner)
+			got := runWith(t, server.env(), "link", "add", addedSource, "relates to", tc.target)
 
 			assert.Equal(t, faultDocument{
 				code: "bad_usage",
 				details: []detail{
-					{"request", issueRequest(server.url, tc.partner, addPartnerFields)},
+					{"request", issueRequest(server.url, tc.target, addTargetFields)},
 					{"issue", addedSource},
-					{"partner", addedSource},
+					{"target", addedSource},
 				},
-			}, requireRefusal(t, got))
-			assert.Equal(t, []string{"/api/issues/" + addedSource, "/api/issues/" + tc.partner}, server.sentPaths())
+			}, requireFault(t, got))
+			assert.Equal(t, []string{"/api/issues/" + addedSource, "/api/issues/" + tc.target}, server.sentPaths())
 		})
 	}
 }
 
-// Both ids of an issue go out again before anything is written: the readable one becomes a path segment
-// and the internal one becomes the body, so a read that gives either of them in a shape ytrack does not send
-// ends the call where it arrived rather than at an endpoint nobody named.
 func TestLinkAddRefusesAReadThatNamesAnIssueByNeitherOfItsIDs(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		source  string
-		partner string
-		// The read the refusal names: the issue it went out to and what it asked of that issue.
+		name   string
+		source string
+		target string
 		read   string
 		fields string
 		paths  []string
 	}{
 		{
-			name:    "the issue written on by a readable id that would reach another endpoint",
-			source:  issueLinksOf(addedSourceID, "..", devIssueLinks()...),
-			partner: addressedIssue(addedPartnerID, addedPartner),
-			read:    addedSource,
-			fields:  addSourceFields,
-			paths:   []string{"/api/issues/" + addedSource},
+			name:   "the issue written on by a readable id that would reach another endpoint",
+			source: issueLinksOf(addedSourceID, "..", devIssueLinks()...),
+			target: addressedIssue(addedTargetID, addedTarget),
+			read:   addedSource,
+			fields: addSourceFields,
+			paths:  []string{"/api/issues/" + addedSource},
 		},
 		{
-			name:    "the issue written on by an id that is no internal id",
-			source:  issueLinksOf("x", addedSource, devIssueLinks()...),
-			partner: addressedIssue(addedPartnerID, addedPartner),
-			read:    addedSource,
-			fields:  addSourceFields,
-			paths:   []string{"/api/issues/" + addedSource},
+			name:   "the issue written on by an id that is no internal id",
+			source: issueLinksOf("x", addedSource, devIssueLinks()...),
+			target: addressedIssue(addedTargetID, addedTarget),
+			read:   addedSource,
+			fields: addSourceFields,
+			paths:  []string{"/api/issues/" + addedSource},
 		},
 		{
-			name:    "the issue at the other end by the id it is addressed by rather than the internal one",
-			source:  devInstanceCatalogue(),
-			partner: addressedIssue(addedPartner, addedPartner),
-			read:    addedPartner,
-			fields:  addPartnerFields,
-			paths:   []string{"/api/issues/" + addedSource, "/api/issues/" + addedPartner},
+			name:   "the issue at the other end by the id it is addressed by rather than the internal one",
+			source: devInstanceCatalogue(),
+			target: addressedIssue(addedTarget, addedTarget),
+			read:   addedTarget,
+			fields: addTargetFields,
+			paths:  []string{"/api/issues/" + addedSource, "/api/issues/" + addedTarget},
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := linking(t, tc.source, tc.partner, noLinkWritten(t))
+			server := linking(t, tc.source, tc.target, noLinkWritten(t))
 
-			got := runWith(t, server.env(), "link", "add", addedSource, "depends on", addedPartner)
+			got := runWith(t, server.env(), "link", "add", addedSource, "depends on", addedTarget)
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Equal(t, detail{"request", issueRequest(server.url, tc.read, tc.fields)}, found.details[0])
 			assert.Equal(t, []string{"upstream_status", "upstream_body"},
@@ -380,7 +362,7 @@ func TestLinkAddNamesThePhrasesOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 	source := aContractIssue(t, dev, "source")
-	partner := aContractIssue(t, dev, "partner")
+	target := aContractIssue(t, dev, "partner")
 	tests := []struct {
 		name    string
 		phrase  string
@@ -392,14 +374,13 @@ func TestLinkAddNamesThePhrasesOfTheDevInstance(t *testing.T) {
 	for _, tc := range tests {
 		sent := len(dev.requests())
 
-		got := runWith(t, dev.env(), "link", "add", source, tc.phrase, partner)
+		got := runWith(t, dev.env(), "link", "add", source, tc.phrase, target)
 
-		found := requireRefusal(t, got)
+		found := requireFault(t, got)
 		assert.Equal(t, "unknown_name", found.code, tc.name)
 		assert.Equal(t, []detail{{"issue", source},
 			{"unknown", []any{[]detail{{"phrase", tc.phrase}, {"nearest", tc.nearest}}}}},
 			found.details[1:], tc.name)
-		// The phrases were settled by the one read of the issue they were read off, and nothing else went out.
 		assert.Equal(t, []string{"/api/issues/" + source}, dev.sentPaths()[sent:], tc.name)
 	}
 }
@@ -410,19 +391,17 @@ func TestLinkAddRefusesLinkingAnIssueOfTheDevInstanceToItself(t *testing.T) {
 	source := aContractIssue(t, dev, "source")
 	sent := len(dev.requests())
 
-	for _, partner := range []string{source, strings.ToLower(source)} {
-		got := runWith(t, dev.env(), "link", "add", source, "relates to", partner)
+	for _, target := range []string{source, strings.ToLower(source)} {
+		got := runWith(t, dev.env(), "link", "add", source, "relates to", target)
 
-		found := requireRefusal(t, got)
-		assert.Equal(t, "bad_usage", found.code, partner)
-		assert.Equal(t, []detail{{"issue", source}, {"partner", source}}, found.details[1:], partner)
+		found := requireFault(t, got)
+		assert.Equal(t, "bad_usage", found.code, target)
+		assert.Equal(t, []detail{{"issue", source}, {"target", source}}, found.details[1:], target)
 	}
 	assert.Equal(t, []string{http.MethodGet, http.MethodGet, http.MethodGet, http.MethodGet},
 		sentMethods(dev)[sent:])
 }
 
-// The issue at the other end is read before the write, so an issue the token has none of is a 404 of that
-// read: the body naming it would have come back as a 400 about a field nobody wrote.
 func TestLinkAddRefusesAPartnerTheDevInstanceDoesNotHave(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -431,7 +410,7 @@ func TestLinkAddRefusesAPartnerTheDevInstanceDoesNotHave(t *testing.T) {
 
 	got := runWith(t, dev.env(), "link", "add", source, "depends on", "DEV-99999")
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "not_found", found.code)
 	assert.Equal(t, "Entity with id DEV-99999 not found", detailNamed(t, found, "upstream_message"))
 	assert.Equal(t, []string{http.MethodGet, http.MethodGet}, sentMethods(dev)[sent:])

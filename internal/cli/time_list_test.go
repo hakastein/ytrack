@@ -12,33 +12,22 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// What a record of the list carries unasked, which is what its help names and what goes out where the caller
-// writes no expression of their own.
 const workItemListFields = "id,duration,type(name),attributes,author(login),date,text"
 
-// What goes out for the same expression: the minutes are filled in under the duration, which arrives with its
-// type and nothing else where nobody asks for them.
 const sentWorkItemFields = "id,duration(minutes),type(name),attributes(id,name,value(id,name)),author(login),date,text"
 
-// The path the work items of one issue stand under, which is the only place ytrack asks about them.
 func workItemsPath(id string) string {
 	return "/api/issues/" + id + "/timeTracking/workItems"
 }
 
-// A work item carries no readable id of its own, so the id of a record is held to the form of an internal one
-// rather than to the digits one instance happens to have numbered it with.
 const internalIDForm = `^[0-9]+-[0-9]+$`
 
-// The one attribute DEV gives its work items, as a work item arrives with it unset and set: every work item
-// carries every attribute of its project.
 const (
 	sentNoAttribute    = `"attributes":[{"$type":"WorkItemAttribute","id":"309-0","name":"Формат работы","value":null}]`
 	sentAgentAttribute = `"attributes":[{"name":"Формат работы","$type":"WorkItemAttribute","id":"309-0",` +
 		`"value":{"$type":"WorkItemAttributeValue","id":"506-1","name":"ИИагент"}}]`
 )
 
-// Records under the default expression, with $type and the keys in an order other than the one asked for: the
-// server keeps an order of its own.
 const (
 	listedWorkItem = `{"author":{"login":"admin","$type":"User"},"text":"Разбор полигона","date":1788220800000,` +
 		`"duration":{"minutes":90,"$type":"DurationValue"},` + sentNoAttribute + `,` +
@@ -55,8 +44,6 @@ const (
 		`author: {login: "dev.member"}, date: "2026-09-02T00:00:00Z", text: "Второй заход"}` + "\n"
 )
 
-// listingWorkItems is what time list sends for a page of limit work items that it goes on to count: the second
-// pass asks for ids alone and for every one of them.
 func listingWorkItems(limit string) []url.Values {
 	return []url.Values{
 		{"fields": {sentWorkItemFields}, "$top": {limit}},
@@ -64,8 +51,6 @@ func listingWorkItems(limit string) []url.Values {
 	}
 }
 
-// countedWorkItems answers a request for work items with records and the request that counts them, $top=-1,
-// with count.
 func countedWorkItems(records string, count http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("$top") == "-1" {
@@ -76,7 +61,6 @@ func countedWorkItems(records string, count http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// workItemListing is the document time list prints, read back.
 type workItemListing struct {
 	Total     int              `yaml:"total"`
 	Returned  int              `yaml:"returned"`
@@ -97,16 +81,14 @@ func requireWorkItemListing(t *testing.T, got outcome) workItemListing {
 	return printed
 }
 
-// The issue is one argument and the limit one number: everything else a call may be written as is refused
-// before the network.
 func TestTimeListRefusesWhatItCannotSend(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
 		argv []string
 	}{
-		{name: "the group with no verb", argv: []string{"time"}},
-		{name: "a verb the group has none of", argv: []string{"time", "bogus"}},
+		{name: "the command with no subcommand", argv: []string{"time"}},
+		{name: "a subcommand the command has none of", argv: []string{"time", "bogus"}},
 		{name: "no issue at all", argv: []string{"time", "list"}},
 		{name: "two issues", argv: []string{"time", "list", "DEV-1", "DEV-2"}},
 		{name: "a limit of zero", argv: []string{"time", "list", "DEV-1", "--limit", "0"}},
@@ -119,14 +101,12 @@ func TestTimeListRefusesWhatItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The help names what goes out unasked and how many records are printed unasked, so a caller reads both
-// defaults off the command rather than off the answer.
 func TestTimeListHelpNamesItsDefaults(t *testing.T) {
 	t.Parallel()
 
@@ -137,8 +117,7 @@ func TestTimeListHelpNamesItsDefaults(t *testing.T) {
 	assert.Contains(t, got.stdout, workItemListFields)
 }
 
-// The group offers the verbs it was built with and no other.
-func TestTimeGroupNamesItsVerbs(t *testing.T) {
+func TestTimeCommandNamesItsSubcommands(t *testing.T) {
 	t.Parallel()
 
 	got := run(t, []string{"time", "--help"})
@@ -148,7 +127,7 @@ func TestTimeGroupNamesItsVerbs(t *testing.T) {
 	assert.Equal(t, []string{"create", "delete", "list", "update"}, availableCommands(t, got.stdout))
 }
 
-func TestTimeGroupIsOfferedByTheWordsOfEveryOtherGroup(t *testing.T) {
+func TestTimeCommandIsOfferedByTheWordsOfEveryOtherCommand(t *testing.T) {
 	t.Parallel()
 	server := serveNothing(t)
 
@@ -161,8 +140,6 @@ func TestTimeGroupIsOfferedByTheWordsOfEveryOtherGroup(t *testing.T) {
 	assert.NotEmpty(t, text)
 }
 
-// One request carries the limit as $top and the default as fields=, and the records are printed in the
-// order they arrived, each on the line of its own.
 func TestTimeListAsksTheWorkItemsOfTheIssueInOneRequest(t *testing.T) {
 	t.Parallel()
 	server := serve(t, respondWith(http.StatusOK, "["+listedWorkItem+","+listedSecondWorkItem+"]"))
@@ -182,15 +159,11 @@ func TestTimeListAsksTheWorkItemsOfTheIssueInOneRequest(t *testing.T) {
 	}
 }
 
-// workItemRecords is the records of a printed selection as they were printed, so a scenario can hold the keys
-// to their order and a record to the one line it stands on.
 func workItemRecords(t *testing.T, got outcome) []*yaml.Node {
 	t.Helper()
 	return nodeAt(t, requireMapping(t, "stdout", got.stdout), "workItems").Content
 }
 
-// A record stands on one line, so its text is a double-quoted string there: every byte of it is kept, the
-// line endings and the separators a literal block could not carry among them.
 func TestTimeListPrintsTheTextOfAWorkItemOnOneLine(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -219,8 +192,6 @@ func TestTimeListPrintsTheTextOfAWorkItemOnOneLine(t *testing.T) {
 	}
 }
 
-// The separators a literal block cannot carry reach the document as the bytes they arrived as, whatever
-// YAML writes them as: the text is read back rather than looked at.
 func TestTimeListKeepsEveryByteOfTheTextOfAWorkItem(t *testing.T) {
 	t.Parallel()
 	const written = "первая\nвторая\rтретья\xe2\x80\xa8четвёртая"
@@ -235,8 +206,6 @@ func TestTimeListKeepsEveryByteOfTheTextOfAWorkItem(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(strings.TrimSuffix(got.stdout, "\n"), "\n  - "))
 }
 
-// A page that fills the limit proves nothing about the whole, so it is counted by a second pass over ids
-// alone, and that pass asks for every work item the issue holds.
 func TestTimeListCountsTheWorkItemsWhenTheyFillTheLimit(t *testing.T) {
 	t.Parallel()
 	const found = `[{"id":"199-6","$type":"IssueWorkItem"},{"id":"199-7","$type":"IssueWorkItem"},` +
@@ -251,7 +220,6 @@ func TestTimeListCountsTheWorkItemsWhenTheyFillTheLimit(t *testing.T) {
 	assert.Equal(t, []string{workItemsPath("DEV-1"), workItemsPath("DEV-1")}, server.sentPaths())
 }
 
-// A page shorter than the limit is the whole of what the issue holds, and nothing is asked twice.
 func TestTimeListCountsNothingWhenThePageIsShortOfTheLimit(t *testing.T) {
 	t.Parallel()
 	server := serve(t, respondWith(http.StatusOK, "["+listedWorkItem+"]"))
@@ -263,8 +231,6 @@ func TestTimeListCountsNothingWhenThePageIsShortOfTheLimit(t *testing.T) {
 	assert.Len(t, server.requests(), 1)
 }
 
-// A count that fails, or that comes back below what already arrived, takes the command with it: half a
-// document would say the rest were not cut off.
 func TestTimeListRefusesWhenTheCountDoesNotMatch(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -307,14 +273,12 @@ func TestTimeListRefusesWhenTheCountDoesNotMatch(t *testing.T) {
 					want.details[i].value = "GET " + server.url + workItemsPath("DEV-1") + "?fields=id&$top=-1"
 				}
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Len(t, server.requests(), 2)
 		})
 	}
 }
 
-// A page longer than the limit means $top went out wrong or the server ignored it, and the count that
-// would follow it would be of something else, so the refusal comes before it.
 func TestTimeListRefusesMoreWorkItemsThanTheLimit(t *testing.T) {
 	t.Parallel()
 	server := serve(t, respondWith(http.StatusOK, "["+listedWorkItem+","+listedSecondWorkItem+"]"))
@@ -325,12 +289,10 @@ func TestTimeListRefusesMoreWorkItemsThanTheLimit(t *testing.T) {
 		code:    "upstream_invalid",
 		details: []detail{{"limit", 1}, {"returned", 2}},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Len(t, server.requests(), 1)
 }
 
-// An issue that holds no work item prints the same keys as one that does, with an empty list under the
-// plural; a body that is no array of objects at all is a refusal rather than an empty list.
 func TestTimeListPrintsTheSameDocumentHoweverManyWereReceived(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -376,7 +338,7 @@ func TestTimeListPrintsTheSameDocumentHoweverManyWereReceived(t *testing.T) {
 			got := runWith(t, server.env(), "time", "list", "DEV-1")
 
 			if tc.refused {
-				found := requireRefusal(t, got)
+				found := requireFault(t, got)
 				assert.Equal(t, "upstream_invalid", found.code)
 				return
 			}
@@ -408,10 +370,6 @@ func TestTimeListPrintsTheWorkItemOfDEV1OfTheDevInstance(t *testing.T) {
 	assert.Equal(t, []string{workItemsPath("DEV-1")}, dev.sentPaths())
 }
 
-// The one work item of DEV-7, the fixture where the moment the server keeps differs from the moment it was
-// written at: 15:00 UTC of 1 September, filed by a token whose profile is Asia/Vladivostok, stands under 2
-// September. This is what the refusal of a time of day rests on — YouTrack files a moment under the
-// calendar day of the writer's own zone, which the caller has no way to know.
 func TestTimeListPrintsTheWorkItemOfDEV7OfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -426,7 +384,8 @@ func TestTimeListPrintsTheWorkItemOfDEV7OfTheDevInstance(t *testing.T) {
 	assert.Equal(t, "PT30M", record["duration"])
 	assert.Equal(t, map[string]any{"name": "Разработка"}, record["type"])
 	assert.Equal(t, map[string]any{"login": "dev.member"}, record["author"])
-	assert.Equal(t, "2026-09-02T00:00:00Z", record["date"])
+	assert.Equal(t, "2026-09-02T00:00:00Z", record["date"],
+		"the member wrote it at 15:00 UTC on 1 September, and their profile is Asia/Vladivostok")
 	assert.Equal(t, "Разбор истории правок", record["text"])
 	assert.Equal(t, []string{workItemsPath("DEV-7")}, dev.sentPaths())
 }
@@ -479,7 +438,7 @@ func TestTimeListRefusesAnIssueTheDevInstanceDoesNotShow(t *testing.T) {
 
 			got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + tc.token(t)}, "time", "list", tc.id)
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "not_found", found.code)
 			assert.Equal(t, "Entity with id "+tc.id+" not found", detailNamed(t, found, "upstream_message"))
 			assert.Equal(t, []string{workItemsPath(tc.id)}, dev.sentPaths())
@@ -487,8 +446,6 @@ func TestTimeListRefusesAnIssueTheDevInstanceDoesNotShow(t *testing.T) {
 	}
 }
 
-// A member of the project reads the work items of its issues by the default, so no key of it costs a
-// reader their document.
 func TestTimeListPrintsTheWorkItemOfDEV1ToTheMemberOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -501,12 +458,9 @@ func TestTimeListPrintsTheWorkItemOfDEV1ToTheMemberOfTheDevInstance(t *testing.T
 	assert.Equal(t, []string{sentWorkItemFields}, dev.sentFields())
 }
 
-// The blocks of the issue a work item hangs from are composed by ytrack rather than answered as they were
-// asked for, so every name an expression may not put under one is refused here exactly as it is at ytrack issue
-// show — and at every verb that prints a work item, since one expression serves all three.
 func TestTimeRefusesTheNamesUnderABlockOfTheIssue(t *testing.T) {
 	t.Parallel()
-	verbs := []struct {
+	subcommands := []struct {
 		name string
 		argv []string
 	}{
@@ -523,15 +477,15 @@ func TestTimeRefusesTheNamesUnderABlockOfTheIssue(t *testing.T) {
 		{name: "a part of the subtasks slot", expression: "issue(subtasks(linkType(sourceToTarget)))"},
 		{name: "a custom field of the issue named", expression: "issue(customFields(State))"},
 	}
-	for _, verb := range verbs {
+	for _, subcommand := range subcommands {
 		for _, tc := range written {
-			t.Run(verb.name+", "+tc.name, func(t *testing.T) {
+			t.Run(subcommand.name+", "+tc.name, func(t *testing.T) {
 				t.Parallel()
 				server := serveNothing(t)
 
-				got := runWith(t, server.env(), slices.Concat(verb.argv, []string{"--fields", tc.expression})...)
+				got := runWith(t, server.env(), slices.Concat(subcommand.argv, []string{"--fields", tc.expression})...)
 
-				assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+				assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 				assert.Empty(t, server.requests())
 			})
 		}
@@ -549,8 +503,6 @@ func TestTimeListAsksTheIssuesOfALinkSlotOfTheIssue(t *testing.T) {
 		server.sentFields())
 }
 
-// Neither flag of the command is written twice, and an expression that does not parse is refused where
-// every other one is: before the network.
 func TestTimeListRefusesAnExpressionItCannotSend(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -567,7 +519,7 @@ func TestTimeListRefusesAnExpressionItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), slices.Concat([]string{"time", "list", "DEV-1"}, tc.flags)...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}

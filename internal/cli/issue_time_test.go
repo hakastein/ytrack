@@ -7,8 +7,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// The class of an int64 belongs to its name, so created is an instant wherever it stands and size and
-// numberInProject are the numbers they arrived as.
 func TestIssueShowPrintsAnInstantOfTheIssueAndLeavesEveryOtherNumberAlone(t *testing.T) {
 	t.Parallel()
 	const body = `{"$type":"Issue","created":1789035410875,"updated":1787942509046,"resolved":null,` +
@@ -28,7 +26,6 @@ attachments:
 	assert.Equal(t, outcome{stdout: printed}, got)
 }
 
-// The fraction stands for the milliseconds that are there and for no more: a whole second carries none at all.
 func TestIssueShowPrintsAnInstantWithNoMillisecondsToSpare(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -53,7 +50,6 @@ func TestIssueShowPrintsAnInstantWithNoMillisecondsToSpare(t *testing.T) {
 	}
 }
 
-// Printing an instant the server wrote some other way would invent a moment, so the answer is refused instead.
 func TestIssueShowRefusesAnInstantThatIsNoWholeNumberOfMilliseconds(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -77,7 +73,7 @@ func TestIssueShowRefusesAnInstantThatIsNoWholeNumberOfMilliseconds(t *testing.T
 					{"upstream_status", 200},
 					{"upstream_body", tc.body},
 				},
-			}, requireRefusal(t, got))
+			}, requireFault(t, got))
 		})
 	}
 }

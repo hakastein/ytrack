@@ -10,11 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The body that asks the counter the selection of the contract scenarios.
 const countedDevInstanceIssues = `{"query":"` + devInstanceIssues + `"}`
 
-// inTurn answers each request with the next of the handlers and every request past the last of them with that
-// last one, so a scenario holds what the second answer changes as well as that there was no third.
 func inTurn(handlers ...http.HandlerFunc) http.HandlerFunc {
 	var mu sync.Mutex
 	answered := 0
@@ -27,8 +24,6 @@ func inTurn(handlers ...http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// countedAt is where in the log of the server each request that counts stands, so a scenario can read what came
-// back to that request rather than to another.
 func countedAt(server *upstream) []int {
 	var at []int
 	for i, path := range server.sentPaths() {
@@ -39,12 +34,13 @@ func countedAt(server *upstream) []int {
 	return at
 }
 
-// A count of -1 is the counter saying it has started and has no number yet, and the question is put again
-// straight away; the number that comes back is the total, and nothing of the first answer is printed.
+const stillCounting = "-1"
+
 func TestIssueListAsksTheCounterAgainWhereItWasStillCounting(t *testing.T) {
 	t.Parallel()
 	calls := &countCalls{}
-	server := searching(t, countedIssues(`[`+listedDEV1()+`]`, calls.recordingHandler(inTurn(countHandler("-1"), countHandler("7")))))
+	counter := calls.recordingHandler(inTurn(countHandler(stillCounting), countHandler("7")))
+	server := searching(t, countedIssues(`[`+listedDEV1()+`]`, counter))
 
 	got := runWith(t, server.env(), "issue", "list", "--query", "project: DEV", "--limit", "1")
 
@@ -56,13 +52,10 @@ func TestIssueListAsksTheCounterAgainWhereItWasStillCounting(t *testing.T) {
 	assert.Equal(t, []countCall{asked, asked}, calls.calls())
 }
 
-// The question is put again once and no further, so an answer that is still -1 the second time is a total the
-// document has no number for, and whether the rest were cut off is unknown with it.
 func TestIssueListPrintsNoTotalWhereTheCounterWasStillCountingTwice(t *testing.T) {
 	t.Parallel()
-	// A third question would be answered a number, which is what a repeat that asked until it got one would print.
 	server := searching(t, countedIssues(`[`+listedDEV1()+`,`+listedDEV2()+`,`+listedDEV3()+`]`,
-		inTurn(countHandler("-1"), countHandler("-1"), countHandler("7"))))
+		inTurn(countHandler(stillCounting), countHandler(stillCounting), countHandler("7"))))
 
 	got := runWith(t, server.env(), "issue", "list", "--query", "", "--limit", "3")
 
@@ -73,8 +66,6 @@ func TestIssueListPrintsNoTotalWhereTheCounterWasStillCountingTwice(t *testing.T
 	assert.Equal(t, 2, sentTo(server, countPath))
 }
 
-// Only -1 is asked again: a repeat that fails takes the command with it the way the first question would, and
-// nothing is asked a third time.
 func TestIssueListRefusesWhereTheRepeatOfTheCountFails(t *testing.T) {
 	t.Parallel()
 	const said = `{"error":"server_error","error_description":"java.lang.NullPointerException"}`
@@ -88,11 +79,11 @@ func TestIssueListRefusesWhereTheRepeatOfTheCountFails(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := searching(t, countedIssues(`[`+listedDEV1()+`]`, inTurn(countHandler("-1"), tc.count)))
+			server := searching(t, countedIssues(`[`+listedDEV1()+`]`, inTurn(countHandler(stillCounting), tc.count)))
 
 			got := runWith(t, server.env(), "issue", "list", "--query", "a", "--limit", "1")
 
-			assert.Equal(t, "upstream_failed", requireRefusal(t, got).code)
+			assert.Equal(t, "upstream_failed", requireFault(t, got).code)
 			requireMarkedUpFirst(t, server, "a")
 			assert.Equal(t, 2, sentTo(server, countPath))
 		})
@@ -110,20 +101,16 @@ func TestIssueListCountsTheIssuesOfTheDevInstanceBeyondTheLimit(t *testing.T) {
 	assert.Equal(t, 2, printed.Returned)
 	assert.True(t, *printed.Truncated)
 	requireMarkedUpFirst(t, dev, devInstanceIssues)
-	// Whether the counter of the instance answers -1 is a matter of what it has counted lately, so the repeat is
-	// held to the answer that was recorded: it is there where the first answer carried no number, and nowhere else.
 	counted := countedAt(dev)
 	require.NotEmpty(t, counted)
 	firstAnswer := dev.answers()[counted[0]]
-	stillCounted := bytes.Contains(firstAnswer, []byte(`"count":-1`))
+	stillCounted := bytes.Contains(firstAnswer, []byte(`"count":`+stillCounting))
 	assert.Equal(t, stillCounted, len(counted) == 2, "the first answer of the counter: %s", firstAnswer)
 	for _, at := range counted {
 		assert.Equal(t, countedDevInstanceIssues, dev.asks()[at])
 	}
 }
 
-// A page that fills the limit exactly is counted too: that it holds as many issues as were asked for proves
-// nothing about what is beyond it.
 func TestIssueListCountsTheIssuesOfTheDevInstanceThatFillTheLimit(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

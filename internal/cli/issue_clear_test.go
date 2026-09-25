@@ -9,8 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The project the scenarios of --clear stand on: a field that holds one value, one that holds several and two
-// the project lets no issue stand without.
 func projectToEmpty() string {
 	return projectResponse(
 		writableField{id: "180-15", name: "Type", valueType: "enum"},
@@ -21,8 +19,6 @@ func projectToEmpty() string {
 	)
 }
 
-// The issue those scenarios write into, carrying the two fields they empty, so that the class of each element
-// of the body is the one the server named rather than the one the table holds.
 func issueToEmpty() string {
 	return issueToUpdate("DEV-1", projectToEmpty(),
 		currentField{name: "Система", kind: "MultiEnumIssueCustomField", binding: "180-20"},
@@ -38,8 +34,6 @@ func sentClearDescription(t *testing.T, body string) string {
 	return string(sent.Description)
 }
 
-// What --clear takes is the name of a part an issue may hold nothing in. The title is no such part —
-// YouTrack files no issue without one — and a part the call writes and empties both says two things at once.
 func TestIssueUpdateRefusesAClearItCannotRead(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -59,7 +53,7 @@ func TestIssueUpdateRefusesAClearItCannotRead(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"issue", "update", "DEV-1"}, tc.argv...)...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -68,9 +62,8 @@ func TestIssueUpdateRefusesAClearItCannotRead(t *testing.T) {
 func TestIssueUpdateEmptiesEachPartTheWayItsTypeStoresNoValue(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		argv []string
-		// The description the answer brings back, as JSON; empty stands for the null of an issue with none.
+		name        string
+		argv        []string
 		description string
 		body        string
 		fields      []receivedField
@@ -120,10 +113,6 @@ func TestIssueUpdateEmptiesEachPartTheWayItsTypeStoresNoValue(t *testing.T) {
 	}
 }
 
-// A field the project requires is emptied by nobody, and every such field the call names is named back at
-// once and before anything is written: the server would answer one of them per attempt. The fields the call
-// does not name are held to nothing — an issue filed before its project required a field holds it empty to
-// this day.
 func TestIssueUpdateRefusesToEmptyEveryFieldTheProjectRequires(t *testing.T) {
 	t.Parallel()
 	server := updating(t, respondWith(http.StatusOK, issueToEmpty()), noUpdate(t))
@@ -139,13 +128,10 @@ func TestIssueUpdateRefusesToEmptyEveryFieldTheProjectRequires(t *testing.T) {
 			{"missing", []any{"Type", "Клиент"}},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 }
 
-// A field the call writes a value into and empties in the same breath is two instructions about one
-// field, and which of them the write would leave behind is nothing ytrack picks. The name is resolved the way
-// every name is, so the two flags reach the same field whatever each of them was typed as.
 func TestIssueUpdateRefusesAFieldWrittenAndEmptiedAtOnce(t *testing.T) {
 	t.Parallel()
 	server := updating(t, respondWith(http.StatusOK, issueToEmpty()), noUpdate(t))
@@ -163,13 +149,10 @@ func TestIssueUpdateRefusesAFieldWrittenAndEmptiedAtOnce(t *testing.T) {
 					"leaves it one way"}}}},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 }
 
-// A part the call emptied comes back holding nothing, and a part that came back holding something is the
-// answer disagreeing with the write as much as a value that came back another. The write happened by then,
-// which is what the exit code of such a refusal says.
 func TestIssueUpdateRefusesAResponseThatStillHasWhatTheCallEmptied(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -259,7 +242,7 @@ func TestIssueUpdateRefusesToEmptyAFieldTheDevProjectRequires(t *testing.T) {
 			{"missing", []any{"Type"}},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	sent := dev.requests()[before:]
 	require.Len(t, sent, 1)
 	assert.Equal(t, http.MethodGet, sent[0].Method)

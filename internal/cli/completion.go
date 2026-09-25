@@ -13,17 +13,12 @@ import (
 	"github.com/hakastein/ytrack/internal/render"
 )
 
-// shell is one of the shells ytrack writes a script for: the name the argument is held to, the way cobra
-// writes the script, and the line that loads it. Everything the command says about shells is read off this
-// one list, so a shell named here is named in the help and offered by the protocol without a second edit.
 type shell struct {
 	name     string
 	generate func(root *cobra.Command, stdout io.Writer) error
 	install  string
 }
 
-// Only the writer forms are called. Their …File counterparts are the one thing in cobra's generators that
-// touches the process: they create a file of their own, and nothing here may.
 func shells() []shell {
 	return []shell{{
 		name:     "bash",
@@ -52,7 +47,6 @@ func shellNames() []string {
 	return names
 }
 
-// installHelp is how the script is loaded, one shell to a line, and it is the only place the help names a shell.
 func installHelp() string {
 	var lines strings.Builder
 	for _, shell := range shells() {
@@ -61,10 +55,6 @@ func installHelp() string {
 	return lines.String()
 }
 
-// newCompletion prints the script a shell sources to complete ytrack. The script goes to stdout as it stands,
-// past the renderer: it is shell source addressed to the shell, not a document addressed to the caller's
-// parser. cobra writes it off the very tree that runs the commands, so there is no second copy of the surface
-// anywhere — the script holds no list of entities, verbs or flags, it asks the binary for them.
 func newCompletion(stdout io.Writer) *cobra.Command {
 	completion := newCommand("completion <shell>", func(cmd *cobra.Command, args []string) *diag.Fault {
 		for _, shell := range shells() {
@@ -80,8 +70,7 @@ func newCompletion(stdout io.Writer) *cobra.Command {
 			"unknown shell %s: ytrack has a script for %s", render.Quote(args[0]), strings.Join(shellNames(), ", "))}
 	})
 	completion.Args = cobra.ExactArgs(1)
-	// The set the protocol offers. cobra holds an argument to it only where Args says so, and OnlyValidArgs
-	// is not taken: it refuses with words naming no shell to write instead.
+	// cobra checks ValidArgs only under Args = OnlyValidArgs, so here it feeds completion alone.
 	completion.ValidArgs = shellNames()
 	completion.Short = "Print a shell completion script"
 	completion.Long = "Print a shell completion script. Load it:\n\n" +
@@ -90,85 +79,65 @@ func newCompletion(stdout io.Writer) *cobra.Command {
 	return completion
 }
 
-// The annotation saying where a command takes something no command tree knows: a path. Its value is the place
-// of that argument, counted from one, because a command takes a path at one place and readable identifiers at
-// the others — attachment create <owner> <path> takes it second. It is read by the completion protocol alone,
-// and it is the one place a directive other than NoFileComp comes from.
-const completesPathAt = "ytrack.completesPathAt"
+const pathIsArgumentNumber = "ytrack.completesPathAt"
 
-// pathArgPosition is the place the annotation names, counted from one, and none where the command takes no
-// path at all.
-func pathArgPosition(cmd *cobra.Command) int {
-	place, err := strconv.Atoi(cmd.Annotations[completesPathAt])
+func pathArgumentNumber(cmd *cobra.Command) int {
+	number, err := strconv.Atoi(cmd.Annotations[pathIsArgumentNumber])
 	if err != nil {
 		return 0
 	}
-	return place
+	return number
 }
 
-// What a shell sends when it has nothing to complete at all, which no generated script does: every one of
-// them writes the words of the command line after the name of the protocol.
+const (
+	shellOffersNoFileNames = cobra.ShellCompDirectiveNoFileComp
+	shellOffersFileNames   = cobra.ShellCompDirectiveDefault
+)
+
 const noCommandLine = "the completion protocol needs the command line to complete"
 
-// complete answers the completion protocol. words is the command line a shell is completing: its last word is
-// the one being completed, and the rest stand typed before it. calledAs tells the two names of the protocol
-// apart, and the text after a tab is printed for one of them alone.
 func complete(root *cobra.Command, stdout io.Writer, calledAs string, words []string) *diag.Fault {
 	if len(words) == 0 {
 		return &diag.Fault{Code: diag.BadUsage, Message: noCommandLine}
 	}
 	typed, completing := words[:len(words)-1], words[len(words)-1]
-	directive := cobra.ShellCompDirectiveNoFileComp
+	directive := shellOffersNoFileNames
 	var suggestions []string
-	// Find takes the flags out of what was typed itself, so neither a flag nor the value after it hides the
-	// command, and what it hands back besides the command is the rest of the line. It fails where the line
-	// names no command of ytrack, and then there is nothing to offer at all.
-	if cmd, rest, err := root.Find(typed); err == nil {
-		// --help is cobra's own and joins a command only as it is executed. It is put there first, so that
-		// the line is read with the flags the call itself would be read with.
+	if cmd, argsAndFlags, err := root.Find(typed); err == nil {
 		cmd.InitDefaultHelpFlag()
-		written := parseLine(cmd, rest)
+		written := parseLine(cmd, argsAndFlags)
 		switch {
 		case strings.HasPrefix(completing, "-"):
 			suggestions = append(flagsOf(cmd), joinedValues(cmd, completing)...)
 		case written.flagValue:
-			// The value of a flag, which is neither an argument nor a flag: only a closed set the binary holds
-			// itself is offered there (ADR-0009), and a file name is no value of any flag.
 			suggestions = closedSetOf(written.valueOf)
 		default:
 			suggestions = argumentsOf(cmd, written)
-			if written.arguments+1 == pathArgPosition(cmd) {
-				// A shell offers file names of its own under every directive but NoFileComp.
-				directive = cobra.ShellCompDirectiveDefault
+			if completingArgument := written.arguments + 1; completingArgument == pathArgumentNumber(cmd) {
+				directive = shellOffersFileNames
 			}
 		}
 	}
 	return printCompletions(stdout, suggestions, completing, calledAs == cobra.ShellCompRequestCmd, directive)
 }
 
-// lineState is where the word being completed stands, read off the rest of the command line: the words
-// under the command found, flags and the values of flags among them.
 type lineState struct {
-	// How many arguments stand written before the word being completed.
-	arguments int
-	// The word being completed is the value of the flag written before it, and not an argument.
-	flagValue bool
-	// That flag, and nil where the command has no flag of the name written.
-	valueOf *pflag.Flag
-	// A flag the command keeps to itself is written. No command under it takes such a flag, so the line is
-	// one that command answers itself.
-	ownFlag bool
+	arguments        int
+	flagValue        bool
+	valueOf          *pflag.Flag
+	localFlagWritten bool
 }
 
-// parseLine reads the line the way cobra reads it as it runs the call: a flag written as two words takes
-// the word after it, one carrying an = takes none, and what is left over are the arguments.
+func (s lineState) subcommandCanFollow() bool {
+	return s.arguments == 0 && !s.localFlagWritten
+}
+
 func parseLine(cmd *cobra.Command, words []string) lineState {
-	ownFlags := cmd.LocalNonPersistentFlags()
+	localFlags := cmd.LocalNonPersistentFlags()
 	var written lineState
 	for index := 0; index < len(words); index++ {
 		word := words[index]
 		if word == "--" {
-			// A lone -- ends the flags: every word after it is an argument, whatever it begins with.
 			written.arguments += len(words) - index - 1
 			return written
 		}
@@ -177,24 +146,18 @@ func parseLine(cmd *cobra.Command, words []string) lineState {
 		case !isFlag:
 			written.arguments++
 		case takesTheNextWord && index == len(words)-1:
-			// The flag stands last, so the word being completed is the value it takes.
 			written.flagValue = true
 			written.valueOf = flag
 		case takesTheNextWord:
-			// The word after it is that value, and no argument of the command.
 			index++
 		}
-		if flag != nil && ownFlags.Lookup(flag.Name) != nil {
-			written.ownFlag = true
+		if flag != nil && localFlags.Lookup(flag.Name) != nil {
+			written.localFlagWritten = true
 		}
 	}
 	return written
 }
 
-// parseFlagWord reads one word of the line as cobra's own Find reads it: whether the word is a flag, which flag
-// of the command it names, and whether the value of that flag is the word after it. A word carrying an = carries
-// its value with it, a flag the command does not have is read as taking one, and a shorthand takes the word
-// after it only where it stands on its own.
 func parseFlagWord(cmd *cobra.Command, word string) (isFlag bool, flag *pflag.Flag, takesTheNextWord bool) {
 	switch {
 	case strings.HasPrefix(word, "--"):
@@ -206,16 +169,14 @@ func parseFlagWord(cmd *cobra.Command, word string) (isFlag bool, flag *pflag.Fl
 		if name != "" {
 			flag = cmd.Flags().ShorthandLookup(name[:1])
 		}
-		return true, flag, !carriesItsValue && len(word) == 2 && takesAValue(flag)
+		standsAlone := len(word) == len("-x")
+		return true, flag, !carriesItsValue && standsAlone && takesAValue(flag)
 	}
 	return false, nil, false
 }
 
-// The annotation of a flag whose value is one of a closed set the binary holds itself — the categories of the
-// journal are one — so offering it costs no request. Every other value of a flag is the server's to know.
 const completesClosedSet = "ytrack.completesClosedSet"
 
-// closedSet marks the flag as taking one of values.
 func closedSet(flag *pflag.Flag, values []string) {
 	if flag.Annotations == nil {
 		flag.Annotations = map[string][]string{}
@@ -230,8 +191,6 @@ func closedSetOf(flag *pflag.Flag) []string {
 	return flag.Annotations[completesClosedSet]
 }
 
-// joinedValues is the closed set of a flag written with an = and its value begun after it, each value offered
-// whole with the flag before it, since that is the word the shell replaces.
 func joinedValues(cmd *cobra.Command, completing string) []string {
 	name, _, carriesItsValue := strings.Cut(strings.TrimPrefix(completing, "--"), "=")
 	if !carriesItsValue || !strings.HasPrefix(completing, "--") {
@@ -244,37 +203,26 @@ func joinedValues(cmd *cobra.Command, completing string) []string {
 	return suggestions
 }
 
-// takesAValue is whether the word after a flag is the value of it. A flag pflag gives a value of its own where
-// it is written alone — a boolean — takes no word; a flag the command does not have takes one, since there is
-// nothing saying it does not.
+// cobra's Find also takes an unknown flag to consume the next word.
 func takesAValue(flag *pflag.Flag) bool {
 	return flag == nil || flag.NoOptDefVal == ""
 }
 
-// flagsOf is the flags a command takes, its own and the ones it inherits, --help among them: it is a flag the
-// caller may write like any other.
 func flagsOf(cmd *cobra.Command) []string {
 	var suggestions []string
 	cmd.Flags().VisitAll(func(flag *pflag.Flag) {
-		// pflag writes the name of a flag's value in backquotes inside the usage, and UnquoteUsage is what
-		// takes them out; without it the quotes themselves would reach the shell.
 		_, usage := pflag.UnquoteUsage(flag)
 		suggestions = append(suggestions, "--"+flag.Name+"\t"+usage)
 	})
 	return suggestions
 }
 
-// argumentsOf is what may stand where the caller is completing: the values of a closed set, where the command
-// names one and takes an argument at that place, and the commands under it, which stand right after its own
-// name and nowhere else. An identifier is never among them — no TAB of a shell sends a request.
 func argumentsOf(cmd *cobra.Command, written lineState) []string {
 	var suggestions []string
 	if takesAnArgumentAt(cmd, written.arguments) {
 		suggestions = append(suggestions, cmd.ValidArgs...)
 	}
-	// Past an argument already written, and past a flag the command keeps to itself, no command under it can
-	// answer the line: what stands there is an argument of the command found.
-	if written.arguments > 0 || written.ownFlag {
+	if !written.subcommandCanFollow() {
 		return suggestions
 	}
 	for _, child := range cmd.Commands() {
@@ -290,8 +238,6 @@ func takesAnArgumentAt(cmd *cobra.Command, place int) bool {
 	return cmd.ValidateArgs(make([]string, place+1)) == nil
 }
 
-// printCompletions is the form the generated script parses: one suggestion to a line, its text after a tab,
-// and a last line of a colon and the directive. Only what the caller has begun to write is offered back.
 func printCompletions(stdout io.Writer, suggestions []string, prefix string, describe bool,
 	directive cobra.ShellCompDirective,
 ) *diag.Fault {

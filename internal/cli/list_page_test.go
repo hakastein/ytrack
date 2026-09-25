@@ -13,9 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A list counted by a pass over ids, as the argv that prints it, the path its records are read from, the type
-// the server sends each of them under, the key they are printed under and what every request of it carries
-// beside the page.
 type pagedList struct {
 	argv   []string
 	path   string
@@ -24,7 +21,6 @@ type pagedList struct {
 	search url.Values
 }
 
-// sent is the query of a request of the list asking for that page.
 func (l pagedList) sent(page url.Values) url.Values {
 	query := url.Values{"fields": {"id"}}
 	for key, values := range l.search {
@@ -49,8 +45,6 @@ func pagedLists() []pagedList {
 	}
 }
 
-// pagedServer is the server of a collection of that many records of schema: each request is answered the part of
-// them its $top and $skip ask for, the way YouTrack pages a collection.
 func pagedServer(t *testing.T, schema string, records int) *upstream {
 	t.Helper()
 	return serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -78,7 +72,6 @@ func pagedServer(t *testing.T, schema string, records int) *upstream {
 	})
 }
 
-// printedIDs is the document of a list printed with --fields id: the counters, then a record to a line.
 func printedIDs(plural string, total int, truncated bool, ids ...int) string {
 	head := fmt.Sprintf("total: %d\nreturned: %d\ntruncated: %t\n%s:", total, len(ids), truncated, plural)
 	if len(ids) == 0 {
@@ -91,8 +84,6 @@ func printedIDs(plural string, total int, truncated bool, ids ...int) string {
 	return head + "\n" + rows.String()
 }
 
-// A page in the middle of a collection: $skip goes out on the page and not on the count, total is the whole
-// collection and truncated says records stand past the page.
 func TestListPrintsAPageInTheMiddleOfTheCollection(t *testing.T) {
 	t.Parallel()
 	for _, list := range pagedLists() {
@@ -112,8 +103,6 @@ func TestListPrintsAPageInTheMiddleOfTheCollection(t *testing.T) {
 	}
 }
 
-// A page short of the limit ends the collection, so the records passed over and the records it holds are the
-// whole of it and nothing is counted.
 func TestListCountsNothingOnTheLastPage(t *testing.T) {
 	t.Parallel()
 	for _, list := range pagedLists() {
@@ -129,8 +118,6 @@ func TestListCountsNothingOnTheLastPage(t *testing.T) {
 	}
 }
 
-// A skip past the end is an empty page rather than a refusal, and the empty page says nothing of how far the end
-// was, so the collection is counted.
 func TestListPrintsAnEmptyPagePastTheEnd(t *testing.T) {
 	t.Parallel()
 	for _, list := range pagedLists() {
@@ -146,8 +133,6 @@ func TestListPrintsAnEmptyPagePastTheEnd(t *testing.T) {
 	}
 }
 
-// A count below the records passed over and the records that arrived is the collection changing between the
-// two requests.
 func TestListRefusesACountBelowThePageItFollows(t *testing.T) {
 	t.Parallel()
 	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -160,12 +145,10 @@ func TestListRefusesACountBelowThePageItFollows(t *testing.T) {
 
 	got := runWith(t, server.env(), "tag", "list", "--fields", "id", "--limit", "2", "--skip", "2")
 
-	assert.Equal(t, "upstream_failed", requireRefusal(t, got).code)
+	assert.Equal(t, "upstream_failed", requireFault(t, got).code)
 	assert.Len(t, server.requests(), 2)
 }
 
-// $skip is an int32 in the specification, and a skip it cannot carry is refused before any request, on every
-// list that takes a page.
 func TestListRefusesASkipItCannotSend(t *testing.T) {
 	t.Parallel()
 	lists := [][]string{{"issue", "list", "--query", ""}, {"activity", "list", "DEV-1"}}
@@ -188,14 +171,13 @@ func TestListRefusesASkipItCannotSend(t *testing.T) {
 
 				got := runWith(t, server.env(), slices.Concat(list, tc.argv)...)
 
-				assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+				assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 				assert.Empty(t, server.requests())
 			})
 		}
 	}
 }
 
-// A skip of none is the first page, and the request is the one it always was.
 func TestListSendsNoSkipForTheFirstPage(t *testing.T) {
 	t.Parallel()
 	server := pagedServer(t, "Project", 1)
@@ -206,9 +188,7 @@ func TestListSendsNoSkipForTheFirstPage(t *testing.T) {
 	assert.Equal(t, []url.Values{{"fields": {"id"}, "$top": {"50"}}}, server.sentQueries())
 }
 
-// A selection of issues is counted by the counter of the server rather than by ids, and the counter knows
-// nothing of the page: $skip goes out on the page alone.
-func TestIssueListPrintsAPageInTheMiddleOfTheSelection(t *testing.T) {
+func TestIssueListPrintsAPageInTheMiddleOfTheResults(t *testing.T) {
 	t.Parallel()
 	server := searching(t, countedIssues(`[`+listedDEV1()+`]`, countHandler("7")))
 
@@ -226,13 +206,11 @@ func TestIssueListPrintsAPageInTheMiddleOfTheSelection(t *testing.T) {
 	assert.Equal(t, 1, sentTo(server, countPath))
 }
 
-// The journal is cut off by the one activity past the limit, so $skip passes over the newest and $top still
-// asks for one past the page.
-func TestActivityPrintsAPageOfTheJournal(t *testing.T) {
+func TestActivityPrintsAPageOfTheActivities(t *testing.T) {
 	t.Parallel()
-	server := journal(t, respondWith(http.StatusOK, `[`+sentLinkActivity(middle)+`,`+sentCreatedActivity(oldest)+`]`))
+	server := activityServer(t, respondWith(http.StatusOK, `[`+sentLinkActivity(middle)+`,`+sentCreatedActivity(oldest)+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue, "--limit", "1", "--skip", "1")
+	got := runWith(t, server.env(), "activity", "list", activityIssue, "--limit", "1", "--skip", "1")
 
 	assert.Equal(t, outcome{stdout: "total: null\nreturned: 1\ntruncated: true\nactivities:\n" + printedLinkRow}, got)
 	sent := activitySent(t, server)
@@ -240,24 +218,21 @@ func TestActivityPrintsAPageOfTheJournal(t *testing.T) {
 	assert.Equal(t, []string{"1"}, sent["$skip"])
 }
 
-// A page of the journal short of the activity past it ends the journal, so the activities passed over and the
-// ones printed are the whole of it.
-func TestActivityCountsTheLastPageOfTheJournal(t *testing.T) {
+func TestActivityCountsTheLastPageOfTheActivities(t *testing.T) {
 	t.Parallel()
-	server := journal(t, respondWith(http.StatusOK, `[`+sentLinkActivity(middle)+`,`+sentCreatedActivity(oldest)+`]`))
+	server := activityServer(t, respondWith(http.StatusOK, `[`+sentLinkActivity(middle)+`,`+sentCreatedActivity(oldest)+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue, "--limit", "5", "--skip", "1")
+	got := runWith(t, server.env(), "activity", "list", activityIssue, "--limit", "5", "--skip", "1")
 
 	rows := printedLinkRow + printedCreatedRow
 	assert.Equal(t, outcome{stdout: "total: 3\nreturned: 2\ntruncated: false\nactivities:\n" + rows}, got)
 }
 
-// An empty page after a skip says nothing of where the journal ended, and the journal is counted nowhere.
 func TestActivityPrintsNoTotalForAnEmptyPagePastTheEnd(t *testing.T) {
 	t.Parallel()
-	server := journal(t, respondWith(http.StatusOK, noActivities))
+	server := activityServer(t, respondWith(http.StatusOK, noActivities))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue, "--skip", "9")
+	got := runWith(t, server.env(), "activity", "list", activityIssue, "--skip", "9")
 
 	assert.Equal(t, outcome{stdout: "total: null\nreturned: 0\ntruncated: false\nactivities: []\n"}, got)
 }
@@ -300,9 +275,7 @@ func TestArticleListPrintsAnEmptyPagePastTheChildOfTheDevInstance(t *testing.T) 
 	assert.Equal(t, outcome{stdout: "total: 1\nreturned: 0\ntruncated: false\narticles: []\n"}, got)
 }
 
-// The journal takes $skip: the page past the newest three of the mixed fixture begins where the first page of
-// four ended.
-func TestActivityPrintsTheSecondPageOfTheJournalOfTheDevInstance(t *testing.T) {
+func TestActivityPrintsTheSecondPageOfTheActivitiesOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 

@@ -9,9 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A command that addresses one issue by a string the caller wrote, with whatever else it needs to get as far
-// as the form of that string. The id stands behind the separator because pflag reads a leading dash as a flag
-// wherever the word stands, so without it the id of one case would never reach the form at all.
+const cyrillicCapitalA = "А"
+
 type idCommand struct {
 	name string
 	argv func(id string) []string
@@ -24,8 +23,6 @@ func issueCommands() []idCommand {
 			return []string{"issue", "update", "--summary", "x", "--", id}
 		}},
 		{name: "delete", argv: func(id string) []string { return []string{"issue", "delete", "--", id} }},
-		// The work items of an issue hang from it and are reached through its own API, so the string is held to
-		// the form of an issue here as well, whether they are read or written.
 		{name: "time list", argv: func(id string) []string { return []string{"time", "list", "--", id} }},
 		{name: "time create", argv: func(id string) []string {
 			return []string{"time", "create", "--", id, "PT1H"}
@@ -39,8 +36,6 @@ func issueCommands() []idCommand {
 	}
 }
 
-// One parse settles what every command of issues was given, and the refusal names the class the string
-// belongs to rather than only the form it is not. Nothing of this costs a request.
 func TestIssueCommandsRefuseAnIDOfAnyOtherForm(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -69,9 +64,7 @@ func TestIssueCommandsRefuseAnIDOfAnyOtherForm(t *testing.T) {
 		{name: "an escape in place of the number", id: "DEV-%31"},
 		{name: "a space before the id", id: " DEV-1"},
 		{name: "a line ending after the id", id: "DEV-1\n"},
-		// The marker of an article is the Latin letter and no other: the server answers 404 for the Cyrillic
-		// one, which is written in bytes here because the two letters look alike.
-		{name: "a Cyrillic marker", id: "ДЕВ-\xd0\x90-1"},
+		{name: "a Cyrillic marker", id: "ДЕВ-" + cyrillicCapitalA + "-1"},
 		{name: "bytes that are no UTF-8", id: "\xff-1"},
 		{name: "the marker in lower case", id: "DEV-a-1"},
 	}
@@ -85,7 +78,7 @@ func TestIssueCommandsRefuseAnIDOfAnyOtherForm(t *testing.T) {
 
 					got := runWith(t, server.env(), command.argv(tc.id)...)
 
-					assert.Equal(t, "bad_usage", requireRefusal(t, got).code)
+					assert.Equal(t, "bad_usage", requireFault(t, got).code)
 					assert.Empty(t, server.requests())
 				})
 			}
@@ -93,9 +86,6 @@ func TestIssueCommandsRefuseAnIDOfAnyOtherForm(t *testing.T) {
 	}
 }
 
-// An id of the form of an issue is sent to the issues and nowhere else, and the server settles what it
-// names: a code in any letter case, holding an underscore, digits or letters outside ASCII, and a number with
-// leading zeros are all the form, and a 404 is an answer rather than a reason to ask the articles instead.
 func TestIssueCommandsSendEveryFormOfAnIssueToTheIssues(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -120,7 +110,7 @@ func TestIssueCommandsSendEveryFormOfAnIssueToTheIssues(t *testing.T) {
 
 					got := runWith(t, server.env(), command.argv(tc.id)...)
 
-					assert.Equal(t, "not_found", requireRefusal(t, got).code)
+					assert.Equal(t, "not_found", requireFault(t, got).code)
 					paths := server.sentPaths()
 					require.Len(t, paths, 1)
 					assert.True(t, strings.HasPrefix(paths[0], "/api/issues/"), "the request went to %s", paths[0])
@@ -137,7 +127,7 @@ func TestIssueShowSendsACodeWithAnUnderscoreToTheDevInstance(t *testing.T) {
 
 	got := runWith(t, dev.env(), "issue", "show", "Dev_X-1")
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	want := noSuchIssue(dev.url, "Dev_X-1")
 	assert.Equal(t, want.code, found.code)
 	assert.Equal(t, want.details, found.details)
@@ -152,16 +142,12 @@ func articleCommands() []idCommand {
 			return []string{"article", "update", "--summary", "x", "--", id}
 		}},
 		{name: "delete", argv: func(id string) []string { return []string{"article", "delete", "--", id} }},
-		// The one article a creation names is the parent, and it is named by a flag, so the separator has
-		// nothing to part here.
 		{name: "create --parent", argv: func(id string) []string {
 			return []string{"article", "create", "DEV", "--summary", "x", "--parent", id}
 		}},
 	}
 }
 
-// The same parse settles what every command of articles was given, and a string of the form of an issue is
-// refused here rather than sent: the API of articles answers 404 for it, which would name the wrong reason.
 func TestArticleCommandsRefuseAnIDOfAnyOtherForm(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -187,7 +173,7 @@ func TestArticleCommandsRefuseAnIDOfAnyOtherForm(t *testing.T) {
 
 					got := runWith(t, server.env(), command.argv(tc.id)...)
 
-					assert.Equal(t, "bad_usage", requireRefusal(t, got).code)
+					assert.Equal(t, "bad_usage", requireFault(t, got).code)
 					assert.Empty(t, server.requests())
 				})
 			}
@@ -195,9 +181,6 @@ func TestArticleCommandsRefuseAnIDOfAnyOtherForm(t *testing.T) {
 	}
 }
 
-// An id of the form of an article is sent to the articles and nowhere else, and the server settles what it
-// names: a code in any letter case or holding digits and an underscore, and a number with leading zeros, are
-// all the form, and a 404 is an answer rather than a reason to ask the issues instead.
 func TestArticleCommandsSendEveryFormOfAnArticleToTheArticles(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -219,7 +202,7 @@ func TestArticleCommandsSendEveryFormOfAnArticleToTheArticles(t *testing.T) {
 
 					got := runWith(t, server.env(), command.argv(tc.id)...)
 
-					assert.Equal(t, "not_found", requireRefusal(t, got).code)
+					assert.Equal(t, "not_found", requireFault(t, got).code)
 					paths := server.sentPaths()
 					require.Len(t, paths, 1)
 					assert.True(t, strings.HasPrefix(paths[0], "/api/articles/"), "the request went to %s", paths[0])
@@ -230,9 +213,6 @@ func TestArticleCommandsSendEveryFormOfAnArticleToTheArticles(t *testing.T) {
 	}
 }
 
-// The commands that name an entity of either kind, since what they write hangs from an issue and from an
-// article alike. One parse settles which of the two the string is, and no command of this kind ever asks the
-// other API about it.
 func ownerCommands(t *testing.T) []idCommand {
 	t.Helper()
 	attached := aFileToAttach(t)
@@ -255,8 +235,6 @@ func ownerCommands(t *testing.T) []idCommand {
 		{name: "attachment delete", argv: func(id string) []string {
 			return []string{"attachment", "delete", "--", id, "12-1"}
 		}},
-		// A tagging reads the owner before it resolves the name, so the one request of the form is the owner's
-		// and the catalogue of tags is never asked for here.
 		{name: "tag add", argv: func(id string) []string {
 			return []string{"tag", "add", "--name", "x", "--", id}
 		}},
@@ -266,8 +244,6 @@ func ownerCommands(t *testing.T) []idCommand {
 	}
 }
 
-// A string of neither form is refused before any request, and the refusal names the class it belongs to:
-// here an internal id is no address at all, although it is the one thing the comment itself is addressed by.
 func TestOwnerCommandsRefuseAStringOfNeitherForm(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -292,7 +268,7 @@ func TestOwnerCommandsRefuseAStringOfNeitherForm(t *testing.T) {
 
 					got := runWith(t, server.env(), command.argv(tc.id)...)
 
-					assert.Equal(t, "bad_usage", requireRefusal(t, got).code)
+					assert.Equal(t, "bad_usage", requireFault(t, got).code)
 					assert.Empty(t, server.requests())
 				})
 			}
@@ -300,8 +276,6 @@ func TestOwnerCommandsRefuseAStringOfNeitherForm(t *testing.T) {
 	}
 }
 
-// Every form of an issue goes to the issues and every form of an article to the articles, each in one
-// request: the form settles the API, and a 404 from it is an answer rather than a reason to ask the other.
 func TestOwnerCommandsSendEachFormToTheAPIOfItsKind(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -330,7 +304,7 @@ func TestOwnerCommandsSendEachFormToTheAPIOfItsKind(t *testing.T) {
 
 					got := runWith(t, server.env(), command.argv(tc.id)...)
 
-					assert.Equal(t, "not_found", requireRefusal(t, got).code)
+					assert.Equal(t, "not_found", requireFault(t, got).code)
 					paths := server.sentPaths()
 					require.Len(t, paths, 1)
 					assert.True(t, strings.HasPrefix(paths[0], tc.under), "the request went to %s", paths[0])
@@ -341,17 +315,11 @@ func TestOwnerCommandsSendEachFormToTheAPIOfItsKind(t *testing.T) {
 	}
 }
 
-// A command that addresses one child of an issue or of an article, beside the collection that child stands
-// under: the form of the id is one rule for every kind of child, and where the request lands is what says the
-// id reached the entity it addresses rather than another endpoint.
 type childCommand struct {
 	idCommand
 	under string
 }
 
-// The commands that address one child, which carries no readable id of its own and is named by the internal id
-// instead. The owner stands in the argument before it, so a command that works on either kind is written once
-// per kind.
 func childCommands() []childCommand {
 	return []childCommand{
 		{under: "/comments/", idCommand: idCommand{name: "comment update on an issue", argv: func(id string) []string {
@@ -383,9 +351,6 @@ func childCommands() []childCommand {
 
 const attachmentsCollection = "attachments"
 
-// A string that is no internal id is refused before any request, whichever kind of owner it was written
-// under: the generated client would resolve it against the server, and an empty id or a traversal reaches an
-// endpoint other than the one child that was named.
 func TestChildCommandsRefuseAStringThatIsNoInternalID(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -410,7 +375,7 @@ func TestChildCommandsRefuseAStringThatIsNoInternalID(t *testing.T) {
 
 					got := runWith(t, server.env(), command.argv(tc.id)...)
 
-					assert.Equal(t, "bad_usage", requireRefusal(t, got).code)
+					assert.Equal(t, "bad_usage", requireFault(t, got).code)
 					assert.Empty(t, server.requests())
 				})
 			}
@@ -418,9 +383,6 @@ func TestChildCommandsRefuseAStringThatIsNoInternalID(t *testing.T) {
 	}
 }
 
-// Every internal id goes to the server as it was written, in one request: the class is not read — the
-// instance numbers its own entities and the classes of two instances already differ — and a leading zero is
-// the server's to refuse, which it does by matching the id exactly.
 func TestChildCommandsSendEveryInternalIDToTheServer(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -442,7 +404,7 @@ func TestChildCommandsSendEveryInternalIDToTheServer(t *testing.T) {
 
 					got := runWith(t, server.env(), command.argv(tc.id)...)
 
-					assert.Equal(t, "not_found", requireRefusal(t, got).code)
+					assert.Equal(t, "not_found", requireFault(t, got).code)
 					paths := server.sentPaths()
 					require.Len(t, paths, 1)
 					assert.True(t, strings.HasSuffix(paths[0], command.under+tc.id), "the request went to %s", paths[0])
@@ -452,8 +414,6 @@ func TestChildCommandsSendEveryInternalIDToTheServer(t *testing.T) {
 	}
 }
 
-// The commands that name a project by its code. Each is given whatever else it needs to get as far as the form
-// of that code: a creation with no title is refused for the missing title before the code is ever looked at.
 func codeCommands() []idCommand {
 	return []idCommand{
 		{name: "project show", argv: func(code string) []string { return []string{"project", "show", "--", code} }},
@@ -465,8 +425,6 @@ func codeCommands() []idCommand {
 	}
 }
 
-// The code of a project is held to the grammar that parts every readable id from an internal one, and to
-// the same one in each command that takes a code. Nothing of this costs a request.
 func TestProjectCodeCommandsRefuseACodeOfAnotherForm(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -494,7 +452,7 @@ func TestProjectCodeCommandsRefuseACodeOfAnotherForm(t *testing.T) {
 
 					got := runWith(t, server.env(), command.argv(tc.code)...)
 
-					assert.Equal(t, "bad_usage", requireRefusal(t, got).code)
+					assert.Equal(t, "bad_usage", requireFault(t, got).code)
 					assert.Empty(t, server.requests())
 				})
 			}
@@ -502,9 +460,6 @@ func TestProjectCodeCommandsRefuseACodeOfAnotherForm(t *testing.T) {
 	}
 }
 
-// A string of the form of a code goes to the projects and the server settles what it names: any letter
-// case, an underscore, digits after the first letter and letters outside ASCII are all the form, and a 404 is
-// an answer rather than a reason to ask anywhere else. A creation refused here has written nothing.
 func TestProjectCodeCommandsSendEveryFormOfACodeToTheProjects(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -527,7 +482,7 @@ func TestProjectCodeCommandsSendEveryFormOfACodeToTheProjects(t *testing.T) {
 
 					got := runWith(t, server.env(), command.argv(tc.code)...)
 
-					assert.Equal(t, "not_found", requireRefusal(t, got).code)
+					assert.Equal(t, "not_found", requireFault(t, got).code)
 					paths := server.sentPaths()
 					require.Len(t, paths, 1)
 					assert.True(t, strings.HasPrefix(paths[0], "/api/admin/projects/"), "the request went to %s", paths[0])
@@ -552,7 +507,7 @@ func TestProjectShowSendsACodeWithDigitsToTheDevInstance(t *testing.T) {
 			{"upstream_error", "Not Found"},
 			{"upstream_message", "Entity with id Api_32 not found"},
 		},
-	}, requireRefusal(t, got))
+	}, requireFault(t, got))
 	require.Len(t, dev.requests(), 1)
 	assert.Equal(t, "/api/admin/projects/Api_32", dev.sentPaths()[0])
 }

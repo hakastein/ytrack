@@ -15,19 +15,12 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// What a creation asks of the article it filed: what the caller asked to print, and beside it every part that
-// went out, so the check of the write has it to hold the answer against. The project stands here and nowhere
-// in the default, since it is the one part of a creation the caller names that an article does not print.
 const askedArticleFields = articleShowFields + ",project(shortName)"
 
-// The request a creation goes out as, which is the one a refusal about it names.
 func articleCreationRequest(address, fields string) string {
 	return "POST " + address + "/api/articles?fields=" + fields
 }
 
-// The article a creation answers with, under the expression that goes out. Each of content, project and parent
-// is JSON already, so a scenario may send null for any of them; a scenario that leaves one out gets what a
-// creation of an article at the root of DEV comes back as.
 type answeredArticle struct {
 	readable string
 	summary  string
@@ -53,8 +46,6 @@ func filedArticleIn(readable, summary, content, project string) string {
 	return answeredArticle{readable: readable, summary: summary, content: content, project: project}.json()
 }
 
-// creatingAnArticle is the server of a creation: the POST is the whole command, so a scenario says what that
-// one request was answered with.
 func creatingAnArticle(t *testing.T, creation http.HandlerFunc) *upstream {
 	t.Helper()
 	return serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -65,7 +56,6 @@ func creatingAnArticle(t *testing.T, creation http.HandlerFunc) *upstream {
 	})
 }
 
-// sentArticle is the body of the one request that went out, read as JSON reads it.
 func sentArticle(t *testing.T, u *upstream) map[string]any {
 	t.Helper()
 	asks := u.asks()
@@ -75,9 +65,6 @@ func sentArticle(t *testing.T, u *upstream) map[string]any {
 	return body
 }
 
-// What a creation takes: one project, written as an argument, and a title, which is the value of a flag.
-// The title is looked for before the code is read, so a call giving neither is answered about the title, which
-// is how ytrack issue create answers it.
 func TestArticleCreateRefusesBeforeAnyRequest(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -108,15 +95,12 @@ func TestArticleCreateRefusesBeforeAnyRequest(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// Text YouTrack would keep as something other than what was written never goes out: the write would happen
-// and the document would disagree with it, and the caller would be told about an article that by then exists.
-// The runes stand in the literals as bytes, since a source file is read by more than one tool.
 func TestArticleCreateRefusesTextTheServerWouldRewrite(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -125,7 +109,6 @@ func TestArticleCreateRefusesTextTheServerWouldRewrite(t *testing.T) {
 	}{
 		{name: "a line feed in the title", argv: []string{"--summary", "a\nb"}},
 		{name: "a carriage return in the title", argv: []string{"--summary", "a\rb"}},
-		// A CRLF is named by the line feed of it, which is the first rune of the two the check comes to.
 		{name: "a CRLF in the title", argv: []string{"--summary", "a\r\nb"}},
 		{name: "an empty title", argv: []string{"--summary", ""}},
 		{name: "a title that is no UTF-8", argv: []string{"--summary", "a\xffb"}},
@@ -139,14 +122,12 @@ func TestArticleCreateRefusesTextTheServerWouldRewrite(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"article", "create", "DEV"}, tc.argv...)...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// A creation has the flags it has: nothing reads a value out of a file, and nothing clears a part of an
-// article that does not exist yet.
 func TestArticleCreateHasNoFlagsBesidesItsOwn(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -166,26 +147,22 @@ func TestArticleCreateHasNoFlagsBesidesItsOwn(t *testing.T) {
 
 			got := runWith(t, server.env(), "article", "create", "DEV", "--summary", "x", tc.flag, "y")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The comments of an article are no part of a write, and --clear content belongs to the update, so a
-// creation is told so by the name of the flag rather than by a refusal of its own.
 func TestArticleCreatePrintsNoComments(t *testing.T) {
 	t.Parallel()
 	server := serveNothing(t)
 
 	got := runWith(t, server.env(), "article", "create", "DEV", "--summary", "x", "--fields", "+comments(text)")
 
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 	assert.Empty(t, server.requests())
 }
 
-// The help names what a caller gets where they write no expression at all, and how text already written is
-// passed in, since no flag reads it out of a file.
 func TestArticleCreateHelpNamesTheDefault(t *testing.T) {
 	t.Parallel()
 
@@ -197,8 +174,6 @@ func TestArticleCreateHelpNamesTheDefault(t *testing.T) {
 	assert.NotContains(t, got.stdout, "-file")
 }
 
-// The whole of the command: one request, a body of the project by the code that was typed, the title and
-// the content as they were given, and the answer as the document.
 func TestArticleCreateFilesTheArticleInOneRequest(t *testing.T) {
 	t.Parallel()
 	const title = "[bug] fix login"
@@ -244,9 +219,6 @@ func textOfSize(chunk string, size int) string {
 	return text[:cut] + strings.Repeat("x", size-cut)
 }
 
-// Every part of a creation is the value of a flag, so pflag hands it over whatever it starts with, and
-// nothing of it is read by ytrack: a title of runes YouTrack keeps in an article and drops from an issue goes
-// out as it was typed, and so does a body of one dash.
 func TestArticleCreateWritesTheTextItWasGiven(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -319,15 +291,11 @@ func TestArticleCreateWritesTheTextItWasGiven(t *testing.T) {
 	}
 }
 
-// A 200 says the server took the body, not that it kept what was in it. What came back other than as it
-// went out is a refusal naming both, and nothing is printed: the article exists and holds something the caller
-// did not write, which is what the exit code of a write that happened is for.
 func TestArticleCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		argv []string
-		// The article the answer carries, and the id a refusal names it by, which is that answer's own.
+		name     string
+		argv     []string
 		filed    string
 		article  string
 		mismatch []any
@@ -399,8 +367,6 @@ func TestArticleCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 	}
 }
 
-// The content a call never wrote is never held against anything: YouTrack files an article without it, the
-// key comes back null, and that is the article the caller asked for.
 func TestArticleCreateChecksNoContentWhereNoneWasWritten(t *testing.T) {
 	t.Parallel()
 	server := creatingAnArticle(t, respondWith(http.StatusOK, createdArticle("DEV-A-7", "x", "null")))
@@ -414,8 +380,6 @@ func TestArticleCreateChecksNoContentWhereNoneWasWritten(t *testing.T) {
 	assert.Nil(t, requireValue(t, nodeAt(t, mapping, "content")))
 }
 
-// What the server says about a body it refused passes on word for word, and no article was filed, so the
-// caller may fix the call and send it again.
 func TestArticleCreateRefusesWhatTheServerRefused(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -467,15 +431,12 @@ func TestArticleCreateRefusesWhatTheServerRefused(t *testing.T) {
 					{"upstream_message", tc.upstreamMessage},
 				}, tc.details...),
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Equal(t, []string{http.MethodPost}, sentMethods(server))
 		})
 	}
 }
 
-// The body left whole and the connection went away before an answer: the article may stand in the project
-// and may never have been filed, and nothing ytrack could send afterwards tells the two apart — a repeat would
-// file a second one. So the caller is told that much, and the exit code says the instance may have changed.
 func TestArticleCreateIsUncertainWhereTheAnswerNeverCame(t *testing.T) {
 	t.Parallel()
 	server := creatingAnArticle(t, breakOff)
@@ -488,8 +449,6 @@ func TestArticleCreateIsUncertainWhereTheAnswerNeverCame(t *testing.T) {
 	assert.Empty(t, got.stdout)
 }
 
-// What the caller asks to print and what the check of the write reads are two things: every part that went
-// out is asked for whatever the expression says, and only the expression reaches the document.
 func TestArticleCreateChecksMoreThanItPrints(t *testing.T) {
 	t.Parallel()
 	server := creatingAnArticle(t, respondWith(http.StatusOK, createdArticle("DEV-A-7", "x", asJSON("первая"))))
@@ -512,16 +471,14 @@ func fileArticle(t *testing.T, dev *upstream, summary string, argv ...string) st
 	return readable
 }
 
-// removeArticle is the cleanup of a contract test that filed an article: the deletion prints the id it was
-// known by, and a read afterwards finds nothing. The context of the test is cancelled before any cleanup runs,
-// so these two calls get one of their own or they would leave the article behind.
 func removeArticle(t *testing.T, dev *upstream, readable string) {
 	t.Helper()
-	deleted := runInContext(t, context.Background(), dev.env(), "article", "delete", readable)
+	notCancelledAtCleanup := context.Background()
+	deleted := runInContext(t, notCancelledAtCleanup, dev.env(), "article", "delete", readable)
 	assert.Equal(t, outcome{stdout: "idReadable: " + strconv.Quote(readable) + "\n"}, deleted)
 
-	gone := runInContext(t, context.Background(), dev.env(), "article", "show", readable, "--comments=0")
-	assert.Equal(t, "not_found", requireRefusalDocument(t, gone).code)
+	gone := runInContext(t, notCancelledAtCleanup, dev.env(), "article", "show", readable, "--comments=0")
+	assert.Equal(t, "not_found", requireFaultDocument(t, gone).code)
 }
 
 func TestArticleCreateFilesAnArticleOfTheDevInstance(t *testing.T) {
@@ -536,7 +493,6 @@ func TestArticleCreateFilesAnArticleOfTheDevInstance(t *testing.T) {
 	mapping := requireMapping(t, "stdout", got.stdout)
 	readable := nodeAt(t, mapping, "idReadable").Value
 	require.Regexp(t, `^DEV-A-[0-9]+$`, readable)
-	// Registered after the recorder's own cleanup, so the deletion runs first and the cassette records it.
 	t.Cleanup(func() { removeArticle(t, dev, readable) })
 
 	assert.Equal(t, contractArticleTitle(t), nodeAt(t, mapping, "summary").Value)
@@ -553,8 +509,6 @@ func hostileContent() string {
 	return textOfSize(hostileText, 81_033)
 }
 
-// The server reads the code in any letter case and answers with the project as it keeps it, so an article
-// filed in dev is an article of DEV and the check holds the two the same.
 func TestArticleCreateFilesAnArticleInTheProjectOfALowerCaseCode(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -582,12 +536,10 @@ func TestArticleCreateRefusesAProjectTheDevInstanceDoesNotHave(t *testing.T) {
 			{"upstream_message", "Project was not found"},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodPost}, sentMethods(dev))
 }
 
-// A token that may not write in the project is answered 403 rather than the 404 a read of an article
-// hidden from it gets: the knowledge base tells a caller that may not file from one that may not see.
 func TestArticleCreateRefusesTheProjectTheLimitedUserMayNotWriteIn(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -605,6 +557,6 @@ func TestArticleCreateRefusesTheProjectTheLimitedUserMayNotWriteIn(t *testing.T)
 			authFromEnv(),
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodPost}, sentMethods(dev))
 }

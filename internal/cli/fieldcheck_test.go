@@ -10,13 +10,11 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// Every name Project declares, itself or through IssueFolder, which it extends.
 func projectNames() []any {
 	return []any{"$type", "archived", "createdBy", "customFields", "description", "fromEmail", "iconUrl", "id", "issues",
 		"leader", "name", "replyToEmail", "shortName", "startingNumber", "team", "template"}
 }
 
-// Every name User and the schemas that extend it declare.
 func userNames() []any {
 	return []any{"$type", "avatarUrl", "banned", "email", "fullName", "guest", "id", "isAnonymized", "login", "name",
 		"online", "profiles", "ringId", "savedQueries", "tags"}
@@ -38,9 +36,8 @@ func unknownEntry(field string, nearest ...any) []detail {
 	return []detail{{"field", field}, {"nearest", append([]any{}, nearest...)}}
 }
 
-// schema is nil where the server named no $type.
-func missingEntry(field string, schema any) []detail {
-	return []detail{{"field", field}, {"type", schema}}
+func missingEntry(field string, serverTypeOrNil any) []detail {
+	return []detail{{"field", field}, {"type", serverTypeOrNil}}
 }
 
 func TestProjectShowRefusesNamesTheSchemasOfTheDevInstanceDoNotDeclare(t *testing.T) {
@@ -56,7 +53,7 @@ func TestProjectShowRefusesNamesTheSchemasOfTheDevInstanceDoNotDeclare(t *testin
 			unknownEntry("leader(logn)", "login"),
 		),
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Len(t, dev.requests(), 1)
 }
 
@@ -70,7 +67,7 @@ func TestProjectShowRefusesFieldsAskedOfAStringOfTheDevInstance(t *testing.T) {
 		code:    "unknown_name",
 		details: missingFieldDetails(dev.url, "shortName(foo)", "unknown", unknownEntry("shortName(foo)")),
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Len(t, dev.requests(), 1)
 }
 
@@ -92,11 +89,11 @@ func TestProjectShowLeavesOutAFieldTheTypeOfTheDevInstanceDoesNotDeclare(t *test
 		require.True(t, ok, "an item of customFields: %v", item)
 		byName[fmt.Sprint(field["name"])] = item
 	}
-	// Оценка is a period field, whose schema has no bundle; State is a state field, whose schema has one.
 	require.Contains(t, byName, "Оценка")
 	require.Contains(t, byName, "State")
-	assert.NotContains(t, byName["Оценка"], "bundle")
-	assert.Contains(t, byName["State"], "bundle")
+	periodField, stateField := byName["Оценка"], byName["State"]
+	assert.NotContains(t, periodField, "bundle")
+	assert.Contains(t, stateField, "bundle")
 	assert.Len(t, dev.requests(), 1)
 }
 
@@ -114,10 +111,9 @@ func TestProjectShowRefusesAFieldMissingFromTheResponse(t *testing.T) {
 	t.Parallel()
 	const asked = "shortName,name,archived,leader(login)"
 	tests := []struct {
-		name   string
-		fields string
-		body   string
-		// Of the refusal, in the order printed.
+		name    string
+		fields  string
+		body    string
 		missing [][]detail
 	}{
 		{
@@ -209,7 +205,7 @@ func TestProjectShowRefusesAFieldMissingFromTheResponse(t *testing.T) {
 			got := runWith(t, server.env(), "project", "show", "DEV", "--fields", tc.fields)
 
 			want := faultDocument{code: "upstream_invalid", details: missingFieldDetails(server.url, tc.fields, "missing", tc.missing...)}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Len(t, server.requests(), 1)
 		})
 	}
@@ -248,9 +244,8 @@ func TestProjectShowRefusesANameNoSchemaOfItsNodeDeclares(t *testing.T) {
 			unknown: [][]detail{unknownEntry("customFields(bundel)", "bundle")},
 		},
 		{
-			name:   "at the root, a name another schema of the hierarchy of the answer declares",
-			fields: "owner",
-			// A tag, in the hierarchy of IssueFolder with Project, declares owner.
+			name:    "at the root, a name another schema of the hierarchy of the answer declares",
+			fields:  "owner",
 			body:    `{"$type":"Project"}`,
 			unknown: [][]detail{unknownEntry("owner", projectNames()...)},
 		},
@@ -275,7 +270,7 @@ func TestProjectShowRefusesANameNoSchemaOfItsNodeDeclares(t *testing.T) {
 			got := runWith(t, server.env(), "project", "show", "DEV", "--fields", tc.fields)
 
 			want := faultDocument{code: "unknown_name", details: missingFieldDetails(server.url, tc.fields, "unknown", tc.unknown...)}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Len(t, server.requests(), 1)
 		})
 	}
@@ -319,7 +314,6 @@ func TestProjectShowLeavesOutAFieldTheNamedTypeDoesNotDeclare(t *testing.T) {
 		{
 			name:   "a field of no schema that another schema of the hierarchy named there declares",
 			fields: "customFields(owner)",
-			// A tag, in the hierarchy of IssueFolder with Project, declares owner.
 			body:   `{"customFields":[{"$type":"Project"}],"$type":"Project"}`,
 			stdout: "customFields:\n  - {}\n",
 		},

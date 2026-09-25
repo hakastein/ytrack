@@ -13,19 +13,12 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// What the tool asks of every custom field of an issue, whatever the caller asked of the issue: the members an
-// identity is read out of, and the binding to the project, which carries the type and the place in the order.
 const customFieldsFields = "customFields(name,value(name,login,minutes,text)," +
 	"projectCustomField(id,ordinal,field(fieldType(valueType,isMultiValue))))"
 
-// The same block with the name a project gave each field, which is asked for where a name of a default stands
-// among the names asked: such a name reached no catalogue, so the block is where it meets a name of the
-// instance.
 const translatedCustomFieldsFields = "customFields(name,value(name,login,minutes,text)," +
 	"projectCustomField(id,ordinal,field(fieldType(valueType,isMultiValue),localizedName)))"
 
-// A custom field as the server sends it, with $type on every object: the value and the ordinal are written as
-// JSON already, so a scenario may send a shape the specification does not allow.
 type receivedField struct {
 	name         string
 	translate    string
@@ -44,29 +37,20 @@ func (f receivedField) sent() string {
 	if binding == "" {
 		binding = "180-1"
 	}
-	// A project that calls the field nothing of its own sends null rather than leaving the name out; a scenario
-	// the tool never asks it of is answered it all the same, which is what an unasked-for key of the server is.
-	translated := "null"
-	if f.translate != "" {
-		translated = strconv.Quote(f.translate)
-	}
 	return `{"$type":"IssueCustomField","name":` + strconv.Quote(f.name) +
 		`,"value":` + cmp.Or(f.value, "null") +
 		`,"projectCustomField":{"$type":"ProjectCustomField","id":` + strconv.Quote(binding) +
 		`,"ordinal":` + ordinal +
 		`,"field":{"$type":"CustomField","fieldType":{"$type":"FieldType","valueType":` +
 		strconv.Quote(f.valueType) + `,"isMultiValue":` + strconv.FormatBool(f.isMultiValue) + `},` +
-		`"localizedName":` + translated + `}}}`
+		`"localizedName":` + localizedNameOrNull(f.translate) + `}}}`
 }
 
-// The element of a bundle enum, state, version, build and ownedField fields hold, with the presentation the
-// server sends beside the name.
 func bundleElement(name string) string {
 	return `{"$type":"EnumBundleElement","name":` + strconv.Quote(name) +
 		`,"localizedName":null,"presentation":` + strconv.Quote(name+" (presentation)") + `}`
 }
 
-// receivedFields is the array of custom fields of one answer, as JSON.
 func receivedFields(fields ...receivedField) string {
 	sent := make([]string, 0, len(fields))
 	for _, field := range fields {
@@ -79,7 +63,6 @@ func issueWithFields(fields ...receivedField) string {
 	return `{"$type":"Issue","idReadable":"DEV-1","customFields":` + receivedFields(fields...) + `}`
 }
 
-// showCustomFields is the block one answer prints, as the mapping under customFields.
 func showCustomFields(t *testing.T, body string) (outcome, *yaml.Node) {
 	t.Helper()
 	server := serve(t, respondWith(http.StatusOK, body))
@@ -94,17 +77,14 @@ func showCustomFields(t *testing.T, body string) (outcome, *yaml.Node) {
 	return got, block
 }
 
-// A value of one type as the server sends it, beside the identity it is printed by: none where the field
-// holds nothing.
 type identityCase struct {
 	name         string
 	valueType    string
 	isMultiValue bool
 	value        string
 	printed      []string
-	// Text in double quotes unless the row says otherwise.
-	style yaml.Style
-	tag   string
+	style        yaml.Style
+	tag          string
 }
 
 func (c identityCase) written() yaml.Style {
@@ -118,8 +98,6 @@ func (c identityCase) read() string {
 	return cmp.Or(c.tag, "!!str")
 }
 
-// The twenty types the table of custom-field types holds, in the forms measured on the working instance: what
-// is printed is the one member that names the value, and a field holding nothing gets no key at all.
 func identityCases() []identityCase {
 	return []identityCase{
 		{
@@ -242,9 +220,6 @@ func identityCases() []identityCase {
 	}
 }
 
-// The identity of a value is settled by the type of its field and by nothing else: what the server sends
-// beside it to show the value to a human — a presentation, a full name, HTML of the same text — is not
-// printed, and neither is the type it arrived under.
 func TestIssueShowPrintsACustomFieldByTheIdentityOfItsType(t *testing.T) {
 	t.Parallel()
 	const named = "Field"
@@ -326,8 +301,6 @@ func TestIssueShowPrintsCustomFieldsInTheOrderOfTheProject(t *testing.T) {
 	}
 }
 
-// A key that comes from the data is held to no grammar of ytrack's: whatever the project called a field, the
-// name reads back as itself, and the writer of double-quoted strings is what makes that so.
 func TestIssueShowQuotesTheNameOfEveryCustomField(t *testing.T) {
 	t.Parallel()
 	names := []string{"Оценка (Back)", "Утв. начала работы", "_________________________",
@@ -350,8 +323,6 @@ func TestIssueShowQuotesTheNameOfEveryCustomField(t *testing.T) {
 	assert.Equal(t, names, keys, "stdout: %q", got.stdout)
 }
 
-// What the server says about a custom field is held against the catalogue of types it publishes itself, and a
-// block that disagrees with it is refused whole rather than printed in part.
 func TestIssueShowRefusesCustomFieldsTheServerContradictsItselfAbout(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -409,12 +380,11 @@ func TestIssueShowRefusesCustomFieldsTheServerContradictsItselfAbout(t *testing.
 					{"upstream_status", 200},
 					{"upstream_body", body},
 				},
-			}, requireRefusal(t, got))
+			}, requireFault(t, got))
 		})
 	}
 }
 
-// The place of a custom field among the fields of its project, with every member the tool asks of it.
 func bindingOf(id, valueType string) string {
 	return `{"$type":"ProjectCustomField","id":` + id + `,"ordinal":1,"field":{"$type":"CustomField",` +
 		`"fieldType":{"$type":"FieldType","valueType":` + valueType + `,"isMultiValue":false}}}`
@@ -424,13 +394,10 @@ func fieldWith(name, binding string) string {
 	return `{"$type":"IssueCustomField","name":` + name + `,"value":null,"projectCustomField":` + binding + `}`
 }
 
-// The block is read whole before any of it is printed, so a part of it standing in a shape the specification
-// does not give it ends the call rather than printing a document with that field missing or bare.
 func TestIssueShowRefusesCustomFieldsOfAShapeTheSpecificationDoesNotGive(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		// What stands under customFields, as JSON.
+		name  string
 		block string
 	}{
 		{name: "the block is no array", block: `null`},
@@ -464,13 +431,11 @@ func TestIssueShowRefusesCustomFieldsOfAShapeTheSpecificationDoesNotGive(t *test
 					{"upstream_status", 200},
 					{"upstream_body", body},
 				},
-			}, requireRefusal(t, got))
+			}, requireFault(t, got))
 		})
 	}
 }
 
-// The custom fields of an issue other than the one asked for are the block whole: a name there would pick
-// fields out of whatever project that issue belongs to, so it is refused before any request.
 func TestIssueShowRefusesNamesWrittenUnderTheCustomFieldsOfAnotherIssue(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -487,7 +452,7 @@ func TestIssueShowRefusesNamesWrittenUnderTheCustomFieldsOfAnotherIssue(t *testi
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--fields", tc.expression)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -509,8 +474,6 @@ func TestIssueShowPrintsTheCustomFieldsOfTheDevInstance(t *testing.T) {
 		token func(t *testing.T) string
 	}{
 		{name: "the admin", token: func(t *testing.T) string { return devTokens(t).admin }},
-		// A member sees every custom field of an issue and the place of each among the project's fields,
-		// while the fields of the project itself come to them empty.
 		{name: "a member of the project", token: func(t *testing.T) string { return devTokens(t).member }},
 	}
 	for _, tc := range tests {
@@ -533,8 +496,6 @@ func TestIssueShowPrintsTheCustomFieldsOfTheDevInstance(t *testing.T) {
 	}
 }
 
-// A field the project marks as one that may not be empty is still left out where it is: what is printed is
-// what the issue holds, and DEV-2 holds no reason for the state it was rejected with.
 func TestIssueShowLeavesOutTheEmptyCustomFieldsOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

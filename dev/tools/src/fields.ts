@@ -1,20 +1,11 @@
-/**
- * Поля проектов полигона: DEV несёт все 20 типов кастом-полей, DOCS — набор проекта с выключенным учётом времени.
- *
- * `Нужен реквеcт на выпуск` пишется через латинскую `c`: значение, которое читается как
- * написанное кириллицей, но сервером не находится.
- */
-
 export type BundleValue = {
   name: string;
   isResolved?: boolean;
   archived?: boolean;
   released?: boolean;
-  /** Логин владельца: воркфлоу Subsystem Assignee ставит его в пустой `Assignee` задачи с этим значением */
-  owner?: string;
+  ownerLogin?: string;
 };
 
-/** Строки каталога `/api/admin/customFieldSettings/types`: по ним tsc требует строку в каждой таблице по типу поля */
 export type TypeId =
   | "enum[1]" | "enum[*]" | "state[1]" | "version[1]" | "version[*]" | "build[1]" | "build[*]" | "ownedField[1]"
   | "ownedField[*]" | "user[1]" | "user[*]" | "group[1]" | "group[*]" | "date" | "date and time" | "integer" | "float"
@@ -29,12 +20,9 @@ export type Field = {
   typeId: TypeId;
   values?: BundleValue[];
   required?: boolean;
-  /** Тот же `canBeEmpty: false`, но под `condition` и выставленный после задач полигона, а не при привязке */
   requiredWhenShown?: boolean;
   defaultValue?: string;
-  /** Прототип уже заведён инстансом и несёт `localizedName`, которого своему не досталось */
   predefined?: boolean;
-  /** Поле появляется на задаче, только когда названное поле принимает названное значение */
   condition?: { field: string; value: string };
 };
 
@@ -44,6 +32,8 @@ const enumValues = (...names: string[]): BundleValue[] => names.map((name) => ({
 
 const stateValues = (...pairs: [string, boolean][]): BundleValue[] =>
   pairs.map(([name, isResolved]) => ({ name, isResolved }));
+
+const latinC = "c";
 
 export const FIELDS: Field[] = [
   {
@@ -84,7 +74,7 @@ export const FIELDS: Field[] = [
       ["Передано в разработку", false], ["В разработке", false], ["Ревью", false],
       ["Готово к слиянию", false], ["Тестирование ветки", false], ["Готова к выпуску", false],
       ["Приёмочные тесты", false], ["На уточнении", false], ["Готова", true],
-      ["Отложена", false], ["Требуются доработки", false], ["Нужен реквеcт на выпуск", false],
+      ["Отложена", false], ["Требуются доработки", false], ["Нужен рекве" + latinC + "т на выпуск", false],
       ["Выпущена", true], ["Нужен MR в релиз", false], ["Готова к релизу", false],
       ["Релизные тесты", false], ["Провалена", true], ["Deploy", false]),
   },
@@ -101,7 +91,6 @@ export const FIELDS: Field[] = [
     values: enumValues("Дубль", "Не воспроизводится", "Не наш модуль", "Передумали"),
   },
   {
-    // Архивных больше, чем живых, как у всякого поля спринтов с историей
     name: "Плановый спринт", typeId: "version[*]", values: [
       { name: "SPR-78", archived: true }, { name: "SPR-24", archived: true },
       { name: "SPR-51", archived: true }, { name: "SPR-52", archived: true },
@@ -115,7 +104,7 @@ export const FIELDS: Field[] = [
   },
   {
     name: "Subsystem", typeId: "ownedField[1]", predefined: true,
-    values: [{ name: "Ядро", owner: "admin" }, { name: "Отчёты" }, { name: "Интеграции" }],
+    values: [{ name: "Ядро", ownerLogin: "admin" }, { name: "Отчёты" }, { name: "Интеграции" }],
   },
   { name: "Подсистемы", typeId: "ownedField[*]", values: enumValues("Биллинг", "Уведомления") },
   { name: "Fixed in build", typeId: "build[1]", predefined: true, values: enumValues("13757", "13874") },
@@ -129,7 +118,6 @@ export const FIELDS: Field[] = [
   { name: "Коэффициент", typeId: "float" },
   { name: "Внешний номер", typeId: "string" },
   { name: "Примечание", typeId: "text" },
-  // Прототипы заводит сам YouTrack под учёт времени, и вторых с этими именами не будет
   { name: "Оценка", typeId: "period", predefined: true },
   { name: "Затраченное время", typeId: "period", predefined: true },
 ];
@@ -147,12 +135,10 @@ export const DOCS_FIELDS: Field[] = [
   { name: "Due Date", typeId: "date", predefined: true },
 ];
 
-// Порядок DEV по `ordinal`
 export const FIELD_ORDER: string[] = [
   "Type", "Priority", "Категория", "Клиент", "Модуль системы", "Система", "Assignee", "State", "Причина отклонения",
   "Соисполнители", "Статус анализа", "Плановый спринт", "Порядок реализации", "Плановая дата решения", "Релиз",
   "Статус разработки", "Затраченное время", "Оценка", "Дата начала работы", "Внешний номер",
-  // Поля, добранные ради недостающих типов, идут в порядке FIELDS
   "Subsystem", "Подсистемы", "Fixed in build", "Сборки", "Группа доступа", "Группы доступа", "Коэффициент",
   "Примечание",
 ];

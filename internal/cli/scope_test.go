@@ -9,8 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A token for each record a scenario writes: the server answers as the user of the token it was sent, so the
-// document says which record the call chose without printing any of them.
 const (
 	hereToken       = "perm-ytrack-test-here"
 	aboveToken      = "perm-ytrack-test-above"
@@ -23,7 +21,6 @@ const (
 	everywhereUser = "from.everywhere"
 )
 
-// here is the directory the test process runs in, as PWD states it and as a scope has to spell it.
 func here(t *testing.T) (stated, scope string) {
 	t.Helper()
 	stated, err := os.Getwd()
@@ -49,15 +46,12 @@ func assertNoRecordedToken(t *testing.T, got outcome) {
 	}
 }
 
-// A record of a directory holds in it and under it, and the nearest one wins: cd internal/cli inside a project
-// set up for the dev instance is not a step out to the global, production, record.
 func TestAuthStatusTakesTheRecordOfTheNearestDirectory(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
 	above := filepath.Dir(scope)
 	tests := []struct {
-		name string
-		// The records of the file, written in an order of their own; the nearest is neither first nor last.
+		name    string
 		records func(address string) []string
 		scope   string
 		user    string
@@ -101,7 +95,6 @@ func TestAuthStatusTakesTheRecordOfTheNearestDirectory(t *testing.T) {
 	}
 }
 
-// A scope is an ancestor by path components, not by the letters of the path.
 func TestAuthStatusMatchesAScopeByWholePathComponents(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
@@ -140,7 +133,6 @@ func TestAuthStatusMatchesAScopeByWholePathComponents(t *testing.T) {
 	}
 }
 
-// A shell keeps PWD as the path it walked in, symlinks and all, while a record spells its directory physically.
 func TestAuthStatusTakesTheRecordOfTheDirectoryASymlinkedPWDReaches(t *testing.T) {
 	t.Parallel()
 	_, scope := here(t)
@@ -156,15 +148,12 @@ func TestAuthStatusTakesTheRecordOfTheDirectoryASymlinkedPWDReaches(t *testing.T
 	assertNoRecordedToken(t, got)
 }
 
-// Which record applies cannot be guessed, and the global record is no answer: it names whichever instance the
-// caller set up for everywhere else.
 func TestNoCommandChoosesARecordWithoutKnowingWhichDirectoryItIsIn(t *testing.T) {
 	t.Parallel()
 	_, scope := here(t)
 	tests := []struct {
 		name string
-		// The env entries beside HOME, so that a scenario can leave PWD out altogether.
-		pwd func(elsewhere string) []string
+		pwd  func(elsewhere string) []string
 	}{
 		{name: "no PWD at all", pwd: func(string) []string { return nil }},
 		{name: "a relative PWD", pwd: func(string) []string { return []string{"PWD=internal/cli"} }},
@@ -180,15 +169,13 @@ func TestNoCommandChoosesARecordWithoutKnowingWhichDirectoryItIsIn(t *testing.T)
 
 			got := runWith(t, append([]string{"HOME=" + home}, tc.pwd(elsewhere)...), "auth", "status")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assertNoRecordedToken(t, got)
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// Nothing in a file of global records alone is chosen by directory, so a caller whose runner left PWD behind is
-// not stopped by it.
 func TestAuthStatusAsksForNoDirectoryWithoutARecordThatNamesOne(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -213,8 +200,6 @@ func TestAuthStatusAsksForNoDirectoryWithoutARecordThatNamesOne(t *testing.T) {
 	}
 }
 
-// A scope no directory can ever be spelled as, and a directory named twice, are mistakes in the file; the whole
-// file is refused before any of it is matched against a directory, so no PWD is needed to see them.
 func TestNoCommandUsesAFileWhoseScopeItCannotMatch(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -240,7 +225,7 @@ func TestNoCommandUsesAFileWhoseScopeItCannotMatch(t *testing.T) {
 			got := runWith(t, []string{"HOME=" + home}, "auth", "status")
 
 			want := faultDocument{code: "bad_usage", details: []detail{fileDetail(path)}}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assertNoToken(t, got, "perm-x")
 			assertNoToken(t, got, "perm-y")
 		})

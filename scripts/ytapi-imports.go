@@ -119,8 +119,8 @@ func findViolations() ([]violation, error) {
 			if !p.DepOnly && path == ytapiPath {
 				ytapiListed = true
 			}
-			// A test binary's only file is the main that go test generates into the build cache.
-			if p.DepOnly || path == ytapiPath || strings.HasSuffix(path, ".test") {
+			generatedTestMain := strings.HasSuffix(path, ".test")
+			if p.DepOnly || path == ytapiPath || generatedTestMain {
 				continue
 			}
 			found, typed, err := useViolations(fset, module.Dir, ytapiPath, p, exports)
@@ -138,7 +138,7 @@ func findViolations() ([]violation, error) {
 	}
 	var unchecked []string
 	for _, f := range files {
-		if filepath.Dir(f.path) != ytapiDir && (!f.ignored || f.pkg == "main") && !checked[f.path] {
+		if filepath.Dir(f.path) != ytapiDir && (!f.ignored || f.isStandaloneProgram()) && !checked[f.path] {
 			unchecked = append(unchecked, f.path)
 		}
 	}
@@ -151,7 +151,6 @@ func findViolations() ([]violation, error) {
 	return slices.Compact(violations), nil
 }
 
-// Reads every .go file in the directories ./... walks, whatever its build constraint.
 func walkModule(fset *token.FileSet, ytapiPath string) ([]sourceFile, []violation, error) {
 	var files []sourceFile
 	var imports []violation
@@ -160,14 +159,14 @@ func walkModule(fset *token.FileSet, ytapiPath string) ([]sourceFile, []violatio
 			return err
 		}
 		name := entry.Name()
-		skipped := strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")
+		ignoredByGo := strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")
 		if entry.IsDir() {
-			if skipped || name == "testdata" || isFile(filepath.Join(path, "go.mod")) {
+			if ignoredByGo || name == "testdata" || isFile(filepath.Join(path, "go.mod")) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if skipped || filepath.Ext(name) != ".go" {
+		if ignoredByGo || filepath.Ext(name) != ".go" {
 			return nil
 		}
 		file, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly|parser.ParseComments)
@@ -214,8 +213,10 @@ func buildConstraint(file *ast.File) (constraint.Expr, error) {
 	return nil, nil
 }
 
-// A file whose constraint requires ignore belongs to no package; go run builds it as a
-// program of its own.
+func (f sourceFile) isStandaloneProgram() bool {
+	return f.ignored && f.pkg == "main"
+}
+
 func requiresIgnore(x constraint.Expr) bool {
 	switch x := x.(type) {
 	case *constraint.TagExpr:
@@ -242,10 +243,9 @@ func listRuns(files []sourceFile) ([]listRun, error) {
 		if goos == host.GOOS {
 			continue
 		}
-		// Not every OS has the host's architecture: js and wasip1 have only wasm.
 		arch := host.GOARCH
 		if !slices.Contains(known, platform{goos, arch}) {
-			arch = known[slices.IndexFunc(known, func(p platform) bool { return p.GOOS == goos })].GOARCH
+			arch = known.firstArch(goos)
 		}
 		envs = append(envs, []string{"GOOS=" + goos, "GOARCH=" + arch})
 	}
@@ -260,7 +260,7 @@ func listRuns(files []sourceFile) ([]listRun, error) {
 		}
 	}
 	for _, f := range files {
-		if f.ignored && f.pkg == "main" {
+		if f.isStandaloneProgram() {
 			runs = append(runs, listRun{nil, []string{f.path}})
 		}
 	}
@@ -276,23 +276,31 @@ func buildTerms(files []sourceFile, known platforms) (oses, tags []string) {
 		if goos := fileOS(filepath.Base(f.path), known); goos != "" {
 			osSet[goos] = true
 		}
-		if f.build == nil {
-			continue
-		}
-		// Eval visits both sides of && and ||, so the callback sees every tag.
-		f.build.Eval(func(tag string) bool {
+		for _, tag := range constraintTags(f.build) {
 			if known.hasOS(tag) {
 				osSet[tag] = true
-			} else if ownTag(tag, known) {
+			} else if !goSetsTag(tag, known) {
 				tagSet[tag] = true
 			}
-			return true
-		})
+		}
 	}
 	return slices.Sorted(maps.Keys(osSet)), slices.Sorted(maps.Keys(tagSet))
 }
 
-// The OS a name such as x_windows.go, x_windows_amd64.go or x_windows_test.go restricts its file to.
+func constraintTags(x constraint.Expr) []string {
+	switch x := x.(type) {
+	case *constraint.TagExpr:
+		return []string{x.Tag}
+	case *constraint.NotExpr:
+		return constraintTags(x.X)
+	case *constraint.AndExpr:
+		return append(constraintTags(x.X), constraintTags(x.Y)...)
+	case *constraint.OrExpr:
+		return append(constraintTags(x.X), constraintTags(x.Y)...)
+	}
+	return nil
+}
+
 func fileOS(name string, known platforms) string {
 	stem, _, _ := strings.Cut(name, ".")
 	parts := strings.Split(strings.TrimSuffix(stem, "_test"), "_")[1:]
@@ -305,12 +313,10 @@ func fileOS(name string, known platforms) string {
 	return ""
 }
 
-// Terms go sets itself (go help buildconstraint) are not the module's own: in -tags one would
-// compile files meant for another platform, toolchain or Go release.
-func ownTag(tag string, known platforms) bool {
+func goSetsTag(tag string, known platforms) bool {
 	arch, _, _ := strings.Cut(tag, ".")
-	return !known.hasOS(tag) && !known.hasArch(arch) && !slices.Contains([]string{"unix", "cgo", "gc", "gccgo"}, tag) &&
-		!strings.HasPrefix(tag, "go1.") && !strings.HasPrefix(tag, "goexperiment.")
+	return known.hasOS(tag) || known.hasArch(arch) || slices.Contains([]string{"unix", "cgo", "gc", "gccgo"}, tag) ||
+		strings.HasPrefix(tag, "go1.") || strings.HasPrefix(tag, "goexperiment.")
 }
 
 func (known platforms) hasOS(name string) bool {
@@ -321,8 +327,10 @@ func (known platforms) hasArch(name string) bool {
 	return slices.ContainsFunc(known, func(p platform) bool { return p.GOARCH == name })
 }
 
-// Type-checked, because a method called on a *ytapi.Client held by a type from the adapter
-// file reaches the package without importing or naming it.
+func (known platforms) firstArch(goos string) string {
+	return known[slices.IndexFunc(known, func(p platform) bool { return p.GOOS == goos })].GOARCH
+}
+
 func useViolations(fset *token.FileSet, root, ytapiPath string, p listedPackage, exports map[string]string) ([]violation, []string, error) {
 	dir, err := filepath.Rel(root, p.Dir)
 	if err != nil {
@@ -338,10 +346,8 @@ func useViolations(fset *token.FileSet, root, ytapiPath string, p listedPackage,
 		}
 		files, paths = append(files, file), append(paths, path)
 	}
-	// An external test imports its package rebuilt with the in-package tests, under the path
-	// ImportMap gives.
 	conf := types.Config{Importer: importer.ForCompiler(fset, "gc", func(path string) (io.ReadCloser, error) {
-		return os.Open(exports[cmp.Or(p.ImportMap[path], path)])
+		return os.Open(exports[p.listedImportPath(path)])
 	})}
 	info := types.Info{Uses: map[*ast.Ident]types.Object{}}
 	if _, err := conf.Check(p.ImportPath, fset, files, &info); err != nil {
@@ -357,8 +363,10 @@ func useViolations(fset *token.FileSet, root, ytapiPath string, p listedPackage,
 	return found, paths, nil
 }
 
-// ADR-0004's list. Methods of Client are the operations themselves, so they stay in the adapter
-// file however the value reached the caller.
+func (p listedPackage) listedImportPath(sourceImport string) string {
+	return cmp.Or(p.ImportMap[sourceImport], sourceImport)
+}
+
 func allowed(obj types.Object) bool {
 	switch obj := obj.(type) {
 	case *types.TypeName:

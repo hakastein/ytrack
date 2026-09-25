@@ -19,12 +19,9 @@ const (
 	secondFieldPath = metadataPath + "/customFields/180-2"
 )
 
-// Type of DEV as an enum and as a user field: the same name, addressed by the same id, holding another kind of
-// value, which is what the metadata left on disk by an earlier run can be wrong about.
 const (
 	typeAsAUser = `{"$type":"UserProjectCustomField","id":"180-1","field":{"$type":"CustomField","name":"Type",` +
 		`"localizedName":"Тип","fieldType":{"$type":"FieldType","valueType":"user","isMultiValue":false}}}`
-	// A user bundle holds both the groups it was built from, under values, and the users the field allows.
 	typeAsAUserAnswered = `{"$type":"UserProjectCustomField","field":{"$type":"CustomField","name":"Type",` +
 		`"localizedName":"Тип","fieldType":{"$type":"FieldType","valueType":"user","isMultiValue":false}},` +
 		`"canBeEmpty":false,"bundle":{"$type":"UserBundle","values":[],"aggregatedUsers":[{"$type":"User","login":"admin"}]}}`
@@ -62,15 +59,12 @@ bundle:
 `
 )
 
-// An instance whose project a scenario changes between two runs of ytrack: the metadata under fields and the
-// answer each id is given, so a field can be renamed, retyped or taken away while a cache of it sits on disk.
 type instance struct {
 	mu       sync.Mutex
 	metadata string
 	fields   map[string]string
 }
 
-// typeOnlyInstance is the project of every scenario before it changes: one enum field, addressed by 180-1.
 func typeOnlyInstance() *instance {
 	return &instance{
 		metadata: projectMetadata(projectField("180-1", "Type", "Тип")),
@@ -101,12 +95,10 @@ func (i *instance) handle(w http.ResponseWriter, r *http.Request) {
 	respondWith(http.StatusOK, held)(w, r)
 }
 
-// The runs of a cache scenario share a home directory: what one leaves there is what the next reads.
 func atHome(u *upstream, home string) []string {
 	return append(u.env(), "HOME="+home)
 }
 
-// aProject is one server over held and a home directory of its own.
 func aProject(t *testing.T, held *instance) (*upstream, string) {
 	t.Helper()
 	return serve(t, held.handle), t.TempDir()
@@ -124,8 +116,6 @@ func TestFieldShowTakesTheMetadataTheRunBeforeLeftOnDisk(t *testing.T) {
 	assert.Equal(t, []string{metadataPath, firstFieldPath, firstFieldPath}, server.sentPaths())
 }
 
-// A field added since the cache was written is a name the disk cannot resolve, and a name the disk cannot
-// resolve is a reason to read the metadata again rather than a refusal.
 func TestFieldShowReadsTheMetadataAgainForAFieldAddedSinceTheCacheWasWritten(t *testing.T) {
 	t.Parallel()
 	held := typeOnlyInstance()
@@ -142,8 +132,6 @@ func TestFieldShowReadsTheMetadataAgainForAFieldAddedSinceTheCacheWasWritten(t *
 	assert.Equal(t, []string{metadataPath, firstFieldPath, metadataPath, secondFieldPath}, server.sentPaths())
 }
 
-// A name no metadata holds is refused only over metadata that has just arrived, so the request the refusal
-// names is the one that read it.
 func TestFieldShowRefusesAnUnknownNameOnlyAfterReadingTheMetadataAgain(t *testing.T) {
 	t.Parallel()
 	server, home := aProject(t, typeOnlyInstance())
@@ -159,17 +147,14 @@ func TestFieldShowRefusesAnUnknownNameOnlyAfterReadingTheMetadataAgain(t *testin
 			{"unknown", []any{unknownEntry("Нет", "Type")}},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{metadataPath, firstFieldPath, metadataPath}, server.sentPaths())
 }
 
-// The metadata reaches the disk as it arrived, before a name is resolved against it and before an id is held to
-// its form, so a run that refused still spares the next one the request that read it.
-func TestFieldShowLeavesTheCacheWarmAfterARefusal(t *testing.T) {
+func TestFieldShowLeavesTheCacheWarmAfterAFault(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		// refused is the name the first run is given, and metadata the project both runs are answered from.
+		name     string
 		refused  string
 		metadata string
 	}{
@@ -215,13 +200,11 @@ func TestFieldShowRefusesAnIdItCannotAddressOverTheCacheAsWell(t *testing.T) {
 			{"upstream_body", metadata},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, first))
-	assert.Equal(t, want, requireRefusal(t, second))
+	assert.Equal(t, want, requireFault(t, first))
+	assert.Equal(t, want, requireFault(t, second))
 	assert.Equal(t, []string{metadataPath, metadataPath}, server.sentPaths())
 }
 
-// The id the cache holds addresses nothing once the field is gone, and a 404 over a cached id says the cache is
-// behind rather than that the caller named something the project never had.
 func TestFieldShowRefusesAFieldRemovedSinceTheCacheWasWrittenByName(t *testing.T) {
 	t.Parallel()
 	held := &instance{
@@ -245,12 +228,10 @@ func TestFieldShowRefusesAFieldRemovedSinceTheCacheWasWrittenByName(t *testing.T
 			{"unknown", []any{unknownEntry("Type", "Priority")}},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{metadataPath, firstFieldPath, firstFieldPath, metadataPath}, server.sentPaths())
 }
 
-// What the default asks for is a function of what the field holds, so a field that changed type was asked the
-// wrong question; the answer says so, and the right question is asked over metadata read again.
 func TestFieldShowAsksAgainForAFieldThatChangedTypeSinceTheCacheWasWritten(t *testing.T) {
 	t.Parallel()
 	held := typeOnlyInstance()
@@ -266,8 +247,6 @@ func TestFieldShowAsksAgainForAFieldThatChangedTypeSinceTheCacheWasWritten(t *te
 		metadataSent, fieldShowDefault(bundleUsers)}, server.sentFields())
 }
 
-// A project that calls a field nothing of its own sends null, which is not the empty string: a cache that blurred
-// the two would disagree with the next answer and send the run that reads it back for the metadata again.
 func TestFieldShowTakesAFieldWithNoTranslationOffTheDiskAsItWas(t *testing.T) {
 	t.Parallel()
 	server, home := aProject(t, &instance{
@@ -283,8 +262,6 @@ func TestFieldShowTakesAFieldWithNoTranslationOffTheDiskAsItWas(t *testing.T) {
 	assert.Equal(t, []string{metadataPath, firstFieldPath, firstFieldPath}, server.sentPaths())
 }
 
-// A field name belongs to a project, so the metadata of two projects is two records under one home directory
-// rather than one that the second run writes over.
 func TestFieldShowKeepsTheMetadataOfOneProjectOutOfAnothers(t *testing.T) {
 	t.Parallel()
 	type project struct {
@@ -320,16 +297,12 @@ func TestFieldShowKeepsTheMetadataOfOneProjectOutOfAnothers(t *testing.T) {
 		"/api/admin/projects/DOCS/customFields/181-1", firstFieldPath}, server.sentPaths())
 }
 
-// Type of DEV once the project made it a group field: the same name at the same id, holding a kind of value
-// whose fields carry no bundle at all.
 const (
 	typeAsAGroup = `{"$type":"GroupProjectCustomField","id":"180-1","field":{"$type":"CustomField","name":"Type",` +
 		`"localizedName":"Тип","fieldType":{"$type":"FieldType","valueType":"group","isMultiValue":false}}}`
 	typeAsAGroupAnswered = `{"$type":"GroupProjectCustomField","field":{"$type":"CustomField","name":"Type",` +
 		`"localizedName":"Тип","fieldType":{"$type":"FieldType","valueType":"group","isMultiValue":false}},` +
 		`"canBeEmpty":false}`
-	// The answer to a request built from the cache: asked for a bundle, the server names a type that declares
-	// one and sends none.
 	typeWithoutTheBundle = `{"$type":"EnumProjectCustomField","field":{"$type":"CustomField","name":"Type",` +
 		`"localizedName":"Тип","fieldType":{"$type":"FieldType","valueType":"enum","isMultiValue":false}},` +
 		`"canBeEmpty":false}`
@@ -344,9 +317,6 @@ canBeEmpty: false
 `
 )
 
-// A key the type the server named declares and did not send is a lie, and a lie about the field a cached id
-// addresses says the question was built from metadata that is behind — so it is asked again over metadata read
-// anew rather than handed to the caller.
 func TestFieldShowAsksAgainWhenTheResponseToACachedRequestIsInvalid(t *testing.T) {
 	t.Parallel()
 	held := typeOnlyInstance()
@@ -367,8 +337,6 @@ func TestFieldShowAsksAgainWhenTheResponseToACachedRequestIsInvalid(t *testing.T
 	assert.Equal(t, []string{metadataPath, firstFieldPath, firstFieldPath, metadataPath, firstFieldPath}, server.sentPaths())
 }
 
-// State of DEV once the project made it single-valued again: a row of the catalogue, unlike the multi-valued
-// state the cache is left holding.
 const (
 	stateOfOne = `{"$type":"StateProjectCustomField","id":"180-1","field":{"$type":"CustomField","name":"State",` +
 		`"localizedName":null,"fieldType":{"$type":"FieldType","valueType":"state","isMultiValue":false}}}`
@@ -401,13 +369,10 @@ func TestFieldShowReadsTheMetadataAgainForACachedTypeOutsideTheCatalogue(t *test
 	assert.Equal(t, []string{metadataPath, metadataPath, firstFieldPath}, server.sentPaths())
 }
 
-// Which fields of a project arrive and which values they allow are a function of the token, so what one
-// identity was told is nothing to answer another with.
 func TestFieldShowKeepsTheMetadataOfOneIdentityOutOfAnothers(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		// again is the environment of the second run, and reached the server that run is sent to.
+		name    string
 		again   func(first, second *upstream, home string) []string
 		reached func(first, second *upstream) *upstream
 	}{
@@ -442,8 +407,6 @@ func TestFieldShowKeepsTheMetadataOfOneIdentityOutOfAnothers(t *testing.T) {
 	}
 }
 
-// Where a relative HOME would name the cache depends on the directory ytrack was called in, which is no place
-// to keep an answer given to a token.
 func TestFieldShowKeepsNoCacheWithoutAnAbsoluteHome(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -469,7 +432,6 @@ func TestFieldShowKeepsNoCacheWithoutAnAbsoluteHome(t *testing.T) {
 	}
 }
 
-// The cache is an answer a token was given, so it goes where only its owner reads it and holds no token itself.
 func TestFieldShowWritesTheCacheUnderOneDirectoryOfItsOwn(t *testing.T) {
 	t.Parallel()
 	server, home := aProject(t, typeOnlyInstance())
@@ -509,8 +471,6 @@ func TestFieldShowWritesTheCacheUnderOneDirectoryOfItsOwn(t *testing.T) {
 	assert.Equal(t, directories[2], filepath.Dir(files[0]))
 }
 
-// A cache that cannot be written changes nothing about the answer, and there is no code for a refusal that
-// changes nothing: the command works, the next call reads the metadata again.
 func TestFieldShowSaysNothingOfACacheItCannotWrite(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -550,8 +510,6 @@ func TestFieldShowSaysNothingOfACacheItCannotWrite(t *testing.T) {
 	}
 }
 
-// What the cache holds is its own business, and a file that does not read back as it is a miss: the shape is
-// never guessed at, whatever is left of the file.
 func TestFieldShowReadsTheMetadataAgainWhenTheCacheDoesNotReadBack(t *testing.T) {
 	t.Parallel()
 	server, home := aProject(t, typeOnlyInstance())

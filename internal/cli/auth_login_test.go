@@ -25,34 +25,28 @@ import (
 	"github.com/hakastein/ytrack/internal/cli"
 )
 
-// The token a human types in these scenarios, and the user the server says it belongs to.
 const (
 	typedToken = "perm-ytrack-test-typed"
 	typedUser  = "from.typed"
 )
 
-// What the dialogue puts on the terminal.
 const (
 	addressPrompt = "YouTrack URL: "
 	tokenPrompt   = "Token: "
 )
 
-// transcript is what the terminal showed — the prompts and whatever the line discipline echoed back — and whether
-// the command left the echo on.
 type transcript struct {
 	shown  string
 	echoes bool
 }
 
-// keyboard is the master side of the pseudoterminal: the test types on it while the command reads and prompts on
-// the other side, and shown is everything drawn off it so far.
+const ctrlD = 0x04
+
 type keyboard struct {
-	master *os.File
-	slave  *os.File
-	// (*os.File).Fd puts the file back into blocking mode, so the descriptor is taken once and made
-	// non-blocking after that, never through Fd again.
-	descriptor int
-	shown      []byte
+	master        *os.File
+	slave         *os.File
+	nonBlockingFD int
+	shown         []byte
 }
 
 func (k *keyboard) typeLine(t *testing.T, line string) {
@@ -61,15 +55,12 @@ func (k *keyboard) typeLine(t *testing.T, line string) {
 	require.NoError(t, err)
 }
 
-// An EOT is how a terminal in canonical mode ends the input of the read waiting on it.
 func (k *keyboard) typeTheEndOfInput(t *testing.T) {
 	t.Helper()
-	_, err := k.master.Write([]byte{0x04})
+	_, err := k.master.Write([]byte{ctrlD})
 	require.NoError(t, err)
 }
 
-// The prompt for the token is written while the echo is still on, so a test that typed on seeing it would have the
-// token echoed back; the termios of the terminal is what says the echo has gone.
 func (k *keyboard) waitForTheEchoToGoOff(t *testing.T) {
 	t.Helper()
 	require.Eventually(t, func() bool { return !k.echoes() }, 5*time.Second, time.Millisecond)
@@ -80,13 +71,10 @@ func (k *keyboard) echoes() bool {
 	return err == nil && termios.Lflag&unix.ECHO != 0
 }
 
-// draw takes what the terminal has to show at this moment. A blocking read of a terminal nobody will write to
-// again is woken by neither a deadline nor a close, so the reading is done out of blocking mode, where having
-// nothing more to show is EAGAIN.
-func (k *keyboard) draw() error {
+func (k *keyboard) drainWithoutBlocking() error {
 	held := make([]byte, 4096)
 	for {
-		n, err := unix.Read(k.descriptor, held)
+		n, err := unix.Read(k.nonBlockingFD, held)
 		if n <= 0 {
 			return err
 		}
@@ -94,26 +82,20 @@ func (k *keyboard) draw() error {
 	}
 }
 
-// waitForThePrompt holds the typist back until the command has asked, so that what the terminal showed reads in
-// the order a human saw it rather than in the order two goroutines happened to reach it.
 func (k *keyboard) waitForThePrompt(t *testing.T, words string) {
 	t.Helper()
 	require.Eventually(t, func() bool {
-		_ = k.draw()
+		_ = k.drainWithoutBlocking()
 		return strings.Contains(string(k.shown), words)
 	}, 5*time.Second, time.Millisecond)
 }
 
-// everythingShown is the whole of what the terminal showed: the command wrote its prompts and the line discipline
-// echoed what was typed, all of it before the command returned, and nothing else reads this side.
 func (k *keyboard) everythingShown(t *testing.T) string {
 	t.Helper()
-	require.ErrorIs(t, k.draw(), unix.EAGAIN)
+	require.ErrorIs(t, k.drainWithoutBlocking(), unix.EAGAIN)
 	return string(k.shown)
 }
 
-// runOnATerminal runs argv with a pseudoterminal for stdin and lets answering type on it while the command is in the
-// middle of the dialogue.
 func runOnATerminal(t *testing.T, env []string, answering func(t *testing.T, k *keyboard), argv ...string) (outcome, transcript) {
 	t.Helper()
 	return runOnATerminalUntil(t, t.Context(), env, answering, argv...)
@@ -127,8 +109,8 @@ func runOnATerminalUntil(t *testing.T, ctx context.Context, env []string, answer
 		_ = slave.Close()
 		_ = master.Close()
 	})
-	typist := &keyboard{master: master, slave: slave, descriptor: int(master.Fd())}
-	require.NoError(t, unix.SetNonblock(typist.descriptor, true))
+	typist := &keyboard{master: master, slave: slave, nonBlockingFD: int(master.Fd())}
+	require.NoError(t, unix.SetNonblock(typist.nonBlockingFD, true))
 
 	var stdout, stderr bytes.Buffer
 	finished := make(chan int, 1)
@@ -141,7 +123,6 @@ func runOnATerminalUntil(t *testing.T, ctx context.Context, env []string, answer
 	return outcome{code: code, stdout: stdout.String(), stderr: stderr.String()}, said
 }
 
-// typeAnswers waits for each prompt and types after it, the token once the echo has gone off.
 func typeAnswers(address, secret string) func(t *testing.T, k *keyboard) {
 	return func(t *testing.T, k *keyboard) {
 		t.Helper()
@@ -154,15 +135,12 @@ func typeAnswers(address, secret string) func(t *testing.T, k *keyboard) {
 
 func sayingNothing(*testing.T, *keyboard) {}
 
-// A token typed on a terminal has one more place it could show up than a token found in a variable or a file: the
-// echo of the terminal it was typed on.
 func assertTheTokenWasNotShown(t *testing.T, got outcome, said transcript, secret string) {
 	t.Helper()
 	assertNoToken(t, got, secret)
 	assert.NotContains(t, said.shown, secret)
 }
 
-// loginDocument is what auth login prints: where the login applies and whose token the server said it is.
 func loginDocument(address, scope, login, fullName string) string {
 	return fmt.Sprintf("url: %q\nscope: %q\nuser:\n  login: %q\n  fullName: %q\n", address, scope, login, fullName)
 }
@@ -179,8 +157,6 @@ func TestAuthLoginKeepsTheLoginTypedForTheDirectoryItWasCalledIn(t *testing.T) {
 
 	assert.Equal(t, outcome{stdout: loginDocument(server.url, scope, typedUser, typedUser)}, got)
 	assertTheTokenWasNotShown(t, got, said, typedToken)
-	// The whole of what the terminal showed: the two prompts, the echo of the address, which is typed in the open,
-	// and the line the dialogue ends itself, the return key after the token having gone unechoed with it.
 	assert.Equal(t, addressPrompt+server.url+"\r\n"+tokenPrompt+"\r\n", said.shown)
 	assert.True(t, said.echoes, "the terminal was left without its echo")
 	assert.Equal(t, savedFile(scopedRecord(scope, server.url, typedToken)), fileBytes(t, path))
@@ -188,10 +164,8 @@ func TestAuthLoginKeepsTheLoginTypedForTheDirectoryItWasCalledIn(t *testing.T) {
 	assert.Equal(t, fs.FileMode(0o700), mode(t, filepath.Dir(path)))
 	assert.Equal(t, []string{".ytrack"}, entries(t, home))
 	assert.Equal(t, []string{"auth.json"}, entries(t, filepath.Dir(path)))
-	// Nothing of ytrack's is kept in the project a caller works in.
 	assert.Equal(t, before, entries(t, stated))
 
-	// The login just kept is the one every other command finds here, with no environment to name it.
 	afterwards := runWith(t, env, "auth", "status")
 
 	want := status(server.url, "settings", typedUser, typedUser)
@@ -206,8 +180,6 @@ func mode(t *testing.T, path string) fs.FileMode {
 	return held.Mode().Perm()
 }
 
-// A login made for everywhere is the one a caller wants for the instance they work with outside their projects, and
-// it leaves the logins of the directories alone.
 func TestAuthLoginGlobalKeepsTheLoginForEverywhere(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
@@ -223,8 +195,6 @@ func TestAuthLoginGlobalKeepsTheLoginForEverywhere(t *testing.T) {
 	assert.Equal(t, savedFile(unscopedRecord(server.url, typedToken), held), fileBytes(t, path))
 }
 
-// Logging in for everywhere again is what a rotated token calls for, and a second record without a scope would
-// make the whole file unreadable for every command until a human took one of them out.
 func TestAuthLoginGlobalReplacesTheSavedGlobalLogin(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
@@ -240,8 +210,6 @@ func TestAuthLoginGlobalReplacesTheSavedGlobalLogin(t *testing.T) {
 	assert.Equal(t, savedFile(unscopedRecord(server.url, typedToken), held), fileBytes(t, path))
 }
 
-// An instance behind a proxy that asks for a password has that password in its address, and a login run from a
-// pipeline puts what it prints into the job's log.
 func TestAuthLoginPrintsTheAddressWithoutItsPassword(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
@@ -257,7 +225,6 @@ func TestAuthLoginPrintsTheAddressWithoutItsPassword(t *testing.T) {
 	assert.Equal(t, outcome{stdout: loginDocument(printed, scope, typedUser, typedUser)}, got)
 	assert.NotContains(t, got.stdout, "secret")
 	assertTheTokenWasNotShown(t, got, said, typedToken)
-	// The record keeps the address as it was typed: without the password nothing of this would get past the proxy.
 	assert.Equal(t, savedFile(scopedRecord(scope, behind.String(), typedToken)), fileBytes(t, path))
 }
 
@@ -277,8 +244,6 @@ func TestAuthLoginReplacesTheLoginSavedForTheSameDirectory(t *testing.T) {
 	assert.Equal(t, savedFile(everywhere, scopedRecord(scope, server.url, typedToken)), fileBytes(t, path))
 }
 
-// The server is asked whose token it is before anything is written, so a token it refuses is refused here rather
-// than by every command that would have used it afterwards.
 func TestAuthLoginKeepsNoLoginTheServerRefuses(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
@@ -297,8 +262,7 @@ func TestAuthLoginKeepsNoLoginTheServerRefuses(t *testing.T) {
 			{"upstream_message", "Invalid token"},
 		},
 	}
-	// The token was typed on this run rather than found somewhere, so the refusal has no origin to name.
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assertTheTokenWasNotShown(t, got, said, typedToken)
 	assert.Equal(t, held, fileBytes(t, path))
 }
@@ -314,7 +278,7 @@ func TestAuthLoginKeepsNoLoginWhenNothingAnswersAtTheAddress(t *testing.T) {
 
 	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(closed, typedToken), "auth", "login")
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "upstream_failed", found.code)
 	assert.Equal(t, []detail{{"request", meRequest(closed)}}, found.details)
 	assertTheTokenWasNotShown(t, got, said, typedToken)
@@ -345,7 +309,7 @@ func TestAuthLoginRefusesAnAddressItCannotUseBeforeAskingForTheToken(t *testing.
 				k.typeLine(t, tc.address)
 			}, "auth", "login")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Contains(t, said.shown, addressPrompt)
 			assert.NotContains(t, said.shown, tokenPrompt, "the token was asked for after the address was refused")
 			assert.NoFileExists(t, path)
@@ -354,7 +318,6 @@ func TestAuthLoginRefusesAnAddressItCannotUseBeforeAskingForTheToken(t *testing.
 	}
 }
 
-// A terminal at its end says as much as a refused address does: there is no address to log in with.
 func TestAuthLoginRefusesAnEndOfInputAtTheAddressPrompt(t *testing.T) {
 	t.Parallel()
 	stated, _ := here(t)
@@ -365,7 +328,7 @@ func TestAuthLoginRefusesAnEndOfInputAtTheAddressPrompt(t *testing.T) {
 		k.typeTheEndOfInput(t)
 	}, "auth", "login")
 
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 	assert.NotContains(t, said.shown, tokenPrompt)
 	assert.True(t, said.echoes)
 	assert.NoFileExists(t, path)
@@ -392,7 +355,7 @@ func TestAuthLoginRefusesATokenOfNothingAtAll(t *testing.T) {
 
 			got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(server.url, tc.typed), "auth", "login")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.True(t, said.echoes)
 			assert.Equal(t, held, fileBytes(t, path))
 			assert.Empty(t, server.requests())
@@ -400,8 +363,6 @@ func TestAuthLoginRefusesATokenOfNothingAtAll(t *testing.T) {
 	}
 }
 
-// A token pasted out of a page or a log brings whatever was copied with it, and the check that keeps a control
-// byte out of a header is the same one a token from a variable or a record goes through.
 func TestAuthLoginRefusesATokenItCannotSend(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
@@ -421,7 +382,7 @@ func TestAuthLoginRefusesATokenItCannotSend(t *testing.T) {
 
 			got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(server.url, tc.typed), "auth", "login")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assertTheTokenWasNotShown(t, got, said, tc.typed)
 			assert.True(t, said.echoes, "the terminal was left without its echo")
 			assert.Equal(t, held, fileBytes(t, path))
@@ -442,14 +403,12 @@ func TestAuthLoginUsesNoFileOfLoginRecordsItCannotRead(t *testing.T) {
 	}, "auth", "login")
 
 	want := faultDocument{code: "bad_usage", details: []detail{fileDetail(path)}}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.NotContains(t, said.shown, addressPrompt, "an address was asked for before the file that would hold it was read")
 	assert.Equal(t, held, fileBytes(t, path))
 	assert.Empty(t, server.requests())
 }
 
-// A token pasted into a terminal brings whatever whitespace was around it in the file it was copied from, and the
-// server answers 401 to a token with a space on it.
 func TestAuthLoginSendsTheTokenWithoutTheSpacesAroundIt(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
@@ -466,8 +425,6 @@ func TestAuthLoginSendsTheTokenWithoutTheSpacesAroundIt(t *testing.T) {
 	assert.Equal(t, "Bearer "+typedToken, requests[0].Header.Get("Authorization"))
 }
 
-// The read of the token returns for a line and for nothing else, so a context cancelled while it waits has to put
-// the echo back itself: a caller who interrupted auth login gets a terminal that still shows what they type.
 func TestAuthLoginGivesTheEchoBackWhenItIsStoppedAtTheTokenPrompt(t *testing.T) {
 	t.Parallel()
 	stated, _ := here(t)
@@ -482,15 +439,13 @@ func TestAuthLoginGivesTheEchoBackWhenItIsStoppedAtTheTokenPrompt(t *testing.T) 
 	}, "auth", "login")
 
 	want := faultDocument{code: "upstream_failed"}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.True(t, said.echoes, "the terminal was left without its echo")
 	assert.NoFileExists(t, path)
 	assert.Empty(t, entries(t, home))
 	assert.Empty(t, server.requests())
 }
 
-// Which login a call is about is settled before a word is asked for: a refusal afterwards would throw away a token
-// already typed.
 func TestAuthLoginAsksForNothingWithoutADirectoryToSaveTheLogin(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
@@ -517,7 +472,7 @@ func TestAuthLoginAsksForNothingWithoutADirectoryToSaveTheLogin(t *testing.T) {
 
 			got, said := runOnATerminal(t, tc.env(home, stale), sayingNothing, "auth", "login")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, said.shown, "the terminal was asked something before there was a place to keep the answer")
 			assertNoRecordedToken(t, got)
 			assert.Equal(t, held, fileBytes(t, path))

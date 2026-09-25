@@ -11,22 +11,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Where the phrases of the links of the instance are read, which is a request of its own before the journal.
 const linkTypesPath = "/api/issueLinkTypes"
 
-// A link type as the server sends one: both phrases and both translations, the last two written as JSON, since
-// a translation the instance keeps none of arrives as "" from one type and as null from the next.
-func sentLinkType(source, target, translatedSource, translatedTarget string) string {
-	return sentLinkTypeWith(strconv.Quote(source), strconv.Quote(target), translatedSource, translatedTarget)
+func sentLinkType(source, target, translatedSourceJSON, translatedTargetJSON string) string {
+	return sentLinkTypeWith(strconv.Quote(source), strconv.Quote(target), translatedSourceJSON, translatedTargetJSON)
 }
 
-// sentLinkTypeWith is sentLinkType with all four phrases written as JSON, for a scenario that sends one of a
-// shape no phrase can be read out of.
-func sentLinkTypeWith(source, target, translatedSource, translatedTarget string) string {
-	return `{"$type":"IssueLinkType","name":"Type","sourceToTarget":` + source +
-		`,"targetToSource":` + target +
-		`,"localizedSourceToTarget":` + translatedSource +
-		`,"localizedTargetToSource":` + translatedTarget + `}`
+func sentLinkTypeWith(sourceJSON, targetJSON, translatedSourceJSON, translatedTargetJSON string) string {
+	return `{"$type":"IssueLinkType","name":"Type","sourceToTarget":` + sourceJSON +
+		`,"targetToSource":` + targetJSON +
+		`,"localizedSourceToTarget":` + translatedSourceJSON +
+		`,"localizedTargetToSource":` + translatedTargetJSON + `}`
 }
 
 func devInstanceLinkTypes() string {
@@ -39,7 +34,6 @@ func devInstanceLinkTypes() string {
 	}, ",") + `]`
 }
 
-// linkTypesOf answers a request for the link types with answering and leaves every other request to handler.
 func linkTypesOf(answering, handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == linkTypesPath {
@@ -59,8 +53,6 @@ func linkingTypes(t *testing.T, types, handler http.HandlerFunc) *upstream {
 	return serve(t, linkTypesOf(types, handler))
 }
 
-// A record of a link as the server sends one: the end of the link type is named by the phrase alone, translated
-// and capitalized, and the issue at the other end stands under added.
 func sentLinkRecord(label string) string {
 	return sentActivity{
 		kind: "LinksActivityItem", category: "LinksCategory", timestamp: middle,
@@ -69,9 +61,6 @@ func sentLinkRecord(label string) string {
 	}.sent()
 }
 
-// A record of a link names the end of its link type in the language of the instance, and the phrase ytrack
-// prints is the untranslated one the link type keeps: the two are held together by the label alone, letter case
-// aside, and a type with no translation is written under the untranslated phrase itself.
 func TestActivityPrintsALinkByThePhraseOfItsType(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -92,9 +81,9 @@ func TestActivityPrintsALinkByThePhraseOfItsType(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.label, func(t *testing.T) {
 			t.Parallel()
-			server := journal(t, respondWith(http.StatusOK, `[`+sentLinkRecord(tc.label)+`]`))
+			server := activityServer(t, respondWith(http.StatusOK, `[`+sentLinkRecord(tc.label)+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "field")
+			got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "field")
 
 			assert.Equal(t, outcome{stdout: oneRecord(`field: "` + tc.want + `"`)}, got)
 			assert.Equal(t, []string{linkTypesPath, activitiesPath}, server.sentPaths())
@@ -102,8 +91,6 @@ func TestActivityPrintsALinkByThePhraseOfItsType(t *testing.T) {
 	}
 }
 
-// The label is the whole of what a record says about the link it stands for, so a label the types of the
-// instance do not settle leaves nothing to print: the phrase would have to be guessed either way.
 func TestActivityRefusesALinkThePhrasesOfTheInstanceDoNotResolve(t *testing.T) {
 	t.Parallel()
 	ambiguous := `[` + sentLinkType("relates to", "", `"связана с"`, `""`) + `,` +
@@ -111,11 +98,11 @@ func TestActivityRefusesALinkThePhrasesOfTheInstanceDoNotResolve(t *testing.T) {
 		sentLinkType("is required for", "depends on", `"обязательна для"`, `"зависит от"`) + `]`
 	t.Run("a link of a phrase no type of the instance goes by", func(t *testing.T) {
 		t.Parallel()
-		server := journal(t, respondWith(http.StatusOK, `[`+sentLinkRecord("Блокирует")+`]`))
+		server := activityServer(t, respondWith(http.StatusOK, `[`+sentLinkRecord("Блокирует")+`]`))
 
-		got := runWith(t, server.env(), "activity", "list", journalIssue)
+		got := runWith(t, server.env(), "activity", "list", activityIssue)
 
-		found := requireRefusal(t, got)
+		found := requireFault(t, got)
 		assert.Equal(t, "upstream_invalid", found.code)
 		assert.Empty(t, got.stdout)
 	})
@@ -123,16 +110,16 @@ func TestActivityRefusesALinkThePhrasesOfTheInstanceDoNotResolve(t *testing.T) {
 		t.Parallel()
 		server := linkingTypes(t, respondWith(http.StatusOK, ambiguous), respondWith(http.StatusOK, `[`+sentLinkRecord("Связана с")+`]`))
 
-		got := runWith(t, server.env(), "activity", "list", journalIssue)
+		got := runWith(t, server.env(), "activity", "list", activityIssue)
 
-		found := requireRefusal(t, got)
+		found := requireFault(t, got)
 		assert.Equal(t, "upstream_invalid", found.code)
 	})
 	t.Run("two types written alike and no record of either", func(t *testing.T) {
 		t.Parallel()
 		server := linkingTypes(t, respondWith(http.StatusOK, ambiguous), respondWith(http.StatusOK, `[`+sentLinkRecord("Зависит от")+`]`))
 
-		got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "field")
+		got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "field")
 
 		assert.Equal(t, outcome{stdout: oneRecord(`field: "depends on"`)}, got)
 	})
@@ -144,25 +131,22 @@ func TestActivityPrintsALinkOfATypeWrittenAlikeAtBothEnds(t *testing.T) {
 		sentLinkType("is required for", "depends on", `"обязательна для"`, `"зависит от"`) + `]`
 	server := linkingTypes(t, respondWith(http.StatusOK, symmetric), respondWith(http.StatusOK, `[`+sentLinkRecord("Связана с")+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "field")
+	got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "field")
 
 	assert.Equal(t, outcome{stdout: oneRecord(`field: "relates to"`)}, got)
 }
 
 func TestActivityRefusesALinkNamedByNoPhraseAtAll(t *testing.T) {
 	t.Parallel()
-	server := journal(t, respondWith(http.StatusOK, `[`+sentLinkRecord("")+`]`))
+	server := activityServer(t, respondWith(http.StatusOK, `[`+sentLinkRecord("")+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "field")
+	got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "field")
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "upstream_invalid", found.code)
 	assert.Empty(t, got.stdout)
 }
 
-// The catalogue of phrases is held to its own shape before any record is read by it: a phrase that is neither
-// text nor absent leaves the instance saying something other than the link types it was asked for, and a journal
-// printed past that would name links by labels nobody asked about.
 func TestActivityRefusesACatalogueOfLinkTypesOfAShapeItCannotRead(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -184,19 +168,16 @@ func TestActivityRefusesACatalogueOfLinkTypesOfAShapeItCannotRead(t *testing.T) 
 			server := linkingTypes(t, respondWith(http.StatusOK, `[`+tc.kind+`]`),
 				respondWith(http.StatusOK, `[`+sentLinkRecord("Зависит от")+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", journalIssue)
+			got := runWith(t, server.env(), "activity", "list", activityIssue)
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Equal(t, 0, sentTo(server, activitiesPath))
 		})
 	}
 }
 
-// The link types are read where a record of a link may be printed by them and nowhere else: how many requests a
-// journal makes follows what was asked of it, and a caller who asks for neither the field nor the links of the
-// journal pays for neither.
-func TestActivityReadsTheLinkTypesOnlyForAJournalThatPrintsALink(t *testing.T) {
+func TestActivityReadsTheLinkTypesOnlyForActivitiesThatPrintALink(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
@@ -204,9 +185,9 @@ func TestActivityReadsTheLinkTypesOnlyForAJournalThatPrintsALink(t *testing.T) {
 		sent  int
 	}{
 		{name: "the default, which prints the field of every category", sent: 1},
-		{name: "a journal that prints no field", flags: []string{"--fields", "timestamp,added"}, sent: 0},
+		{name: "activities that print no field", flags: []string{"--fields", "timestamp,added"}, sent: 0},
 		{
-			name:  "a journal of a category that is no link",
+			name:  "activities of a category that is no link",
 			flags: []string{"--category", "CommentsCategory"},
 			sent:  0,
 		},
@@ -217,9 +198,9 @@ func TestActivityReadsTheLinkTypesOnlyForAJournalThatPrintsALink(t *testing.T) {
 			comment := sentActivity{
 				kind: "CommentActivityItem", category: "CommentsCategory", timestamp: middle,
 			}.sent()
-			server := journal(t, respondWith(http.StatusOK, `[`+comment+`]`))
+			server := activityServer(t, respondWith(http.StatusOK, `[`+comment+`]`))
 
-			got := runWith(t, server.env(), slices.Concat([]string{"activity", "list", journalIssue}, tc.flags)...)
+			got := runWith(t, server.env(), slices.Concat([]string{"activity", "list", activityIssue}, tc.flags)...)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 			assert.Equal(t, tc.sent, sentTo(server, linkTypesPath))
@@ -228,41 +209,35 @@ func TestActivityReadsTheLinkTypesOnlyForAJournalThatPrintsALink(t *testing.T) {
 	}
 }
 
-// The phrases are read before the journal, so a catalogue that does not arrive stops the call where it is: a
-// journal printed without them would name every link by the label of an instance nobody asked about.
-func TestActivitySendsNoJournalWhereTheLinkTypesFail(t *testing.T) {
+func TestActivitySendsNoActivitiesWhereTheLinkTypesFail(t *testing.T) {
 	t.Parallel()
 	server := linkingTypes(t, respondWith(http.StatusInternalServerError, `{"error":"Internal Server Error"}`),
 		respondWith(http.StatusOK, `[`+sentLinkRecord("Зависит от")+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue)
+	got := runWith(t, server.env(), "activity", "list", activityIssue)
 
-	assert.Equal(t, "upstream_failed", requireRefusal(t, got).code)
+	assert.Equal(t, "upstream_failed", requireFault(t, got).code)
 	assert.Empty(t, got.stdout)
 	assert.Equal(t, 0, sentTo(server, activitiesPath))
 }
 
-// The catalogue is read with a count of its own, and a catalogue that fills it is one nothing says the end of:
-// a phrase past the thousandth would be missing and every record of it refused as a phrase of no type.
 func TestActivityRefusesACatalogueOfLinkTypesAsLongAsItAskedFor(t *testing.T) {
 	t.Parallel()
-	types := make([]string, 0, 1000)
-	for at := range 1000 {
+	const linkTypesAskedFor = 1000
+	types := make([]string, 0, linkTypesAskedFor)
+	for at := range linkTypesAskedFor {
 		types = append(types, sentLinkType("goes with "+strconv.Itoa(at), "", `""`, `""`))
 	}
 	server := linkingTypes(t, respondWith(http.StatusOK, `[`+strings.Join(types, ",")+`]`),
 		respondWith(http.StatusOK, `[`+sentLinkRecord("Зависит от")+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue)
+	got := runWith(t, server.env(), "activity", "list", activityIssue)
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "upstream_invalid", found.code)
 	assert.Equal(t, 0, sentTo(server, activitiesPath))
 }
 
-// What a change of a custom field was of is the field the project keeps, named as the project named it: the
-// label on the record is that name translated, and a category that stands for no one field of the issue prints
-// nothing at all however the server fills its filter in.
 func TestActivityPrintsTheFieldOfEveryOtherCategoryByItsCategory(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -287,9 +262,9 @@ func TestActivityPrintsTheFieldOfEveryOtherCategoryByItsCategory(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := journal(t, respondWith(http.StatusOK, `[`+tc.activity+`]`))
+			server := activityServer(t, respondWith(http.StatusOK, `[`+tc.activity+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "field")
+			got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "field")
 
 			assert.Equal(t, outcome{stdout: oneRecord("field: " + tc.want)}, got)
 			assert.NotContains(t, got.stdout, "Состояние")
@@ -297,19 +272,17 @@ func TestActivityPrintsTheFieldOfEveryOtherCategoryByItsCategory(t *testing.T) {
 	}
 }
 
-// A change of a custom field that names no field is the server saying something other than the journal it was
-// asked for: the name the field prints is kept by the project and nowhere in the record itself.
 func TestActivityRefusesAChangeOfACustomFieldThatNamesNoField(t *testing.T) {
 	t.Parallel()
 	activity := sentActivity{
 		kind: "CustomFieldActivityItem", category: "CustomFieldCategory", timestamp: middle,
 		field: `{"$type":"CustomFilterField","name":"Состояние"}`,
 	}.sent()
-	server := journal(t, respondWith(http.StatusOK, `[`+activity+`]`))
+	server := activityServer(t, respondWith(http.StatusOK, `[`+activity+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "field")
+	got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "field")
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "upstream_invalid", found.code)
 }
 
@@ -335,26 +308,26 @@ func TestActivityRefusesAFieldOfARecordOfALinkTheRowDoesNotReferTo(t *testing.T)
 				kind: "LinksActivityItem", category: "LinksCategory", timestamp: middle,
 				field: tc.field, added: sentLinkedIssue,
 			}.sent()
-			server := journal(t, respondWith(http.StatusOK, `[`+activity+`]`))
+			server := activityServer(t, respondWith(http.StatusOK, `[`+activity+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "field")
+			got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "field")
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Empty(t, got.stdout)
 		})
 	}
 }
 
-func TestActivityNamesAFilterOfTheWrongSubtypeWhateverTheJournalPrints(t *testing.T) {
+func TestActivityNamesAFilterOfTheWrongSubtypeWhateverTheActivitiesPrint(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name   string
 		fields string
 	}{
-		{name: "a journal that prints the field alone", fields: "timestamp,field"},
-		{name: "a journal that prints the values beside it", fields: "timestamp,field,added"},
-		{name: "a journal that prints the values alone", fields: "timestamp,added"},
+		{name: "activities that print the field alone", fields: "timestamp,field"},
+		{name: "activities that print the values beside it", fields: "timestamp,field,added"},
+		{name: "activities that print the values alone", fields: "timestamp,added"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -365,11 +338,11 @@ func TestActivityNamesAFilterOfTheWrongSubtypeWhateverTheJournalPrints(t *testin
 					`"name":"State","fieldType":{"$type":"FieldType","valueType":"state"}}}`,
 				added: sentStateValue,
 			}.sent()
-			server := journal(t, respondWith(http.StatusOK, `[`+activity+`]`))
+			server := activityServer(t, respondWith(http.StatusOK, `[`+activity+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", tc.fields)
+			got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", tc.fields)
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
 		})
 	}

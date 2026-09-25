@@ -1,11 +1,3 @@
-/**
- * Сидирование dev-инстанса: проект DEV с кастом-полями всех типов каталога
- * и DOCS с выключенным учётом времени.
- *
- * Чистый YouTrack — это пустота, а контрактным тестам нужен полигон, на котором
- * исполняются обе ветки выбора `$type` и все двадцать строк таблицы типов.
- */
-
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -29,7 +21,6 @@ const MEMBER_TOKEN_FILE = join(dirname(TOKEN_FILE), "member-token");
 type DevInstanceProject = { key: string; name: string; fields: Field[]; order: string[]; workflows: string[] };
 const DEV_PROJECT: DevInstanceProject = {
   key: "DEV", name: "DEVELOPMENT", fields: FIELDS, order: FIELD_ORDER,
-  // Каскад владельца `Subsystem` в `Assignee` и голос за `+1` в комментарии исполняют воркфлоу, а не сервер
   workflows: ["Subsystem Assignee", "One Vote Comment"],
 };
 const DOCS_PROJECT: DevInstanceProject = {
@@ -43,24 +34,18 @@ const DEV_INSTANCE_USERS = [ADMIN_LOGIN, LIMITED.login, MEMBER.login];
 const VALUE_OWNER = ADMIN_LOGIN;
 const VALUE_OWNER_RULE = `владелец значения — только ${VALUE_OWNER}: поля привязываются раньше, чем заводятся ` +
   "остальные пользователи полигона";
-// Команду проекта YouTrack заводит сам, группой `<имя проекта> Team`
-const DEV_INSTANCE_GROUPS = [`${DEV_PROJECT.name} Team`, MEMBER.group];
-// Проект у Hub один, поэтому роль участника глобальная. В команду DEV REST добавляет только группу, а её
-// пользователи попадают в `Assignee`
+const DEV_TEAM_GROUP = `${DEV_PROJECT.name} Team`;
+const DEV_INSTANCE_GROUPS = [DEV_TEAM_GROUP, MEMBER.group];
 const HUB_PROJECT = "GLBL";
 const READ_ISSUE = "JetBrains.YouTrack.READ_ISSUE";
-// На их отсутствии стоят 403 участнику на правку чужого комментария и на чтение групп
 const WITHHELD_PERMISSIONS = ["JetBrains.YouTrack.UPDATE_NOT_OWN_COMMENT", "jetbrains.jetpass.group-read"];
 const POLL_INTERVAL = 500;
 const POLL_TIMEOUT = 60_000;
 const SUBSYSTEM_CASCADE = { source: "Subsystem", target: "Assignee" };
-// Воркфлоу на инстансе больше 42, а без `$top` сервер отдаёт только первые 42
 const WORKFLOW_CATALOG = "/api/admin/workflows?$top=-1";
-// Выражение из правила One Vote Comment: им он режет текст комментария на слова
-const VOTE_WORD_SEPARATOR = /\s|,|;|\.|\?|!|\\/;
+const ONE_VOTE_COMMENT_WORD_SEPARATOR = /\s|,|;|\.|\?|!|\\/;
 const VOTE_WORD = "+1";
 
-// Тип значения он же путь к бандлам: /api/admin/customFieldSettings/bundles/<тип>; у `null` бандла со значениями нет
 const BUNDLE_TYPE: Record<ValueType, string | null> = {
   enum: "EnumBundle",
   state: "StateBundle",
@@ -118,7 +103,6 @@ const ISSUE_FIELD_TYPE: Record<TypeId, string> = {
   period: "PeriodIssueCustomField",
 };
 
-// Ключ, под которым значение пишется в тело и приходит в ответе; дата, число и строка идут без обёртки
 const VALUE_KEY: Record<ValueType, string | null> = {
   enum: "name", state: "name", version: "name", build: "name", ownedField: "name", group: "name",
   user: "login", text: "text", period: "minutes",
@@ -127,7 +111,6 @@ const VALUE_KEY: Record<ValueType, string | null> = {
 
 const isString = (value: unknown): boolean => typeof value === "string";
 
-// Вид значения поля без бандла, как его описывает `FieldValue`; значения бандлов, логины и группы сверяет `value_unlisted`
 const VALUE_KIND: Record<ValueType, { kind: string; fits: (value: unknown) => boolean } | null> = {
   enum: null, state: null, version: null, build: null, ownedField: null, user: null, group: null,
   date: { kind: "момент в мс", fits: Number.isInteger },
@@ -139,7 +122,6 @@ const VALUE_KIND: Record<ValueType, { kind: string; fits: (value: unknown) => bo
   period: { kind: "минуты", fits: Number.isInteger },
 };
 
-// Состав полигона печатается из этих записей, а не из дерева ответа: имя поля между записью и печатью сверяет tsc
 type TimeTracking = { enabled: boolean; estimate: string | null; timeSpent: string | null; workItemTypes: string[] };
 type CreatedIssue = { id: string; idReadable: string; description: string | null; values: FieldValue[] };
 type CreatedLink = { from: string; phrase: string; to: string };
@@ -155,7 +137,6 @@ type CreatedMember = { login: string; email: string; role: string; project: stri
 type CheckedLimited = { login: string; roles: string[]; projects: string[] };
 type IssueHistory = { issue: string; categories: Record<string, number> };
 type Vote = { issue: string; voter: string };
-/** Запись истории в сверяемых ключах: ключ, которого нет, не сверяется */
 type Activity = { category: string; author?: string; added?: unknown; removed?: unknown };
 type FieldOrder = { project: string; fields: string[] };
 
@@ -184,10 +165,9 @@ const isEmpty = (value: unknown): boolean => value === null || value === "" || (
 
 function cascadeOwner(project: DevInstanceProject, values: FieldValue[]): string | undefined {
   const source = values.find((v) => v.field === SUBSYSTEM_CASCADE.source);
-  return fieldOf(project, SUBSYSTEM_CASCADE.source)?.values?.find((v) => v.name === source?.value)?.owner;
+  return fieldOf(project, SUBSYSTEM_CASCADE.source)?.values?.find((v) => v.name === source?.value)?.ownerLogin;
 }
 
-/** Таблицы ссылаются друг на друга, а разрешаются ссылки посреди записей, когда проект уже заведён */
 function checkReferences(): void {
   const referenced: [table: string, issue: Issue][] = [
     ...LINKS.flatMap(([from, , to]): [string, Issue][] => [["LINKS", from], ["LINKS", to]]),
@@ -239,8 +219,8 @@ function checkFields(): void {
     fail("default_value_unlisted", `умолчания полей не из их бандлов: ${unlistedDefaults.join(", ")}`);
   }
   const foreignOwners = PROJECTS.flatMap((project) => project.fields.flatMap((f) => (f.values ?? [])
-    .filter((v) => v.owner !== undefined && v.owner !== VALUE_OWNER)
-    .map((v) => `${project.key} ${f.name} ${JSON.stringify(v.name)} ${JSON.stringify(v.owner)}`)));
+    .filter((v) => v.ownerLogin !== undefined && v.ownerLogin !== VALUE_OWNER)
+    .map((v) => `${project.key} ${f.name} ${JSON.stringify(v.name)} ${JSON.stringify(v.ownerLogin)}`)));
   if (foreignOwners.length) {
     fail("owner_unlisted", `владельцы значений не ${VALUE_OWNER}: ${foreignOwners.join(", ")}; ${VALUE_OWNER_RULE}`);
   }
@@ -263,7 +243,6 @@ function checkFields(): void {
 }
 
 function checkFieldOrder(): void {
-  // Раньше непокрытых: опечатка в имени оставляет без места и настоящее поле
   const unlisted = PROJECTS.flatMap((project) => project.order
     .filter((name) => !project.fields.some((f) => f.name === name))
     .map((name) => `${project.key} ${JSON.stringify(name)}`));
@@ -284,7 +263,6 @@ function checkFieldOrder(): void {
   }
 }
 
-/** Выпавшая из описания черта не ломает ни типов, ни сверки с ответом: описание сверяется с той же константой */
 function checkTextFeatures(): void {
   const missing = ISSUES.flatMap((issue) => (issue.textFeatures ?? [])
     .filter(([, pattern]) => !pattern.test(issue.description ?? ""))
@@ -304,7 +282,6 @@ function checkTimeZoneFixture(): void {
   if (MEMBER.timeZone === INSTANCE_TIME_ZONE) {
     fail("time_zone_fixture_inert", `пояс участника ${MEMBER.timeZone} совпадает с поясом инстанса`);
   }
-  // День записи времени сервер берёт в поясе профиля того, чей токен пишет, а не в поясе инстанса
   const { date, storedDate } = HISTORY.memberWorkItem;
   const member = calendarDay(date, MEMBER.timeZone);
   const instance = calendarDay(date, INSTANCE_TIME_ZONE);
@@ -325,7 +302,7 @@ function checkHistoryTable(): void {
   if (inert.length) {
     fail("history_edit_inert", `правки истории не меняют значения: ${inert.join(", ")}`);
   }
-  if (!HISTORY.memberComment.split(VOTE_WORD_SEPARATOR).includes(VOTE_WORD)) {
+  if (!HISTORY.memberComment.split(ONE_VOTE_COMMENT_WORD_SEPARATOR).includes(VOTE_WORD)) {
     fail("vote_token_missing",
       `в комментарии участника ${JSON.stringify(HISTORY.memberComment)} нет отдельного слова ${VOTE_WORD}`);
   }
@@ -391,7 +368,6 @@ function checkValueTable(): void {
   }
 }
 
-/** Таблица типов — двадцать строк, и полигон обязан исполнять каждую. */
 async function checkCoverage(api: Api): Promise<void> {
   const catalog = new Set<string>(
     (await api.get("/api/admin/customFieldSettings/types", "id")).map((t: Tree) => t.id),
@@ -408,7 +384,6 @@ async function checkCoverage(api: Api): Promise<void> {
   }
 }
 
-/** Резолв до проекта: пропавший предопределённый прототип валит сидирование раньше первой записи */
 async function resolvePrototypes(api: Api): Promise<Map<string, string>> {
   const catalog: Tree[] = await api.get("/api/admin/customFieldSettings/customFields", "id,name");
   const ids = new Map<string, string>();
@@ -450,7 +425,6 @@ async function resolveMemberRole(api: Api): Promise<HubRole> {
 
 async function checkInstanceTimeZone(api: Api): Promise<void> {
   const appearance: Tree = await api.get("/api/admin/globalSettings/appearanceSettings", "timeZone(id)");
-  // На поясе профиля admin стоит дата записи времени DEV-1
   const admin: Tree = await api.get("/api/users/me", "profiles(general(timezone(id)))");
   const diverged = divergence({ instance: INSTANCE_TIME_ZONE, admin: INSTANCE_TIME_ZONE }, {
     instance: appearance.timeZone?.id ?? null, admin: admin.profiles?.general?.timezone?.id ?? null,
@@ -460,10 +434,6 @@ async function checkInstanceTimeZone(api: Api): Promise<void> {
   }
 }
 
-/**
- * Мастер заводит пять типов работ, а недостающие до каталога полигона заводятся здесь. Уже заведённые
- * сверяются, а не заводятся заново: второй тип с тем же именем сервер отвергает.
- */
 async function ensureWorkItemTypes(api: Api): Promise<Map<string, Tree>> {
   const path = "/api/admin/timeTrackingSettings/workItemTypes";
   const fields = "id,name,autoAttached";
@@ -473,7 +443,6 @@ async function ensureWorkItemTypes(api: Api): Promise<Map<string, Tree>> {
   if (missing.length) {
     fail("work_item_type_missing", `инстанс не завёл типы работ: ${missing.join(", ")}`);
   }
-  // Раньше непокрытых: опечатка в имени типа мастера делает непокрытым настоящий тип
   const named = new Set(WORK_ITEM_TYPES.map((t) => t.name));
   const uncovered = [...catalog.keys()].filter((name) => !named.has(name)).sort()
     .map((name) => JSON.stringify(name));
@@ -498,10 +467,6 @@ async function ensureWorkItemTypes(api: Api): Promise<Map<string, Tree>> {
   return catalog;
 }
 
-/**
- * Уже заведённый тип сверяется, а не заводится заново: `make seed` после отказа на
- * старте застаёт его на инстансе, а второй тип с тем же именем сервер отвергает.
- */
 async function ensureLinkType(api: Api): Promise<void> {
   const fields = Object.keys(COPY_LINK).join(",");
   const catalog: Tree[] = await api.get("/api/issueLinkTypes", fields);
@@ -519,13 +484,11 @@ async function checkLinkCoverage(api: Api): Promise<number> {
   const touched = new Set<string>();
   const unknown: string[] = [];
   for (const [, phrase] of LINKS) {
-    // Пустой `targetToSource` у Relates фразой не считается
     const named = catalog.filter((t) =>
       phrase !== "" && (t.sourceToTarget === phrase || t.targetToSource === phrase));
     if (named.length === 1) touched.add(named[0].name);
     else unknown.push(JSON.stringify(phrase));
   }
-  // Раньше непокрытых: фраза с опечаткой оставляет незадетым и свой тип
   if (unknown.length) {
     fail("links_unknown", `фразы полигона не называют ровно один тип связи: ${unknown.join(", ")}`);
   }
@@ -544,9 +507,8 @@ async function createProject(api: Api, project: DevInstanceProject, leaderId: st
   const created = await api.post("/api/admin/projects", {
     name: project.name, shortName: project.key, leader: { id: leaderId },
   }, "id,customFields(id)");
-  // Проект приезжает с восемью полями по умолчанию: набор полигона задаёт только таблица
-  for (const attached of created.customFields as Tree[]) {
-    await api.delete(`/api/admin/projects/${created.id}/customFields/${attached.id}`);
+  for (const defaultField of created.customFields as Tree[]) {
+    await api.delete(`/api/admin/projects/${created.id}/customFields/${defaultField.id}`);
   }
   return created.id;
 }
@@ -567,24 +529,23 @@ async function makeBundle(
   const path = `/api/admin/customFieldSettings/bundles/${type}`;
   const bundle = await api.post(path, { name: `${field.name} (${project.key})` }, "id");
   const owners: ValueOwner[] = [];
-  for (const { owner, ...value } of field.values) {
-    if (owner === undefined) {
+  for (const { ownerLogin, ...value } of field.values) {
+    if (ownerLogin === undefined) {
       await api.post(`${path}/${bundle.id}/values`, value, "id");
       continue;
     }
     const described = `${project.key} ${field.name} ${JSON.stringify(value.name)}`;
-    const ownerId = ownerIds.get(owner)
-      ?? fail("owner_unlisted", `у владельца ${described} ${JSON.stringify(owner)} нет id; ${VALUE_OWNER_RULE}`);
+    const ownerId = ownerIds.get(ownerLogin)
+      ?? fail("owner_unlisted", `у владельца ${described} ${JSON.stringify(ownerLogin)} нет id; ${VALUE_OWNER_RULE}`);
     const created: Tree = await api.post(`${path}/${bundle.id}/values`, { ...value, owner: { id: ownerId } },
       "name,owner(login)");
     const got = { name: created.name, owner: created.owner?.login ?? null };
-    const diverged = divergence({ name: value.name, owner }, got);
+    const diverged = divergence({ name: value.name, owner: ownerLogin }, got);
     if (diverged.length) {
       fail("owner_mismatch", `значение ${described} расходится с записанным: ${diverged.join(", ")}`);
     }
     owners.push({ field: field.name, value: got.name, owner: got.owner });
   }
-  // Без `$type` привязка к проекту отвечает 500 java.lang.InstantiationException
   return [{ id: bundle.id, $type: bundleType }, owners];
 }
 
@@ -593,7 +554,6 @@ async function attach(
   ownerIds: ReadonlyMap<string, string>, field: Field,
 ): Promise<[attached: Tree, owners: ValueOwner[]]> {
   const type = valueType(field);
-  // Прототип у имени поля один на все проекты: заведённый здесь берут одноимённые поля следующих проектов
   const prototype = prototypes.get(field.name) ?? await createPrototype(api, field);
   prototypes.set(field.name, prototype);
   const body: Tree = {
@@ -605,8 +565,7 @@ async function attach(
   const made = await makeBundle(api, project, field, ownerIds);
   if (made) body.bundle = made[0];
   if (BUNDLE_TYPE[type] !== null) {
-    // Предопределённый прототип тянет значение по умолчанию из штатного
-    // бандла, и свой бандл отвергается тем, что его не содержит
+    // Без него предопределённый прототип тянет умолчание из штатного бандла, и свой бандл сервер отвергает
     body.defaultValues = [];
   }
   const attached: Tree = await api.post(`/api/admin/projects/${projectId}/customFields`, body,
@@ -637,7 +596,6 @@ async function applyDefault(
 ): Promise<FieldDefault> {
   const host = attached.get(field.name)!;
   const value = host.bundle.values.find((v: Tree) => v.name === field.defaultValue);
-  // Без `$type` у значения сервер отвечает 500 java.lang.InstantiationException
   const got: Tree = await api.post(`/api/admin/projects/${projectId}/customFields/${host.id}`,
     { defaultValues: [{ id: value.id, $type: value.$type }] }, "defaultValues(name)");
   const want = JSON.stringify([field.defaultValue]);
@@ -694,7 +652,7 @@ async function writeFieldOrder(
   api: Api, project: DevInstanceProject, projectId: string, attached: Map<string, Tree>,
 ): Promise<FieldOrder> {
   for (const [index, name] of project.order.entries()) {
-    // С единицы: привязанное поле приходит с ordinal 0, и запись нуля сверка по ответу не отличила бы от пропущенной
+    // С единицы: привязанное поле приходит с ordinal 0, и запись нуля по ответу не проверить
     const ordinal = index + 1;
     const got: Tree = await api.post(`/api/admin/projects/${projectId}/customFields/${attached.get(name)!.id}`,
       { ordinal }, "ordinal");
@@ -705,7 +663,6 @@ async function writeFieldOrder(
   return { project: project.key, fields: project.order };
 }
 
-/** Поля по умолчанию, удалённые из нового проекта, ломают использование до привязки полей из таблицы */
 async function checkWorkflowUsages(api: Api, project: DevInstanceProject): Promise<void> {
   const catalog: Tree[] = await api.get(WORKFLOW_CATALOG, "title,usages(project(shortName),isBroken)");
   const broken = project.workflows.filter((title) => !catalog.some((w) => w.title === title &&
@@ -716,10 +673,6 @@ async function checkWorkflowUsages(api: Api, project: DevInstanceProject): Promi
   }
 }
 
-/**
- * Проект, созданный через REST, получает весь глобальный каталог типов работ, и `autoAttached`
- * на это не влияет, поэтому набор пишется целиком — сервер принимает его и при выключенном учёте.
- */
 async function writeTimeTracking(
   api: Api, project: DevInstanceProject, projectId: string, attached: Map<string, Tree>, types: Map<string, Tree>,
   want: TimeTracking,
@@ -737,8 +690,6 @@ async function writeTimeTracking(
     estimate: settings.estimate?.field.name ?? null,
     timeSpent: settings.timeSpent?.field.name ?? null,
   });
-  // Порядок в теле сервер не хранит и отдаёт типы в порядке глобального каталога: с таблицей этот порядок
-  // сводит заведение недостающих типов в её порядке
   const got: string[] = (settings.workItemTypes ?? []).map((t: Tree) => t.name);
   if (JSON.stringify(got) !== JSON.stringify(want.workItemTypes)) {
     diverged.push(`типы работ ${JSON.stringify(got)} вместо ${JSON.stringify(want.workItemTypes)}`);
@@ -749,10 +700,6 @@ async function writeTimeTracking(
   return want;
 }
 
-/**
- * Атрибут работ глобален, как тип работ: заведённый раньше сверяется по значениям, а не заводится
- * заново, и к проекту привязывается уже он.
- */
 async function ensureWorkItemAttribute(api: Api): Promise<string> {
   const path = "/api/admin/timeTrackingSettings/attributePrototypes";
   const fields = "id,name,values(name)";
@@ -810,7 +757,7 @@ async function waitFor<T>(read: () => Promise<T>, ready: (got: T) => boolean, ti
   }
 }
 
-/** Пользователь Hub становится пользователем YouTrack по запросу своим токеном, а до того `/api/users/{login}` — 404 */
+/** Пользователь Hub становится пользователем YouTrack по первому запросу своим токеном */
 async function awaitMemberEntity(member: Api): Promise<string> {
   const want = { login: MEMBER.login, email: MEMBER.email };
   const me: Tree = await waitFor(() => member.get("/api/users/me", "id,login,email"),
@@ -826,7 +773,6 @@ async function joinMemberGroup(api: Api, hubId: string): Promise<void> {
     fail("member_group_mismatch", `в группу ${JSON.stringify(MEMBER.group)} записан ` +
       `${JSON.stringify(added.login)} вместо ${JSON.stringify(MEMBER.login)}`);
   }
-  // В `/api/groups` группа Hub появляется не сразу
   const listed = (groups: Tree[]): Tree[] => groups.filter((g) => g.name === MEMBER.group);
   await waitFor(() => api.get("/api/groups?$top=-1", "name,usersCount"),
     (groups) => listed(groups).some((g) => g.usersCount === 1),
@@ -842,7 +788,6 @@ async function grantMemberRole(api: Api, member: Api, hubId: string, role: HubRo
   if (diverged.length) {
     fail("member_role_mismatch", `роль участника расходится с записанной: ${diverged.join(", ")}`);
   }
-  // Роль доходит до токена участника через кэш прав секунд через пять, а до того DEV ему не виден
   const permissions = await waitFor(
     async (): Promise<string[]> => (await member.get("/api/permissions/cache?$top=-1", "permission(key)"))
       .map((cached: Tree) => cached.permission.key),
@@ -879,9 +824,7 @@ async function createMember(api: Api, role: HubRole): Promise<[created: CreatedM
   }, member];
 }
 
-/** Роль, выданная группе, в прямых ролях Hub не видна: её ловит список проектов, который видит токен dev.limited */
 async function checkLimited(api: Api, limited: Pick<Api, "get">, hubId: string): Promise<CheckedLimited> {
-  // Пустой список ролей Hub не отдаёт вовсе: ключа в ответе нет
   const user: Tree = await api.get(`/hub/api/rest/users/${hubId}`, "projectRoles(role(key),project(key))");
   const roles: string[] = (user.projectRoles ?? []).map((granted: Tree) => `${granted.role.key} ${granted.project.key}`);
   if (roles.length) {
@@ -903,8 +846,7 @@ function issueField(project: DevInstanceProject, { field, value }: FieldValue): 
   };
 }
 
-// Дата сверяется днём UTC: любой момент дня UTC сервер хранит полднем этого дня
-function identity(field: Field, value: FieldValue["value"] | null): FieldValue["value"] | null {
+function comparable(field: Field, value: FieldValue["value"] | null): FieldValue["value"] | null {
   if (typeof value !== "number") return value;
   switch (valueType(field)) {
     case "date":
@@ -916,7 +858,6 @@ function identity(field: Field, value: FieldValue["value"] | null): FieldValue["
   }
 }
 
-/** Сверенные значения задачи: записанные, умолчания незаписанных полей и `Assignee`, которого поставил каскад */
 function checkValues(project: DevInstanceProject, got: Tree, written: FieldValue[]): FieldValue[] {
   const received = new Map<string, any>((got.customFields as Tree[]).map((f) => [f.name, f.value]));
   const read = (name: string): FieldValue["value"] | null => {
@@ -924,12 +865,12 @@ function checkValues(project: DevInstanceProject, got: Tree, written: FieldValue
     const key = VALUE_KEY[valueType(field)];
     const unwrap = (item: Tree | null): any => key === null || item === null ? item : item[key];
     const value = received.get(name) ?? null;
-    return identity(field, Array.isArray(value) ? value.map(unwrap) : unwrap(value));
+    return comparable(field, Array.isArray(value) ? value.map(unwrap) : unwrap(value));
   };
   const differing = (values: FieldValue[]): string[] => values
     .filter(({ field, value }) => JSON.stringify(read(field)) !== JSON.stringify(value))
     .map(({ field, value }) => `${field} ${JSON.stringify(read(field))} вместо ${JSON.stringify(value)}`);
-  const values = written.map(({ field, value }) => ({ field, value: identity(fieldOf(project, field)!, value)! }));
+  const values = written.map(({ field, value }) => ({ field, value: comparable(fieldOf(project, field)!, value)! }));
   const diverged = differing(values);
   if (diverged.length) {
     fail("field_value_mismatch", `значения полей ${got.idReadable} расходятся с записанными: ${diverged.join(", ")}`);
@@ -974,10 +915,6 @@ async function createIssue(
   };
 }
 
-/**
- * Слот ищется по фразе среди слотов задачи, а не собирается из id типа и суффикса:
- * форма его идентификатора в спеке не описана.
- */
 async function createLinks(api: Api, issues: Map<Issue, CreatedIssue>): Promise<CreatedLink[]> {
   const created: CreatedLink[] = [];
   for (const [from, phrase, to] of LINKS) {
@@ -997,17 +934,15 @@ async function createLinks(api: Api, issues: Map<Issue, CreatedIssue>): Promise<
       fail("link_mismatch", `связь ${source.idReadable} ${JSON.stringify(phrase)} вернула ` +
         `${JSON.stringify(added.idReadable)} вместо ${target.idReadable}`);
     }
-    // Ответ — партнёр при любом слоте, поэтому направление сверяется по его обратной стороне и выводится из
-    // фразы, а не из выбранного слота: при `sourceToTarget` партнёр — цель, и источник у него во входящем слоте
-    const want = !type.directed ? "BOTH" : type.sourceToTarget === phrase ? "INWARD" : "OUTWARD";
-    const got = (added.links as Tree[])
+    const directionSeenFromTarget = !type.directed ? "BOTH" : type.sourceToTarget === phrase ? "INWARD" : "OUTWARD";
+    const sourceSlotsOnTarget = (added.links as Tree[])
       .filter((slot) => slot.linkType.name === type.name &&
         slot.issues.some((issue: Tree) => issue.idReadable === source.idReadable))
       .map((slot) => slot.direction);
-    if (got.length !== 1 || got[0] !== want) {
+    if (sourceSlotsOnTarget.length !== 1 || sourceSlotsOnTarget[0] !== directionSeenFromTarget) {
       fail("link_direction_mismatch", `связь ${source.idReadable} ${JSON.stringify(phrase)} ${target.idReadable}: ` +
-        `у ${target.idReadable} задача ${source.idReadable} в слотах ${type.name} ${JSON.stringify(got)} ` +
-        `вместо ${JSON.stringify([want])}`);
+        `у ${target.idReadable} задача ${source.idReadable} в слотах ${type.name} ${JSON.stringify(sourceSlotsOnTarget)} ` +
+        `вместо ${JSON.stringify([directionSeenFromTarget])}`);
     }
     created.push({ from: source.idReadable, phrase, to: added.idReadable });
   }
@@ -1094,7 +1029,6 @@ async function editHistory(api: Api, issue: CreatedIssue): Promise<[edited: Crea
   if (tag.name !== HISTORY.tag) {
     fail("tag_mismatch", `заведён тег ${JSON.stringify(tag.name)} вместо ${JSON.stringify(HISTORY.tag)}`);
   }
-  // Каждая правка — отдельный запрос: одно тело с заголовком и описанием даёт две записи истории с одним `timestamp`
   for (const edit of HISTORY.edits) {
     switch (edit.kind) {
       case "summary": {
@@ -1123,7 +1057,6 @@ async function editHistory(api: Api, issue: CreatedIssue): Promise<[edited: Crea
         break;
       }
       case "tag removed": {
-        // Снятие отвечает пустым телом. Сам тег не удаляется: удалённый, он уносит из истории свои записи `TagsCategory`
         await api.delete(`/api/issues/${issue.id}/tags/${tag.id}`);
         const left: string[] = (await api.get(`/api/issues/${issue.id}`, "tags(name)")).tags.map((t: Tree) => t.name);
         if (left.length) {
@@ -1159,7 +1092,6 @@ async function voteByComment(member: Api, issue: CreatedIssue): Promise<[comment
   return [comment, { issue: issue.idReadable, voter: MEMBER.login }];
 }
 
-// Тег в истории называет имя, пользователя — логин, хотя имя у него тоже есть, комментарий и запись времени — текст
 function named(value: unknown): unknown {
   return Array.isArray(value) ? value.map((item: Tree) => item.login ?? item.name ?? item.text) : value;
 }
@@ -1183,7 +1115,6 @@ function editActivities(edit: HistoryEdit): Activity[] {
 }
 
 async function checkHistory(api: Api, issue: CreatedIssue): Promise<IssueHistory> {
-  // Записи самого сидирования сверяются точным числом, а голос, который ставит воркфлоу, — включением
   const exact: Activity[] = [
     { category: "IssueCreatedCategory" },
     ...HISTORY.edits.flatMap(editActivities),
@@ -1274,7 +1205,6 @@ async function main(): Promise<void> {
     issues.set(issue, await createIssue(api, DEV_PROJECT, projectId, issue, writtenValues(issue)));
   }
   const links = await createLinks(api, issues);
-  // Полночь UTC в поясе admin — тот же день, и дата хранится как отправлена
   const workItem = await createWorkItem(api, ADMIN_LOGIN, issues.get(WORK_ITEM.issue)!, workItemTypes, WORK_ITEM,
     WORK_ITEM.date);
   const attachment = await createAttachment(api, issues);
@@ -1286,8 +1216,7 @@ async function main(): Promise<void> {
     HISTORY.memberWorkItem, HISTORY.memberWorkItem.storedDate);
   const history = await checkHistory(api, historyIssue);
   const devOrder = await writeFieldOrder(api, DEV_PROJECT, projectId, dev.attached);
-  // Флаги — последние записи своего проекта: с флагом сервер не создаёт отклонённую задачу без причины, а DEV-2
-  // заведена такой
+  // Обязательность под условием ставится последней: с ней сервер не создаёт отклонённую задачу без причины
   const devRequired = await requireWhenShown(api, DEV_PROJECT, projectId, dev.attached);
   const docsId = await createProject(api, DOCS_PROJECT, admin.id);
   const docs = await attachFields(api, DOCS_PROJECT, docsId, prototypes, ownerIds);
