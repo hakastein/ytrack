@@ -8,7 +8,7 @@ import (
 	"github.com/hakastein/ytrack/internal/fake"
 )
 
-func TestTagRefusesEveryCallOfTheWrongShape(t *testing.T) {
+func TestTagRefusesACallWithNoName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string

@@ -14,8 +14,6 @@ import (
 
 const tagFields = "name,owner(login),readSharingSettings(permittedGroups(name),permittedUsers(login))"
 
-const privateStarOfEveryUser = "Звезда"
-
 func tagsRequest(address, fields, top string) string {
 	return "GET " + address + "/api/tags?fields=" + fields + "&$top=" + top
 }
@@ -53,19 +51,19 @@ func TestTagListRefusesFlagsItCannotSend(t *testing.T) {
 
 func TestTagListPrintsTheRecordsAsTheyWereAskedFor(t *testing.T) {
 	t.Parallel()
-	const records = `[{"$type":"Tag","owner":{"$type":"User","login":"admin"},"name":"[bug] fix login",` +
+	const records = `[{"$type":"Tag","owner":{"$type":"User","login":"first"},"name":"[bug] fix login",` +
 		`"readSharingSettings":{"$type":"WatchFolderSharingSettings","permittedUsers":[],"permittedGroups":[]}},` +
-		`{"readSharingSettings":{"permittedGroups":[{"$type":"NestedGroup","name":"DEVELOPMENT Team"},` +
-		`{"$type":"RegisteredUsersGroup","name":"Зарегистрированные пользователи"}],` +
-		`"permittedUsers":[{"login":"dev.limited","$type":"User"}],"$type":"WatchFolderSharingSettings"},` +
-		`"name":"карта","$type":"Tag","owner":{"login":"dev.member","$type":"User"}}]`
+		`{"readSharingSettings":{"permittedGroups":[{"$type":"UserGroup","name":"First"},` +
+		`{"$type":"UserGroup","name":"Second"}],` +
+		`"permittedUsers":[{"login":"third","$type":"User"}],"$type":"WatchFolderSharingSettings"},` +
+		`"name":"Early","$type":"Tag","owner":{"login":"second","$type":"User"}}]`
 	server := fake.Serve(t, fake.JSON(http.StatusOK, records))
 
 	got := runWith(t, server.Env(), "tag", "list")
 
 	want := "total: 2\nreturned: 2\ntruncated: false\ntags:\n" +
-		`  - {name: "[bug] fix login", owner: {login: "admin"}, readSharingSettings: {permittedGroups: [], permittedUsers: []}}` + "\n" +
-		`  - {name: "карта", owner: {login: "dev.member"}, readSharingSettings: {permittedGroups: [{name: "DEVELOPMENT Team"}, {name: "Зарегистрированные пользователи"}], permittedUsers: [{login: "dev.limited"}]}}` + "\n"
+		`  - {name: "[bug] fix login", owner: {login: "first"}, readSharingSettings: {permittedGroups: [], permittedUsers: []}}` + "\n" +
+		`  - {name: "Early", owner: {login: "second"}, readSharingSettings: {permittedGroups: [{name: "First"}, {name: "Second"}], permittedUsers: [{login: "third"}]}}` + "\n"
 	assert.Equal(t, outcome{stdout: want}, got)
 	assert.Equal(t, []string{"/api/tags"}, server.Paths())
 	assert.Equal(t, []url.Values{{"fields": {tagFields}, "$top": {"50"}}}, server.Queries())
@@ -101,10 +99,10 @@ func TestTagListPrintsTheSameShapeForAnyNumberOfRecords(t *testing.T) {
 		},
 		{
 			name: "one",
-			body: `[{"$type":"Tag","name":"` + privateStarOfEveryUser + `","owner":{"$type":"User","login":"admin"},` +
+			body: `[{"$type":"Tag","name":"Early","owner":{"$type":"User","login":"admin"},` +
 				`"readSharingSettings":{"$type":"WatchFolderSharingSettings","permittedGroups":[],"permittedUsers":[]}}]`,
 			want: "total: 1\nreturned: 1\ntruncated: false\ntags:\n" +
-				`  - {name: "` + privateStarOfEveryUser + `", owner: {login: "admin"}, readSharingSettings: {permittedGroups: [], permittedUsers: []}}` + "\n",
+				`  - {name: "Early", owner: {login: "admin"}, readSharingSettings: {permittedGroups: [], permittedUsers: []}}` + "\n",
 		},
 	}
 	for _, tc := range tests {

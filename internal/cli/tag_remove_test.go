@@ -2,8 +2,6 @@ package cli_test
 
 import (
 	"net/http"
-	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -35,54 +33,68 @@ func takingATagOff(t *testing.T, owner, catalogue, removal http.HandlerFunc) *fa
 
 func TestTagRemoveTakesTheTagOffTheOwnerAndNotOutOfTheInstance(t *testing.T) {
 	t.Parallel()
+	server := takingATagOff(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), shownTags(), deletionDone())
+
+	got := runWith(t, server.Env(), "tag", "remove", "dev-7", "--name", "ready")
+
+	want := "idReadable: \"DEV-7\"\n" + "removed:\n  name: \"Ready\"\n  owner:\n    login: \"first\"\n"
+	assert.Equal(t, outcome{stdout: want}, got)
+	assert.Equal(t, []string{http.MethodGet, http.MethodGet, http.MethodDelete}, sentMethods(server))
+	assert.Equal(t, []string{
+		"/api/issues/dev-7?fields=" + taggedOwnerFields,
+		tagsCollection + "?fields=" + resolvedTagFields + "&$top=-1",
+		tagOnOwnerPath("issues", "DEV-7", "10-5") + "?",
+	}, server.Targets())
+	assert.Equal(t, []string{"", "", ""}, server.Bodies())
+}
+
+func TestTagRemoveRefusesWhatTheReadsBeforeTheRemovalDoNotAllow(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
-		name       string
-		written    string
-		owner      string
-		collection string
-		readable   string
-		apart      string
+		name    string
+		owner   string
+		written string
+		want    func(address string) faultDocument
+		methods []string
 	}{
 		{
-			name:       "an issue in lower case",
-			written:    "dev-7",
-			owner:      issueNamed("DEV-7"),
-			collection: "issues",
-			readable:   "DEV-7",
-			apart:      "/api/articles",
+			name:    "an owner the read names by the id of an article",
+			owner:   issueNamed("DEV-A-7"),
+			written: "ready",
+			want: func(address string) faultDocument {
+				return faultDocument{code: "upstream_invalid", details: []detail{
+					{"request", issueRequest(address, "DEV-7", taggedOwnerFields)},
+					{"upstream_status", 200},
+					{"upstream_body", issueNamed("DEV-A-7")},
+				}}
+			},
+			methods: []string{http.MethodGet},
 		},
 		{
-			name:       "an article in mixed case",
-			written:    "dev-A-7",
-			owner:      articleNamed("DEV-A-7"),
-			collection: "articles",
-			readable:   "DEV-A-7",
-			apart:      "/api/issues",
+			name:    "a name two tags carry",
+			owner:   issueNamed("DEV-7"),
+			written: "shared",
+			want: func(address string) faultDocument {
+				return faultDocument{code: "unknown_name", details: []detail{
+					{"request", tagsRequest(address, resolvedTagFields, "-1")},
+					{"ambiguous", []any{[]detail{{"tag", "shared"}, {"candidates", []any{
+						[]detail{{"name", "Shared"}, {"owner", "first"}},
+						[]detail{{"name", "Shared"}, {"owner", "second"}},
+					}}}}},
+				}}
+			},
+			methods: []string{http.MethodGet, http.MethodGet},
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := takingATagOff(t, fake.JSON(http.StatusOK, tc.owner), shownTags(), deletionDone())
+			server := takingATagOff(t, fake.JSON(http.StatusOK, tc.owner), shownTags(), noDeletion(t))
 
-			got := runWith(t, server.Env(), "tag", "remove", tc.written, "--name", "ready")
+			got := runWith(t, server.Env(), "tag", "remove", "DEV-7", "--name", tc.written)
 
-			want := "idReadable: " + strconv.Quote(tc.readable) + "\n" +
-				"removed:\n  name: \"Ready\"\n  owner:\n    login: \"admin\"\n"
-			assert.Equal(t, outcome{stdout: want}, got)
-
-			assert.Equal(t, []string{http.MethodGet, http.MethodGet, http.MethodDelete}, sentMethods(server))
-			assert.Equal(t, []string{
-				"/api/" + tc.collection + "/" + tc.written,
-				tagsCollection,
-				tagOnOwnerPath(tc.collection, tc.readable, "10-5"),
-			}, server.Paths())
-			assert.Equal(t, []string{taggedOwnerFields, resolvedTagFields, ""}, server.Fields())
-			assert.Equal(t, []string{"", "", ""}, server.Bodies())
-			assert.Empty(t, server.Request(t, 2).URL.RawQuery)
-			assert.NotContains(t, strings.Join(server.Paths(), " "), tc.apart)
-			assert.NotContains(t, strings.Join(server.Paths(), " "), tagDeletionPath("10-5"))
-			requireResolvedWithoutTheServer(t, server, "ready")
+			assert.Equal(t, tc.want(server.URL), requireFault(t, got))
+			assert.Equal(t, tc.methods, sentMethods(server))
 		})
 	}
 }

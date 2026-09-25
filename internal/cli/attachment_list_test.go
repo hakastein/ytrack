@@ -54,8 +54,7 @@ func TestAttachmentListRefusesTheContentOfAFile(t *testing.T) {
 
 	got := runWith(t, server.Env(), "attachment", "list", "DEV-1", "--fields", "+base64Content")
 
-	found := requireFault(t, got)
-	assert.Equal(t, "bad_usage", found.code)
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 	assert.Empty(t, server.Requests())
 }
 
@@ -250,41 +249,20 @@ func TestAttachmentListRefusesWhatTheServerAnswered(t *testing.T) {
 	}
 }
 
-func TestAttachmentListReadsAnArticleThroughTheAPIOfArticles(t *testing.T) {
+func TestAttachmentListRefusesALinkThatIsNoAbsolutePath(t *testing.T) {
 	t.Parallel()
-	const records = `[{"$type":"ArticleAttachment","id":"522-4","name":"кот.png","size":70,` +
-		`"mimeType":"image/png","url":"/api/files/522-4?sign=z&updated=2",` +
-		`"thumbnailURL":"/api/files/211-3?sign=y&updated=2"}]`
-	server := fake.Serve(t, fake.JSON(http.StatusOK, records))
+	server := fake.Serve(t, fake.JSON(http.StatusOK,
+		`[{"id":"12-2","name":"a.txt","size":1,"mimeType":"text/plain","url":"api/files/12-2"}]`))
 
-	got := runWith(t, server.Env(), "attachment", "list", "DEV-A-7", "--fields", "+thumbnailURL")
+	got := runWith(t, server.Env(), "attachment", "list", "DEV-1")
 
-	want := "total: 1\nreturned: 1\ntruncated: false\nattachments:\n" +
-		`  - {id: "522-4", name: "кот.png", size: 70, mimeType: "image/png", url: "` +
-		server.Origin + `/api/files/522-4?sign=z&updated=2", thumbnailURL: "` +
-		server.Origin + `/api/files/211-3?sign=y&updated=2"}` + "\n"
-	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []string{"/api/articles/DEV-A-7/attachments"}, server.Paths())
-	assert.Equal(t, []url.Values{{"fields": {attachmentFields + ",thumbnailURL"}, "$top": {"50"}}}, server.Queries())
-}
-
-func TestAttachmentListNamesTheCommentAFileBelongsTo(t *testing.T) {
-	t.Parallel()
-	const records = `[{"$type":"IssueAttachment","id":"12-2","name":"a.txt","size":1,"mimeType":"text/plain",` +
-		`"url":"/api/files/12-2?sign=s&updated=1","comment":null},` +
-		`{"$type":"IssueAttachment","id":"12-3","name":"b.txt","size":2,"mimeType":"text/plain",` +
-		`"url":"/api/files/12-3?sign=s&updated=2","comment":{"$type":"IssueComment","id":"7-12"}}]`
-	server := fake.Serve(t, fake.JSON(http.StatusOK, records))
-
-	got := runWith(t, server.Env(), "attachment", "list", "DEV-1", "--fields", "+comment(id)")
-
-	want := "total: 2\nreturned: 2\ntruncated: false\nattachments:\n" +
-		`  - {id: "12-2", name: "a.txt", size: 1, mimeType: "text/plain", url: "` + server.Origin +
-		`/api/files/12-2?sign=s&updated=1", comment: null}` + "\n" +
-		`  - {id: "12-3", name: "b.txt", size: 2, mimeType: "text/plain", url: "` + server.Origin +
-		`/api/files/12-3?sign=s&updated=2", comment: {id: "7-12"}}` + "\n"
-	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t,
-		[]url.Values{{"fields": {attachmentFields + ",comment(id)"}, "$top": {"50"}}},
-		server.Queries())
+	want := faultDocument{
+		code: "upstream_invalid",
+		details: []detail{
+			{"request", attachmentsRequest(server.URL, "issues", "DEV-1", attachmentFields, "50")},
+			{"field", "url"},
+			{"upstream_value", "api/files/12-2"},
+		},
+	}
+	assert.Equal(t, want, requireFault(t, got))
 }

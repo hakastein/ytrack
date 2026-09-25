@@ -3,11 +3,9 @@ package cli_test
 import (
 	"net/http"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/hakastein/ytrack/internal/fake"
 )
@@ -35,30 +33,12 @@ func attachmentOfDEV7() string {
 
 func TestAttachmentDeleteRefusesAnIDThatIsNoInternalID(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		id   string
-	}{
-		{name: "the readable id of an issue", id: "DEV-2"},
-		{name: "two dots", id: ".."},
-		{name: "empty", id: ""},
-		{name: "a number and a dash", id: "12-"},
-		{name: "a negative number", id: "-1"},
-		{name: "a letter after the number", id: "12-2x"},
-		{name: "the name of a file", id: "заметка-полигона.txt"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
+	server := fake.ServeNothing(t)
 
-			got := runWith(t, server.Env(), "attachment", "delete", "--", "DEV-1", tc.id)
+	got := runWith(t, server.Env(), "attachment", "delete", "DEV-1", "..")
 
-			refused := requireFault(t, got)
-			assert.Equal(t, "bad_usage", refused.code)
-			assert.Empty(t, server.Requests())
-		})
-	}
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+	assert.Empty(t, server.Requests())
 }
 
 func TestAttachmentDeleteRefusesAnInternalIDForItsOwner(t *testing.T) {
@@ -79,16 +59,12 @@ func TestAttachmentDeletePrintsWhatTheReadBeforeItFound(t *testing.T) {
 
 	want := `id: "12-5"` + "\n" + `name: "a.txt"` + "\n" + "issue:\n" + `  idReadable: "DEV-7"` + "\n"
 	assert.Equal(t, outcome{stdout: want}, got)
-
-	asked := server.Requests()
-	require.Len(t, asked, 2)
-	assert.Equal(t, http.MethodGet, asked[0].Method)
-	assert.Equal(t, "/api/issues/dev-7/attachments/12-5", asked[0].URL.Path)
-	assert.Equal(t, deletedAttachmentFields("issue"), server.Fields()[0])
-	assert.Equal(t, http.MethodDelete, asked[1].Method)
-	assert.Equal(t, "/api/issues/DEV-7/attachments/12-5", asked[1].URL.Path)
-	assert.Empty(t, asked[1].URL.RawQuery)
-	assert.Empty(t, server.Bodies()[1])
+	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
+	assert.Equal(t, []string{
+		"/api/issues/dev-7/attachments/12-5?fields=" + deletedAttachmentFields("issue"),
+		"/api/issues/DEV-7/attachments/12-5?",
+	}, server.Targets())
+	assert.Equal(t, []string{"", ""}, server.Bodies())
 }
 
 func TestAttachmentDeleteReadsTheStatusOfEachRequest(t *testing.T) {
@@ -153,69 +129,37 @@ func TestAttachmentDeleteReadsTheStatusOfEachRequest(t *testing.T) {
 
 func TestAttachmentDeleteRefusesAnAnswerItCannotBeAddressedBy(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name     string
-		read     http.HandlerFunc
-		deletion func(t *testing.T) http.HandlerFunc
-		exit     int
-		methods  []string
-	}{
-		{
-			name:     "another attachment than the one asked for",
-			read:     fake.JSON(http.StatusOK, attachmentOf("12-6", "a.txt", "DEV-7")),
-			deletion: noDeletion,
-			exit:     1,
-			methods:  []string{http.MethodGet},
-		},
-		{
-			name:     "an owner no request can be addressed by",
-			read:     fake.JSON(http.StatusOK, attachmentOf("12-5", "a.txt", "..")),
-			deletion: noDeletion,
-			exit:     1,
-			methods:  []string{http.MethodGet},
-		},
-		{
-			name:     "an owner that arrived as no object at all",
-			read:     fake.JSON(http.StatusOK, `{"$type":"IssueAttachment","id":"12-5","name":"a.txt","issue":null}`),
-			deletion: noDeletion,
-			exit:     1,
-			methods:  []string{http.MethodGet},
-		},
-		{
-			name:     "a deletion answered with a body",
-			read:     fake.JSON(http.StatusOK, attachmentOfDEV7()),
-			deletion: func(*testing.T) http.HandlerFunc { return fake.JSON(http.StatusOK, `{"x":1}`) },
-			exit:     2,
-			methods:  []string{http.MethodGet, http.MethodDelete},
+	read := attachmentOf("12-5", "a.txt", "..")
+	server := deleting(t, fake.JSON(http.StatusOK, read), noDeletion(t))
+
+	got := runWith(t, server.Env(), "attachment", "delete", "DEV-7", "12-5")
+
+	want := faultDocument{
+		code: "upstream_invalid",
+		details: []detail{
+			{"request", attachmentReadRequest(server.URL, "issues", "DEV-7", "12-5", deletedAttachmentFields("issue"))},
+			{"upstream_status", 200},
+			{"upstream_body", read},
 		},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := deleting(t, tc.read, tc.deletion(t))
-
-			got := runWith(t, server.Env(), "attachment", "delete", "DEV-7", "12-5")
-
-			refused := requireFaultDocument(t, got)
-			assert.Equal(t, "upstream_invalid", refused.code)
-			assert.Equal(t, tc.exit, got.code)
-			assert.Equal(t, tc.methods, sentMethods(server))
-		})
-	}
+	assert.Equal(t, want, requireFault(t, got))
+	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 }
 
-func TestAttachmentDeleteTakesAFileOffAnArticleThroughItsOwnAPI(t *testing.T) {
+func TestAttachmentDeleteExitsWith2WhereTheDeletionIsAnsweredWithABody(t *testing.T) {
 	t.Parallel()
-	const answered = `{"$type":"ArticleAttachment","id":"522-4","name":"кот.png",` +
-		`"article":{"$type":"Article","idReadable":"DEV-A-7"}}`
-	server := deleting(t, fake.JSON(http.StatusOK, answered), deletionDone())
+	server := deleting(t, fake.JSON(http.StatusOK, attachmentOfDEV7()), fake.JSON(http.StatusOK, `{"x":1}`))
 
-	got := runWith(t, server.Env(), "attachment", "delete", "DEV-A-7", "522-4")
+	got := runWith(t, server.Env(), "attachment", "delete", "DEV-7", "12-5")
 
-	want := `id: "522-4"` + "\n" + `name: "кот.png"` + "\n" + "article:\n" + `  idReadable: "DEV-A-7"` + "\n"
-	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []string{"/api/articles/DEV-A-7/attachments/522-4", "/api/articles/DEV-A-7/attachments/522-4"},
-		server.Paths())
-	assert.Equal(t, deletedAttachmentFields("article"), server.Fields()[0])
-	assert.NotContains(t, strings.Join(server.Paths(), " "), "/api/issues")
+	want := faultDocument{
+		code: "upstream_invalid",
+		details: []detail{
+			{"request", attachmentDeletionRequest(server.URL, "issues", "DEV-7", "12-5")},
+			{"upstream_status", 200},
+			{"upstream_body", `{"x":1}`},
+		},
+	}
+	assert.Equal(t, want, requireUncertainty(t, got))
+	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
 }

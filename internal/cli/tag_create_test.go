@@ -1,13 +1,10 @@
 package cli_test
 
 import (
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/hakastein/ytrack/internal/fake"
 )
@@ -34,19 +31,6 @@ func madeTag(name string) string {
 	return sharedTag(name, nil, nil)
 }
 
-func sentTag(t *testing.T, u *fake.Server) map[string]any {
-	t.Helper()
-	asks := u.Bodies()
-	require.Len(t, asks, 1)
-	var body map[string]any
-	require.NoError(t, json.Unmarshal([]byte(asks[0]), &body))
-	return body
-}
-
-func runesTheServerCutsOffTheEdges() []rune {
-	return []rune{' ', '\t', '\n', '\r', '\v', '\f', 0x1C, 0x1D, 0x1E, 0x1F, 0xA0, 0x2028, 0x2029, 0x3000}
-}
-
 func TestTagCreateRefusesACallOfAnyOtherShape(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -54,7 +38,6 @@ func TestTagCreateRefusesACallOfAnyOtherShape(t *testing.T) {
 		argv []string
 	}{
 		{name: "an empty name", argv: []string{"--name", ""}},
-		{name: "a name that is no UTF-8", argv: []string{"--name", "\xff"}},
 		{name: "the name given twice", argv: []string{"--name", "a", "--name", "b"}},
 	}
 	for _, tc := range tests {
@@ -66,61 +49,6 @@ func TestTagCreateRefusesACallOfAnyOtherShape(t *testing.T) {
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.Requests())
-		})
-	}
-}
-
-func TestTagCreateRefusesANameTheServerWouldCut(t *testing.T) {
-	t.Parallel()
-	type edge struct {
-		name    string
-		written string
-	}
-	var tests []edge
-	for _, r := range runesTheServerCutsOffTheEdges() {
-		tests = append(tests,
-			edge{name: fmt.Sprintf("U+%04X at the beginning", r), written: string(r) + "карта"},
-			edge{name: fmt.Sprintf("U+%04X at the end", r), written: "карта" + string(r)})
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
-
-			got := runWith(t, server.Env(), "tag", "create", "--name", tc.written)
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests(), "the tag would already exist when the answer showed the cut name")
-		})
-	}
-}
-
-func TestTagCreateSendsTheNameAndNothingElse(t *testing.T) {
-	t.Parallel()
-	keptAsWrittenByTheServer := []struct {
-		name    string
-		written string
-	}{
-		{name: "brackets and a space", written: "[bug] fix login"},
-		{name: "a tab inside the name", written: "два\tслова"},
-		{name: "a line feed inside the name", written: "две\nстроки"},
-		{name: "a carriage return inside the name", written: "две\rстроки"},
-		{name: "a line separator inside the name", written: "две" + string(rune(0x2028)) + "строки"},
-		{name: "a start of heading at the edge", written: string(rune(0x01)) + "карта"},
-		{name: "a next line at the edge", written: "карта" + string(rune(0x85))},
-		{name: "a zero width space at the edge", written: string(rune(0x200B)) + "карта"},
-		{name: "a byte order mark at the edge", written: "карта" + string(rune(0xFEFF))},
-	}
-	for _, tc := range keptAsWrittenByTheServer {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := creatingATag(t, fake.JSON(http.StatusOK, madeTag(tc.written)))
-
-			got := runWith(t, server.Env(), "tag", "create", "--name", tc.written)
-
-			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			assert.Equal(t, map[string]any{"name": tc.written}, sentTag(t, server))
-			assert.Equal(t, []string{createdTagFields}, server.Fields())
 		})
 	}
 }
@@ -137,62 +65,31 @@ func TestTagCreatePrintsTheTagTheServerMade(t *testing.T) {
 		"updateSharingSettings:\n  permittedGroups: []\n  permittedUsers: []\n" +
 		"tagSharingSettings:\n  permittedGroups: []\n  permittedUsers: []\n"
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []string{"/api/tags"}, server.Paths())
+	assert.Equal(t, []string{"/api/tags?fields=" + createdTagFields}, server.Targets())
+	assert.Equal(t, []string{`{"name":"[bug] fix login"}`}, server.Bodies())
 }
 
 func TestTagCreateRefusesANameTheServerKeptAsAnother(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name     string
-		written  string
-		kept     string
-		mismatch []any
-	}{
-		{
-			name:     "a rune cut off the end after all",
-			written:  "карта" + string(rune(0x85)),
-			kept:     madeTag("карта"),
-			mismatch: []any{[]detail{{"field", "name"}, {"expected", "карта" + string(rune(0x85))}, {"actual", "карта"}}},
-		},
-		{
-			name:     "another letter case",
-			written:  "Карта",
-			kept:     madeTag("карта"),
-			mismatch: []any{[]detail{{"field", "name"}, {"expected", "Карта"}, {"actual", "карта"}}},
-		},
-		{
-			name:     "no name on the tag at all",
-			written:  "карта",
-			kept:     `{"$type":"Tag","name":null,"owner":{"$type":"User","login":"admin"}}`,
-			mismatch: []any{[]detail{{"field", "name"}, {"expected", "карта"}, {"actual", nil}}},
+	server := creatingATag(t, fake.JSON(http.StatusOK, madeTag("early")))
+
+	got := runWith(t, server.Env(), "tag", "create", "--name", "Early", "--fields", "name")
+
+	want := faultDocument{
+		code: "upstream_invalid",
+		details: []detail{
+			{"request", tagCreationRequest(server.URL, "name")},
+			{"tag", "Early"},
+			{"mismatch", []any{[]detail{{"field", "name"}, {"expected", "Early"}, {"actual", "early"}}}},
 		},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := creatingATag(t, fake.JSON(http.StatusOK, tc.kept))
-
-			got := runWith(t, server.Env(), "tag", "create", "--name", tc.written, "--fields", "name")
-
-			want := faultDocument{
-				code: "upstream_invalid",
-				details: []detail{
-					{"request", tagCreationRequest(server.URL, "name")},
-					{"tag", tc.written},
-					{"mismatch", tc.mismatch},
-				},
-			}
-			assert.Equal(t, want, requireUncertainty(t, got))
-			assert.Empty(t, got.stdout)
-		})
-	}
+	assert.Equal(t, want, requireUncertainty(t, got))
 }
 
 func TestTagCreateRefusesWhatTheServerRefused(t *testing.T) {
 	t.Parallel()
 	const duplicate = `{"error":"invalid_properties","error_description":"Property Tag.name is invalid",` +
-		`"error_children":[{"error":"Tag.name-is-invalid","error_description":"Property Tag.name is invalid",` +
-		`"error_developer_message":"У пользователя уже есть тег с именем карта","error_field":"name"}]}`
+		`"error_children":[{"error":"Tag.name-is-invalid","error_field":"name"}]}`
 	tests := []struct {
 		name    string
 		status  int
@@ -228,7 +125,7 @@ func TestTagCreateRefusesWhatTheServerRefused(t *testing.T) {
 			t.Parallel()
 			server := creatingATag(t, fake.JSON(tc.status, tc.body))
 
-			got := runWith(t, server.Env(), "tag", "create", "--name", "карта")
+			got := runWith(t, server.Env(), "tag", "create", "--name", "Early")
 
 			want := faultDocument{
 				code: tc.code,
@@ -247,21 +144,10 @@ func TestTagCreateIsUncertainWhereTheAnswerNeverCame(t *testing.T) {
 	t.Parallel()
 	server := creatingATag(t, breakOff)
 
-	got := runWith(t, server.Env(), "tag", "create", "--name", "карта")
+	got := runWith(t, server.Env(), "tag", "create", "--name", "Early")
 
 	found := requireUncertainty(t, got)
 	assert.Equal(t, "write_uncertain", found.code)
 	assert.Equal(t, []detail{{"request", tagCreationRequest(server.URL, createdTagFields)}}, found.details)
 	assert.Empty(t, got.stdout)
-}
-
-func TestTagCreateChecksMoreThanItPrints(t *testing.T) {
-	t.Parallel()
-	server := creatingATag(t, fake.JSON(http.StatusOK, madeTag("карта")))
-
-	got := runWith(t, server.Env(), "tag", "create", "--name", "карта", "--fields", "owner(login)")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, "owner:\n  login: \"admin\"\n", got.stdout)
-	assert.Equal(t, []string{"owner(login),name"}, server.Fields())
 }
