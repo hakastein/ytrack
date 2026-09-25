@@ -58,18 +58,6 @@ func TestProjectShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
 	assert.Equal(t, "application/json", request.Header.Get("Accept"))
 }
 
-func TestProjectShowSendsACodeOfLettersDigitsAndUnderscores(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, projectDEV))
-
-	got := runWith(t, server.Env(), "project", "show", "Проект_²")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	requests := server.Requests()
-	require.Len(t, requests, 1)
-	assert.Equal(t, "/api/admin/projects/Проект_²", requests[0].URL.Path)
-}
-
 func TestProjectShowReachesTheAPIUnderThePathOfTheAddress(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

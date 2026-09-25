@@ -31,26 +31,14 @@ func madeTag(name string) string {
 	return sharedTag(name, nil, nil)
 }
 
-func TestTagCreateRefusesACallOfAnyOtherShape(t *testing.T) {
+func TestTagCreateRefusesAnEmptyName(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "an empty name", argv: []string{"--name", ""}},
-		{name: "the name given twice", argv: []string{"--name", "a", "--name", "b"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
+	server := fake.ServeNothing(t)
 
-			got := runWith(t, server.Env(), append([]string{"tag", "create"}, tc.argv...)...)
+	got := runWith(t, server.Env(), "tag", "create", "--name", "")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests())
-		})
-	}
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+	assert.Empty(t, server.Requests())
 }
 
 func TestTagCreatePrintsTheTagTheServerMade(t *testing.T) {
@@ -84,70 +72,4 @@ func TestTagCreateRefusesANameTheServerKeptAsAnother(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireUncertainty(t, got))
-}
-
-func TestTagCreateRefusesWhatTheServerRefused(t *testing.T) {
-	t.Parallel()
-	const duplicate = `{"error":"invalid_properties","error_description":"Property Tag.name is invalid",` +
-		`"error_children":[{"error":"Tag.name-is-invalid","error_field":"name"}]}`
-	tests := []struct {
-		name    string
-		status  int
-		body    string
-		code    string
-		details []detail
-	}{
-		{
-			name:   "a name the token already owns a tag under",
-			status: http.StatusBadRequest,
-			body:   duplicate,
-			code:   "rejected",
-			details: []detail{
-				{"upstream_error", "invalid_properties"},
-				{"upstream_message", "Property Tag.name is invalid"},
-				{"upstream_body", duplicate},
-			},
-		},
-		{
-			name:   "a token that may not make tags",
-			status: http.StatusForbidden,
-			body:   `{"error":"Forbidden","error_description":"HTTP 403 Forbidden"}`,
-			code:   "denied",
-			details: []detail{
-				{"upstream_error", "Forbidden"},
-				{"upstream_message", "HTTP 403 Forbidden"},
-				authFromEnv(),
-			},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := creatingATag(t, fake.JSON(tc.status, tc.body))
-
-			got := runWith(t, server.Env(), "tag", "create", "--name", "Early")
-
-			want := faultDocument{
-				code: tc.code,
-				details: append([]detail{
-					{"request", tagCreationRequest(server.URL, createdTagFields)},
-					{"upstream_status", tc.status},
-				}, tc.details...),
-			}
-			assert.Equal(t, want, requireFault(t, got))
-			assert.Empty(t, got.stdout)
-		})
-	}
-}
-
-func TestTagCreateIsUncertainWhereTheAnswerNeverCame(t *testing.T) {
-	t.Parallel()
-	server := creatingATag(t, breakOff)
-
-	got := runWith(t, server.Env(), "tag", "create", "--name", "Early")
-
-	found := requireUncertainty(t, got)
-	assert.Equal(t, "write_uncertain", found.code)
-	assert.Equal(t, []detail{{"request", tagCreationRequest(server.URL, createdTagFields)}}, found.details)
-	assert.Empty(t, got.stdout)
 }

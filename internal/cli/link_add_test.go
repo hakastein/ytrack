@@ -59,27 +59,14 @@ func noLinkWritten(t *testing.T) http.HandlerFunc {
 	}
 }
 
-func TestLinkAddRefusesACallThatNamesNoOneLink(t *testing.T) {
+func TestLinkAddRefusesAnEmptyPhrase(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "an issue that would reach another endpoint", argv: []string{"link", "add", "..", "needs", "DEV-2"}},
-		{name: "a target issue that is an article", argv: []string{"link", "add", "DEV-1", "needs", "DEV-A-1"}},
-		{name: "an empty phrase", argv: []string{"link", "add", "DEV-1", "", "DEV-2"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
+	server := fake.ServeNothing(t)
 
-			got := runWith(t, server.Env(), tc.argv...)
+	got := runWith(t, server.Env(), "link", "add", "DEV-1", "", "DEV-2")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests())
-		})
-	}
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+	assert.Empty(t, server.Requests())
 }
 
 func TestLinkAddWritesTheLinkAndPrintsTheLinksOfTheIssue(t *testing.T) {
@@ -154,27 +141,4 @@ func TestLinkAddRefusesAnAnswerWithoutTheLink(t *testing.T) {
 			{"target", "DEV-2"},
 		},
 	}, requireUncertainty(t, got))
-}
-
-func TestLinkAddCarriesWhatTheServerSaidAboutTheWrite(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		write http.HandlerFunc
-	}{
-		{name: "a write whose answer never came", write: breakOff},
-		{name: "a write answered by a gateway", write: gateway(http.StatusBadGateway)},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := linking(t, tc.write)
-
-			got := runWith(t, server.Env(), "link", "add", "DEV-1", "needs", "DEV-2")
-
-			found := requireUncertainty(t, got)
-			assert.Equal(t, "write_uncertain", found.code)
-			assert.Equal(t, []detail{{"issue", "DEV-1"}, {"phrase", "needs"}, {"target", "DEV-2"}}, found.details[1:4])
-		})
-	}
 }

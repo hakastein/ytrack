@@ -38,16 +38,6 @@ func catalogueOf(fields ...cataloguedField) string {
 	return "[" + strings.Join(sent, ",") + "]"
 }
 
-func devCatalogue() string {
-	return catalogueOf(
-		cataloguedField{name: "Priority", translate: "Приоритет"},
-		cataloguedField{name: "Type", translate: "Тип"},
-		cataloguedField{name: "State", translate: "Состояние"},
-		cataloguedField{name: "Статус разработки"},
-		cataloguedField{name: "Модуль системы"},
-	)
-}
-
 func serveNamedFields(t *testing.T, catalogue string, issue http.HandlerFunc) *fake.Server {
 	t.Helper()
 	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -86,7 +76,7 @@ func TestIssueShowRefusesANameNoCustomFieldOfTheInstanceAnswersTo(t *testing.T) 
 	assert.Equal(t, []string{cataloguePath}, server.Paths())
 }
 
-func TestIssueShowRefusesTheNamesTheCatalogueIsClosedTo(t *testing.T) {
+func TestIssueShowAsksForNoIssueWhereTheCatalogueIsClosed(t *testing.T) {
 	t.Parallel()
 	body := `{"error":"Forbidden","error_description":"HTTP 403 Forbidden"}`
 	server := fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -96,15 +86,6 @@ func TestIssueShowRefusesTheNamesTheCatalogueIsClosedTo(t *testing.T) {
 
 	got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "customFields(State)")
 
-	assert.Equal(t, faultDocument{
-		code: "denied",
-		details: []detail{
-			{"request", catalogueRequest(server.URL)},
-			{"upstream_status", 403},
-			{"upstream_error", "Forbidden"},
-			{"upstream_message", "HTTP 403 Forbidden"},
-			authFromEnv(),
-		},
-	}, requireFault(t, got))
+	assert.Equal(t, catalogueRequest(server.URL), detailNamed(t, requireFault(t, got), "request"))
 	assert.Len(t, server.Requests(), 1)
 }

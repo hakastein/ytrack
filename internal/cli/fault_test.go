@@ -206,6 +206,65 @@ func TestProjectShowRefusesByTheStatusOfTheAnswer(t *testing.T) {
 	}
 }
 
+func TestEveryCommandRefusesByTheStatusOfItsFirstAnswer(t *testing.T) {
+	t.Parallel()
+	attached := aFileToAttach(t)
+	tests := []struct {
+		name string
+		argv []string
+	}{
+		{name: "issue show", argv: []string{"issue", "show", "DEV-1"}},
+		{name: "issue list", argv: []string{"issue", "list", "--query", "a"}},
+		{name: "issue create", argv: []string{"issue", "create", "DEV", "--summary", "x"}},
+		{name: "issue update", argv: []string{"issue", "update", "DEV-1", "--summary", "x"}},
+		{name: "issue delete", argv: []string{"issue", "delete", "DEV-1"}},
+		{name: "article show", argv: []string{"article", "show", "DEV-A-1"}},
+		{name: "article list", argv: []string{"article", "list", "--query", "a"}},
+		{name: "article list --parent", argv: []string{"article", "list", "--parent", "DEV-A-1"}},
+		{name: "article create", argv: []string{"article", "create", "DEV", "--summary", "x"}},
+		{name: "article update", argv: []string{"article", "update", "DEV-A-1", "--summary", "x"}},
+		{name: "article delete", argv: []string{"article", "delete", "DEV-A-1"}},
+		{name: "comment list", argv: []string{"comment", "list", "DEV-1"}},
+		{name: "comment create", argv: []string{"comment", "create", "DEV-1", "--text", "x"}},
+		{name: "comment update", argv: []string{"comment", "update", "DEV-1", "7-1", "--text", "x"}},
+		{name: "comment delete", argv: []string{"comment", "delete", "DEV-1", "7-1"}},
+		{name: "attachment list", argv: []string{"attachment", "list", "DEV-1"}},
+		{name: "attachment create", argv: []string{"attachment", "create", "DEV-1", attached}},
+		{name: "attachment delete", argv: []string{"attachment", "delete", "DEV-1", "12-1"}},
+		{name: "tag list", argv: []string{"tag", "list"}},
+		{name: "tag create", argv: []string{"tag", "create", "--name", "x"}},
+		{name: "tag create --visible-for", argv: []string{"tag", "create", "--name", "x", "--visible-for", "First"}},
+		{name: "tag delete", argv: []string{"tag", "delete", "--name", "x"}},
+		{name: "tag add", argv: []string{"tag", "add", "DEV-1", "--name", "x"}},
+		{name: "tag remove", argv: []string{"tag", "remove", "DEV-1", "--name", "x"}},
+		{name: "link list", argv: []string{"link", "list", "DEV-1"}},
+		{name: "link add", argv: []string{"link", "add", "DEV-1", "needs", "DEV-2"}},
+		{name: "link remove", argv: []string{"link", "remove", "DEV-1", "needs", "DEV-2"}},
+		{name: "time list", argv: []string{"time", "list", "DEV-1"}},
+		{name: "time create", argv: []string{"time", "create", "DEV-1", "PT1H"}},
+		{name: "time update", argv: []string{"time", "update", "DEV-1", "199-6", "--text", "x"}},
+		{name: "time delete", argv: []string{"time", "delete", "DEV-1", "199-6"}},
+		{name: "activity list", argv: []string{"activity", "list", "DEV-1"}},
+		{name: "field list", argv: []string{"field", "list", "DEV"}},
+		{name: "field show", argv: []string{"field", "show", "DEV", "Type"}},
+		{name: "project show", argv: []string{"project", "show", "DEV"}},
+		{name: "project list", argv: []string{"project", "list"}},
+		{name: "user show", argv: []string{"user", "show", "first"}},
+		{name: "user list", argv: []string{"user", "list", "--query", "a"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := fake.Serve(t, fake.JSON(http.StatusForbidden, `{"error":"Forbidden","error_description":"Denied"}`))
+
+			got := runWith(t, server.Env(), tc.argv...)
+
+			assert.Equal(t, "denied", requireFault(t, got).code)
+			assert.Len(t, server.Requests(), 1)
+		})
+	}
+}
+
 func TestProjectShowRefusesAnAnswerOfAnotherShape(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

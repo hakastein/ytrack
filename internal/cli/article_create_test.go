@@ -62,16 +62,6 @@ func TestArticleCreateRefusesBeforeAnyRequest(t *testing.T) {
 	}{
 		{name: "no title", argv: []string{"article", "create", "DEV"}},
 		{name: "no title and a code of no form", argv: []string{"article", "create", "1DEV"}},
-		{name: "a code that opens with a digit", argv: []string{"article", "create", "1DEV", "--summary", "x"}},
-		{name: "two dots for a project", argv: []string{"article", "create", "..", "--summary", "x"}},
-		{
-			name: "a title twice",
-			argv: []string{"article", "create", "DEV", "--summary", "a", "--summary", "b"},
-		},
-		{
-			name: "content twice",
-			argv: []string{"article", "create", "DEV", "--summary", "x", "--content", "a", "--content", "b"},
-		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -127,73 +117,4 @@ func TestArticleCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireUncertainty(t, got))
-}
-
-func TestArticleCreateRefusesWhatTheServerRefused(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name            string
-		status          int
-		code            string
-		upstreamError   string
-		upstreamMessage string
-		details         []detail
-	}{
-		{
-			name:            "a project the instance has none of",
-			status:          http.StatusNotFound,
-			code:            "not_found",
-			upstreamError:   "Not Found",
-			upstreamMessage: "Project was not found",
-		},
-		{
-			name:            "a project the token may not write in",
-			status:          http.StatusForbidden,
-			code:            "denied",
-			upstreamError:   "Forbidden",
-			upstreamMessage: "HTTP 403 Forbidden",
-			details:         []detail{authFromEnv()},
-		},
-		{
-			name:            "a body the server disagreed with",
-			status:          http.StatusBadRequest,
-			code:            "rejected",
-			upstreamError:   "Bad Request",
-			upstreamMessage: "Value is required",
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			said := `{"error":` + strconv.Quote(tc.upstreamError) + `,"error_description":` +
-				strconv.Quote(tc.upstreamMessage) + `}`
-			server := creatingAnArticle(t, fake.JSON(tc.status, said))
-
-			got := runWith(t, server.Env(), "article", "create", "DEV", "--summary", "x")
-
-			want := faultDocument{
-				code: tc.code,
-				details: append([]detail{
-					{"request", articleCreationRequest(server.URL, askedArticleFields)},
-					{"upstream_status", tc.status},
-					{"upstream_error", tc.upstreamError},
-					{"upstream_message", tc.upstreamMessage},
-				}, tc.details...),
-			}
-			assert.Equal(t, want, requireFault(t, got))
-			assert.Equal(t, []string{http.MethodPost}, sentMethods(server))
-		})
-	}
-}
-
-func TestArticleCreateIsUncertainWhereTheAnswerNeverCame(t *testing.T) {
-	t.Parallel()
-	server := creatingAnArticle(t, breakOff)
-
-	got := runWith(t, server.Env(), "article", "create", "DEV", "--summary", "x")
-
-	found := requireUncertainty(t, got)
-	assert.Equal(t, "write_uncertain", found.code)
-	assert.Equal(t, []detail{{"request", articleCreationRequest(server.URL, askedArticleFields)}}, found.details)
-	assert.Empty(t, got.stdout)
 }

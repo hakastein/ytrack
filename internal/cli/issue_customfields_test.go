@@ -51,7 +51,3 @@ func receivedFields(fields ...receivedField) string {
 	}
 	return "[" + strings.Join(sent, ",") + "]"
 }
-
-func issueWithFields(fields ...receivedField) string {
-	return `{"$type":"Issue","idReadable":"DEV-1","customFields":` + receivedFields(fields...) + `}`
-}

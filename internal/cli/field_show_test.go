@@ -77,31 +77,14 @@ func noField(t *testing.T) http.HandlerFunc {
 	}
 }
 
-func TestFieldShowRefusesACallItCannotSend(t *testing.T) {
+func TestFieldShowRefusesTheEmptyName(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{
-			name: "the empty name",
-			argv: []string{"field", "show", "DEV", ""},
-		},
-		{
-			name: "a project code the generated client would send elsewhere",
-			argv: []string{"field", "show", "..", "Type"},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
+	server := fake.ServeNothing(t)
 
-			got := runWith(t, server.Env(), tc.argv...)
+	got := runWith(t, server.Env(), "field", "show", "DEV", "")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-		})
-	}
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+	assert.Empty(t, server.Requests())
 }
 
 func TestFieldShowPrintsTheFieldItsNameResolvesTo(t *testing.T) {

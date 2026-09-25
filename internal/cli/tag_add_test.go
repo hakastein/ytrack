@@ -46,26 +46,14 @@ func noTagging(t *testing.T) http.HandlerFunc {
 	}
 }
 
-func TestTagAddRefusesACallOfAnyOtherShape(t *testing.T) {
+func TestTagAddRefusesAnEmptyName(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "an empty name", argv: []string{"DEV-7", "--name", ""}},
-		{name: "the name given twice", argv: []string{"DEV-7", "--name", "a", "--name", "b"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
+	server := fake.ServeNothing(t)
 
-			got := runWith(t, server.Env(), append([]string{"tag", "add"}, tc.argv...)...)
+	got := runWith(t, server.Env(), "tag", "add", "DEV-7", "--name", "")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests())
-		})
-	}
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+	assert.Empty(t, server.Requests())
 }
 
 func TestTagAddReadsTheOwnerThenResolvesTheNameThenWrites(t *testing.T) {
@@ -155,51 +143,24 @@ func TestTagAddRefusesATagOtherThanTheOneResolved(t *testing.T) {
 	assert.Equal(t, want, requireUncertainty(t, got))
 }
 
-func TestTagAddReadsWhatTheServerAnsweredTheWriteWith(t *testing.T) {
+func TestTagAddRefusesATagGoneBetweenTheReadAndTheWrite(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name    string
-		status  int
-		said    string
-		code    string
-		message string
-	}{
-		{
-			name:    "a token shown the tag and not allowed to hang it",
-			status:  http.StatusForbidden,
-			said:    `{"error":"Forbidden","error_description":"Denied"}`,
-			code:    "denied",
-			message: "Denied",
-		},
-		{
-			name:    "a tag that went away between the read and the write",
-			status:  http.StatusBadRequest,
-			said:    `{"error":"bad_request","error_description":"No tag 10-5"}`,
-			code:    "rejected",
-			message: "No tag 10-5",
-		},
-		{
-			name:    "an owner that went away between the read and the write",
-			status:  http.StatusNotFound,
-			said:    entityNotFound("DEV-7"),
-			code:    "not_found",
-			message: "Entity with id DEV-7 not found",
+	const said = `{"error":"bad_request","error_description":"No tag 10-5"}`
+	server := addingATag(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), shownTags(),
+		fake.JSON(http.StatusBadRequest, said))
+
+	got := runWith(t, server.Env(), "tag", "add", "DEV-7", "--name", "ready")
+
+	want := faultDocument{
+		code: "rejected",
+		details: []detail{
+			{"request", taggingRequest(server.URL, "issues", "DEV-7", resolvedTagFields)},
+			{"issue", "DEV-7"},
+			{"tag", "ready"},
+			{"upstream_status", 400},
+			{"upstream_error", "bad_request"},
+			{"upstream_message", "No tag 10-5"},
 		},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := addingATag(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), shownTags(),
-				fake.JSON(tc.status, tc.said))
-
-			got := runWith(t, server.Env(), "tag", "add", "DEV-7", "--name", "ready")
-
-			found := requireFault(t, got)
-			assert.Equal(t, tc.code, found.code)
-			assert.Equal(t, detail{"request", taggingRequest(server.URL, "issues", "DEV-7", resolvedTagFields)},
-				found.details[0])
-			assert.Equal(t, []detail{{"issue", "DEV-7"}, {"tag", "ready"}}, found.details[1:3])
-			assert.Equal(t, tc.message, detailNamed(t, found, "upstream_message"))
-		})
-	}
+	assert.Equal(t, want, requireFault(t, got))
 }

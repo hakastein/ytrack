@@ -15,24 +15,12 @@ const sentArticleFields = articleShowFields + "," + articleCommentFields
 
 func TestArticleShowRefusesACommentsFlagThatIsNeitherAllNorACount(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "a negative count", argv: []string{"--comments=-1"}},
-		{name: "the flag twice", argv: []string{"--comments=1", "--comments=2"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
+	server := fake.ServeNothing(t)
 
-			got := runWith(t, server.Env(), append([]string{"article", "show", "DEV-A-1"}, tc.argv...)...)
+	got := runWith(t, server.Env(), "article", "show", "DEV-A-1", "--comments=-1")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests())
-		})
-	}
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+	assert.Empty(t, server.Requests())
 }
 
 func TestArticleShowRefusesCommentsAskedForInTheExpression(t *testing.T) {

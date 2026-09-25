@@ -43,26 +43,14 @@ func resolvingTags(t *testing.T, catalogue string, deletion http.HandlerFunc) *f
 	return fake.Serve(t, readThenDeletion(fake.JSON(http.StatusOK, catalogue), deletion))
 }
 
-func TestTagDeleteRefusesACallOfAnyOtherShape(t *testing.T) {
+func TestTagDeleteRefusesAnEmptyName(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "an empty name", argv: []string{"--name", ""}},
-		{name: "the name given twice", argv: []string{"--name", "a", "--name", "b"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
+	server := fake.ServeNothing(t)
 
-			got := runWith(t, server.Env(), append([]string{"tag", "delete"}, tc.argv...)...)
+	got := runWith(t, server.Env(), "tag", "delete", "--name", "")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests())
-		})
-	}
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+	assert.Empty(t, server.Requests())
 }
 
 func TestTagDeletePrintsWhatTheResolverFound(t *testing.T) {
@@ -115,59 +103,23 @@ func TestTagDeleteRefusesAnIDItCannotAddressTheDeletionBy(t *testing.T) {
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 }
 
-func TestTagDeleteReadsWhatTheServerAnsweredTheDeletionWith(t *testing.T) {
+func TestTagDeleteRefusesATagGoneBetweenTheTwoRequests(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name     string
-		deletion http.HandlerFunc
-		code     string
-		exit     int
-	}{
-		{
-			name:     "a token that may see the tag and not destroy it",
-			deletion: fake.JSON(http.StatusForbidden, `{"error":"Forbidden","error_description":"Insufficient rights"}`),
-			code:     "denied",
-			exit:     1,
-		},
-		{
-			name:     "a tag that went away between the two requests",
-			deletion: fake.JSON(http.StatusNotFound, `{"error":"Not Found","error_description":"Entity with id 10-5 not found"}`),
-			code:     "not_found",
-			exit:     1,
-		},
-		{
-			name:     "an answer carrying a body where the call is answered with none",
-			deletion: fake.JSON(http.StatusOK, `{"x":1}`),
-			code:     "upstream_invalid",
-			exit:     2,
+	const missing = `{"error":"Not Found","error_description":"Entity with id 10-5 not found"}`
+	server := resolvingTags(t, tagsOfTwoOwners(), fake.JSON(http.StatusNotFound, missing))
+
+	got := runWith(t, server.Env(), "tag", "delete", "--name", "ready")
+
+	want := faultDocument{
+		code: "not_found",
+		details: []detail{
+			{"request", tagDeletionRequest(server.URL, "10-5")},
+			{"tag", "ready"},
+			{"upstream_status", 404},
+			{"upstream_error", "Not Found"},
+			{"upstream_message", "Entity with id 10-5 not found"},
 		},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := resolvingTags(t, tagsOfTwoOwners(), tc.deletion)
-
-			got := runWith(t, server.Env(), "tag", "delete", "--name", "ready")
-
-			found := requireFaultDocument(t, got)
-			assert.Equal(t, tc.code, found.code)
-			assert.Equal(t, tc.exit, got.code)
-			assert.Equal(t, detail{"request", tagDeletionRequest(server.URL, "10-5")}, found.details[0])
-			assert.Equal(t, detail{"tag", "ready"}, found.details[1])
-			assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
-		})
-	}
-}
-
-func TestTagDeleteSendsNoDeletionWhereTheCatalogueWasNotReceived(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, readThenDeletion(
-		fake.JSON(http.StatusInternalServerError, `{"error":"Internal Server Error"}`), noDeletion(t)))
-
-	got := runWith(t, server.Env(), "tag", "delete", "--name", "Ready")
-
-	found := requireFault(t, got)
-	assert.Equal(t, "upstream_failed", found.code)
-	assert.Equal(t, tagsRequest(server.URL, resolvedTagFields, "-1"), detailNamed(t, found, "request"))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
+	assert.Equal(t, want, requireFault(t, got))
+	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
 }

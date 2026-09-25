@@ -37,20 +37,6 @@ func targetIssue(id, summary string) string {
 	return `{"$type":"Issue","idReadable":` + strconv.Quote(id) + `,"summary":` + strconv.Quote(summary) + `}`
 }
 
-func emptyIssueLinks() []receivedLink {
-	return []receivedLink{
-		{direction: "BOTH", sourceToTarget: "relates to"},
-		{direction: "OUTWARD", sourceToTarget: "is required for", targetToSource: "depends on"},
-		{direction: "INWARD", sourceToTarget: "is required for", targetToSource: "depends on"},
-		{direction: "OUTWARD", sourceToTarget: "is duplicated by", targetToSource: "duplicates"},
-		{direction: "INWARD", sourceToTarget: "is duplicated by", targetToSource: "duplicates"},
-		{direction: "OUTWARD", sourceToTarget: "parent for", targetToSource: "subtask of"},
-		{direction: "INWARD", sourceToTarget: "parent for", targetToSource: "subtask of"},
-		{direction: "OUTWARD", sourceToTarget: "Скопирована в", targetToSource: "Копия"},
-		{direction: "INWARD", sourceToTarget: "Скопирована в", targetToSource: "Копия"},
-	}
-}
-
 func keysOf(node *yaml.Node) []string {
 	keys := []string{}
 	for pair := range slices.Chunk(node.Content, 2) {

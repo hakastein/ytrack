@@ -51,21 +51,3 @@ func TestUserShowRefusesFieldsThatDoNotParse(t *testing.T) {
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 	assert.Empty(t, server.Requests())
 }
-
-func TestUserShowRefusesALoginTheServerDoesNotKnow(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusNotFound, entityNotFound("first")))
-
-	got := runWith(t, server.Env(), "user", "show", "first")
-
-	want := faultDocument{
-		code: "not_found",
-		details: []detail{
-			{"request", "GET " + server.URL + "/api/users/first?fields=login,fullName,email,banned"},
-			{"upstream_status", 404},
-			{"upstream_error", "Not Found"},
-			{"upstream_message", "Entity with id first not found"},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-}

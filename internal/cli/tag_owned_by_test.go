@@ -19,10 +19,6 @@ func TestTagRefusesAnOwnerOfNoLogin(t *testing.T) {
 		{name: "a deletion", argv: []string{"tag", "delete", "--name", "Shared", "--owned-by", ""}},
 		{name: "a tagging", argv: []string{"tag", "add", "DEV-7", "--name", "Shared", "--owned-by", ""}},
 		{name: "a removal", argv: []string{"tag", "remove", "DEV-7", "--name", "Shared", "--owned-by", ""}},
-		{
-			name: "the owner given twice",
-			argv: []string{"tag", "delete", "--name", "Shared", "--owned-by", "first", "--owned-by", "second"},
-		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

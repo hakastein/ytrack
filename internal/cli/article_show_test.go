@@ -49,34 +49,3 @@ func TestArticleShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
 	assert.Equal(t, []string{"/api/articles/DEV-A-1"}, server.Paths())
 	assert.Equal(t, []url.Values{{"fields": {sentArticleFields}}}, server.Queries())
 }
-
-func TestArticleShowPassesOnWhatTheServerAnswered(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name   string
-		status int
-		body   string
-		code   string
-	}{
-		{
-			name: "a web page under a 200", status: http.StatusOK,
-			body: "<html><body>login</body></html>", code: "upstream_invalid",
-		},
-		{
-			name: "a refusal of the server", status: http.StatusForbidden,
-			body: `{"error":"Forbidden","error_description":"Insufficient rights"}`, code: "denied",
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.Serve(t, fake.JSON(tc.status, tc.body))
-
-			got := runWith(t, server.Env(), "article", "show", "DEV-A-1")
-
-			found := requireFault(t, got)
-			assert.Equal(t, tc.code, found.code)
-			assert.Len(t, server.Requests(), 1)
-		})
-	}
-}

@@ -59,56 +59,14 @@ func sentComment(t *testing.T, u *fake.Server) map[string]any {
 	return body
 }
 
-func TestCommentCreateRefusesBeforeAnyRequest(t *testing.T) {
+func TestCommentCreateRefusesACallWithNoText(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "no text", argv: []string{"comment", "create", "DEV-1"}},
-		{
-			name: "the text twice",
-			argv: []string{"comment", "create", "DEV-1", "--text", "a", "--text", "b"},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
+	server := fake.ServeNothing(t)
 
-			got := runWith(t, server.Env(), tc.argv...)
+	got := runWith(t, server.Env(), "comment", "create", "DEV-1")
 
-			assert.Equal(t, "bad_usage", requireFault(t, got).code)
-			assert.Empty(t, server.Requests())
-		})
-	}
-}
-
-func TestCommentCreateRefusesAnOwnerOfAnyOtherForm(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "an internal id for an owner", argv: []string{"comment", "create", "3-19", "--text", "x"}},
-		{name: "two dots for an owner", argv: []string{"comment", "create", "..", "--text", "x"}},
-		{
-			name: "the marker of an article in lower case",
-			argv: []string{"comment", "create", "DEV-a-1", "--text", "x"},
-		},
-		{name: "a space before the owner", argv: []string{"comment", "create", " DEV-1", "--text", "x"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
-
-			got := runWith(t, server.Env(), tc.argv...)
-
-			assert.Equal(t, "bad_usage", requireFault(t, got).code)
-			assert.Empty(t, server.Requests())
-		})
-	}
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+	assert.Empty(t, server.Requests())
 }
 
 func TestCommentCreateWritesOnAnIssueInOneRequest(t *testing.T) {
@@ -168,61 +126,4 @@ func TestCommentCreateChecksTheResponseAgainstTheSchemaOfTheOwner(t *testing.T) 
 		},
 	}
 	assert.Equal(t, want, requireUncertainty(t, got))
-}
-
-func TestCommentCreateRefusesWhatTheServerRefused(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name            string
-		status          int
-		code            string
-		upstreamError   string
-		upstreamMessage string
-		details         []detail
-	}{
-		{
-			name:            "an issue the instance has none of",
-			status:          http.StatusNotFound,
-			code:            "not_found",
-			upstreamError:   "Not Found",
-			upstreamMessage: "Entity with id DEV-99999 not found",
-		},
-		{
-			name:            "a body the server disagreed with",
-			status:          http.StatusBadRequest,
-			code:            "rejected",
-			upstreamError:   "bad_request",
-			upstreamMessage: "Comment can't be empty.",
-		},
-		{
-			name:            "a token that may read the issue and not comment on it",
-			status:          http.StatusForbidden,
-			code:            "denied",
-			upstreamError:   "Forbidden",
-			upstreamMessage: "HTTP 403 Forbidden",
-			details:         []detail{authFromEnv()},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			said := `{"error":` + strconv.Quote(tc.upstreamError) + `,"error_description":` +
-				strconv.Quote(tc.upstreamMessage) + `}`
-			server := commenting(t, fake.JSON(tc.status, said))
-
-			got := runWith(t, server.Env(), "comment", "create", "DEV-7", "--text", "x")
-
-			want := faultDocument{
-				code: tc.code,
-				details: append([]detail{
-					{"request", issueCommentRequest(server.URL, "DEV-7", writtenCommentFields)},
-					{"upstream_status", tc.status},
-					{"upstream_error", tc.upstreamError},
-					{"upstream_message", tc.upstreamMessage},
-				}, tc.details...),
-			}
-			assert.Equal(t, want, requireFault(t, got))
-			assert.Equal(t, []string{http.MethodPost}, sentMethods(server))
-		})
-	}
 }

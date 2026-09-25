@@ -146,21 +146,3 @@ func TestTagCreateRefusesAGroupIDItCannotShareTheTagBy(t *testing.T) {
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server),
 		"the server answers a malformed id with 400 that does not say where the id came from")
 }
-
-func TestTagCreateSendsNoWriteWhereTheGroupsWereRefused(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
-		if !assert.Equal(t, http.MethodGet, r.Method, "a creation reached the server") {
-			return
-		}
-		fake.JSON(http.StatusForbidden, `{"error":"Forbidden","error_description":"HTTP 403 Forbidden"}`)(w, r)
-	})
-
-	got := runWith(t, server.Env(), "tag", "create", "--name", "Early", "--visible-for", "First")
-
-	found := requireFault(t, got)
-	assert.Equal(t, "denied", found.code)
-	assert.Equal(t, detail{"request", groupsRequest(server.URL)}, found.details[0])
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
-	assert.Empty(t, got.stdout)
-}

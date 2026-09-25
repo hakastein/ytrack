@@ -22,46 +22,14 @@ func fieldsQueries(fields string) []url.Values {
 	return []url.Values{{"fields": {fields}, "$top": {"-1"}}}
 }
 
-func TestFieldRefusesACallItCannotSend(t *testing.T) {
+func TestFieldListRefusesFieldsThatAreNotAnExpression(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "a project code the generated client would send elsewhere", argv: []string{"field", "list", ".."}},
-		{name: "fields that are not an expression", argv: []string{"field", "list", "DEV", "--fields", "field("}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
+	server := fake.ServeNothing(t)
 
-			got := runWith(t, server.Env(), tc.argv...)
+	got := runWith(t, server.Env(), "field", "list", "DEV", "--fields", "field(")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-		})
-	}
-}
-
-func TestFieldRefusesAFlagGivenTwice(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "fields of field list", argv: []string{"field", "list", "DEV", "--fields", "field(name)", "--fields", "ordinal"}},
-		{name: "fields of field show", argv: []string{"field", "show", "DEV", "Type", "--fields", "field(name)", "--fields", "canBeEmpty"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
-
-			got := runWith(t, server.Env(), tc.argv...)
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-		})
-	}
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+	assert.Empty(t, server.Requests())
 }
 
 const shuffledFields = `[

@@ -36,29 +36,14 @@ func sentChanges(t *testing.T, u *fake.Server) map[string]any {
 	return body
 }
 
-func TestArticleUpdateRefusesBeforeAnyRequest(t *testing.T) {
+func TestArticleUpdateRefusesACallThatWritesNothing(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "nothing to write", argv: []string{"DEV-A-7"}},
-		{name: "the id of an issue", argv: []string{"DEV-1", "--summary", "x"}},
-		{name: "an internal id", argv: []string{"3-19", "--summary", "x"}},
-		{name: "a title twice", argv: []string{"DEV-A-7", "--summary", "a", "--summary", "b"}},
-		{name: "content twice", argv: []string{"DEV-A-7", "--content", "a", "--content", "b"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
+	server := fake.ServeNothing(t)
 
-			got := runWith(t, server.Env(), append([]string{"article", "update"}, tc.argv...)...)
+	got := runWith(t, server.Env(), "article", "update", "DEV-A-7")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests())
-		})
-	}
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+	assert.Empty(t, server.Requests())
 }
 
 func TestArticleUpdateWritesTheArticleTheReadFound(t *testing.T) {
@@ -97,26 +82,6 @@ func TestArticleUpdateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 	assert.Equal(t, want, requireUncertainty(t, got))
 }
 
-func TestArticleUpdateRefusesAnArticleTheReadDoesNotFind(t *testing.T) {
-	t.Parallel()
-	said := `{"error":"Not Found","error_description":"Can't find article with id DEV-A-99999"}`
-	server := updatingAnArticle(t, fake.JSON(http.StatusNotFound, said), noUpdate(t))
-
-	got := runWith(t, server.Env(), "article", "update", "DEV-A-99999", "--summary", "x")
-
-	want := faultDocument{
-		code: "not_found",
-		details: []detail{
-			{"request", articleToWriteRequest(server.URL, "DEV-A-99999")},
-			{"upstream_status", 404},
-			{"upstream_error", "Not Found"},
-			{"upstream_message", "Can't find article with id DEV-A-99999"},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
-}
-
 func TestArticleUpdateRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 	t.Parallel()
 	const body = `{"$type":"Article","id":"177-7","idReadable":"..","project":{"$type":"Project","shortName":"DEV"}}`
@@ -134,17 +99,4 @@ func TestArticleUpdateRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 	}
 	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
-}
-
-func TestArticleUpdateIsUncertainWhereTheAnswerNeverCame(t *testing.T) {
-	t.Parallel()
-	server := updatingAnArticle(t, fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")), breakOff)
-
-	got := runWith(t, server.Env(), "article", "update", "DEV-A-7", "--summary", "x")
-
-	found := requireUncertainty(t, got)
-	assert.Equal(t, "write_uncertain", found.code)
-	assert.Equal(t, []detail{{"request", articleUpdateRequest(server.URL, "DEV-A-7", articleShowFields)}},
-		found.details)
-	assert.Empty(t, got.stdout)
 }

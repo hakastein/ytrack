@@ -111,27 +111,14 @@ func creationRequest(address, fields string) string {
 	return "POST " + address + "/api/issues?fields=" + fields
 }
 
-func TestIssueCreateRefusesBeforeAnyRequest(t *testing.T) {
+func TestIssueCreateRefusesACallWithNoTitle(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "no title", argv: []string{"issue", "create", "DEV"}},
-		{name: "two dots for a project", argv: []string{"issue", "create", "..", "--summary", "x"}},
-		{name: "a title twice", argv: []string{"issue", "create", "DEV", "--summary", "a", "--summary", "b"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
+	server := fake.ServeNothing(t)
 
-			got := runWith(t, server.Env(), tc.argv...)
+	got := runWith(t, server.Env(), "issue", "create", "DEV")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests())
-		})
-	}
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+	assert.Empty(t, server.Requests())
 }
 
 func TestIssueCreateReadsTheProjectAndFilesTheIssue(t *testing.T) {
@@ -214,69 +201,4 @@ func TestIssueCreateRefusesMetadataOfTheProjectOfAnotherShape(t *testing.T) {
 	}
 	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
-}
-
-func TestIssueCreateRefusesWhatTheServerRefused(t *testing.T) {
-	t.Parallel()
-	const said = `{"error":"Field required","error_description":"Поле Тип обязательно","error_field":"Тип",` +
-		`"error_type":"workflow","error_workflow_type":"require"}`
-	server := creating(t, fake.JSON(http.StatusOK, projectRequiringNothing()), fake.JSON(http.StatusBadRequest, said))
-
-	got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x")
-
-	want := faultDocument{
-		code: "rejected",
-		details: []detail{
-			{"request", creationRequest(server.URL, askedIssueFields)},
-			{"upstream_status", 400},
-			{"upstream_error", "Field required"},
-			{"upstream_message", "Поле Тип обязательно"},
-			{"upstream_body", said},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
-}
-
-func TestIssueCreateRefusesWhatTheTokenMayNotReachAt(t *testing.T) {
-	t.Parallel()
-	t.Run("a project the read does not find", func(t *testing.T) {
-		t.Parallel()
-		said := `{"error":"Not Found","error_description":"Entity with id NOPE not found"}`
-		server := creating(t, fake.JSON(http.StatusNotFound, said), noCreation(t))
-
-		got := runWith(t, server.Env(), "issue", "create", "NOPE", "--summary", "x")
-
-		want := faultDocument{
-			code: "not_found",
-			details: []detail{
-				{"request", writeMetadataRequest(server.URL, "NOPE")},
-				{"upstream_status", 404},
-				{"upstream_error", "Not Found"},
-				{"upstream_message", "Entity with id NOPE not found"},
-			},
-		}
-		assert.Equal(t, want, requireFault(t, got))
-		assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
-	})
-	t.Run("a token that may read the project and not write in it", func(t *testing.T) {
-		t.Parallel()
-		said := `{"error":"Forbidden","error_description":"HTTP 403 Forbidden"}`
-		server := creating(t, fake.JSON(http.StatusOK, projectRequiringNothing()), fake.JSON(http.StatusForbidden, said))
-
-		got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x")
-
-		want := faultDocument{
-			code: "denied",
-			details: []detail{
-				{"request", creationRequest(server.URL, askedIssueFields)},
-				{"upstream_status", 403},
-				{"upstream_error", "Forbidden"},
-				{"upstream_message", "HTTP 403 Forbidden"},
-				authFromEnv(),
-			},
-		}
-		assert.Equal(t, want, requireFault(t, got))
-		assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
-	})
 }

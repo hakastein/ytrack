@@ -99,57 +99,25 @@ func TestTagRemoveRefusesWhatTheReadsBeforeTheRemovalDoNotAllow(t *testing.T) {
 	}
 }
 
-func TestTagRemoveReadsWhatTheServerAnsweredTheRemovalWith(t *testing.T) {
+func TestTagRemoveRefusesATagTheOwnerDoesNotCarry(t *testing.T) {
 	t.Parallel()
 	const missing = `{"error":"Not Found","error_description":"Entity with id 10-5 not found"}`
-	tests := []struct {
-		name    string
-		removal http.HandlerFunc
-		code    string
-		exit    int
-		details []detail
-	}{
-		{
-			name:    "a tag the owner does not carry",
-			removal: fake.JSON(http.StatusNotFound, missing),
-			code:    "not_found",
-			exit:    1,
-			details: []detail{
-				{"upstream_status", 404},
-				{"upstream_error", "Not Found"},
-				{"upstream_message", "Entity with id 10-5 not found"},
-			},
-		},
-		{
-			name:    "an answer carrying a body where the call is answered with none",
-			removal: fake.JSON(http.StatusOK, `{"x":1}`),
-			code:    "upstream_invalid",
-			exit:    2,
-			details: []detail{
-				{"upstream_status", 200},
-				{"upstream_body", `{"x":1}`},
-			},
+	server := takingATagOff(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), shownTags(),
+		fake.JSON(http.StatusNotFound, missing))
+
+	got := runWith(t, server.Env(), "tag", "remove", "DEV-7", "--name", "ready")
+
+	want := faultDocument{
+		code: "not_found",
+		details: []detail{
+			{"request", tagRemovalRequest(server.URL, "issues", "DEV-7", "10-5")},
+			{"issue", "DEV-7"},
+			{"tag", "ready"},
+			{"upstream_status", 404},
+			{"upstream_error", "Not Found"},
+			{"upstream_message", "Entity with id 10-5 not found"},
 		},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := takingATagOff(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), shownTags(), tc.removal)
-
-			got := runWith(t, server.Env(), "tag", "remove", "DEV-7", "--name", "ready")
-
-			found := requireFaultDocument(t, got)
-			assert.Equal(t, tc.exit, got.code)
-			want := faultDocument{
-				code: tc.code,
-				details: append([]detail{
-					{"request", tagRemovalRequest(server.URL, "issues", "DEV-7", "10-5")},
-					{"issue", "DEV-7"},
-					{"tag", "ready"},
-				}, tc.details...),
-			}
-			assert.Equal(t, want, found)
-			assert.Equal(t, []string{http.MethodGet, http.MethodGet, http.MethodDelete}, sentMethods(server))
-		})
-	}
+	assert.Equal(t, want, requireFault(t, got))
+	assert.Equal(t, []string{http.MethodGet, http.MethodGet, http.MethodDelete}, sentMethods(server))
 }

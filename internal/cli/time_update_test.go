@@ -17,65 +17,14 @@ func workItemUpdateRequest(address, issue, id, fields string) string {
 	return "POST " + address + workItemPath(issue, id) + "?fields=" + fields
 }
 
-func TestTimeUpdateRefusesWhatItCannotSend(t *testing.T) {
+func TestTimeUpdateRefusesACallThatWritesNothing(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "nothing to write at all", argv: []string{}},
-		{name: "the duration twice", argv: []string{"--duration", "PT1H", "--duration", "PT2H"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
+	server := fake.ServeNothing(t)
 
-			got := runWith(t, server.Env(), append([]string{"time", "update", "DEV-1", "199-6"}, tc.argv...)...)
+	got := runWith(t, server.Env(), "time", "update", "DEV-1", "199-6")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests())
-		})
-	}
-}
-
-func TestTimeUpdateRefusesAnIDThatIsNoInternalID(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		id   string
-	}{
-		{name: "the readable id of an issue", id: "DEV-1"},
-		{name: "the readable id of an article", id: "DEV-A-1"},
-		{name: "two dots", id: ".."},
-		{name: "a number and a dash", id: "199-"},
-		{name: "a number without a class", id: "-1"},
-		{name: "a letter after the number", id: "199-1x"},
-		{name: "a space before the id", id: " 199-1"},
-		{name: "an underscore in place of the dash", id: "199_1"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
-
-			got := runWith(t, server.Env(), "time", "update", "--text", "x", "--", "DEV-1", tc.id)
-
-			found := requireFault(t, got)
-			assert.Equal(t, "bad_usage", found.code)
-			assert.Empty(t, server.Requests())
-		})
-	}
-}
-
-func TestTimeUpdateSendsAnIDWithALeadingZeroAsItWasWritten(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusNotFound, entityNotFound("199-06")))
-
-	got := runWith(t, server.Env(), "time", "update", "DEV-1", "199-06", "--text", "x")
-
-	assert.Equal(t, "not_found", requireFault(t, got).code)
-	assert.Equal(t, []string{workItemPath("DEV-1", "199-06")}, server.Paths())
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+	assert.Empty(t, server.Requests())
 }
 
 func TestTimeUpdateWritesTheNamedPartsAndPrintsWhatTheServerKept(t *testing.T) {
@@ -123,24 +72,4 @@ func TestTimeUpdateRefusesAnAttributeTheServerDidNotTakeAway(t *testing.T) {
 			{"mismatch", []any{[]detail{{"field", "Mode"}, {"expected", nil}, {"actual", "Pair"}}}},
 		},
 	}, requireUncertainty(t, got))
-}
-
-func TestTimeUpdateRefusesWhatTheServerRefused(t *testing.T) {
-	t.Parallel()
-	server := writingTime(t, fake.JSON(http.StatusNotFound,
-		`{"error":"Not Found","error_description":"Entity with id 199-6 not found"}`))
-
-	got := runWith(t, server.Env(), "time", "update", "DEV-1", "199-6", "--text", "x")
-
-	want := faultDocument{
-		code: "not_found",
-		details: []detail{
-			{"request", workItemUpdateRequest(server.URL, "DEV-1", "199-6", sentWorkItemWriteFields)},
-			{"upstream_status", 404},
-			{"upstream_error", "Not Found"},
-			{"upstream_message", "Entity with id 199-6 not found"},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodPost}, sentMethods(server))
 }

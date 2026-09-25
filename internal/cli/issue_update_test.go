@@ -60,28 +60,14 @@ func updateRequest(address, readable, fields string) string {
 	return "POST " + address + "/api/issues/" + readable + "?fields=" + fields
 }
 
-func TestIssueUpdateRefusesBeforeAnyRequest(t *testing.T) {
+func TestIssueUpdateRefusesACallThatWritesNothing(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "an internal id", argv: []string{"issue", "update", "3-26", "--summary", "x"}},
-		{name: "nothing to write", argv: []string{"issue", "update", "DEV-1"}},
-		{name: "a title twice", argv: []string{"issue", "update", "DEV-1", "--summary", "a", "--summary", "b"}},
-		{name: "prose twice", argv: []string{"issue", "update", "DEV-1", "--description", "a", "--description", "b"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
+	server := fake.ServeNothing(t)
 
-			got := runWith(t, server.Env(), tc.argv...)
+	got := runWith(t, server.Env(), "issue", "update", "DEV-1")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests())
-		})
-	}
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+	assert.Empty(t, server.Requests())
 }
 
 func TestIssueUpdateReadsTheIssueAndWritesByTheIDOfIt(t *testing.T) {

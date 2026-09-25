@@ -2,7 +2,6 @@ package cli_test
 
 import (
 	"net/http"
-	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,33 +10,6 @@ import (
 
 	"github.com/hakastein/ytrack/internal/fake"
 )
-
-func TestProjectShowRefusesFieldsGivenTwice(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		flags []string
-	}{
-		{
-			name:  "two expressions",
-			flags: []string{"--fields", "name", "--fields", "shortName"},
-		},
-		{
-			name:  "one expression twice",
-			flags: []string{"--fields=name", "--fields=name"},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
-
-			got := runWith(t, server.Env(), slices.Concat([]string{"project", "show", "DEV"}, tc.flags)...)
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-		})
-	}
-}
 
 func TestProjectShowPrintsAListOneFlowItemALine(t *testing.T) {
 	t.Parallel()

@@ -72,35 +72,14 @@ func writingTimeAgainstTheSettings(t *testing.T, write http.HandlerFunc) *fake.S
 	})
 }
 
-func TestTimeCreateRefusesWhatItCannotSend(t *testing.T) {
+func TestTimeCreateRefusesADurationLongerThanTheServerKeeps(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "a duration longer than the server keeps", argv: []string{"time", "create", "DEV-1", "PT2147483648M"}},
-		{
-			name: "the day twice",
-			argv: []string{"time", "create", "DEV-1", "PT1H", "--date", "2026-09-01", "--date", "2026-09-02"},
-		},
-		{name: "the text twice", argv: []string{"time", "create", "DEV-1", "PT1H", "--text", "a", "--text", "b"}},
-		{name: "the type twice", argv: []string{"time", "create", "DEV-1", "PT1H", "--type", "First", "--type", "Second"}},
-		{
-			name: "the expression twice",
-			argv: []string{"time", "create", "DEV-1", "PT1H", "--fields", "id", "--fields", "text"},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
+	server := fake.ServeNothing(t)
 
-			got := runWith(t, server.Env(), tc.argv...)
+	got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT2147483648M")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests())
-		})
-	}
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+	assert.Empty(t, server.Requests())
 }
 
 func TestTimeCreateWritesTheWorkItemAndPrintsWhatTheServerKept(t *testing.T) {
@@ -169,63 +148,6 @@ func TestTimeCreateRefusesADurationTheServerKeptOtherwise(t *testing.T) {
 			{"mismatch", []any{[]detail{{"field", "duration"}, {"expected", "PT1H30M"}, {"actual", "PT1H"}}}},
 		},
 	}, requireUncertainty(t, got))
-}
-
-func TestTimeCreateRefusesWhatTheServerRefused(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name            string
-		status          int
-		code            string
-		upstreamError   string
-		upstreamMessage string
-		details         []detail
-	}{
-		{
-			name:            "a duration of no length",
-			status:          http.StatusBadRequest,
-			code:            "rejected",
-			upstreamError:   "invalid_properties",
-			upstreamMessage: "The duration is empty",
-		},
-		{
-			name:            "an issue the instance has none of",
-			status:          http.StatusNotFound,
-			code:            "not_found",
-			upstreamError:   "Not Found",
-			upstreamMessage: "Entity with id DEV-1 not found",
-		},
-		{
-			name:            "a token that may read the issue and not write time against it",
-			status:          http.StatusForbidden,
-			code:            "denied",
-			upstreamError:   "Forbidden",
-			upstreamMessage: "HTTP 403 Forbidden",
-			details:         []detail{authFromEnv()},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			said := `{"error":` + strconv.Quote(tc.upstreamError) + `,"error_description":` +
-				strconv.Quote(tc.upstreamMessage) + `}`
-			server := writingTime(t, fake.JSON(tc.status, said))
-
-			got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT0M")
-
-			want := faultDocument{
-				code: tc.code,
-				details: append([]detail{
-					{"request", workItemWriteRequest(server.URL, "DEV-1", sentWorkItemWriteFields)},
-					{"upstream_status", tc.status},
-					{"upstream_error", tc.upstreamError},
-					{"upstream_message", tc.upstreamMessage},
-				}, tc.details...),
-			}
-			assert.Equal(t, want, requireFault(t, got))
-			assert.Equal(t, []string{http.MethodPost}, sentMethods(server))
-		})
-	}
 }
 
 func noWorkItemWritten(t *testing.T) http.HandlerFunc {

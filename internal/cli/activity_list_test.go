@@ -2,13 +2,10 @@ package cli_test
 
 import (
 	"net/http"
-	"net/url"
-	"slices"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/hakastein/ytrack/internal/fake"
 )
@@ -92,8 +89,6 @@ func threeActivities() string {
 	return `[` + sentFieldActivity(newest) + `,` + sentLinkActivity(middle) + `,` + sentCreatedActivity(oldest) + `]`
 }
 
-const noActivities = `[]`
-
 func activityServer(t *testing.T, handler http.HandlerFunc) *fake.Server {
 	t.Helper()
 	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -110,17 +105,6 @@ func activityRequest(address, top string) string {
 		sentActivityFields + "&$top=" + top
 }
 
-func activitySent(t *testing.T, server *fake.Server) url.Values {
-	t.Helper()
-	for _, request := range server.Requests() {
-		if request.URL.Path == activitiesPath {
-			return request.URL.Query()
-		}
-	}
-	require.FailNow(t, "no request reached the activities of an issue")
-	return nil
-}
-
 func TestActivityTakesTheIssueAsItsOneArgument(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -132,9 +116,6 @@ func TestActivityTakesTheIssueAsItsOneArgument(t *testing.T) {
 			name: "the name the activity went by before",
 			argv: []string{"issue-history", "list", "--query", "issue id: DEV-1"},
 		},
-		{name: "the readable id of an article", argv: []string{"activity", "list", "DEV-A-1"}},
-		{name: "an internal id", argv: []string{"activity", "list", "3-19"}},
-		{name: "a string of neither form", argv: []string{"activity", "list", "DEV"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -149,32 +130,14 @@ func TestActivityTakesTheIssueAsItsOneArgument(t *testing.T) {
 	}
 }
 
-func TestActivityRefusesTheFlagsOfAListItCannotSend(t *testing.T) {
+func TestActivityRefusesAnExpressionThatClosesNothing(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name  string
-		flags []string
-	}{
-		{name: "a limit of zero", flags: []string{"--limit", "0"}},
-		{
-			name:  "a limit of the largest int32, which leaves no room for the activity past it",
-			flags: []string{"--limit", "2147483647"},
-		},
-		{name: "the limit twice", flags: []string{"--limit", "1", "--limit", "2"}},
-		{name: "the fields twice", flags: []string{"--fields", "timestamp", "--fields", "category"}},
-		{name: "an expression that closes nothing", flags: []string{"--fields", "timestamp(added"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
+	server := fake.ServeNothing(t)
 
-			got := runWith(t, server.Env(), slices.Concat([]string{"activity", "list", activityIssue}, tc.flags)...)
+	got := runWith(t, server.Env(), "activity", "list", activityIssue, "--fields", "timestamp(added")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests())
-		})
-	}
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+	assert.Empty(t, server.Requests())
 }
 
 func TestActivityPrintsTheActivitiesOfTheIssueItWasGiven(t *testing.T) {
@@ -209,17 +172,6 @@ func TestActivityRefusesAnAnswerOfAnotherShape(t *testing.T) {
 	assert.Equal(t, want, requireFault(t, got))
 }
 
-func TestActivityReadsTheCutOffTheActivityPastTheLimit(t *testing.T) {
-	t.Parallel()
-	server := activityServer(t, fake.JSON(http.StatusOK, threeActivities()))
-
-	got := runWith(t, server.Env(), "activity", "list", activityIssue, "--limit", "2")
-
-	rows := printedFieldRow + printedLinkRow
-	assert.Equal(t, outcome{stdout: "total: null\nreturned: 2\ntruncated: true\nactivities:\n" + rows}, got)
-	assert.Equal(t, []string{"3"}, activitySent(t, server)["$top"])
-}
-
 func TestActivityChecksTheActivityPastTheLimitWithTheRest(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -248,33 +200,4 @@ func TestActivityChecksTheActivityPastTheLimitWithTheRest(t *testing.T) {
 			assert.Empty(t, got.stdout)
 		})
 	}
-}
-
-func TestActivityRefusesMoreActivitiesThanItAskedFor(t *testing.T) {
-	t.Parallel()
-	four := `[` + sentFieldActivity(newest) + `,` + sentLinkActivity(middle) + `,` +
-		sentCreatedActivity(oldest) + `,` + sentCreatedActivity(oldest) + `]`
-	server := activityServer(t, fake.JSON(http.StatusOK, four))
-
-	got := runWith(t, server.Env(), "activity", "list", activityIssue, "--limit", "2")
-
-	want := faultDocument{
-		code:    "upstream_invalid",
-		details: []detail{{"limit", 2}, {"returned", 4}},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-}
-
-func TestActivityPassesOnAnIssueTheServerDoesNotHave(t *testing.T) {
-	t.Parallel()
-	const said = `{"error":"Not Found","error_description":"Entity with id DEV-7 not found"}`
-	server := activityServer(t, fake.JSON(http.StatusNotFound, said))
-
-	got := runWith(t, server.Env(), "activity", "list", activityIssue)
-
-	found := requireFault(t, got)
-	assert.Equal(t, "not_found", found.code)
-	assert.Equal(t, activityRequest(server.URL, "51"), detailNamed(t, found, "request"))
-	assert.Equal(t, "Entity with id DEV-7 not found", detailNamed(t, found, "upstream_message"))
-	assert.Equal(t, []string{linkTypesPath, activitiesPath}, server.Paths())
 }

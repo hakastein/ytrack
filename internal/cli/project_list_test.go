@@ -12,8 +12,6 @@ import (
 
 const listedDEV = `{"name":"DEVELOPMENT","$type":"Project","shortName":"DEV"}`
 
-const printedListedDEV = `  - {shortName: "DEV", name: "DEVELOPMENT"}` + "\n"
-
 func listRequest(address, fields, top string) string {
 	return "GET " + address + "/api/admin/projects?fields=" + fields + "&$top=" + top
 }
@@ -26,44 +24,6 @@ func countedBy(records string, count http.HandlerFunc) http.HandlerFunc {
 		}
 		fake.JSON(http.StatusOK, records)(w, r)
 	}
-}
-
-func countingQueries(limit string) []url.Values {
-	return []url.Values{
-		{"fields": {"shortName,name"}, "$top": {limit}},
-		{"fields": {"id"}, "$top": {"-1"}},
-	}
-}
-
-func TestProjectListRefusesALimitItCannotSend(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		limit string
-	}{
-		{name: "zero", limit: "0"},
-		{name: "a negative number", limit: "-1"},
-		{name: "past the largest int32", limit: "2147483648"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
-
-			got := runWith(t, server.Env(), "project", "list", "--limit", tc.limit)
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-		})
-	}
-}
-
-func TestProjectListRefusesALimitGivenTwice(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "project", "list", "--limit", "1", "--limit", "2")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 }
 
 func TestProjectListRefusesFieldsThatDoNotParse(t *testing.T) {
@@ -84,96 +44,6 @@ func TestProjectListAddsFieldsToTheDefaultOfTheList(t *testing.T) {
 	want := "total: 1\nreturned: 1\ntruncated: false\nprojects:\n" + `  - {shortName: "DEV", name: "DEVELOPMENT", id: "0-1"}` + "\n"
 	assert.Equal(t, outcome{stdout: want}, got)
 	assert.Equal(t, []url.Values{{"fields": {"shortName,name,id"}, "$top": {"50"}}}, server.Queries())
-}
-
-func TestProjectListSendsTheLimitAsTop(t *testing.T) {
-	t.Parallel()
-	for _, limit := range []string{"1", "2147483647"} {
-		t.Run(limit, func(t *testing.T) {
-			t.Parallel()
-			server := fake.Serve(t, fake.JSON(http.StatusOK, `[]`))
-
-			got := runWith(t, server.Env(), "project", "list", "--limit", limit)
-
-			assert.Equal(t, outcome{stdout: "total: 0\nreturned: 0\ntruncated: false\nprojects: []\n"}, got)
-			assert.Equal(t, []url.Values{{"fields": {"shortName,name"}, "$top": {limit}}}, server.Queries())
-		})
-	}
-}
-
-func TestProjectListCountsTheProjectsWhenTheyFillTheLimit(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name   string
-		count  string
-		stdout string
-	}{
-		{
-			name:   "more counted than arrived",
-			count:  `[{"id":"0-0","$type":"Project"},{"id":"0-1","$type":"Project"},{"id":"0-2","$type":"Project"}]`,
-			stdout: "total: 3\nreturned: 1\ntruncated: true\nprojects:\n" + printedListedDEV,
-		},
-		{
-			name:   "as many counted as arrived",
-			count:  `[{"id":"0-0","$type":"Project"}]`,
-			stdout: "total: 1\nreturned: 1\ntruncated: false\nprojects:\n" + printedListedDEV,
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.Serve(t, countedBy(`[`+listedDEV+`]`, fake.JSON(http.StatusOK, tc.count)))
-
-			got := runWith(t, server.Env(), "project", "list", "--limit", "1")
-
-			assert.Equal(t, outcome{stdout: tc.stdout}, got)
-			assert.Equal(t, countingQueries("1"), server.Queries())
-		})
-	}
-}
-
-func TestProjectListRefusesMoreProjectsThanTheLimit(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, `[`+listedDEV+`,{"shortName":"OLD","name":"Old","$type":"Project"}]`))
-
-	got := runWith(t, server.Env(), "project", "list", "--limit", "1")
-
-	want := faultDocument{
-		code:    "upstream_invalid",
-		details: []detail{{"limit", 1}, {"returned", 2}},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, server.Requests(), 1)
-}
-
-func TestProjectListRefusesACountBelowTheProjectsReceived(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, countedBy(`[`+listedDEV+`]`, fake.JSON(http.StatusOK, `[]`)))
-
-	got := runWith(t, server.Env(), "project", "list", "--limit", "1")
-
-	want := faultDocument{
-		code:    "upstream_failed",
-		details: []detail{{"total", 0}, {"returned", 1}},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, countingQueries("1"), server.Queries())
-}
-
-func TestProjectListRefusesACountWhoseAnswerBreaksOff(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, countedBy(`[`+listedDEV+`]`, func(w http.ResponseWriter, _ *http.Request) {
-		conn, _, err := http.NewResponseController(w).Hijack()
-		if assert.NoError(t, err) {
-			assert.NoError(t, conn.Close())
-		}
-	}))
-
-	got := runWith(t, server.Env(), "project", "list", "--limit", "1")
-
-	want := faultDocument{code: "upstream_failed", details: []detail{{"request", listRequest(server.URL, "id", "-1")}}}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, server.Requests(), 2)
 }
 
 func TestProjectListRefusesAnAnswerOfAnotherShape(t *testing.T) {

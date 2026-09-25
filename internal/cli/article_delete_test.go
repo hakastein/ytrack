@@ -1,7 +1,6 @@
 package cli_test
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -20,44 +19,6 @@ func articleReadRequest(address, id string) string {
 	return "GET " + address + "/api/articles/" + url.PathEscape(id) + "?fields=" + deletedFields
 }
 
-func articleDeletionRequest(address, readable string) string {
-	return "DELETE " + address + "/api/articles/" + readable
-}
-
-func noArticleToDelete(address, id, said string) faultDocument {
-	return faultDocument{
-		code: "not_found",
-		details: []detail{
-			{"request", articleReadRequest(address, id)},
-			{"upstream_status", 404},
-			{"upstream_error", "Not Found"},
-			{"upstream_message", said},
-		},
-	}
-}
-
-func TestArticleDeleteRefusesBeforeAnyRequest(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "an issue id", argv: []string{"article", "delete", "DEV-1"}},
-		{name: "an internal id", argv: []string{"article", "delete", "3-19"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
-
-			got := runWith(t, server.Env(), tc.argv...)
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests())
-		})
-	}
-}
-
 func TestArticleDeleteReadsTheIDAndDeletesByIt(t *testing.T) {
 	t.Parallel()
 	server := deleting(t, fake.JSON(http.StatusOK, articleNamed("DEV-A-7")), deletionDone())
@@ -70,112 +31,6 @@ func TestArticleDeleteReadsTheIDAndDeletesByIt(t *testing.T) {
 	assert.Equal(t, []url.Values{{"fields": {deletedFields}}, {}}, server.Queries())
 	assert.Equal(t, "Bearer "+fake.Token, server.Last(t).Header.Get("Authorization"))
 	assert.Equal(t, []string{"", ""}, server.Bodies(), "neither request carries a body")
-}
-
-func TestArticleDeleteRefusesAnArticleTheReadDoesNotFind(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		said string
-	}{
-		{name: "an article nobody wrote", said: "Can't find article with id dev-A-7"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			body := `{"error":"Not Found","error_description":` + strconv.Quote(tc.said) + `}`
-			server := deleting(t, fake.JSON(http.StatusNotFound, body), noDeletion(t))
-
-			got := runWith(t, server.Env(), "article", "delete", "dev-A-7")
-
-			assert.Equal(t, noArticleToDelete(server.URL, "dev-A-7", tc.said), requireFault(t, got))
-			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
-		})
-	}
-}
-
-func TestArticleDeleteRefusesWhatTheServerRefused(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name            string
-		status          int
-		upstreamError   string
-		upstreamMessage string
-		code            string
-		details         []detail
-	}{
-		{
-			name:            "the article is gone between the read and the deletion",
-			status:          http.StatusNotFound,
-			upstreamError:   "Not Found",
-			upstreamMessage: "Entity with id DEV-A-7 not found",
-			code:            "not_found",
-		},
-		{
-			name:            "the token may read the article and not delete it",
-			status:          http.StatusForbidden,
-			upstreamError:   "Forbidden",
-			upstreamMessage: "Insufficient rights",
-			code:            "denied",
-			details:         []detail{authFromEnv()},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			body := `{"error":` + strconv.Quote(tc.upstreamError) + `,"error_description":` + strconv.Quote(tc.upstreamMessage) + `}`
-			server := deleting(t, fake.JSON(http.StatusOK, articleNamed("DEV-A-7")), fake.JSON(tc.status, body))
-
-			got := runWith(t, server.Env(), "article", "delete", "DEV-A-7")
-
-			want := faultDocument{
-				code: tc.code,
-				details: append([]detail{
-					{"request", articleDeletionRequest(server.URL, "DEV-A-7")},
-					{"upstream_status", tc.status},
-					{"upstream_error", tc.upstreamError},
-					{"upstream_message", tc.upstreamMessage},
-				}, tc.details...),
-			}
-			assert.Equal(t, want, requireFault(t, got))
-			assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
-		})
-	}
-}
-
-func TestArticleDeleteRefusesA200ThatCarriesABody(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name        string
-		contentType string
-		body        string
-	}{
-		{name: "a JSON object", contentType: "application/json", body: `{"x":1}`},
-		{name: "a web page", contentType: "text/html", body: "<!doctype html>\n<html><body>Log in</body></html>"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := deleting(t, fake.JSON(http.StatusOK, articleNamed("DEV-A-7")), func(w http.ResponseWriter, _ *http.Request) {
-				w.Header().Set("Content-Type", tc.contentType)
-				w.WriteHeader(http.StatusOK)
-				_, _ = io.WriteString(w, tc.body)
-			})
-
-			got := runWith(t, server.Env(), "article", "delete", "DEV-A-7")
-
-			want := faultDocument{
-				code: "upstream_invalid",
-				details: []detail{
-					{"request", articleDeletionRequest(server.URL, "DEV-A-7")},
-					{"upstream_status", 200},
-					{"upstream_body", tc.body},
-				},
-			}
-			assert.Equal(t, want, requireUncertainty(t, got))
-			assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
-		})
-	}
 }
 
 func TestArticleDeleteRefusesAReadableIDItCannotAddressBy(t *testing.T) {

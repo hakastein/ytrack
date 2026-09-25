@@ -11,35 +11,14 @@ import (
 
 const commentFields = "comments(id,author(login),created,text,deleted)"
 
-func commentDetails(id, created, login, text string) []detail {
-	return []detail{
-		{"id", id},
-		{"author", []detail{{"login", login}}},
-		{"created", created},
-		{"text", text},
-	}
-}
-
 func TestIssueShowRefusesACommentsFlagThatIsNeitherAllNorACount(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "a word of its own", argv: []string{"--comments=every"}},
-		{name: "the flag twice", argv: []string{"--comments=1", "--comments=2"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
+	server := fake.ServeNothing(t)
 
-			got := runWith(t, server.Env(), append([]string{"issue", "show", "DEV-1"}, tc.argv...)...)
+	got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=every")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests())
-		})
-	}
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+	assert.Empty(t, server.Requests())
 }
 
 func TestIssueShowRefusesCommentsAskedForInTheExpression(t *testing.T) {

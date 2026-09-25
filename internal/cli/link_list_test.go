@@ -15,28 +15,14 @@ func linkListFields(target string) string {
 	return "links(issues(" + target + "),direction,linkType(sourceToTarget,targetToSource),issuesSize)"
 }
 
-func TestLinkListRefusesACallThatNamesNoOneIssue(t *testing.T) {
+func TestLinkListRefusesANameUnderASlotOfATargetIssue(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "a path that would reach another endpoint", argv: []string{"link", "list", ".."}},
-		{name: "the id of an article", argv: []string{"link", "list", "DEV-A-1"}},
-		{name: "an internal id", argv: []string{"link", "list", "3-19"}},
-		{name: "a name under a slot of a target issue", argv: []string{"link", "list", "DEV-1", "--fields", "+links(id)"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
+	server := fake.ServeNothing(t)
 
-			got := runWith(t, server.Env(), tc.argv...)
+	got := runWith(t, server.Env(), "link", "list", "DEV-1", "--fields", "+links(id)")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests())
-		})
-	}
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+	assert.Empty(t, server.Requests())
 }
 
 func TestLinkListPrintsThePhrasesOfAnIssueInTheOrderReceived(t *testing.T) {
