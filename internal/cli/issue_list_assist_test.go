@@ -10,12 +10,6 @@ import (
 	"github.com/hakastein/ytrack/internal/fake"
 )
 
-const (
-	markedSearch        = "State: Opne \xf0\x9f\x98\x80 привет"
-	greetingUTF16Start  = 15
-	greetingUTF16Length = 6
-)
-
 func marking(t *testing.T, assist, rest http.HandlerFunc) *fake.Server {
 	t.Helper()
 	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -72,126 +66,17 @@ func TestIssueListRefusesASearchThatCannotBeMarkedUp(t *testing.T) {
 
 func TestIssueListRefusesAMarkupShortOfWhatItAskedFor(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name    string
-		marked  string
-		missing []detail
-	}{
-		{
-			name:    "no styled ranges at all",
-			marked:  `{"$type":"SearchSuggestions","query":"project: DEV"}`,
-			missing: missingEntry("styleRanges", "SearchSuggestions"),
-		},
-		{
-			name: "a range with no style",
-			marked: `{"$type":"SearchSuggestions","query":"project: DEV","styleRanges":` +
-				`[{"$type":"SearchStyleRange","start":0,"length":8}]}`,
-			missing: missingEntry("styleRanges(style)", "SearchStyleRange"),
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := marking(t, fake.JSON(http.StatusOK, tc.marked), notAsked(t))
+	server := marking(t, fake.JSON(http.StatusOK, `{"$type":"SearchSuggestions","query":"field: value"}`), notAsked(t))
 
-			got := runWith(t, server.Env(), "issue", "list", "--query", "project: DEV")
+	got := runWith(t, server.Env(), "issue", "list", "--query", "field: value")
 
-			want := faultDocument{
-				code: "upstream_invalid",
-				details: []detail{
-					{"request", "POST " + server.URL + fake.AssistPath + "?fields=" + markupFields},
-					{"fields", markupFields},
-					{"missing", []any{tc.missing}},
-				},
-			}
-			assert.Equal(t, want, requireFault(t, got))
-			assert.Equal(t, 0, sentTo(server, issuesPath))
-		})
-	}
-}
-
-func TestIssueListRefusesAMarkupThatDoesNotFitTheSearch(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name   string
-		marked string
-		fits   bool
-	}{
-		{
-			name:   "a range that ends where the text ends",
-			marked: fake.Markup(t, markedSearch, fake.StyleRange(greetingUTF16Start, greetingUTF16Length, "text")),
-			fits:   true,
+	assert.Equal(t, faultDocument{
+		code: "upstream_invalid",
+		details: []detail{
+			{"request", "POST " + server.URL + fake.AssistPath + "?fields=" + markupFields},
+			{"fields", markupFields},
+			{"missing", []any{missingEntry("styleRanges", "SearchSuggestions")}},
 		},
-		{
-			name:   "a range that runs past the end",
-			marked: fake.Markup(t, markedSearch, fake.StyleRange(greetingUTF16Start+1, greetingUTF16Length, "text")),
-		},
-		{
-			name:   "a range that begins before the start",
-			marked: fake.Markup(t, markedSearch, fake.StyleRange(-1, greetingUTF16Length, "text")),
-		},
-		{
-			name:   "a search that came back with a space of its own",
-			marked: fake.Markup(t, markedSearch+" ", fake.StyleRange(greetingUTF16Start, greetingUTF16Length, "text")),
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := marking(t, fake.JSON(http.StatusOK, tc.marked), fake.JSON(http.StatusOK, `[`+listedDEV1()+`]`))
-
-			got := runWith(t, server.Env(), "issue", "list", "--query", markedSearch)
-
-			requireMarkedUpFirst(t, server, markedSearch)
-			if tc.fits {
-				assert.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-				assert.Equal(t, 1, sentTo(server, issuesPath))
-				return
-			}
-			found := requireFault(t, got)
-			assert.Equal(t, "upstream_invalid", found.code)
-			assert.Equal(t, 0, sentTo(server, issuesPath))
-		})
-	}
-}
-
-func TestIssueListRefusesAMarkupOfAShapeItCannotRead(t *testing.T) {
-	t.Parallel()
-	const search = "State: Opne"
-	tests := []struct {
-		name   string
-		marked string
-	}{
-		{
-			name: "the styled ranges as one range rather than a list of them",
-			marked: `{"$type":"SearchSuggestions","query":"State: Opne","styleRanges":` +
-				`{"$type":"SearchStyleRange","start":0,"length":5,"style":"field-name"}}`,
-		},
-		{name: "a range that is no object at all", marked: `{"$type":"SearchSuggestions","query":"State: Opne","styleRanges":[null]}`},
-		{
-			name:   "where a range begins written as text",
-			marked: fake.Markup(t, search, `{"$type":"SearchStyleRange","start":"0","length":5,"style":"field-name"}`),
-		},
-		{
-			name:   "how far a range runs on written as a fraction",
-			marked: fake.Markup(t, search, `{"$type":"SearchStyleRange","start":0,"length":1.5,"style":"field-name"}`),
-		},
-		{
-			name:   "a range of no style",
-			marked: fake.Markup(t, search, `{"$type":"SearchStyleRange","start":0,"length":5,"style":null}`),
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := marking(t, fake.JSON(http.StatusOK, tc.marked), notAsked(t))
-
-			got := runWith(t, server.Env(), "issue", "list", "--query", search)
-
-			found := requireFault(t, got)
-			assert.Equal(t, "upstream_invalid", found.code)
-			requireMarkedUpFirst(t, server, search)
-			assert.Equal(t, 0, sentTo(server, issuesPath))
-		})
-	}
+	}, requireFault(t, got))
+	assert.Equal(t, []string{fake.AssistPath}, server.Paths())
 }

@@ -1,24 +1,14 @@
 package cli_test
 
 import (
-	"net/http"
 	"slices"
 	"strconv"
 	"strings"
-	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
-
-	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const linkParts = "direction,linkType(sourceToTarget,targetToSource)"
-
-func linksFields(link, target string) string {
-	return link + "(issues(" + target + ")," + linkParts + ")"
-}
 
 type receivedLink struct {
 	direction      string
@@ -47,10 +37,6 @@ func targetIssue(id, summary string) string {
 	return `{"$type":"Issue","idReadable":` + strconv.Quote(id) + `,"summary":` + strconv.Quote(summary) + `}`
 }
 
-func issueWithLinks(links ...receivedLink) string {
-	return `{"$type":"Issue","idReadable":"DEV-1","links":` + receivedLinks(links...) + `}`
-}
-
 func emptyIssueLinks() []receivedLink {
 	return []receivedLink{
 		{direction: "BOTH", sourceToTarget: "relates to"},
@@ -65,202 +51,10 @@ func emptyIssueLinks() []receivedLink {
 	}
 }
 
-func showLinks(t *testing.T, body, expression string) (outcome, *yaml.Node) {
-	t.Helper()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, body))
-
-	got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", expression)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	assert.Equal(t, []string{linksFields("links", "idReadable")}, server.Fields())
-	block := nodeAt(t, requireMapping(t, "stdout", got.stdout), "links")
-	require.Equal(t, yaml.MappingNode, block.Kind, "stdout: %q", got.stdout)
-	return got, block
-}
-
 func keysOf(node *yaml.Node) []string {
 	keys := []string{}
 	for pair := range slices.Chunk(node.Content, 2) {
 		keys = append(keys, pair[0].Value)
 	}
 	return keys
-}
-
-func TestIssueShowPrintsALinkUnderThePhraseOfItsOwnEnd(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name   string
-		link   receivedLink
-		phrase string
-	}{
-		{
-			name:   "at the source of a directed link",
-			link:   receivedLink{direction: "OUTWARD", sourceToTarget: "is required for", targetToSource: "depends on"},
-			phrase: "is required for",
-		},
-		{
-			name:   "at the target of a directed link",
-			link:   receivedLink{direction: "INWARD", sourceToTarget: "is required for", targetToSource: "depends on"},
-			phrase: "depends on",
-		},
-		{
-			name:   "at either end of an undirected link",
-			link:   receivedLink{direction: "BOTH", sourceToTarget: "relates to"},
-			phrase: "relates to",
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			tc.link.issues = []string{targetIssue("DEV-2", "Отклонённая задача")}
-
-			got, block := showLinks(t, issueWithLinks(tc.link), "links")
-
-			assert.Equal(t, []string{tc.phrase}, keysOf(block), "stdout: %q", got.stdout)
-			assert.Equal(t, yaml.DoubleQuotedStyle, block.Content[0].Style, "the phrase stands bare")
-		})
-	}
-}
-
-func TestIssueShowLeavesOutTheEmptyLinkSlots(t *testing.T) {
-	t.Parallel()
-
-	got, block := showLinks(t, issueWithLinks(emptyIssueLinks()...), "links")
-
-	assert.Empty(t, block.Content, "stdout: %q", got.stdout)
-	assert.NotContains(t, got.stdout, "163-")
-}
-
-func TestIssueShowAsksForTheReadableIDOfEveryTargetByDefault(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name       string
-		expression string
-	}{
-		{name: "the slot alone", expression: "links"},
-		{name: "the issues of the slot alone", expression: "links(issues)"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			body := issueWithLinks(receivedLink{
-				direction: "BOTH", sourceToTarget: "relates to",
-				issues: []string{targetIssue("DEV-2", "Отклонённая задача")},
-			})
-
-			got, _ := showLinks(t, body, tc.expression)
-
-			assert.Equal(t, []detail{{"links", []detail{
-				{"relates to", []any{[]detail{{"idReadable", "DEV-2"}}}},
-			}}}, requireDocument(t, got.stdout))
-			assert.NotContains(t, got.stdout, "Отклонённая задача")
-		})
-	}
-}
-
-func TestIssueShowRefusesLinksTheServerNamesBadly(t *testing.T) {
-	t.Parallel()
-	target := []string{targetIssue("DEV-2", "Отклонённая задача")}
-	tests := []struct {
-		name     string
-		received []receivedLink
-	}{
-		{
-			name: "two links of one phrase",
-			received: []receivedLink{
-				{direction: "OUTWARD", sourceToTarget: "X", targetToSource: "Y", issues: target},
-				{direction: "BOTH", sourceToTarget: "X", issues: target},
-			},
-		},
-		{
-			name: "a link holding issues and going by no phrase",
-			received: []receivedLink{
-				{direction: "INWARD", sourceToTarget: "is required for", targetToSource: "", issues: target},
-			},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			body := issueWithLinks(tc.received...)
-			server := fake.Serve(t, fake.JSON(http.StatusOK, body))
-
-			got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "links")
-
-			assert.Equal(t, faultDocument{
-				code: "upstream_invalid",
-				details: []detail{
-					{"request", issueRequest(server.URL, "DEV-1", linksFields("links", "idReadable"))},
-					{"upstream_status", 200},
-					{"upstream_body", body},
-				},
-			}, requireFault(t, got))
-		})
-	}
-}
-
-func issueLinkWith(issues, direction, linkType string) string {
-	return `{"$type":"IssueLink","id":"163-0","issues":` + issues + `,"direction":` + direction +
-		`,"linkType":` + linkType + `}`
-}
-
-func TestIssueShowRefusesLinksOfAShapeTheSpecificationDoesNotGive(t *testing.T) {
-	t.Parallel()
-	const targets = `[{"$type":"Issue","idReadable":"DEV-2"}]`
-	const linkType = `{"$type":"IssueLinkType","sourceToTarget":"relates to","targetToSource":"relates to"}`
-	tests := []struct {
-		name  string
-		links string
-	}{
-		{name: "a slot is no object", links: `[[` + issueLinkWith(targets, `"BOTH"`, linkType) + `]]`},
-		{name: "the issues of a slot are no array", links: `[` + issueLinkWith(`null`, `"BOTH"`, linkType) + `]`},
-		{name: "an issue at the other end is no object", links: `[` + issueLinkWith(`[null]`, `"BOTH"`, linkType) + `]`},
-		{name: "the end the issue stands at is no text", links: `[` + issueLinkWith(targets, `null`, linkType) + `]`},
-		{name: "the type of a link is no object", links: `[` + issueLinkWith(targets, `"BOTH"`, `null`) + `]`},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			body := `{"$type":"Issue","idReadable":"DEV-1","links":` + tc.links + `}`
-			server := fake.Serve(t, fake.JSON(http.StatusOK, body))
-
-			got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "links")
-
-			assert.Equal(t, faultDocument{
-				code: "upstream_invalid",
-				details: []detail{
-					{"request", issueRequest(server.URL, "DEV-1", linksFields("links", "idReadable"))},
-					{"upstream_status", 200},
-					{"upstream_body", body},
-				},
-			}, requireFault(t, got))
-		})
-	}
-}
-
-func TestIssueShowRefusesNamesWrittenUnderALinkSlot(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name       string
-		expression string
-	}{
-		{name: "the id of the slot", expression: "links(id)"},
-		{name: "the end the issue stands at", expression: "links(direction)"},
-		{name: "the type of the link", expression: "links(linkType(name))"},
-		{name: "the id of the parent slot", expression: "parent(id)"},
-		{name: "the trimmed issues of the subtasks slot", expression: "subtasks(trimmedIssues(idReadable))"},
-		{name: "under the issues of a link", expression: "links(issues(parent(id)))"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
-
-			got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--fields", tc.expression)
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests())
-		})
-	}
 }

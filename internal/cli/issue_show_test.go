@@ -12,40 +12,37 @@ import (
 	"github.com/hakastein/ytrack/internal/fake"
 )
 
-func issueInProgress() string {
-	return `{"summary":"[bug] fix login","$type":"Issue","id":"3-19",` +
-		`"tags":[{"name":"история-полигона","$type":"IssueTag"}],"reporter":{"$type":"User","login":"admin"},` +
-		`"created":1789035410875,"updated":1787942509046,"resolved":null,"idReadable":"DEV-1",` +
+func shownIssue() string {
+	return `{"summary":"First","$type":"Issue","id":"3-19",` +
+		`"tags":[{"name":"Tag","$type":"IssueTag"}],"reporter":{"$type":"User","login":"reporter"},` +
+		`"created":1788134400000,"updated":1788134401000,"resolved":null,"idReadable":"DEV-1",` +
 		`"customFields":` + receivedFields(
-		receivedField{name: "State", valueType: "state", ordinal: "8", binding: "180-14",
-			value: bundleElement("In Progress")},
-		receivedField{name: "Type", valueType: "enum", ordinal: "1", binding: "180-15",
-			value: bundleElement("Task")},
+		receivedField{name: "State", valueType: "state", ordinal: "8", binding: "180-14", value: bundleElement("Open")},
+		receivedField{name: "Type", valueType: "enum", ordinal: "1", binding: "180-15", value: bundleElement("Task")},
 	) + `,"links":` + receivedLinks(receivedLink{
-		direction: "INWARD", sourceToTarget: "parent for", targetToSource: "subtask of",
-		issues: []string{targetIssue("DEV-4", "Родительская задача")},
-	}) + `,"description":"Шаги:\n1. открыть\n2. войти","comments":[]}`
+		direction: "INWARD", sourceToTarget: "source to target", targetToSource: "target to source",
+		issues: []string{targetIssue("DEV-2", "Second")},
+	}) + `,"description":"First line\nSecond line","comments":[]}`
 }
 
-const printedInProgress = `idReadable: "DEV-1"
-summary: "[bug] fix login"
+const printedIssue = `idReadable: "DEV-1"
+summary: "First"
 reporter:
-  login: "admin"
-created: "2026-09-10T10:16:50.875Z"
-updated: "2026-08-28T18:41:49.046Z"
+  login: "reporter"
+created: "2026-08-31T00:00:00Z"
+updated: "2026-08-31T00:00:01Z"
 resolved: null
 tags:
-  - {name: "история-полигона"}
+  - {name: "Tag"}
 customFields:
   "Type": "Task"
-  "State": "In Progress"
+  "State": "Open"
 links:
-  "subtask of":
-    - {idReadable: "DEV-4", summary: "Родительская задача"}
+  "target to source":
+    - {idReadable: "DEV-2", summary: "Second"}
 description: |-
-  Шаги:
-  1. открыть
-  2. войти
+  First line
+  Second line
 comments: []
 `
 
@@ -111,21 +108,19 @@ func TestIssueShowRefusesTheInternalIDTheServerResolves(t *testing.T) {
 	}
 }
 
-func TestIssueShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
+func TestIssueShowPrintsTheDefaultFieldsWithTheComments(t *testing.T) {
 	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, issueInProgress()))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, shownIssue()))
 
 	got := runWith(t, server.Env(), "issue", "show", "DEV-1")
 
-	assert.Equal(t, outcome{stdout: printedInProgress}, got)
-	requests := server.Requests()
-	require.Len(t, requests, 1)
-	request := requests[0]
-	assert.Equal(t, http.MethodGet, request.Method)
-	assert.Equal(t, "/api/issues/DEV-1", request.URL.Path)
-	assert.Equal(t, url.Values{"fields": {sentIssueFields}}, request.URL.Query())
-	assert.Equal(t, "Bearer "+fake.Token, request.Header.Get("Authorization"))
-	assert.Equal(t, "application/json", request.Header.Get("Accept"))
+	assert.Equal(t, outcome{stdout: printedIssue}, got)
+	assert.Equal(t, []string{"/api/issues/DEV-1"}, server.Paths())
+	sent := server.Request(t, 0)
+	assert.Equal(t, http.MethodGet, sent.Method)
+	assert.Equal(t, url.Values{"fields": {sentIssueFields}}, sent.URL.Query())
+	assert.Equal(t, "Bearer "+fake.Token, sent.Header.Get("Authorization"))
+	assert.Equal(t, "application/json", sent.Header.Get("Accept"))
 }
 
 func TestIssueShowSendsEveryIDTheFormAllows(t *testing.T) {
@@ -143,7 +138,7 @@ func TestIssueShowSendsEveryIDTheFormAllows(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := fake.Serve(t, fake.JSON(http.StatusOK, issueInProgress()))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, shownIssue()))
 
 			got := runWith(t, server.Env(), "issue", "show", tc.id)
 

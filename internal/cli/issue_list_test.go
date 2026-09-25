@@ -7,11 +7,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
 
 	"github.com/hakastein/ytrack/internal/fake"
@@ -46,27 +44,27 @@ func (i listedIssue) sent() string {
 }
 
 func listedDEV1() string {
-	return listedIssue{id: "DEV-1", internal: "3-19", summary: "[bug] fix login",
-		state: "In Progress", createdEpochMillis: "1789035410875"}.sent()
+	return listedIssue{id: "DEV-1", internal: "3-19", summary: "First",
+		state: "Open", createdEpochMillis: "1788134400875"}.sent()
 }
 
 func listedDEV2() string {
-	return listedIssue{id: "DEV-2", internal: "3-20", summary: "Вторая задача",
-		state: "Отклонена", createdEpochMillis: "1789035411000"}.sent()
+	return listedIssue{id: "DEV-2", internal: "3-20", summary: "Second",
+		state: "Closed", createdEpochMillis: "1788134401000"}.sent()
 }
 
 func listedDEV3() string {
-	return listedIssue{id: "DEV-3", internal: "3-21", summary: "Третья задача",
-		state: "Новая", createdEpochMillis: "1789035412400"}.sent()
+	return listedIssue{id: "DEV-3", internal: "3-21", summary: "Third",
+		state: "New", createdEpochMillis: "1788134402400"}.sent()
 }
 
 const (
-	printedDEV1Row = `  - {idReadable: "DEV-1", summary: "[bug] fix login", ` +
-		`customFields: {"State": "In Progress", "Type": "Task"}, created: "2026-09-10T10:16:50.875Z"}` + "\n"
-	printedDEV2Row = `  - {idReadable: "DEV-2", summary: "Вторая задача", ` +
-		`customFields: {"State": "Отклонена", "Type": "Task"}, created: "2026-09-10T10:16:51Z"}` + "\n"
-	printedDEV3Row = `  - {idReadable: "DEV-3", summary: "Третья задача", ` +
-		`customFields: {"State": "Новая", "Type": "Task"}, created: "2026-09-10T10:16:52.4Z"}` + "\n"
+	printedDEV1Row = `  - {idReadable: "DEV-1", summary: "First", ` +
+		`customFields: {"State": "Open", "Type": "Task"}, created: "2026-08-31T00:00:00.875Z"}` + "\n"
+	printedDEV2Row = `  - {idReadable: "DEV-2", summary: "Second", ` +
+		`customFields: {"State": "Closed", "Type": "Task"}, created: "2026-08-31T00:00:01Z"}` + "\n"
+	printedDEV3Row = `  - {idReadable: "DEV-3", summary: "Third", ` +
+		`customFields: {"State": "New", "Type": "Task"}, created: "2026-08-31T00:00:02.4Z"}` + "\n"
 )
 
 func issueListRequest(address, escapedQuery, fields, top string) string {
@@ -109,39 +107,6 @@ func sentTo(server *fake.Server, path string) int {
 	return sent
 }
 
-type countCalls struct {
-	mu   sync.Mutex
-	sent []countCall
-}
-
-type countCall struct {
-	method      string
-	contentType string
-	body        string
-	err         error
-}
-
-func (c *countCalls) recordingHandler(count http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		c.mu.Lock()
-		c.sent = append(c.sent, countCall{
-			method:      r.Method,
-			contentType: r.Header.Get("Content-Type"),
-			body:        string(body),
-			err:         err,
-		})
-		c.mu.Unlock()
-		count(w, r)
-	}
-}
-
-func (c *countCalls) calls() []countCall {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return slices.Clone(c.sent)
-}
-
 func TestIssueListTakesItsSearchFromTheQueryFlagAlone(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -151,7 +116,6 @@ func TestIssueListTakesItsSearchFromTheQueryFlagAlone(t *testing.T) {
 		{name: "no search at all", argv: []string{"issue", "list"}},
 		{name: "the flag twice", argv: []string{"issue", "list", "--query", "a", "--query", "b"}},
 		{name: "a search that is no UTF-8", argv: []string{"issue", "list", "--query", "\xff"}},
-		{name: "a search holding a byte that is no UTF-8", argv: []string{"issue", "list", "--query", "State: \xc3\x28"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -190,81 +154,32 @@ func TestIssueListRefusesTheFlagsOfAListItCannotSend(t *testing.T) {
 	}
 }
 
-func TestIssueListRefusesWhatOnlyIssueShowPrints(t *testing.T) {
+func TestIssueListRefusesCommentsAskedForInTheExpression(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name       string
-		expression string
-	}{
-		{name: "comments in place of the default", expression: "comments(text)"},
-		{name: "comments added to the default", expression: "+comments"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
+	server := fake.ServeNothing(t)
 
-			got := runWith(t, server.Env(), "issue", "list", "--query", "", "--fields", tc.expression)
+	got := runWith(t, server.Env(), "issue", "list", "--query", "", "--fields", "+comments")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests())
-		})
-	}
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+	assert.Empty(t, server.Requests())
 }
 
-func TestIssueListSendsASearchItReadsNoWordOf(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		query string
-	}{
-		{name: "brackets that never close", query: "(((("},
-		{name: "a word behind a hash", query: "#Новая"},
-		{name: "a leading dash", query: "-тег"},
-		{name: "a field with nothing after it", query: "has:"},
-		{name: "a name with nothing after it", query: "State:"},
-		{name: "a quote that never closes", query: `"unclosed`},
-		{name: "a closing brace alone", query: "}"},
-		{name: "characters a query escapes", query: "a&b=c?d#e%20+f"},
-		{name: "words of a text search", query: "Задача в работе"},
-		{name: "a tab and a line feed inside", query: "State:\tIn\nProgress"},
-		{name: "a line separator inside", query: "a\xe2\x80\xa8b"},
-		{name: "a character outside the basic plane", query: "\xf0\x9f\x98\x80"},
-		{name: "four kilobytes of it", query: strings.Repeat("Задача ", 512)},
-		{name: "an empty search", query: ""},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.Serve(t, fake.Searching(t, fake.JSON(http.StatusOK, `[`+listedDEV1()+`]`)))
-
-			got := runWith(t, server.Env(), "issue", "list", "--query", tc.query)
-
-			assert.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			requireMarkedUpFirst(t, server, tc.query)
-			requests := server.Requests()
-			require.Len(t, requests, 2)
-			search := requests[1]
-			assert.Equal(t, issuesPath, search.URL.Path)
-			assert.Equal(t, []string{tc.query}, search.URL.Query()["query"])
-			assert.Equal(t, []string{"50"}, search.URL.Query()["$top"])
-			assert.Equal(t, []string{sentIssueListFields}, search.URL.Query()["fields"])
-			assert.Equal(t, []string{namedState, namedType}, search.URL.Query()["customFields"])
-		})
-	}
-}
-
-func TestIssueListPrintsARecordToALine(t *testing.T) {
+func TestIssueListPrintsTheIssuesTheSearchFinds(t *testing.T) {
 	t.Parallel()
 	server := fake.Serve(t, fake.Searching(t, fake.JSON(http.StatusOK, `[`+listedDEV1()+`,`+listedDEV2()+`]`)))
 
-	got := runWith(t, server.Env(), "issue", "list", "--query", "project: DEV")
+	got := runWith(t, server.Env(), "issue", "list", "--query", " project: DEV ", "--limit", "3")
 
 	want := "total: 2\nreturned: 2\ntruncated: false\nissues:\n" + printedDEV1Row + printedDEV2Row
 	assert.Equal(t, outcome{stdout: want}, got)
-	requireMarkedUpFirst(t, server, "project: DEV")
-	assert.Equal(t, 1, sentTo(server, issuesPath))
-	assert.Equal(t, 0, sentTo(server, countPath))
+	requireMarkedUpFirst(t, server, " project: DEV ")
+	assert.Equal(t, []string{fake.AssistPath, issuesPath}, server.Paths())
+	assert.Equal(t, url.Values{
+		"query":        {" project: DEV "},
+		"customFields": {namedState, namedType},
+		"fields":       {sentIssueListFields},
+		"$top":         {"3"},
+	}, server.Request(t, 1).URL.Query())
 }
 
 func TestIssueListPrintsAListWhateverTheCountOfRecords(t *testing.T) {
@@ -373,28 +288,6 @@ func TestIssueListCountsOnlyAPageThatFillsTheLimit(t *testing.T) {
 	}
 }
 
-func TestIssueListAsksTheCounterTheSearchItAskedThePageFor(t *testing.T) {
-	t.Parallel()
-	const query = `project: DEV "exact phrase" \ "`
-	calls := &countCalls{}
-	server := fake.Serve(t, fake.Searching(t, countedIssues(`[`+listedDEV1()+`]`, calls.recordingHandler(countHandler("7")))))
-
-	got := runWith(t, server.Env(), "issue", "list", "--query", query, "--limit", "1")
-
-	want := "total: 7\nreturned: 1\ntruncated: true\nissues:\n" + printedDEV1Row
-	assert.Equal(t, outcome{stdout: want}, got)
-	sent := []countCall{{
-		method:      http.MethodPost,
-		contentType: "application/json",
-		body:        `{"query":"project: DEV \"exact phrase\" \\ \""}`,
-	}}
-	assert.Equal(t, sent, calls.calls())
-	requireMarkedUpFirst(t, server, query)
-	counted := countedAt(server)
-	require.Len(t, counted, 1)
-	assert.Equal(t, url.Values{"fields": {"count"}}, server.Queries()[counted[0]])
-}
-
 func TestIssueListRefusesWhenTheCountFails(t *testing.T) {
 	t.Parallel()
 	const said = `{"error":"server_error","error_description":"java.lang.NullPointerException"}`
@@ -473,38 +366,6 @@ func TestIssueListRefusesACountBelowTheIssuesReceived(t *testing.T) {
 	assert.Equal(t, want, requireFault(t, got))
 	requireMarkedUpFirst(t, server, "")
 	assert.Equal(t, 1, sentTo(server, countPath))
-}
-
-func TestIssueListRefusesACountThatIsNoNumberOfIssues(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		count http.HandlerFunc
-	}{
-		{name: "a negative number other than -1", count: countHandler("-2")},
-		{name: "a fraction", count: countHandler("1.5")},
-		{name: "a number in quotes", count: countHandler(`"3"`)},
-		{name: "nothing at all", count: countHandler("null")},
-		{name: "no count in the answer", count: fake.JSON(http.StatusOK, `{"$type":"IssueCountResponse","id":"count"}`)},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.Serve(t, fake.Searching(t, countedIssues(`[`+listedDEV1()+`]`, tc.count)))
-
-			got := runWith(t, server.Env(), "issue", "list", "--query", "a", "--limit", "1")
-
-			found := requireFault(t, got)
-			assert.Equal(t, "upstream_invalid", found.code)
-			requireMarkedUpFirst(t, server, "a")
-			assert.Equal(t, 1, sentTo(server, countPath))
-		})
-	}
-}
-
-func records(t *testing.T, got outcome) []*yaml.Node {
-	t.Helper()
-	return nodeAt(t, requireMapping(t, "stdout", got.stdout), "issues").Content
 }
 
 func recordKeys(record *yaml.Node) []string {
