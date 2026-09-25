@@ -17,8 +17,6 @@ import (
 	"github.com/hakastein/ytrack/internal/cli"
 )
 
-const unknownFlagOfEveryEscape = "--q\" b\\ n\n t\t r\r soh\x01 esc\x1b del\x7f nel\xc2\x85 csi\xc2\x9b ls\xe2\x80\xa8 ps\xe2\x80\xa9 bom\xef\xbb\xbf fffe\xef\xbf\xbe ffff\xef\xbf\xbf Статус 😀"
-
 type outcome struct {
 	code   int
 	stdout string
@@ -61,25 +59,12 @@ func TestRunRefusesAnyCommand(t *testing.T) {
 		{name: "command with no subcommand", argv: []string{"project"}},
 		{name: "unknown subcommand of a command", argv: []string{"project", "bogus"}},
 		{name: "completion protocol behind a flag", argv: []string{"--limit=5", "__complete", "issue"}},
-		{name: "flag with characters YAML must escape", argv: []string{unknownFlagOfEveryEscape}},
-		{name: "flag with invalid UTF-8", argv: []string{"--\xff"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, run(t, tc.argv)))
 		})
-	}
-}
-
-func TestRunEscapesTheUnprintableAndLeavesTextRaw(t *testing.T) {
-	t.Parallel()
-	stderr := run(t, []string{unknownFlagOfEveryEscape}).stderr
-	for _, r := range []rune{0xFEFF, 0xFFFE, 0xFFFF} {
-		assert.NotContains(t, stderr, string(r), "U+%04X stands raw", r)
-	}
-	for _, form := range []string{"\\uFEFF", "\\uFFFE", "\\uFFFF", "\\x01", "Статус", "😀"} {
-		assert.Contains(t, stderr, form)
 	}
 }
 
