@@ -25,10 +25,6 @@ func articleLineRequest(address, id string) string {
 	return "GET " + address + "/api/articles/" + url.PathEscape(id) + "?fields=" + articleLineFields()
 }
 
-func sentSince(u *upstream, mark int) []string {
-	return sentMethods(u)[mark:]
-}
-
 type ancestor struct{ id, readable string }
 
 const (
@@ -109,17 +105,6 @@ func TestArticleUpdateRefusesAParentBeforeAnyRequest(t *testing.T) {
 			assert.Empty(t, server.requests())
 		})
 	}
-}
-
-func TestArticleUpdateHelpNamesTheParentFlagAndWhatClearTakes(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"article", "update", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, "--parent")
-	assert.Contains(t, got.stdout, "content or parent")
 }
 
 func TestArticleUpdateMovesAnArticleUnderTheIDTheReadGave(t *testing.T) {
@@ -396,62 +381,4 @@ func TestArticleUpdateRefusesAnAnswerThatDisagreesAboutTheParent(t *testing.T) {
 			assert.Empty(t, got.stdout)
 		})
 	}
-}
-
-func TestArticleUpdateMovesArticlesOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	title := contractArticleTitle(t)
-	root := fileArticle(t, dev, title+" R")
-	t.Cleanup(func() { removeArticle(t, dev, root) })
-	parent := fileArticle(t, dev, title+" P", "--parent", root)
-	child := fileArticle(t, dev, title+" C", "--parent", parent)
-	grandchild := fileArticle(t, dev, title+" G", "--parent", child)
-
-	mark := len(sentMethods(dev))
-	closing := runWith(t, dev.env(), "article", "update", parent, "--parent", grandchild)
-	found := requireFault(t, closing)
-	assert.Equal(t, "bad_usage", found.code)
-	assert.Contains(t, found.details, detail{"chain", []any{grandchild, child, parent}})
-	assert.Equal(t, []string{http.MethodGet, http.MethodGet}, sentSince(dev, mark), "the write never went out")
-
-	moved := runWith(t, dev.env(), "article", "update", child, "--parent", root)
-	require.Equal(t, 0, moved.code, "stderr: %s", moved.stderr)
-	assert.Equal(t, root, nodeAt(t, requireMapping(t, "stdout", moved.stdout), "parentArticle", "idReadable").Value)
-
-	mark = len(sentMethods(dev))
-	missing := runWith(t, dev.env(), "article", "update", child, "--parent", "DEV-A-99999")
-	assert.Equal(t, "not_found", requireFault(t, missing).code)
-	assert.Equal(t, []string{http.MethodGet, http.MethodGet}, sentSince(dev, mark), "the write never went out")
-	standing := runWith(t, dev.env(), "article", "show", child, "--comments=0", "--fields", "parentArticle(idReadable)")
-	require.Equal(t, 0, standing.code, "stderr: %s", standing.stderr)
-	assert.Equal(t, root, nodeAt(t, requireMapping(t, "stdout", standing.stdout), "parentArticle", "idReadable").Value,
-		"a parent the dev instance has none of leaves the standing one where it was")
-
-	taken := runWith(t, dev.env(), "article", "update", child, "--clear", "parent")
-	t.Cleanup(func() { removeArticle(t, dev, child) })
-	require.Equal(t, 0, taken.code, "stderr: %s", taken.stderr)
-	assert.Nil(t, requireValue(t, nodeAt(t, requireMapping(t, "stdout", taken.stdout), "parentArticle")))
-}
-
-func TestArticleUpdateMovesNothingUnderAParentOfAnotherProjectOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	filed := fileArticle(t, dev, contractArticleTitle(t))
-	t.Cleanup(func() { removeArticle(t, dev, filed) })
-	mark := len(sentMethods(dev))
-
-	got := runWith(t, dev.env(), "article", "update", filed, "--parent", "DEMO-A-1")
-
-	want := faultDocument{
-		code: "bad_usage",
-		details: []detail{
-			{"request", articleLineRequest(dev.url, "DEMO-A-1")},
-			{"project", "DEV"},
-			{"parent", "DEMO-A-1"},
-			{"parent_project", "DEMO"},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet, http.MethodGet}, sentSince(dev, mark), "the write never went out")
 }

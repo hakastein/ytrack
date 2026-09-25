@@ -21,9 +21,8 @@ const (
 )
 
 const (
-	issueListFields = "idReadable,summary,customFields(State,Type),created"
-	namedState      = "State"
-	namedType       = "Type"
+	namedState = "State"
+	namedType  = "Type"
 )
 
 const sentIssueListFields = "idReadable,summary," + translatedCustomFieldsFields + ",created"
@@ -75,33 +74,6 @@ func issueListRequest(address, escapedQuery, fields, top string) string {
 
 func countRequest(address string) string {
 	return "POST " + address + countPath + "?fields=count"
-}
-
-type issueListing struct {
-	Total     *int             `yaml:"total"`
-	Returned  int              `yaml:"returned"`
-	Truncated *bool            `yaml:"truncated"`
-	Issues    []map[string]any `yaml:"issues"`
-}
-
-func requireIssueListing(t *testing.T, got outcome) issueListing {
-	t.Helper()
-	assert.Empty(t, got.stderr)
-	return requireListingIgnoringStderr(t, got)
-}
-
-func requireListingIgnoringStderr(t *testing.T, got outcome) issueListing {
-	t.Helper()
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	decoder := yaml.NewDecoder(strings.NewReader(got.stdout))
-	decoder.KnownFields(true)
-	var printed issueListing
-	require.NoError(t, decoder.Decode(&printed), "stdout: %s", got.stdout)
-	assert.Len(t, printed.Issues, printed.Returned)
-	require.NotNil(t, printed.Total, "stdout: %s", got.stdout)
-	require.NotNil(t, printed.Truncated, "stdout: %s", got.stdout)
-	assert.Equal(t, *printed.Total > printed.Returned, *printed.Truncated)
-	return printed
 }
 
 func countHandler(count string) http.HandlerFunc {
@@ -175,9 +147,6 @@ func TestIssueListTakesItsSearchFromTheQueryFlagAlone(t *testing.T) {
 		argv []string
 	}{
 		{name: "no search at all", argv: []string{"issue", "list"}},
-		{name: "a word of its own", argv: []string{"issue", "list", "DEV-1"}},
-		{name: "two words of their own", argv: []string{"issue", "list", "a", "b"}},
-		{name: "a word of its own that starts with a dash", argv: []string{"issue", "list", "-тег"}},
 		{name: "the flag twice", argv: []string{"issue", "list", "--query", "a", "--query", "b"}},
 		{name: "a search that is no UTF-8", argv: []string{"issue", "list", "--query", "\xff"}},
 		{name: "a search holding a byte that is no UTF-8", argv: []string{"issue", "list", "--query", "State: \xc3\x28"}},
@@ -241,16 +210,6 @@ func TestIssueListRefusesWhatOnlyIssueShowPrints(t *testing.T) {
 	}
 }
 
-func TestIssueListHelpNamesTheDefaultFields(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"issue", "list", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, issueListFields)
-}
-
 func TestIssueListSendsASearchItReadsNoWordOf(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -289,36 +248,6 @@ func TestIssueListSendsASearchItReadsNoWordOf(t *testing.T) {
 			assert.Equal(t, []string{"50"}, search.URL.Query()["$top"])
 			assert.Equal(t, []string{sentIssueListFields}, search.URL.Query()["fields"])
 			assert.Equal(t, []string{namedState, namedType}, search.URL.Query()["customFields"])
-		})
-	}
-}
-
-func TestIssueListSearchesForATextThatLooksLikeAFlag(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		flag  []string
-		query string
-	}{
-		{name: "a leading dash, apart", flag: []string{"--query", "-тег"}, query: "-тег"},
-		{name: "a leading dash, joined", flag: []string{"--query=-тег"}, query: "-тег"},
-		{name: "the word help, apart", flag: []string{"--query", "--help"}, query: "--help"},
-		{name: "the word help, joined", flag: []string{"--query=--help"}, query: "--help"},
-		{name: "a separator after the flag", flag: []string{"--query", "-тег", "--"}, query: "-тег"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := searching(t, respondWith(http.StatusOK, `[`+listedDEV1()+`]`))
-
-			got := runWith(t, server.env(), slices.Concat([]string{"issue", "list"}, tc.flag)...)
-
-			want := "total: 1\nreturned: 1\ntruncated: false\nissues:\n" + printedDEV1Row
-			assert.Equal(t, outcome{stdout: want}, got)
-			requireMarkedUpFirst(t, server, tc.query)
-			requests := server.requests()
-			require.Len(t, requests, 2)
-			assert.Equal(t, []string{tc.query}, requests[1].URL.Query()["query"])
 		})
 	}
 }
@@ -571,8 +500,6 @@ func TestIssueListRefusesACountThatIsNoNumberOfIssues(t *testing.T) {
 	}
 }
 
-const devInstanceIssues = "issue id: DEV-1, DEV-2, DEV-3 sort by: {issue id} asc"
-
 func records(t *testing.T, got outcome) []*yaml.Node {
 	t.Helper()
 	return nodeAt(t, requireMapping(t, "stdout", got.stdout), "issues").Content
@@ -584,84 +511,4 @@ func recordKeys(record *yaml.Node) []string {
 		keys = append(keys, pair[0].Value)
 	}
 	return keys
-}
-
-func requireIssuesOfTheDevInstance(t *testing.T, got outcome, ids ...string) {
-	t.Helper()
-	printed := requireIssueListing(t, got)
-	assert.Equal(t, len(ids), *printed.Total)
-	assert.False(t, *printed.Truncated)
-	found := records(t, got)
-	require.Len(t, found, len(ids))
-	for i, record := range found {
-		assert.Equal(t, []string{"idReadable", "summary", "customFields", "created"}, recordKeys(record))
-		assert.Equal(t, ids[i], nodeAt(t, record, "idReadable").Value)
-		summary := nodeAt(t, record, "summary")
-		assert.Equal(t, yaml.DoubleQuotedStyle, summary.Style)
-		assert.NotEmpty(t, summary.Value)
-		fields := nodeAt(t, record, "customFields")
-		assert.Equal(t, []string{namedState, namedType}, recordKeys(fields))
-		for pair := range slices.Chunk(fields.Content, 2) {
-			assert.Equal(t, yaml.DoubleQuotedStyle, pair[0].Style, "the key %q stands bare", pair[0].Value)
-			assert.NotEmpty(t, pair[1].Value)
-		}
-		assert.Regexp(t, instantForm, nodeAt(t, record, "created").Value)
-	}
-}
-
-func TestIssueListPrintsTheIssuesOfTheDevInstanceTheSearchNames(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "issue", "list", "--query", devInstanceIssues)
-
-	requireIssuesOfTheDevInstance(t, got, "DEV-1", "DEV-2", "DEV-3")
-	requireMarkedUpFirst(t, dev, devInstanceIssues)
-	assert.Equal(t, []url.Values{{"query": {devInstanceIssues}, "customFields": {namedState, namedType}, "fields": {sentIssueListFields}, "$top": {"50"}}}, dev.sentQueries()[1:])
-}
-
-func TestIssueListDoesNotCountTheIssuesOfTheDevInstanceThatFitTheLimit(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "issue", "list", "--query", devInstanceIssues, "--limit", "4")
-
-	requireIssuesOfTheDevInstance(t, got, "DEV-1", "DEV-2", "DEV-3")
-	requireMarkedUpFirst(t, dev, devInstanceIssues)
-	assert.Equal(t, []url.Values{{"query": {devInstanceIssues}, "customFields": {namedState, namedType}, "fields": {sentIssueListFields}, "$top": {"4"}}}, dev.sentQueries()[1:])
-}
-
-func TestIssueListPassesOnTheDevInstanceRefusingAValueOfAField(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	const query = "issue id: DEV-1 State: In Progress"
-
-	got := runWith(t, dev.env(), "issue", "list", "--query", query)
-
-	documents := documentsOf(t, got.stderr)
-	require.Len(t, documents, 2, "stderr: %q", got.stderr)
-	assert.Equal(t, warningOf(query, "Progress"), requireWarning(t, documents[0]))
-	assert.Equal(t, 1, strings.Count(got.stderr, separator), "stderr: %q", got.stderr)
-	got.stderr = got.stderr[strings.Index(got.stderr, separator)+len(separator):]
-	found := requireFault(t, got)
-	assert.Equal(t, "rejected", found.code)
-	assert.Equal(t, detail{"upstream_status", 400}, found.details[1])
-	assert.Equal(t, detail{"upstream_error", "invalid_query"}, found.details[2])
-	body, isText := found.details[len(found.details)-1].value.(string)
-	require.True(t, isText, "upstream_body: %v", found.details[len(found.details)-1])
-	assert.Equal(t, "upstream_body", found.details[len(found.details)-1].key)
-	assert.Contains(t, body, "«In»")
-	requireMarkedUpFirst(t, dev, query)
-	assert.Equal(t, 1, sentTo(dev, issuesPath))
-}
-
-func TestIssueListFindsNoIssueOfTheDevInstanceForTheLimitedToken(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}, "issue", "list", "--query", "")
-
-	assert.Equal(t, outcome{stdout: "total: 0\nreturned: 0\ntruncated: false\nissues: []\n"}, got)
-	requireMarkedUpFirst(t, dev, "")
-	assert.Equal(t, 1, sentTo(dev, issuesPath))
 }

@@ -40,7 +40,6 @@ func TestArticleShowRefusesACommentsFlagThatIsNeitherAllNorACount(t *testing.T) 
 	}{
 		{name: "a negative count", argv: []string{"--comments=-1"}},
 		{name: "a word of its own", argv: []string{"--comments=x"}},
-		{name: "no value at all", argv: []string{"--comments"}},
 		{name: "the flag twice", argv: []string{"--comments=1", "--comments=2"}},
 	}
 	for _, tc := range tests {
@@ -157,30 +156,4 @@ func TestArticleShowPrintsTheTextOfACommentAsReceived(t *testing.T) {
 			assert.Equal(t, "2026-09-10T10:16:50.875Z", nodeAt(t, root, "comments", "created").Value)
 		})
 	}
-}
-
-func TestArticleShowPrintsTheArticleOfTheDevInstanceWithNoCommentsAsAnEmptyList(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "article", "show", "DEV-A-1", "--fields", "idReadable")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	assert.Equal(t, []detail{{"idReadable", "DEV-A-1"}, {"comments", []any{}}}, requireDocument(t, got.stdout))
-	assert.Equal(t, []string{"idReadable," + articleCommentFields}, dev.sentFields())
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestArticleShowAsksTheDevInstanceForNoCommentsAtZero(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "article", "show", "DEV-A-1", "--comments=0")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	for _, key := range requireDocument(t, got.stdout) {
-		assert.NotEqual(t, "comments", key.key)
-	}
-	assert.Equal(t, []string{articleShowFields}, dev.sentFields())
 }

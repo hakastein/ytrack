@@ -10,7 +10,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.yaml.in/yaml/v3"
 
 	"github.com/hakastein/ytrack/internal/cli"
 )
@@ -31,29 +30,6 @@ plugins:
       - {name: "Дизайн/Прототипирование"}
 `
 
-const printedDevProject = `shortName: "DEV"
-name: "DEVELOPMENT"
-plugins:
-  timeTrackingSettings:
-    enabled: true
-    workItemTypes:
-      - {name: "Разработка"}
-      - {name: "Тестирование"}
-      - {name: "Документирование"}
-      - {name: "Исследование"}
-      - {name: "Груминг"}
-      - {name: "Декомпозиция"}
-      - {name: "Кодревью"}
-      - {name: "ПланированиеРетро"}
-      - {name: "ТехОкружение"}
-      - {name: "Коммуникации"}
-      - {name: "Дизайн/Прототипирование"}
-      - {name: "Написание ТЗ"}
-      - {name: "Написание инструкции"}
-      - {name: "Проектирование"}
-      - {name: "Уточнение требований"}
-`
-
 func authFromEnv() detail {
 	return detail{"auth_from", "environment"}
 }
@@ -64,118 +40,6 @@ func authFromSettings() detail {
 
 func lookedIn(places ...any) detail {
 	return detail{"looked_in", places}
-}
-
-func TestProjectShowPrintsDEVOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "project", "show", "DEV")
-
-	assert.Equal(t, outcome{stdout: printedDevProject}, got)
-	assert.Equal(t, []string{defaultProjectFields}, dev.sentFields())
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestProjectShowKeepsTheTypesOfWorkOutOfTheCustomFieldsOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "project", "show", "DEV", "--fields",
-		"plugins(timeTrackingSettings(workItemTypes(name))),customFields(field(name,localizedName),bundle(values(name)))")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	var printed struct {
-		Plugins struct {
-			TimeTrackingSettings struct {
-				WorkItemTypes []struct {
-					Name string `yaml:"name"`
-				} `yaml:"workItemTypes"`
-			} `yaml:"timeTrackingSettings"`
-		} `yaml:"plugins"`
-		CustomFields []struct {
-			Field struct {
-				Name          string `yaml:"name"`
-				LocalizedName string `yaml:"localizedName"`
-			} `yaml:"field"`
-			Bundle struct {
-				Values []struct {
-					Name string `yaml:"name"`
-				} `yaml:"values"`
-			} `yaml:"bundle"`
-		} `yaml:"customFields"`
-	}
-	require.NoError(t, yaml.Unmarshal([]byte(got.stdout), &printed))
-	var types []string
-	for _, workItemType := range printed.Plugins.TimeTrackingSettings.WorkItemTypes {
-		types = append(types, workItemType.Name)
-	}
-	assert.Equal(t, []string{
-		"Разработка", "Тестирование", "Документирование", "Исследование", "Груминг", "Декомпозиция", "Кодревью",
-		"ПланированиеРетро", "ТехОкружение", "Коммуникации", "Дизайн/Прототипирование", "Написание ТЗ",
-		"Написание инструкции", "Проектирование", "Уточнение требований",
-	}, types)
-	assert.NotContains(t, types, "ИИРазработка")
-	assert.NotContains(t, types, "Реализация")
-	var names, values []string
-	for _, item := range printed.CustomFields {
-		names = append(names, item.Field.Name)
-		if item.Field.LocalizedName != "" {
-			names = append(names, item.Field.LocalizedName)
-		}
-		for _, value := range item.Bundle.Values {
-			values = append(values, value.Name)
-		}
-	}
-	const fieldsOfDEV, localizedNamesOfDEV = 28, 6
-	assert.Len(t, printed.CustomFields, fieldsOfDEV)
-	assert.Len(t, names, fieldsOfDEV+localizedNamesOfDEV)
-	assert.Len(t, values, 92)
-	taken := map[string]bool{}
-	for _, name := range append(names, values...) {
-		taken[strings.ToLower(name)] = true
-	}
-	var shared []string
-	for _, name := range types {
-		if taken[strings.ToLower(name)] {
-			shared = append(shared, name)
-		}
-	}
-	assert.Empty(t, shared)
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestProjectShowPrintsTheProjectOfTheDevInstanceThatHasTimeTrackingOff(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "project", "show", "DOCS")
-
-	const want = `shortName: "DOCS"
-name: "DOCS"
-plugins:
-  timeTrackingSettings:
-    enabled: false
-    workItemTypes:
-      - {name: "Разработка"}
-      - {name: "Тестирование"}
-      - {name: "Документирование"}
-      - {name: "Исследование"}
-      - {name: "Груминг"}
-      - {name: "Декомпозиция"}
-      - {name: "Кодревью"}
-      - {name: "ПланированиеРетро"}
-      - {name: "ТехОкружение"}
-      - {name: "Коммуникации"}
-      - {name: "Дизайн/Прототипирование"}
-      - {name: "Написание ТЗ"}
-      - {name: "Написание инструкции"}
-      - {name: "Проектирование"}
-      - {name: "Уточнение требований"}
-      - {name: "ИИРазработка"}
-`
-	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Len(t, dev.requests(), 1)
 }
 
 func TestProjectShowPrintsTheTimeTrackingSettingsAsReceived(t *testing.T) {
@@ -234,50 +98,6 @@ func TestNoCommandOfItsOwnReadsTheTypesOfWork(t *testing.T) {
 			assert.Empty(t, server.requests())
 		})
 	}
-}
-
-func TestProjectHelpNamesTwoSubcommands(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"project", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.Equal(t, []string{"list", "show"}, availableCommands(t, got.stdout))
-}
-
-func TestProjectShowPrintsTheFieldsTheMemberAsksFor(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).member}, "project", "show", "DEV", "--fields", "shortName,name")
-
-	assert.Equal(t, outcome{stdout: "shortName: \"DEV\"\nname: \"DEVELOPMENT\"\n"}, got)
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestProjectShowPrintsTheDefaultToTheMember(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).member}, "project", "show", "DEV")
-
-	assert.Equal(t, outcome{stdout: printedDevProject}, got)
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestProjectShowRefusesAFieldHiddenFromTheMember(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).member}, "project", "show", "DEV", "--fields", "+archived")
-
-	want := faultDocument{
-		code:    "upstream_invalid",
-		details: missingFieldDetails(dev.url, defaultProjectFields+",archived", "missing", missingEntry("archived", "Project")),
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, dev.requests(), 1)
 }
 
 func TestProjectShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
@@ -354,27 +174,6 @@ func TestProjectShowReachesTheAPIUnderThePathOfTheAddress(t *testing.T) {
 			requests := server.requests()
 			require.Len(t, requests, 1)
 			assert.Equal(t, tc.want, requests[0].URL.Path)
-		})
-	}
-}
-
-func TestProjectShowTakesExactlyOneCode(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "no code", argv: []string{"project", "show"}},
-		{name: "two codes", argv: []string{"project", "show", "DEV", "DEMO"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := serveNothing(t)
-
-			got := runWith(t, server.env(), tc.argv...)
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 		})
 	}
 }

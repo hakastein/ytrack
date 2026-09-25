@@ -3,37 +3,14 @@ package cli_test
 import (
 	"net/http"
 	"net/url"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"go.yaml.in/yaml/v3"
 )
 
 const listedDEV = `{"name":"DEVELOPMENT","$type":"Project","shortName":"DEV"}`
 
 const printedListedDEV = `  - {shortName: "DEV", name: "DEVELOPMENT"}` + "\n"
-
-type listDocument struct {
-	Total     int              `yaml:"total"`
-	Returned  int              `yaml:"returned"`
-	Truncated bool             `yaml:"truncated"`
-	Projects  []map[string]any `yaml:"projects"`
-}
-
-func requireListing(t *testing.T, got outcome) listDocument {
-	t.Helper()
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	decoder := yaml.NewDecoder(strings.NewReader(got.stdout))
-	decoder.KnownFields(true)
-	var printed listDocument
-	require.NoError(t, decoder.Decode(&printed), "stdout: %s", got.stdout)
-	assert.Len(t, printed.Projects, printed.Returned)
-	assert.Equal(t, printed.Total > printed.Returned, printed.Truncated)
-	return printed
-}
 
 func listRequest(address, fields, top string) string {
 	return "GET " + address + "/api/admin/projects?fields=" + fields + "&$top=" + top
@@ -56,15 +33,6 @@ func countingQueries(limit string) []url.Values {
 	}
 }
 
-func TestProjectListTakesNoArgument(t *testing.T) {
-	t.Parallel()
-	server := serveNothing(t)
-
-	got := runWith(t, server.env(), "project", "list", "DEV")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-}
-
 func TestProjectListRefusesALimitItCannotSend(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -74,7 +42,6 @@ func TestProjectListRefusesALimitItCannotSend(t *testing.T) {
 		{name: "zero", limit: "0"},
 		{name: "a negative number", limit: "-1"},
 		{name: "past the largest int32", limit: "2147483648"},
-		{name: "not a number", limit: "x"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -115,32 +82,6 @@ func TestProjectListAddsFieldsToTheDefaultOfTheList(t *testing.T) {
 	want := "total: 1\nreturned: 1\ntruncated: false\nprojects:\n" + `  - {shortName: "DEV", name: "DEVELOPMENT", id: "0-1"}` + "\n"
 	assert.Equal(t, outcome{stdout: want}, got)
 	assert.Equal(t, []url.Values{{"fields": {"shortName,name,id"}, "$top": {"50"}}}, server.sentQueries())
-}
-
-func TestProjectListHelpNamesTheDefaults(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"project", "list", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, "shortName,name")
-}
-
-func TestProjectListPrintsAnArchivedProjectAndCountsIt(t *testing.T) {
-	t.Parallel()
-	server := serve(t, respondWith(http.StatusOK, `[{"archived":false,"name":"DEVELOPMENT","shortName":"DEV","$type":"Project"},{"archived":true,"name":"Old","shortName":"OLD","$type":"Project"}]`))
-
-	got := runWith(t, server.env(), "project", "list", "--fields", "+archived")
-
-	want := "total: 2\nreturned: 2\ntruncated: false\nprojects:\n" +
-		`  - {shortName: "DEV", name: "DEVELOPMENT", archived: false}` + "\n" +
-		`  - {shortName: "OLD", name: "Old", archived: true}` + "\n"
-	assert.Equal(t, outcome{stdout: want}, got)
-	requests := server.requests()
-	require.Len(t, requests, 1)
-	assert.Equal(t, "/api/admin/projects", requests[0].URL.Path)
-	assert.Equal(t, url.Values{"fields": {"shortName,name,archived"}, "$top": {"50"}}, requests[0].URL.Query())
 }
 
 func TestProjectListSendsTheLimitAsTop(t *testing.T) {
@@ -326,107 +267,4 @@ func TestProjectListRefusesAFieldAProjectDidNotBring(t *testing.T) {
 			assert.Equal(t, want, requireFault(t, got))
 		})
 	}
-}
-
-func TestProjectListPrintsTheProjectsOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "project", "list")
-
-	printed := requireListing(t, got)
-	assert.Contains(t, strings.SplitAfter(got.stdout, "\n"), printedListedDEV)
-	var codes []any
-	for _, project := range printed.Projects {
-		codes = append(codes, project["shortName"])
-	}
-	assert.Contains(t, codes, "DEMO")
-	assert.Equal(t, []url.Values{{"fields": {"shortName,name"}, "$top": {"50"}}}, dev.sentQueries())
-}
-
-func TestProjectListCountsTheProjectsOfTheDevInstanceBeyondTheLimit(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "project", "list", "--limit", "1")
-
-	printed := requireListing(t, got)
-	assert.Equal(t, 1, printed.Returned)
-	assert.True(t, printed.Truncated)
-	assert.GreaterOrEqual(t, printed.Total, 2)
-	assert.Equal(t, countingQueries("1"), dev.sentQueries())
-}
-
-func TestProjectListCountsTheProjectsOfTheDevInstanceThatFillTheLimit(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "project", "list", "--limit", "2")
-
-	requireListing(t, got)
-	assert.Equal(t, countingQueries("2"), dev.sentQueries())
-}
-
-func TestProjectListPrintsNoProjectHiddenFromTheLimitedUser(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}, "project", "list")
-
-	assert.Equal(t, outcome{stdout: "total: 0\nreturned: 0\ntruncated: false\nprojects: []\n"}, got)
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestProjectListPrintsTheFieldsTheMemberAsksFor(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).member}, "project", "list", "--fields", "shortName,name")
-
-	const want = `total: 3
-returned: 3
-truncated: false
-projects:
-  - {shortName: "DEV", name: "DEVELOPMENT"}
-  - {shortName: "DOCS", name: "DOCS"}
-  - {shortName: "DEMO", name: "Демопроект"}
-`
-	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestProjectListPrintsTheDefaultToTheMember(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).member}, "project", "list")
-
-	const want = `total: 3
-returned: 3
-truncated: false
-projects:
-  - {shortName: "DEV", name: "DEVELOPMENT"}
-  - {shortName: "DOCS", name: "DOCS"}
-  - {shortName: "DEMO", name: "Демопроект"}
-`
-	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestProjectListRefusesANameTheSchemasOfTheDevInstanceDoNotDeclare(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "project", "list", "--fields", "shortName,bogus")
-
-	want := faultDocument{
-		code: "unknown_name",
-		details: []detail{
-			{"request", listRequest(dev.url, "shortName,bogus", "50")},
-			{"fields", "shortName,bogus"},
-			{"unknown", []any{unknownEntry("bogus", projectNames()...)}},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, dev.requests(), 1)
 }

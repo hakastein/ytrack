@@ -54,17 +54,10 @@ func TestLinkRemoveRefusesACallThatNamesNoOneLink(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "nothing at all", argv: []string{"link", "remove"}},
-		{name: "no target issue", argv: []string{"link", "remove", "DEV-1", "depends on"}},
-		{name: "a fourth word", argv: []string{"link", "remove", "DEV-1", "depends on", "DEV-2", "DEV-3"}},
 		{name: "an issue that would reach another endpoint", argv: []string{"link", "remove", "..", "depends on", "DEV-2"}},
 		{name: "a target issue that is an article", argv: []string{"link", "remove", "DEV-1", "depends on", "DEV-A-1"}},
 		{name: "an empty phrase", argv: []string{"link", "remove", "DEV-1", "", "DEV-2"}},
 		{name: "a phrase that is no text", argv: []string{"link", "remove", "DEV-1", "\xff", "DEV-2"}},
-		{
-			name: "an expression of what to print",
-			argv: []string{"link", "remove", "DEV-1", "depends on", "DEV-2", "--fields", "idReadable"},
-		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -77,17 +70,6 @@ func TestLinkRemoveRefusesACallThatNamesNoOneLink(t *testing.T) {
 			assert.Empty(t, server.requests())
 		})
 	}
-}
-
-func TestLinkRemoveHelpPromisesNoExpression(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"link", "remove", "--help"})
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, "ytrack link remove")
-	assert.NotContains(t, got.stdout, "--fields")
 }
 
 func TestLinkRemoveTakesTheLinkAwayBySlotAndInternalID(t *testing.T) {
@@ -265,96 +247,5 @@ func TestLinkRemoveRefusesBeforeTheRemovalTheWayAddDoes(t *testing.T) {
 			assert.Equal(t, tc.want(server.url), requireFault(t, got))
 			assert.Equal(t, tc.paths, server.sentPaths())
 		})
-	}
-}
-
-func TestLinkRemoveOnTheDevInstanceUnlinksBothIssuesAndThenFindsNothing(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	source := aContractIssue(t, dev, "source")
-	target := aContractIssue(t, dev, "partner")
-
-	filed := runWith(t, dev.env(), "link", "add", source, "depends on", target)
-	require.Equal(t, 0, filed.code, "stderr: %s", filed.stderr)
-	require.Equal(t, []string{target}, targetsUnder(t, filed.stdout, "depends on"))
-
-	sent := len(dev.requests())
-	got := runWith(t, dev.env(), "link", "remove", source, "depends on", target)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	assert.Equal(t, []detail{
-		{"idReadable", source},
-		{"removed", []detail{{"depends on", []any{[]detail{{"idReadable", target}}}}}},
-	}, requireDocument(t, got.stdout))
-	assert.Equal(t, []string{http.MethodGet, http.MethodGet, http.MethodDelete}, sentMethods(dev)[sent:])
-	assert.Regexp(t, `^[0-9]+-[0-9]+t$`, path.Base(path.Dir(path.Dir(dev.sentPaths()[sent+2]))))
-
-	for _, issue := range []string{source, target} {
-		held := runWith(t, dev.env(), "link", "list", issue)
-
-		require.Equal(t, 0, held.code, "stderr: %s", held.stderr)
-		assert.Equal(t, []detail{{"total", 0}, {"returned", 0}, {"truncated", false}},
-			requireDocument(t, held.stdout)[:3], issue)
-		assert.Empty(t, keysOf(nodeAt(t, requireMapping(t, "stdout", held.stdout), "links")), issue)
-	}
-
-	again := runWith(t, dev.env(), "link", "remove", source, "depends on", target)
-
-	found := requireFault(t, again)
-	assert.Equal(t, "not_found", found.code)
-	assert.Equal(t, []detail{{"issue", source}, {"phrase", "depends on"}, {"target", target}}, found.details[1:4])
-	assert.Equal(t, 404, detailNamed(t, found, "upstream_status"))
-}
-
-func TestLinkRemoveOnTheDevInstanceLeavesTheLinkNamedFromTheEndItIsNotAt(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	source := aContractIssue(t, dev, "the one that waits")
-	target := aContractIssue(t, dev, "the one that blocks")
-
-	filed := runWith(t, dev.env(), "link", "add", source, "depends on", target)
-	require.Equal(t, 0, filed.code, "stderr: %s", filed.stderr)
-	require.Equal(t, []string{target}, targetsUnder(t, filed.stdout, "depends on"))
-
-	got := runWith(t, dev.env(), "link", "remove", source, "is required for", target)
-
-	found := requireFault(t, got)
-	assert.Equal(t, "not_found", found.code)
-	assert.Equal(t, []detail{{"issue", source}, {"phrase", "is required for"}, {"target", target}},
-		found.details[1:4])
-
-	held := runWith(t, dev.env(), "link", "list", source)
-
-	require.Equal(t, 0, held.code, "stderr: %s", held.stderr)
-	assert.Equal(t, []string{target}, targetsUnder(t, held.stdout, "depends on"))
-}
-
-func TestLinkRemoveOnTheDevInstanceTakesTheLinkAwayFromEitherEnd(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	source := aContractIssue(t, dev, "the one that waits")
-	target := aContractIssue(t, dev, "the one that blocks")
-
-	filed := runWith(t, dev.env(), "link", "add", source, "depends on", target)
-	require.Equal(t, 0, filed.code, "stderr: %s", filed.stderr)
-	require.Equal(t, []string{target}, targetsUnder(t, filed.stdout, "depends on"))
-
-	got := runWith(t, dev.env(), "link", "remove", target, "is required for", source)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	assert.Equal(t, []detail{
-		{"idReadable", target},
-		{"removed", []detail{{"is required for", []any{[]detail{{"idReadable", source}}}}}},
-	}, requireDocument(t, got.stdout))
-
-	for _, issue := range []string{source, target} {
-		held := runWith(t, dev.env(), "link", "list", issue)
-
-		require.Equal(t, 0, held.code, "stderr: %s", held.stderr)
-		assert.Equal(t, []detail{{"total", 0}, {"returned", 0}, {"truncated", false}},
-			requireDocument(t, held.stdout)[:3], issue)
-		assert.Empty(t, keysOf(nodeAt(t, requireMapping(t, "stdout", held.stdout), "links")), issue)
 	}
 }

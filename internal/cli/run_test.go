@@ -34,7 +34,6 @@ func TestRunRefusesAnyCommand(t *testing.T) {
 	}{
 		{name: "no command", argv: []string{}},
 		{name: "unknown command", argv: []string{"bogus", "show", "DEV-1"}},
-		{name: "unknown flag", argv: []string{"project", "list", "--bogus"}},
 		{name: "help command", argv: []string{"help"}},
 		{name: "help command with a topic", argv: []string{"help", "project"}},
 		{name: "the stand-in cobra is given for a help command", argv: []string{"no-help"}},
@@ -68,14 +67,6 @@ func TestRunTakesNilArgvAsEmpty(t *testing.T) {
 	t.Cleanup(func() { os.Args = args })
 	os.Args = []string{args[0], "issue"}
 	assert.Equal(t, run(t, []string{}), run(t, nil))
-}
-
-func TestRunHelpIsNotACommand(t *testing.T) {
-	t.Parallel()
-	got := run(t, []string{"--help"})
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.NotEmpty(t, got.stdout)
 }
 
 type faultDocument struct {

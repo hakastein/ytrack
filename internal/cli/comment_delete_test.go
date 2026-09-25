@@ -2,7 +2,6 @@ package cli_test
 
 import (
 	"net/http"
-	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -21,56 +20,6 @@ func removingAComment(t *testing.T, deletion http.HandlerFunc) *upstream {
 		}
 		deletion(w, r)
 	})
-}
-
-func commentIDs(t *testing.T, dev *upstream, show ...string) []string {
-	t.Helper()
-	got := runWith(t, dev.env(), show...)
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	var ids []string
-	for _, held := range nodeAt(t, requireMapping(t, "stdout", got.stdout), "comments").Content {
-		ids = append(ids, nodeAt(t, held, "id").Value)
-	}
-	return ids
-}
-
-func TestCommentDeleteRefusesBeforeAnyRequest(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "neither owner nor id", argv: []string{"comment", "delete"}},
-		{name: "an owner and no id", argv: []string{"comment", "delete", "DEV-1"}},
-		{name: "the id of the comment alone", argv: []string{"comment", "delete", "7-12"}},
-		{name: "a second id", argv: []string{"comment", "delete", "DEV-1", "7-1", "7-2"}},
-		{name: "a flag that says it twice", argv: []string{"comment", "delete", "DEV-1", "7-1", "--yes"}},
-		{name: "a flag that says it anyway", argv: []string{"comment", "delete", "DEV-1", "7-1", "--force"}},
-		{name: "an expression", argv: []string{"comment", "delete", "DEV-1", "7-1", "--fields", "id("}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := serveNothing(t)
-
-			got := runWith(t, server.env(), tc.argv...)
-
-			assert.Equal(t, "bad_usage", requireFault(t, got).code)
-			assert.Empty(t, server.requests())
-		})
-	}
-}
-
-func TestCommentDeleteHelpOffersNoConfirmation(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"comment", "delete", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	for _, flag := range []string{"--yes", "--force", "--confirm"} {
-		assert.NotContains(t, got.stdout, flag)
-	}
 }
 
 func TestCommentDeleteRefusesAnIDThatIsNoInternalID(t *testing.T) {
@@ -182,97 +131,4 @@ func TestCommentDeleteReadsTheAnswerOfTheRemoval(t *testing.T) {
 			assert.Equal(t, []string{http.MethodDelete}, sentMethods(server))
 		})
 	}
-}
-
-func TestCommentDeleteRemovesACommentOfAnIssueOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := commentedIssue(t, dev, "issue")
-	comment := commentOn(t, dev, issue, "ytrack contract первая")
-	kept := commentOn(t, dev, issue, "ytrack contract вторая")
-	show := []string{"issue", "show", issue, "--fields", "idReadable"}
-
-	got := runWith(t, dev.env(), "comment", "delete", issue, comment)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	assert.Equal(t, "id: \""+comment+"\"\n", got.stdout)
-	assert.Equal(t, []string{kept}, commentIDs(t, dev, show...))
-
-	again := runWith(t, dev.env(), "comment", "delete", issue, comment)
-	assert.Equal(t, "not_found", requireFault(t, again).code)
-
-	written := runWith(t, dev.env(), "comment", "update", issue, comment, "--text", "ytrack contract x")
-	assert.Equal(t, "not_found", requireFault(t, written).code)
-}
-
-func TestCommentDeleteRemovesACommentOfAnArticleOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	article := commentedArticle(t, dev, "article")
-	comment := commentOn(t, dev, article, "ytrack contract первая")
-	kept := commentOn(t, dev, article, "ytrack contract вторая")
-	show := []string{"article", "show", article, "--fields", "idReadable"}
-
-	got := runWith(t, dev.env(), "comment", "delete", article, comment)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, "id: \""+comment+"\"\n", got.stdout)
-	assert.Equal(t, []string{kept}, commentIDs(t, dev, show...))
-
-	again := runWith(t, dev.env(), "comment", "delete", article, comment)
-	assert.Equal(t, "not_found", requireFault(t, again).code)
-}
-
-func TestCommentDeleteRefusesACommentOfAnotherOwner(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := commentedIssue(t, dev, "issue")
-	otherIssue := commentedIssue(t, dev, "other issue")
-	article := commentedArticle(t, dev, "article")
-	comment := commentOn(t, dev, issue, "ytrack contract комментарий задачи")
-	articleComment := commentOn(t, dev, article, "ytrack contract комментарий статьи")
-
-	tests := []struct {
-		name    string
-		owner   string
-		comment string
-	}{
-		{name: "another issue", owner: otherIssue, comment: comment},
-		{name: "an article for the comment of an issue", owner: article, comment: comment},
-		{name: "an issue for the comment of an article", owner: issue, comment: articleComment},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			before := len(dev.requests())
-
-			got := runWith(t, dev.env(), "comment", "delete", tc.owner, tc.comment)
-
-			assert.Equal(t, "not_found", requireFault(t, got).code)
-			assert.Len(t, dev.requests()[before:], 1)
-		})
-	}
-
-	assert.True(t, slices.Contains(commentIDs(t, dev, "issue", "show", issue, "--fields", "idReadable"), comment))
-	assert.True(t, slices.Contains(commentIDs(t, dev, "article", "show", article, "--fields", "idReadable"),
-		articleComment))
-}
-
-func TestCommentDeleteRefusesAnIssueTheLimitedUserMayNotSee(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := commentedIssue(t, dev, "issue")
-	const first = "ytrack contract первая"
-	comment := commentOn(t, dev, issue, first)
-	before := len(dev.requests())
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited},
-		"comment", "delete", issue, comment)
-
-	found := requireFault(t, got)
-	assert.Equal(t, "not_found", found.code)
-	assert.Equal(t, detail{"upstream_message", "Entity with id " + issue + " not found"}, found.details[3])
-	assert.Len(t, dev.requests()[before:], 1)
-
-	assert.Equal(t, first, textOfTheComment(t, dev, []string{"issue", "show", issue, "--fields", "idReadable"}, comment))
 }

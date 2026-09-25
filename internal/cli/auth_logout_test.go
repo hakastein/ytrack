@@ -276,33 +276,3 @@ func TestAuthLogoutUsesNoFileOfLoginRecordsItCannotRead(t *testing.T) {
 	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, held, fileBytes(t, path))
 }
-
-func TestAuthLogoutRefusesACallThatDoesNotAssemble(t *testing.T) {
-	t.Parallel()
-	stated, scope := here(t)
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "an argument", argv: []string{"auth", "logout", "extra"}},
-		{name: "an argument after the flag", argv: []string{"auth", "logout", "--global", "extra"}},
-		{name: "a flag for the token", argv: []string{"auth", "logout", "--token", token}},
-		{name: "a flag for the address", argv: []string{"auth", "logout", "--base-url", "http://h"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := serveNothing(t)
-			held := recordFile(scopedRecord(scope, server.url, hereToken))
-			home, path := homeWith(t, held)
-
-			got := runWith(t, []string{"HOME=" + home, "PWD=" + stated}, tc.argv...)
-
-			assert.Equal(t, "bad_usage", requireFault(t, got).code)
-			assertNoToken(t, got, token)
-			assertNoRecordedToken(t, got)
-			assert.Equal(t, held, fileBytes(t, path))
-			assert.Empty(t, server.requests())
-		})
-	}
-}

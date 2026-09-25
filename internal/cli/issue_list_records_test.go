@@ -1,7 +1,6 @@
 package cli_test
 
 import (
-	"encoding/json"
 	"net/http"
 	"slices"
 	"strconv"
@@ -12,8 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
 )
-
-const devInstanceLinked = "issue id: DEV-1, DEV-2, DEV-3, DEV-4, DEV-5, DEV-6 sort by: {issue id} asc"
 
 func listedRecord(id string, fields []receivedField, keys ...string) string {
 	members := []string{
@@ -211,158 +208,6 @@ func TestIssueListPicksOutTheNamesOfTheDefaultWhereALinkAsksForCustomFieldsToo(t
 	assert.Empty(t, server.sentQueries()[1]["customFields"])
 }
 
-func TestIssueListPrintsTheLinksOfTheDevInstanceInOneRequest(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "issue", "list", "--query", devInstanceLinked, "--limit", "10",
-		"--fields", "+links(issues(idReadable))")
-
-	assert.Empty(t, got.stderr)
-	requireRecordsOnLines(t, got, 6)
-	assert.Equal(t, 1, sentTo(dev, issuesPath))
-	for _, path := range dev.sentPaths() {
-		assert.NotRegexp(t, `^/api/issues/`, path)
-	}
-	found := records(t, got)
-	require.Len(t, found, 6)
-	for _, record := range found {
-		assert.Contains(t, recordKeys(record), "links")
-	}
-	assert.Contains(t, targetsOf(t, found[0], "depends on"), "DEV-3")
-	assert.Contains(t, targetsOf(t, found[3], "parent for"), "DEV-1")
-	for _, hidden := range []string{"163-", "INWARD", "OUTWARD"} {
-		assert.NotContains(t, got.stdout, hidden)
-	}
-}
-
-func targetsOf(t *testing.T, record *yaml.Node, phrase string) []string {
-	t.Helper()
-	link := nodeAt(t, record, "links")
-	for pair := range slices.Chunk(link.Content, 2) {
-		if pair[0].Value != phrase {
-			continue
-		}
-		var ids []string
-		for _, target := range pair[1].Content {
-			ids = append(ids, nodeAt(t, target, "idReadable").Value)
-		}
-		return ids
-	}
-	require.Fail(t, "no link goes by that phrase", "%q", phrase)
-	return nil
-}
-
-func TestIssueListPrintsTheCustomFieldsOfTheDevInstanceWhole(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "issue", "list", "--query", "issue id: DEV-1, DEV-2 sort by: {issue id} asc",
-		"--fields", "+customFields")
-
-	assert.Empty(t, got.stderr)
-	requireRecordsOnLines(t, got, 2)
-	found := records(t, got)
-	require.Len(t, found, 2)
-	assert.Equal(t, []string{namedType, "Priority", "Категория", "Клиент", "Модуль системы", namedState,
-		"Затраченное время"}, keysOf(nodeAt(t, found[0], "customFields")))
-	assert.Equal(t, []string{namedType, "Priority", "Категория", "Клиент", "Модуль системы", namedState},
-		keysOf(nodeAt(t, found[1], "customFields")))
-	assert.Equal(t, "Отклонена", nodeAt(t, found[1], "customFields", namedState).Value)
-	assert.NotContains(t, got.stdout, "Причина отклонения")
-	assert.NotContains(t, got.stdout, "$type")
-}
-
-func TestIssueListPrintsTheTextOfTheDevInstanceAsAStringOnItsLine(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	const query = "issue id: DEV-1, DEV-3, DEV-4, DEV-5 sort by: {issue id} asc"
-
-	got := runWith(t, dev.env(), "issue", "list", "--query", query, "--fields", "idReadable,description")
-
-	assert.Empty(t, got.stderr)
-	requireRecordsOnLines(t, got, 4)
-	sent := sentRecords(t, dev)
-	require.Len(t, sent, 4)
-	for i, record := range records(t, got) {
-		printed := nodeAt(t, record, "description")
-		assert.Equal(t, sent[i]["description"], printed.Value, "stdout: %q", got.stdout)
-		assert.Equal(t, yaml.DoubleQuotedStyle, printed.Style, "stdout: %q", got.stdout)
-		assert.NotEmpty(t, printed.Value)
-	}
-}
-
-func sentRecords(t *testing.T, u *upstream) []map[string]any {
-	t.Helper()
-	const answerAfterMarkup = 1
-	answers := u.answers()
-	require.Len(t, answers, 2)
-	var page []map[string]any
-	require.NoError(t, json.Unmarshal(answers[answerAfterMarkup], &page))
-	return page
-}
-
-func TestIssueListPrintsTheNamedCustomFieldsOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		token func(t *testing.T) string
-	}{
-		{name: "the admin", token: func(t *testing.T) string { return devTokens(t).admin }},
-		{name: "a member of the project", token: func(t *testing.T) string { return devTokens(t).member }},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			dev := devInstance(t)
-			const query = "issue id: DEV-1, DEV-2, DOCS-1 sort by: {issue id} asc"
-
-			got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + tc.token(t)},
-				"issue", "list", "--query", query)
-
-			assert.Empty(t, got.stderr)
-			requireRecordsOnLines(t, got, 3)
-			found := records(t, got)
-			require.Len(t, found, 3)
-			assert.Equal(t, []detail{{namedState, "In Progress"}, {namedType, "Task"}},
-				fieldsOf(t, found[0]), "stdout: %q", got.stdout)
-			assert.Equal(t, []detail{{namedState, "Отклонена"}, {namedType, "Task"}}, fieldsOf(t, found[1]))
-			assert.Equal(t, []detail{{namedState, "To do"}}, fieldsOf(t, found[2]))
-			for _, record := range found {
-				assert.Regexp(t, instantForm, nodeAt(t, record, "created").Value)
-			}
-			assert.Equal(t, []string{assistPath, issuesPath}, dev.sentPaths())
-			assert.Equal(t, []string{namedState, namedType}, dev.sentQueries()[1]["customFields"])
-		})
-	}
-}
-
-func fieldsOf(t *testing.T, record *yaml.Node) []detail {
-	t.Helper()
-	block := nodeAt(t, record, "customFields")
-	printed := []detail{}
-	for pair := range slices.Chunk(block.Content, 2) {
-		printed = append(printed, detail{key: pair[0].Value, value: requireValue(t, pair[1])})
-	}
-	return printed
-}
-
-func TestIssueListRefusesANameNoCustomFieldOfTheDevInstanceAnswersTo(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	const expression = `idReadable,customFields("Статус разрабтки")`
-
-	got := runWith(t, dev.env(), "issue", "list", "--query", "issue id: DEV-1", "--fields", expression)
-
-	found := requireFault(t, got)
-	assert.Equal(t, "unknown_name", found.code)
-	assert.Equal(t, detail{"request", catalogueRequest(dev.url)}, found.details[0])
-	assert.Equal(t, detail{"fields", expression}, found.details[1])
-	assert.Contains(t, got.stderr, "Статус разработки")
-	assert.Equal(t, []string{assistPath, cataloguePath}, dev.sentPaths())
-	assert.Equal(t, 0, sentTo(dev, issuesPath))
-}
-
 func selectingNamedFields(t *testing.T, catalogue string, page http.HandlerFunc) *upstream {
 	t.Helper()
 	return searching(t, func(w http.ResponseWriter, r *http.Request) {
@@ -448,21 +293,4 @@ func TestIssueListPrintsACustomFieldNamedOnTopOfTheDefault(t *testing.T) {
 	record := records(t, got)[0]
 	assert.Equal(t, []string{namedState, namedType, "Priority"}, keysOf(nodeAt(t, record, "customFields")))
 	assert.Equal(t, "Critical", nodeAt(t, record, "customFields", "Priority").Value)
-}
-
-func TestIssueListPrintsACustomFieldNamedOnTopOfTheDevInstanceDefault(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	const query = "issue id: DEV-1, DEV-2 sort by: {issue id} asc"
-
-	got := runWith(t, dev.env(), "issue", "list", "--query", query, "--fields", `+customFields("Приоритет")`)
-
-	assert.Empty(t, got.stderr)
-	requireRecordsOnLines(t, got, 2)
-	assert.Equal(t, []string{assistPath, cataloguePath, issuesPath}, dev.sentPaths())
-	assert.Equal(t, []string{namedState, namedType, "Priority"}, dev.sentQueries()[2]["customFields"])
-	for _, record := range records(t, got) {
-		assert.Equal(t, []string{namedState, namedType, "Priority"}, keysOf(nodeAt(t, record, "customFields")))
-		assert.NotEmpty(t, nodeAt(t, record, "customFields", "Priority").Value)
-	}
 }

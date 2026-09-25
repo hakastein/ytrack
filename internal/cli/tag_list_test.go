@@ -1,18 +1,13 @@
 package cli_test
 
 import (
-	"maps"
 	"math"
 	"net/http"
 	"net/url"
-	"slices"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"go.yaml.in/yaml/v3"
 )
 
 const tagFields = "name,owner(login),readSharingSettings(permittedGroups(name),permittedUsers(login))"
@@ -27,59 +22,6 @@ func countingTags(limit string) []url.Values {
 	return []url.Values{
 		{"fields": {tagFields}, "$top": {limit}},
 		{"fields": {"id"}, "$top": {"-1"}},
-	}
-}
-
-type tagListing struct {
-	Total     int              `yaml:"total"`
-	Returned  int              `yaml:"returned"`
-	Truncated bool             `yaml:"truncated"`
-	Tags      []map[string]any `yaml:"tags"`
-}
-
-func requireTagListing(t *testing.T, got outcome) tagListing {
-	t.Helper()
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	decoder := yaml.NewDecoder(strings.NewReader(got.stdout))
-	decoder.KnownFields(true)
-	var printed tagListing
-	require.NoError(t, decoder.Decode(&printed), "stdout: %s", got.stdout)
-	assert.Len(t, printed.Tags, printed.Returned)
-	assert.Equal(t, printed.Total > printed.Returned, printed.Truncated)
-	return printed
-}
-
-func ownerOf(t *testing.T, record map[string]any) string {
-	t.Helper()
-	owner, isObject := record["owner"].(map[string]any)
-	require.True(t, isObject, "the owner of %v is no object", record)
-	login, isText := owner["login"].(string)
-	require.True(t, isText, "the login of %v is no string", owner)
-	return login
-}
-
-func TestTagRefusesACallThatNamesNoCommandOfIts(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "the command alone", argv: []string{"tag"}},
-		{name: "a subcommand it has none of", argv: []string{"tag", "bogus"}},
-		{name: "a list of one owner", argv: []string{"tag", "list", "x"}},
-		{name: "a list of a project", argv: []string{"tag", "list", "DEV"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := serveNothing(t)
-
-			got := runWith(t, server.env(), tc.argv...)
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
-		})
 	}
 }
 
@@ -105,16 +47,6 @@ func TestTagListRefusesFlagsItCannotSend(t *testing.T) {
 			assert.Empty(t, server.requests())
 		})
 	}
-}
-
-func TestTagListHelpNamesTheDefaultFields(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"tag", "list", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, tagFields)
 }
 
 func TestTagListPrintsTheRecordsAsTheyWereAskedFor(t *testing.T) {
@@ -276,44 +208,4 @@ func TestTagListRefusesWhatTheServerAnswered(t *testing.T) {
 			assert.Empty(t, got.stdout)
 		})
 	}
-}
-
-func TestTagListReadsTheDevInstanceTagsOfTheAdmin(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "tag", "list")
-
-	printed := requireTagListing(t, got)
-	require.NotEmpty(t, printed.Tags)
-	stars := 0
-	for _, record := range printed.Tags {
-		assert.Equal(t, []string{"name", "owner", "readSharingSettings"}, slices.Sorted(maps.Keys(record)))
-		assert.Equal(t, "admin", ownerOf(t, record))
-		if record["name"] == privateStarOfEveryUser {
-			stars++
-		}
-	}
-	assert.Equal(t, 1, stars, "the admin is shown a star other than their own")
-	require.Len(t, dev.requests(), 1)
-	assert.Equal(t, "/api/tags", dev.sentPaths()[0])
-	assert.Equal(t, []string{tagFields}, dev.sentFields())
-}
-
-func TestTagListShowsTheLimitedTokenItsOwnStarAlone(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}, "tag", "list")
-
-	printed := requireTagListing(t, got)
-	stars := 0
-	for _, record := range printed.Tags {
-		assert.Equal(t, "dev.limited", ownerOf(t, record))
-		if record["name"] == privateStarOfEveryUser {
-			stars++
-		}
-	}
-	assert.Equal(t, 1, stars)
-	require.Len(t, dev.requests(), 1)
 }

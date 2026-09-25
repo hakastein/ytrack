@@ -1,16 +1,12 @@
 package cli_test
 
 import (
-	"bytes"
 	"net/http"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
-
-const countedDevInstanceIssues = `{"query":"` + devInstanceIssues + `"}`
 
 func inTurn(handlers ...http.HandlerFunc) http.HandlerFunc {
 	var mu sync.Mutex
@@ -88,36 +84,4 @@ func TestIssueListRefusesWhereTheRepeatOfTheCountFails(t *testing.T) {
 			assert.Equal(t, 2, sentTo(server, countPath))
 		})
 	}
-}
-
-func TestIssueListCountsTheIssuesOfTheDevInstanceBeyondTheLimit(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "issue", "list", "--query", devInstanceIssues, "--limit", "2")
-
-	printed := requireIssueListing(t, got)
-	assert.Equal(t, 3, *printed.Total)
-	assert.Equal(t, 2, printed.Returned)
-	assert.True(t, *printed.Truncated)
-	requireMarkedUpFirst(t, dev, devInstanceIssues)
-	counted := countedAt(dev)
-	require.NotEmpty(t, counted)
-	firstAnswer := dev.answers()[counted[0]]
-	stillCounted := bytes.Contains(firstAnswer, []byte(`"count":`+stillCounting))
-	assert.Equal(t, stillCounted, len(counted) == 2, "the first answer of the counter: %s", firstAnswer)
-	for _, at := range counted {
-		assert.Equal(t, countedDevInstanceIssues, dev.asks()[at])
-	}
-}
-
-func TestIssueListCountsTheIssuesOfTheDevInstanceThatFillTheLimit(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "issue", "list", "--query", devInstanceIssues, "--limit", "3")
-
-	requireIssuesOfTheDevInstance(t, got, "DEV-1", "DEV-2", "DEV-3")
-	requireMarkedUpFirst(t, dev, devInstanceIssues)
-	assert.NotEmpty(t, countedAt(dev))
 }

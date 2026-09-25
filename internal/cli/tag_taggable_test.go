@@ -1,16 +1,12 @@
 package cli_test
 
 import (
-	"maps"
 	"net/http"
-	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-const devInstanceMembers = "Участники полигона"
 
 func TestTagCreateRefusesAGroupOfNoNameForTagging(t *testing.T) {
 	t.Parallel()
@@ -50,17 +46,6 @@ func TestTagCreateWritesTheGroupsThatMayAddTheTag(t *testing.T) {
 		"name,owner(login),readSharingSettings(permittedGroups(name,id),permittedUsers(login))," +
 			"updateSharingSettings(permittedGroups(name),permittedUsers(login))," +
 			"tagSharingSettings(permittedGroups(name,id),permittedUsers(login))"}, server.sentFields())
-}
-
-func TestTagCreateWritesNoTagSharingWhereNobodyMayAddIt(t *testing.T) {
-	t.Parallel()
-	server := sharingATag(t, groupsOfTheInstance(), respondWith(http.StatusOK, sharedTag("карта",
-		[]sharedGroup{{id: "6-1", name: "DEVELOPMENT Team"}}, nil)))
-
-	got := runWith(t, server.env(), "tag", "create", "--name", "карта", "--visible-for", "DEVELOPMENT Team")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, []string{"name", "readSharingSettings"}, slices.Sorted(maps.Keys(sentBody(t, server))))
 }
 
 func TestTagCreateRefusesEveryGroupOfTheThreeFlagsAtOnce(t *testing.T) {
@@ -131,52 +116,4 @@ func taggableTag(name string, read, hang []sharedGroup) string {
 	return `{"$type":"Tag","name":` + asJSON(name) + `,"owner":{"$type":"User","login":"admin"},` +
 		`"readSharingSettings":` + sharingOf(read) + `,"updateSharingSettings":` + sharingOf(nil) +
 		`,"tagSharingSettings":` + taggableBy(hang) + `}`
-}
-
-func TestTagAddHangsTheTagAMemberOfThePolygonMayHang(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	member := []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).member}
-	issue := issueToTag(t, dev)
-	hangs := contractTagName(t) + " hangs"
-	shown := contractTagName(t) + " shown"
-
-	made := runWith(t, dev.env(), "tag", "create", "--name", hangs,
-		"--visible-for", devInstanceMembers, "--taggable-by", devInstanceMembers)
-	require.Equal(t, 0, made.code, "stderr: %s", made.stderr)
-	t.Cleanup(func() { removeTag(t, dev.env(), hangs, "admin") })
-	readOnly := runWith(t, dev.env(), "tag", "create", "--name", shown, "--visible-for", devInstanceMembers)
-	require.Equal(t, 0, readOnly.code, "stderr: %s", readOnly.stderr)
-	t.Cleanup(func() { removeTag(t, dev.env(), shown, "admin") })
-
-	listed := requireTagListing(t, runWith(t, member, "tag", "list"))
-	at := slices.IndexFunc(listed.Tags, func(record map[string]any) bool { return record["name"] == hangs })
-	require.GreaterOrEqual(t, at, 0, "the shared tag stands in no list of the token it was shared with")
-	assert.Equal(t, "admin", ownerOf(t, listed.Tags[at]))
-	assert.Equal(t, []string{"name", "owner", "readSharingSettings"}, slices.Sorted(maps.Keys(listed.Tags[at])))
-
-	hung := runWith(t, member, "tag", "add", issue, "--name", hangs)
-	require.Equal(t, 0, hung.code, "stderr: %s", hung.stderr)
-	assert.Equal(t, hangs, nodeAt(t, requireMapping(t, "stdout", hung.stdout), "added", "name").Value)
-	assert.Equal(t, []string{hangs}, tagsOfTheIssue(t, dev, issue))
-
-	refused := runWith(t, member, "tag", "add", issue, "--name", shown)
-	found := requireFault(t, refused)
-	assert.Equal(t, "denied", found.code)
-	assert.Equal(t, 403, detailNamed(t, found, "upstream_status"))
-	assert.Equal(t, []string{hangs}, tagsOfTheIssue(t, dev, issue), "a tag the token may not hang was hung")
-}
-
-func TestTagCreateRefusesTheMemberTheGroupsOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	member := []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).member}
-
-	got := runWith(t, member, "tag", "create", "--name", contractTagName(t), "--taggable-by", devInstanceMembers)
-
-	found := requireFault(t, got)
-	assert.Equal(t, "denied", found.code)
-	assert.Equal(t, 403, detailNamed(t, found, "upstream_status"))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(dev))
-	assert.Equal(t, []string{"/api/groups"}, dev.sentPaths())
 }

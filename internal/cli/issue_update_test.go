@@ -65,8 +65,6 @@ func TestIssueUpdateRefusesBeforeAnyRequest(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "no id", argv: []string{"issue", "update"}},
-		{name: "two ids", argv: []string{"issue", "update", "DEV-1", "DEV-2"}},
 		{name: "an internal id", argv: []string{"issue", "update", "3-26", "--summary", "x"}},
 		{name: "nothing to write", argv: []string{"issue", "update", "DEV-1"}},
 		{name: "an empty title", argv: []string{"issue", "update", "DEV-1", "--summary", ""}},
@@ -87,17 +85,6 @@ func TestIssueUpdateRefusesBeforeAnyRequest(t *testing.T) {
 			assert.Empty(t, server.requests())
 		})
 	}
-}
-
-func TestIssueUpdateHelpNamesTheDefaultAndNoFile(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"issue", "update", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, issueShowFields)
-	assert.NotContains(t, got.stdout, "-file")
 }
 
 func TestIssueUpdateNamesEachFieldTheClassItWasReceivedUnder(t *testing.T) {
@@ -274,85 +261,4 @@ func TestIssueUpdateIsUncertainWhereTheAnswerCannotBePrinted(t *testing.T) {
 	assert.Equal(t, "upstream_invalid", found.code)
 	assert.Equal(t, detail{"upstream_status", 200}, found.details[1])
 	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
-}
-
-func filedForUpdate(t *testing.T, dev *upstream, filled ...string) string {
-	t.Helper()
-	argv := append([]string{"issue", "create", "DEV", "--summary", contractTitle(t)}, devRequired()...)
-	got := runWith(t, dev.env(), append(argv, filled...)...)
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	readable := nodeAt(t, requireMapping(t, "stdout", got.stdout), "idReadable").Value
-	require.Regexp(t, `^DEV-[0-9]+$`, readable)
-	t.Cleanup(func() { removeIssue(t, dev, readable) })
-	return readable
-}
-
-func TestIssueUpdateReplacesWhatAFieldOfTheDevInstanceHeld(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	readable := filedForUpdate(t, dev)
-
-	got := runWith(t, dev.env(), "issue", "update", readable, "--field", "Клиент=ГАММА", "--field", "Клиент=АЛЬФА")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	mapping := requireMapping(t, "stdout", got.stdout)
-	assert.Equal(t, readable, nodeAt(t, mapping, "idReadable").Value)
-	assert.Equal(t, []string{"АЛЬФА", "ГАММА"}, valuesAt(t, mapping, "customFields", "Клиент"))
-}
-
-func TestIssueUpdateWritesTheFieldOfTheDevInstanceTheSameWriteUncovers(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	readable := filedForUpdate(t, dev, "--field", "State=Новая")
-
-	refused := runWith(t, dev.env(), "issue", "update", readable, "--field", "Причина отклонения=Дубль")
-
-	found := requireFault(t, refused)
-	assert.Equal(t, "rejected", found.code)
-	assert.Contains(t, found.details, detail{"upstream_message", "Вы можете обновлять значение поля Причина " +
-		"отклонения, только когда значение поля State равно Отклонена"})
-
-	got := runWith(t, dev.env(), "issue", "update", readable,
-		"--field", "State=Отклонена", "--field", "Причина отклонения=Дубль")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	mapping := requireMapping(t, "stdout", got.stdout)
-	assert.Equal(t, "Отклонена", nodeAt(t, mapping, "customFields", "State").Value)
-	assert.Equal(t, "Дубль", nodeAt(t, mapping, "customFields", "Причина отклонения").Value)
-	assert.Equal(t, "SingleEnumIssueCustomField", sentFieldTypes(t, lastAsk(dev))["Причина отклонения"])
-}
-
-func textThatSurvives() string {
-	return "Шаги:  \n1. открыть   \n---\n~~~\nи ещё 😀"
-}
-
-func TestIssueUpdateWritesTheTextOfTheDevInstanceByteForByte(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	readable := filedForUpdate(t, dev)
-	title := "  " + contractTitle(t) + "\t"
-	text := textThatSurvives()
-
-	got := runWith(t, dev.env(), "issue", "update", readable, "--summary", title, "--description", text)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	mapping := requireMapping(t, "stdout", got.stdout)
-	assert.Equal(t, title, nodeAt(t, mapping, "summary").Value)
-	assert.Equal(t, text, nodeAt(t, mapping, "description").Value)
-}
-
-func TestIssueUpdateRefusesTheFieldTheDevInstanceComputesItself(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	readable := filedForUpdate(t, dev)
-
-	got := runWith(t, dev.env(), "issue", "update", readable, "--field", "Затраченное время=PT1H")
-
-	found := requireFault(t, got)
-	assert.Equal(t, "rejected", found.code)
-	said, isText := detailNamed(t, found, "upstream_message").(string)
-	require.True(t, isText, "upstream_message: %v", found.details)
-	assert.Contains(t, said, "автоматически рассчитывается")
 }

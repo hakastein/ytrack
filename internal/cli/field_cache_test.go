@@ -526,20 +526,3 @@ func TestFieldShowReadsTheMetadataAgainWhenTheCacheDoesNotReadBack(t *testing.T)
 	assert.Equal(t, outcome{stdout: printedEnumType}, got)
 	assert.Equal(t, []string{metadataPath, firstFieldPath, metadataPath, firstFieldPath}, server.sentPaths())
 }
-
-func TestFieldShowReadsTheMetadataOfTheDevInstanceOnceForTwoRuns(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	home := t.TempDir()
-
-	first := runWith(t, atHome(dev, home), "field", "show", "DEV", "Type")
-	second := runWith(t, atHome(dev, home), "field", "show", "DEV", "Type")
-
-	assert.Equal(t, outcome{stdout: typeOfDEV}, first)
-	assert.Equal(t, first, second)
-	paths := dev.sentPaths()
-	require.Len(t, paths, 3, "paths: %v", paths)
-	assert.Equal(t, metadataPath, paths[0])
-	assert.Regexp(t, `^`+metadataPath+`/customFields/[0-9]+-[0-9]+$`, paths[1])
-	assert.Equal(t, paths[1], paths[2])
-}

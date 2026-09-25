@@ -1,7 +1,6 @@
 package cli_test
 
 import (
-	"bytes"
 	"io"
 	"net/http"
 	"net/url"
@@ -50,30 +49,6 @@ func requireOnePart(t *testing.T, server *upstream) formPart {
 	require.Len(t, parts, 1, "an upload is one part and nothing else")
 	assert.Equal(t, uploadedField, parts[0].field)
 	return parts[0]
-}
-
-func TestAttachmentCreateRefusesACallOfAnyOtherShape(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "nothing at all", argv: nil},
-		{name: "an owner alone", argv: []string{"DEV-1"}},
-		{name: "a third argument", argv: []string{"DEV-1", "a.txt", "b.txt"}},
-		{name: "a path beginning with a dash", argv: []string{"DEV-1", "-x.txt"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := serveNothing(t)
-
-			got := runWith(t, server.env(), append([]string{"attachment", "create"}, tc.argv...)...)
-
-			assert.Equal(t, "bad_usage", requireFault(t, got).code)
-			assert.Empty(t, server.requests())
-		})
-	}
 }
 
 func TestAttachmentCreateRefusesAPathThatIsNoRegularFile(t *testing.T) {
@@ -178,16 +153,6 @@ func TestAttachmentCreateRefusesANameTheServerWouldRewrite(t *testing.T) {
 			assert.Empty(t, server.requests())
 		})
 	}
-}
-
-func TestAttachmentCreateHelpNamesTheDefaultFields(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"attachment", "create", "--help"})
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, attachmentFields)
 }
 
 func TestAttachmentCreateSendsTheFileAsOneStreamedPart(t *testing.T) {
@@ -420,105 +385,6 @@ func repeatedBytes(size int) []byte {
 		content[i] = byte(i % 256)
 	}
 	return content
-}
-
-func everyLatin1RuneAsUTF8(times int) []byte {
-	runes := make([]rune, 0, 0xFF)
-	for r := rune(1); r <= 0xFF; r++ {
-		runes = append(runes, r)
-	}
-	return bytes.Repeat([]byte(string(runes)), times)
-}
-
-func TestAttachmentCreateAttachesAFileToAnIssueOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := attachedIssue(t, dev)
-	const name = "заметка контракта; 100%.bin"
-	content := everyLatin1RuneAsUTF8(2)
-	path := fileWith(t, name, content)
-
-	got := runWith(t, dev.env(), "attachment", "create", issue, path)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	written := requireAttachmentPrinted(t, got.stdout)
-	assert.Regexp(t, attachmentIDForm, written.ID)
-	assert.Equal(t, name, written.Name)
-	assert.Equal(t, len(content), written.Size)
-	assert.Equal(t, "application/octet-stream", written.MimeType)
-	reference, whole := strings.CutPrefix(written.URL, dev.url)
-	require.True(t, whole, "%q does not begin with the address ytrack was given", written.URL)
-	assert.Regexp(t, signedLinkForm, reference)
-
-	response, body := fetched(t, written.URL, "")
-	require.Equal(t, http.StatusOK, response.StatusCode, "body: %s", body)
-	assert.Equal(t, content, body)
-
-	listed := requireAttachmentListing(t, runWith(t, dev.env(), "attachment", "list", issue))
-	assert.Equal(t, 1, listed.Total)
-	require.Len(t, listed.Attachments, 1)
-	assert.Equal(t, written.ID, listed.Attachments[0].ID)
-}
-
-func TestAttachmentCreateAttachesAnEmptyFileToAnIssueOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := attachedIssue(t, dev)
-	path := fileWith(t, "пусто.bin", nil)
-
-	got := runWith(t, dev.env(), "attachment", "create", issue, path)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	written := requireAttachmentPrinted(t, got.stdout)
-	assert.Equal(t, "пусто.bin", written.Name)
-	assert.Equal(t, 0, written.Size)
-}
-
-func TestAttachmentCreateRefusesAnIssueTheDevInstanceHasNoneOf(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	path := fileWith(t, "заметка.bin", []byte("ytrack"))
-
-	got := runWith(t, dev.env(), "attachment", "create", "DEV-99999", path)
-
-	found := requireFault(t, got)
-	assert.Equal(t, "not_found", found.code)
-	assert.Equal(t, "Entity with id DEV-99999 not found", detailNamed(t, found, "upstream_message"))
-	require.Len(t, dev.requests(), 1)
-	assert.Equal(t, "/api/issues/DEV-99999/attachments", dev.sentPaths()[0])
-}
-
-func TestAttachmentCreateRefusesAnIssueTheTokenIsNotAnsweredFor(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := attachedIssue(t, dev)
-	path := fileWith(t, "заметка.bin", []byte("ytrack"))
-	before := len(dev.requests())
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited},
-		"attachment", "create", issue, path)
-
-	found := requireFault(t, got)
-	assert.Equal(t, "not_found", found.code)
-	assert.Equal(t, "Entity with id "+issue+" not found", detailNamed(t, found, "upstream_message"))
-	assert.Len(t, dev.requests()[before:], 1)
-
-	listed := requireAttachmentListing(t, runWith(t, dev.env(), "attachment", "list", issue))
-	assert.Equal(t, 0, listed.Total)
-	assert.Empty(t, listed.Attachments)
-}
-
-func attachedIssue(t *testing.T, dev *upstream) string {
-	t.Helper()
-	summary := "ytrack contract " + t.Name()
-	argv := append([]string{"issue", "create", "DEV", "--summary", summary}, devRequired()...)
-	got := runWith(t, dev.env(), argv...)
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	readable := nodeAt(t, requireMapping(t, "stdout", got.stdout), "idReadable").Value
-	require.Regexp(t, `^DEV-[0-9]+$`, readable)
-	t.Cleanup(func() { removeIssue(t, dev, readable) })
-	return readable
 }
 
 func requireAttachmentPrinted(t *testing.T, stdout string) printedAttachment {

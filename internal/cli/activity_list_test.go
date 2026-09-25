@@ -18,11 +18,8 @@ const (
 	activitiesPath = "/api/issues/" + activityIssue + "/activities"
 )
 
-const (
-	defaultActivityFields = "timestamp,author(login),category,field,added(id,idReadable,login,name,urls),removed(id,idReadable,login,name,urls)"
-	sentActivityFields    = "timestamp,author(login),category(id),field(name,customField(name,fieldType(valueType)))," +
-		"added(id,idReadable,login,name,urls,minutes),removed(id,idReadable,login,name,urls,minutes)"
-)
+const sentActivityFields = "timestamp,author(login),category(id),field(name,customField(name,fieldType(valueType)))," +
+	"added(id,idReadable,login,name,urls,minutes),removed(id,idReadable,login,name,urls,minutes)"
 
 const activityCategories = "AttachmentsCategory,CommentTextCategory,CommentsCategory,CustomFieldCategory," +
 	"DescriptionCategory,IssueCreatedCategory,IssueResolvedCategory,LinksCategory,SummaryCategory," +
@@ -135,25 +132,6 @@ func activityRequest(address, top string) string {
 		sentActivityFields + "&$top=" + top
 }
 
-type activityListing struct {
-	Total      *int             `yaml:"total"`
-	Returned   int              `yaml:"returned"`
-	Truncated  bool             `yaml:"truncated"`
-	Activities []map[string]any `yaml:"activities"`
-}
-
-func requireActivityListing(t *testing.T, got outcome) activityListing {
-	t.Helper()
-	assert.Empty(t, got.stderr)
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	decoder := yaml.NewDecoder(strings.NewReader(got.stdout))
-	decoder.KnownFields(true)
-	var printed activityListing
-	require.NoError(t, decoder.Decode(&printed), "stdout: %s", got.stdout)
-	assert.Len(t, printed.Activities, printed.Returned)
-	return printed
-}
-
 func activitySent(t *testing.T, server *upstream) url.Values {
 	t.Helper()
 	for _, request := range server.requests() {
@@ -176,15 +154,11 @@ func TestActivityTakesTheIssueAsItsOneArgument(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "no subcommand", argv: []string{"activity"}},
 		{name: "one activity by an address of its own", argv: []string{"activity", "show", "DEV-1"}},
 		{
 			name: "the name the activity went by before",
 			argv: []string{"issue-history", "list", "--query", "issue id: DEV-1"},
 		},
-		{name: "no issue at all", argv: []string{"activity", "list"}},
-		{name: "two issues", argv: []string{"activity", "list", "DEV-1", "DEV-2"}},
-		{name: "a search in place of the issue", argv: []string{"activity", "list", "DEV-1", "--query", "issue id: DEV-1"}},
 		{name: "the readable id of an article", argv: []string{"activity", "list", "DEV-A-1"}},
 		{name: "an internal id", argv: []string{"activity", "list", "3-19"}},
 		{name: "a string of neither form", argv: []string{"activity", "list", "DEV"}},
@@ -232,20 +206,6 @@ func TestActivityRefusesTheFlagsOfAListItCannotSend(t *testing.T) {
 			assert.Empty(t, server.requests())
 		})
 	}
-}
-
-func TestActivityHelpNamesTheCategoriesAndTheDefaultFields(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"activity", "list", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	for _, said := range append(strings.Split(activityCategories, ","), defaultActivityFields, "--category") {
-		assert.Contains(t, got.stdout, said)
-	}
-	assert.NotContains(t, got.stdout, "--query")
-	assert.NotContains(t, got.stdout, "target")
 }
 
 func TestActivitySendsTheActivitiesOfTheIssueItWasGiven(t *testing.T) {

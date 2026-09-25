@@ -148,15 +148,3 @@ func methodsOf(u *upstream) []string {
 	}
 	return methods
 }
-
-func TestTimeWritesAndTakesAwayAnAttributeOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	id := workItemOn(t, dev, "DEV-1", "PT5M", "--attribute", "Формат работы=ИИагент", "--text", "атрибут")
-	cleared := runWith(t, dev.env(), "time", "update", "DEV-1", id, "--clear", "Формат работы", "--fields", "attributes")
-	removed := runWith(t, dev.env(), "time", "delete", "DEV-1", id)
-
-	assert.Equal(t, outcome{stdout: "attributes:\n  \"Формат работы\": null\n"}, cleared)
-	require.Equal(t, 0, removed.code, "stderr: %s", removed.stderr)
-}

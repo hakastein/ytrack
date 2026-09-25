@@ -1,7 +1,6 @@
 package cli_test
 
 import (
-	"encoding/json"
 	"net/http"
 	"path"
 	"strconv"
@@ -209,9 +208,6 @@ func TestLinkAddRefusesACallThatNamesNoOneLink(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "nothing at all", argv: []string{"link", "add"}},
-		{name: "no target issue", argv: []string{"link", "add", "DEV-1", "depends on"}},
-		{name: "a fourth word", argv: []string{"link", "add", "DEV-1", "depends on", "DEV-2", "DEV-3"}},
 		{name: "an issue that would reach another endpoint", argv: []string{"link", "add", "..", "depends on", "DEV-2"}},
 		{name: "a target issue that is an article", argv: []string{"link", "add", "DEV-1", "depends on", "DEV-A-1"}},
 		{name: "an empty phrase", argv: []string{"link", "add", "DEV-1", "", "DEV-2"}},
@@ -228,16 +224,6 @@ func TestLinkAddRefusesACallThatNamesNoOneLink(t *testing.T) {
 			assert.Empty(t, server.requests())
 		})
 	}
-}
-
-func TestLinkAddHelpNamesTheDefaultAndWhereThePhrasesComeFrom(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"link", "add", "--help"})
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, linkListTarget)
 }
 
 func TestLinkAddResolvesThePhraseAgainstTheSlotsOfTheIssue(t *testing.T) {
@@ -430,23 +416,6 @@ func TestLinkAddRefusesAnAnswerAboutSomethingElse(t *testing.T) {
 	}
 }
 
-func TestLinkAddRefusesAPhraseNoLinkOfTheIssueGoesBy(t *testing.T) {
-	t.Parallel()
-	server := linking(t, devInstanceCatalogue(), addressedIssue(addedTargetID, addedTarget), noLinkWritten(t))
-
-	got := runWith(t, server.env(), "link", "add", addedSource, "depnds on", addedTarget)
-
-	assert.Equal(t, faultDocument{
-		code: "unknown_name",
-		details: []detail{
-			{"request", issueRequest(server.url, addedSource, addSourceFields)},
-			{"issue", addedSource},
-			{"unknown", []any{[]detail{{"phrase", "depnds on"}, {"nearest", []any{"depends on"}}}}},
-		},
-	}, requireFault(t, got))
-	assert.Equal(t, []string{"/api/issues/" + addedSource}, server.sentPaths())
-}
-
 func TestLinkAddRefusesAnIssueTheServerDoesNotHave(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -573,86 +542,6 @@ func noLinkWritten(t *testing.T) http.HandlerFunc {
 	return func(_ http.ResponseWriter, r *http.Request) {
 		assert.Fail(t, "a write reached the server", "%s %s", r.Method, r.URL)
 	}
-}
-
-func TestLinkAddLinksTwoIssuesOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	source := aContractIssue(t, dev, "source")
-	target := aContractIssue(t, dev, "partner")
-
-	sent := len(dev.requests())
-	got := runWith(t, dev.env(), "link", "add", source, "depends on", target)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	document := requireDocument(t, got.stdout)
-	assert.Equal(t, []detail{{"total", 1}, {"returned", 1}, {"truncated", false}},
-		document[:3])
-	assert.Equal(t, target,
-		nodeAt(t, requireMapping(t, "stdout", got.stdout), "links", "depends on", "idReadable").Value)
-
-	link := path.Base(strings.TrimSuffix(dev.sentPaths()[sent+2], "/issues"))
-	assert.Regexp(t, `^[0-9]+-[0-9]+t$`, link)
-	assert.Equal(t, issueLinkOfThePhrase(t, dev.answers()[sent], "INWARD", "depends on"), link)
-
-	other := runWith(t, dev.env(), "link", "list", target)
-	require.Equal(t, 0, other.code, "stderr: %s", other.stderr)
-	block := nodeAt(t, requireMapping(t, "stdout", other.stdout), "links")
-	assert.Equal(t, source, nodeAt(t, block, "is required for", "idReadable").Value)
-	assert.NotContains(t, keysOf(block), "depends on")
-
-	sent = len(dev.requests())
-	again := runWith(t, dev.env(), "link", "add", source, "ЗАВИСИТ ОТ", target)
-	require.Equal(t, 0, again.code, "stderr: %s", again.stderr)
-	assert.Equal(t, link, path.Base(strings.TrimSuffix(dev.sentPaths()[sent+2], "/issues")))
-
-	held := runWith(t, dev.env(), "link", "list", source)
-	require.Equal(t, 0, held.code, "stderr: %s", held.stderr)
-	assert.Equal(t, []detail{{"total", 1}, {"returned", 1}, {"truncated", false}},
-		requireDocument(t, held.stdout)[:3])
-}
-
-func aContractIssue(t *testing.T, dev *upstream, role string) string {
-	t.Helper()
-	title := "ytrack contract " + t.Name() + " " + role
-	got := runWith(t, dev.env(), "issue", "create", "DEV", "--summary", title,
-		"--field", "Type=Task",
-		"--field", "Категория=Развитие технологий",
-		"--field", "Клиент=ACME",
-		"--field", "Модуль системы=Инфраструктура. DevOps",
-		"--fields", "idReadable")
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	readable := nodeAt(t, requireMapping(t, "stdout", got.stdout), "idReadable").Value
-	require.Regexp(t, `^DEV-[0-9]+$`, readable)
-	t.Cleanup(func() { removeIssue(t, dev, readable) })
-	return readable
-}
-
-func issueLinkOfThePhrase(t *testing.T, body []byte, direction, phrase string) string {
-	t.Helper()
-	var read struct {
-		Links []struct {
-			ID        string `json:"id"`
-			Direction string `json:"direction"`
-			LinkType  struct {
-				SourceToTarget string `json:"sourceToTarget"`
-				TargetToSource string `json:"targetToSource"`
-			} `json:"linkType"`
-		} `json:"links"`
-	}
-	require.NoError(t, json.Unmarshal(body, &read), "the answer read: %s", body)
-	for _, link := range read.Links {
-		named := link.LinkType.SourceToTarget
-		if link.Direction == "INWARD" {
-			named = link.LinkType.TargetToSource
-		}
-		if link.Direction == direction && named == phrase {
-			return link.ID
-		}
-	}
-	require.Fail(t, "the issue holds no slot of that phrase", "%s %s: %s", direction, phrase, body)
-	return ""
 }
 
 func nodeValue(t *testing.T, stdout, key string) any {

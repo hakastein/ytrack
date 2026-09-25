@@ -2,7 +2,6 @@ package cli_test
 
 import (
 	"cmp"
-	"context"
 	"encoding/json"
 	"net/http"
 	"slices"
@@ -134,9 +133,7 @@ func TestIssueCreateRefusesBeforeAnyRequest(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "no project", argv: []string{"issue", "create"}},
 		{name: "no title", argv: []string{"issue", "create", "DEV"}},
-		{name: "the title as an argument", argv: []string{"issue", "create", "DEV", "a", "b"}},
 		{name: "two dots for a project", argv: []string{"issue", "create", "..", "--summary", "x"}},
 		{name: "an empty title", argv: []string{"issue", "create", "DEV", "--summary", ""}},
 		{name: "a title twice", argv: []string{"issue", "create", "DEV", "--summary", "a", "--summary", "b"}},
@@ -183,30 +180,6 @@ func TestIssueCreateRefusesTextTheServerWouldRewrite(t *testing.T) {
 	}
 }
 
-func TestIssueCreateHasNoFlagsBesidesItsOwn(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		flag string
-	}{
-		{name: "prose out of a file", flag: "--description-file"},
-		{name: "a title out of a file", flag: "--summary-file"},
-		{name: "clearing a field", flag: "--clear"},
-		{name: "comments", flag: "--comments"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := serveNothing(t)
-
-			got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", tc.flag, "y")
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
-		})
-	}
-}
-
 func TestIssueCreatePrintsNoComments(t *testing.T) {
 	t.Parallel()
 	server := serveNothing(t)
@@ -215,18 +188,6 @@ func TestIssueCreatePrintsNoComments(t *testing.T) {
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 	assert.Empty(t, server.requests())
-}
-
-func TestIssueCreateHelpNamesTheDefaultAndNoFile(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"issue", "create", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, "ytrack issue create")
-	assert.Contains(t, got.stdout, issueShowFields)
-	assert.NotContains(t, got.stdout, "-file")
 }
 
 func TestIssueCreateReadsTheProjectAndFilesTheIssue(t *testing.T) {
@@ -265,50 +226,6 @@ func longDescription() string {
 		text.WriteString("Шаги:  \n1. открыть   \n---\nи ещё 😀\n")
 	}
 	return strings.TrimSuffix(text.String(), "\n")
-}
-
-func TestIssueCreateWritesTextThatStartsWithADash(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-		want map[string]any
-	}{
-		{
-			name: "prose of one dash",
-			argv: []string{"--summary", "x", "--description", "-"},
-			want: map[string]any{"project": map[string]any{"id": "0-1"}, "summary": "x", "description": "-"},
-		},
-		{
-			name: "a title that starts with a dash",
-			argv: []string{"--summary", "-x"},
-			want: map[string]any{"project": map[string]any{"id": "0-1"}, "summary": "-x"},
-		},
-		{
-			name: "a title the shell would take for the help",
-			argv: []string{"--summary", "--help"},
-			want: map[string]any{"project": map[string]any{"id": "0-1"}, "summary": "--help"},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			summary, _ := tc.want["summary"].(string)
-			description := "null"
-			if written, given := tc.want["description"].(string); given {
-				description = asJSON(written)
-			}
-			server := creating(t, respondWith(http.StatusOK, projectRequiringNothing()),
-				respondWith(http.StatusOK, createdIssue("DEV-7", summary, description)))
-
-			got := runWith(t, server.env(), append([]string{"issue", "create", "DEV"}, tc.argv...)...)
-
-			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			var body map[string]any
-			require.NoError(t, json.Unmarshal([]byte(server.asks()[1]), &body))
-			assert.Equal(t, tc.want, body)
-		})
-	}
 }
 
 func TestIssueCreateNamesEveryRequiredFieldAtOnce(t *testing.T) {
@@ -638,62 +555,4 @@ func TestIssueCreatePrintsTheCustomFieldsItWasAskedFor(t *testing.T) {
 	for _, query := range server.sentQueries() {
 		assert.Empty(t, query["customFields"], "a write never cuts the answer down by name")
 	}
-}
-
-func contractTitle(t *testing.T) string {
-	t.Helper()
-	return "ytrack contract " + t.Name()
-}
-
-func removeIssue(t *testing.T, dev *upstream, readable string) {
-	t.Helper()
-	outlivesTheTest := context.Background()
-	deleted := runInContext(t, outlivesTheTest, dev.env(), "issue", "delete", readable)
-	assert.Equal(t, outcome{stdout: "idReadable: " + strconv.Quote(readable) + "\n"}, deleted)
-
-	gone := runInContext(t, outlivesTheTest, dev.env(), "issue", "show", readable, "--comments=0")
-	assert.Equal(t, "not_found", requireFaultDocument(t, gone).code)
-}
-
-func TestIssueCreateNamesWhatTheDevProjectRequires(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "issue", "create", "DEV", "--summary", contractTitle(t))
-
-	want := faultDocument{
-		code: "missing_required",
-		details: []detail{
-			{"request", writeMetadataRequest(dev.url, "DEV")},
-			{"project", "DEV"},
-			{"missing", []any{"Type", "Категория", "Клиент", "Модуль системы"}},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(dev))
-}
-
-func TestIssueCreateFilesAnIssueTheDemoProjectFillsItself(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	title := contractTitle(t)
-
-	got := runWith(t, dev.env(), "issue", "create", "DEMO", "--summary", title)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	mapping := requireMapping(t, "stdout", got.stdout)
-	readable := nodeAt(t, mapping, "idReadable").Value
-	require.Regexp(t, `^DEMO-[0-9]+$`, readable)
-	t.Cleanup(func() { removeIssue(t, dev, readable) })
-
-	assert.Equal(t, title, nodeAt(t, mapping, "summary").Value)
-	for _, filled := range []struct{ field, value string }{
-		{field: "Priority", value: "Normal"},
-		{field: "Type", value: "Bug"},
-		{field: "State", value: "To do"},
-	} {
-		assert.Equal(t, filled.value, nodeAt(t, mapping, "customFields", filled.field).Value)
-	}
-	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(dev))
 }

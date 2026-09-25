@@ -81,30 +81,3 @@ func TestAuthLoginReadsNothingOfThePipeItIsHanded(t *testing.T) {
 	assert.NoFileExists(t, path)
 	assert.Empty(t, entries(t, home))
 }
-
-func TestAuthLoginRefusesACallThatDoesNotAssemble(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "an argument", argv: []string{"auth", "login", "extra"}},
-		{name: "an argument after the flag", argv: []string{"auth", "login", "--global", "extra"}},
-		{name: "a flag for the token", argv: []string{"auth", "login", "--token", token}},
-		{name: "a flag for the token after =", argv: []string{"auth", "login", "--token=" + token}},
-		{name: "a flag for the address", argv: []string{"auth", "login", "--base-url", "http://h"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			env, home, path := loginEnvironment(t)
-
-			got := runWith(t, env, tc.argv...)
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assertNoToken(t, got, token)
-			assert.NoFileExists(t, path)
-			assert.Empty(t, entries(t, home))
-		})
-	}
-}

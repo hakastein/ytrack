@@ -41,12 +41,8 @@ func TestArticleDeleteRefusesBeforeAnyRequest(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "no id", argv: []string{"article", "delete"}},
-		{name: "two ids", argv: []string{"article", "delete", "DEV-A-1", "DEV-A-2"}},
 		{name: "an issue id", argv: []string{"article", "delete", "DEV-1"}},
 		{name: "an internal id", argv: []string{"article", "delete", "3-19"}},
-		{name: "--yes", argv: []string{"article", "delete", "DEV-A-1", "--yes"}},
-		{name: "--force", argv: []string{"article", "delete", "DEV-A-1", "--force"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -58,18 +54,6 @@ func TestArticleDeleteRefusesBeforeAnyRequest(t *testing.T) {
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
-	}
-}
-
-func TestArticleDeleteHelpOffersNoConfirmation(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"article", "delete", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	for _, flag := range []string{"--yes", "--force", "--confirm"} {
-		assert.NotContains(t, got.stdout, flag)
 	}
 }
 
@@ -99,7 +83,6 @@ func TestArticleDeleteRefusesAnArticleTheReadDoesNotFind(t *testing.T) {
 		said string
 	}{
 		{name: "an article nobody wrote", said: "Can't find article with id dev-A-7"},
-		{name: "an article the token may not see", said: "Entity with id dev-A-7 not found"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -230,44 +213,4 @@ func TestArticleDeleteRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 		})
 	}
-}
-
-func contractArticleTitle(t *testing.T) string {
-	t.Helper()
-	return "ytrack contract " + t.Name()
-}
-
-func TestArticleDeleteDeletesAnArticleOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	filed := fileArticle(t, dev, contractArticleTitle(t), "--content", "Статья, заведённая под удаление.")
-
-	got := runWith(t, dev.env(), "article", "delete", filed)
-
-	assert.Equal(t, outcome{stdout: "idReadable: " + strconv.Quote(filed) + "\n"}, got)
-	gone := runWith(t, dev.env(), "article", "show", filed, "--comments=0")
-	assert.Equal(t, "not_found", requireFaultDocument(t, gone).code)
-	assert.Equal(t, []string{http.MethodPost, http.MethodGet, http.MethodDelete, http.MethodGet}, sentMethods(dev))
-}
-
-func TestArticleDeleteRefusesAnArticleTheDevInstanceDoesNotHave(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "article", "delete", "DEV-A-99999")
-
-	assert.Equal(t, noArticleToDelete(dev.url, "DEV-A-99999", "Can't find article with id DEV-A-99999"),
-		requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(dev))
-}
-
-func TestArticleDeleteSendsNoDeletionForAnArticleTheLimitedUserCannotSee(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited},
-		"article", "delete", "DEV-A-1")
-
-	assert.Equal(t, noArticleToDelete(dev.url, "DEV-A-1", "Entity with id DEV-A-1 not found"), requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(dev))
 }

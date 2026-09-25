@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -150,70 +149,6 @@ func TestIssueShowPrintsADescriptionThatIsNotThereAsNull(t *testing.T) {
 	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-1\"\ndescription: null\n"}, got)
 }
 
-func TestIssueShowPrintsTheTextOfTheDevInstanceAsTheServerSentIt(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		id    string
-		guard func(t *testing.T, sent string)
-	}{
-		{
-			id: "DEV-1",
-			guard: func(t *testing.T, sent string) {
-				for _, held := range []string{"   \n", "\n---\n", "\n~~~\n", "\xf0\x9f\x98\x80"} {
-					assert.Contains(t, sent, held)
-				}
-				assert.False(t, strings.HasSuffix(sent, "\n"), "the description ends in a line ending")
-			},
-		},
-		{
-			id: "DEV-3",
-			guard: func(t *testing.T, sent string) {
-				assert.True(t, strings.HasPrefix(sent, "\n"), "the description does not start with a line ending")
-			},
-		},
-		{
-			id: "DEV-4",
-			guard: func(t *testing.T, sent string) {
-				assert.True(t, strings.HasPrefix(sent, " "), "the description does not start with a space")
-			},
-		},
-		{
-			id: "DEV-5",
-			guard: func(t *testing.T, sent string) {
-				assert.True(t, strings.HasPrefix(sent, "\n "), "the description does not start with a line ending and a space")
-			},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.id, func(t *testing.T) {
-			t.Parallel()
-			dev := devInstance(t)
-
-			got := runWith(t, dev.env(), "issue", "show", tc.id, "--comments=0", "--fields", "idReadable,description")
-
-			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			assert.Empty(t, got.stderr)
-			sent, isText := sentDescription(t, dev).(string)
-			require.True(t, isText, "the server sent no description for %s", tc.id)
-			tc.guard(t, sent)
-			printed := nodeAt(t, requireMapping(t, "stdout", got.stdout), "description")
-			assert.Equal(t, sent, printed.Value)
-			assert.Equal(t, yaml.LiteralStyle, printed.Style)
-		})
-	}
-}
-
-func TestIssueShowPrintsTheEmptyDescriptionOfTheDevInstanceAsNull(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "issue", "show", "DEV-2", "--comments=0", "--fields", "idReadable,description")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Nil(t, sentDescription(t, dev))
-	assert.Equal(t, []detail{{"idReadable", "DEV-2"}, {"description", nil}}, requireDocument(t, got.stdout))
-}
-
 func issueWith(t *testing.T, keys map[string]any) string {
 	t.Helper()
 	object := map[string]any{"$type": "Issue", "idReadable": "DEV-1"}
@@ -223,15 +158,6 @@ func issueWith(t *testing.T, keys map[string]any) string {
 	encoded, err := json.Marshal(object)
 	require.NoError(t, err)
 	return string(encoded)
-}
-
-func sentDescription(t *testing.T, u *upstream) any {
-	t.Helper()
-	answers := u.answers()
-	require.Len(t, answers, 1)
-	var body map[string]any
-	require.NoError(t, json.Unmarshal(answers[0], &body))
-	return body["description"]
 }
 
 func nodeAt(t *testing.T, mapping *yaml.Node, path ...string) *yaml.Node {

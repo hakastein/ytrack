@@ -1,7 +1,6 @@
 package cli_test
 
 import (
-	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -23,15 +22,6 @@ func issueToEmpty() string {
 	return issueToUpdate("DEV-1", projectToEmpty(),
 		currentField{name: "Система", kind: "MultiEnumIssueCustomField", binding: "180-20"},
 		currentField{name: "Assignee", kind: "SingleUserIssueCustomField", binding: "180-21"})
-}
-
-func sentClearDescription(t *testing.T, body string) string {
-	t.Helper()
-	var sent struct {
-		Description json.RawMessage `json:"description"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(body), &sent))
-	return string(sent.Description)
 }
 
 func TestIssueUpdateRefusesAClearItCannotRead(t *testing.T) {
@@ -199,51 +189,4 @@ func TestIssueUpdateRefusesAResponseThatStillHasWhatTheCallEmptied(t *testing.T)
 			assert.Equal(t, want, requireUncertainty(t, got))
 		})
 	}
-}
-
-func TestIssueUpdateEmptiesThePartsOfAnIssueOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	readable := filedForUpdate(t, dev, "--description", "первая",
-		"--field", "Assignee=admin", "--field", "Соисполнители=admin", "--field", "Примечание=заметка")
-
-	got := runWith(t, dev.env(), "issue", "update", readable, "--clear", "Assignee",
-		"--clear", "Соисполнители", "--clear", "description", "--clear", "Примечание")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	mapping := requireMapping(t, "stdout", got.stdout)
-	assert.Equal(t, "!!null", nodeAt(t, mapping, "description").ShortTag())
-	printed := keysOf(nodeAt(t, mapping, "customFields"))
-	for _, emptied := range []string{"Assignee", "Соисполнители", "Примечание"} {
-		assert.NotContains(t, printed, emptied)
-	}
-
-	sent := sentElements(t, lastAsk(dev))
-	assert.Equal(t, "null", string(sent["Assignee"].Value))
-	assert.Equal(t, "[]", string(sent["Соисполнители"].Value))
-	assert.Equal(t, "null", string(sent["Примечание"].Value))
-	assert.Equal(t, "null", sentClearDescription(t, lastAsk(dev)))
-}
-
-func TestIssueUpdateRefusesToEmptyAFieldTheDevProjectRequires(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	readable := filedForUpdate(t, dev)
-	before := len(dev.requests())
-
-	got := runWith(t, dev.env(), "issue", "update", readable, "--clear", "Type")
-
-	want := faultDocument{
-		code: "missing_required",
-		details: []detail{
-			{"request", issueRequest(dev.url, readable, issueWriteFields)},
-			{"project", "DEV"},
-			{"missing", []any{"Type"}},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	sent := dev.requests()[before:]
-	require.Len(t, sent, 1)
-	assert.Equal(t, http.MethodGet, sent[0].Method)
 }

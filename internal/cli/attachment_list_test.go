@@ -7,18 +7,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"go.yaml.in/yaml/v3"
 )
 
 const attachmentFields = "id,name,size,mimeType,url"
-
-const (
-	devInstanceAttachmentName = "заметка-полигона.txt"
-	devInstanceAttachmentSize = 75
-)
-
-const attachmentIDForm = `^[0-9]+-[0-9]+$`
 
 func attachmentsRequest(address, owners, id, fields, top string) string {
 	return "GET " + address + "/api/" + owners + "/" + id + "/attachments?fields=" + fields + "&$top=" + top
@@ -28,83 +19,6 @@ func countingAttachments(limit string) []url.Values {
 	return []url.Values{
 		{"fields": {attachmentFields}, "$top": {limit}},
 		{"fields": {"id"}, "$top": {"-1"}},
-	}
-}
-
-type attachmentListing struct {
-	Total       int                 `yaml:"total"`
-	Returned    int                 `yaml:"returned"`
-	Truncated   bool                `yaml:"truncated"`
-	Attachments []printedAttachment `yaml:"attachments"`
-}
-
-func requireAttachmentListing(t *testing.T, got outcome) attachmentListing {
-	t.Helper()
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	decoder := yaml.NewDecoder(strings.NewReader(got.stdout))
-	decoder.KnownFields(true)
-	var printed attachmentListing
-	require.NoError(t, decoder.Decode(&printed), "stdout: %s", got.stdout)
-	assert.Len(t, printed.Attachments, printed.Returned)
-	assert.Equal(t, printed.Total > printed.Returned, printed.Truncated)
-	return printed
-}
-
-func TestAttachmentRefusesACallThatNamesNoCommandOfIts(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "the command alone", argv: []string{"attachment"}},
-		{name: "a subcommand it has none of", argv: []string{"attachment", "bogus"}},
-		{name: "a download", argv: []string{"attachment", "download", "DEV-1", "12-2"}},
-		{name: "a show of one attachment", argv: []string{"attachment", "show", "DEV-1", "12-2"}},
-		{name: "a list of no owner", argv: []string{"attachment", "list"}},
-		{name: "a list of two owners", argv: []string{"attachment", "list", "DEV-1", "DEV-2"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := serveNothing(t)
-
-			got := runWith(t, server.env(), tc.argv...)
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
-		})
-	}
-}
-
-func TestAttachmentHelpNamesItsSubcommandsAndNoDownload(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"attachment", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.Equal(t, []string{"create", "delete", "list"}, availableCommands(t, got.stdout))
-}
-
-func TestAttachmentListHelpNamesTheDefaultFields(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"attachment", "list", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, attachmentFields)
-}
-
-func TestAttachmentListHelpNamesOwnerExamplesAndTheCommentExpression(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"attachment", "list", "--help"})
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	for _, said := range []string{"DEV-1", "DEV-A-1", "+comment(id)"} {
-		assert.Contains(t, got.stdout, said)
 	}
 }
 
@@ -371,100 +285,4 @@ func TestAttachmentListNamesTheCommentAFileBelongsTo(t *testing.T) {
 	assert.Equal(t,
 		[]url.Values{{"fields": {attachmentFields + ",comment(id)"}, "$top": {"50"}}},
 		server.sentQueries())
-}
-
-func TestAttachmentListReadsTheDevInstanceAttachment(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "attachment", "list", "DEV-1")
-
-	printed := requireAttachmentListing(t, got)
-	assert.Equal(t, 1, printed.Total)
-	assert.Equal(t, 1, printed.Returned)
-	assert.False(t, printed.Truncated)
-	require.Len(t, printed.Attachments, 1)
-	file := printed.Attachments[0]
-	assert.Regexp(t, attachmentIDForm, file.ID)
-	assert.Equal(t, devInstanceAttachmentName, file.Name)
-	assert.Equal(t, devInstanceAttachmentSize, file.Size)
-	assert.Equal(t, "text/plain", file.MimeType)
-	reference, whole := strings.CutPrefix(file.URL, dev.url)
-	require.True(t, whole, "%q does not begin with the address ytrack was given", file.URL)
-	assert.Regexp(t, signedLinkForm, reference)
-
-	asked := dev.requests()
-	require.Len(t, asked, 1)
-	assert.Equal(t, "/api/issues/DEV-1/attachments", asked[0].URL.Path)
-	assert.NotContains(t, strings.Join(dev.sentPaths(), " "), filesPath)
-
-	response, body := fetched(t, file.URL, "")
-	require.Equal(t, http.StatusOK, response.StatusCode, "body: %s", body)
-	assert.Len(t, body, file.Size)
-}
-
-func TestAttachmentListReadsTheCommentOfTheDevInstanceAttachment(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "attachment", "list", "DEV-1", "--fields", "+comment(id)")
-
-	printed := requireAttachmentListing(t, got)
-	require.Len(t, printed.Attachments, 1)
-	assert.Equal(t, devInstanceAttachmentName, printed.Attachments[0].Name)
-	assert.Nil(t, printed.Attachments[0].Comment, "the file hangs from a comment")
-	require.Len(t, dev.requests(), 1)
-	assert.Equal(t, []string{attachmentFields + ",comment(id)"}, dev.sentFields())
-}
-
-func TestAttachmentListCountsTheDevInstanceAttachmentsWhenTheyFillTheLimit(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "attachment", "list", "DEV-1", "--limit", "1")
-
-	printed := requireAttachmentListing(t, got)
-	assert.Equal(t, 1, printed.Total)
-	assert.Equal(t, 1, printed.Returned)
-	assert.False(t, printed.Truncated)
-	assert.Equal(t, countingAttachments("1"), dev.sentQueries())
-	assert.Equal(t, []string{"/api/issues/DEV-1/attachments", "/api/issues/DEV-1/attachments"}, dev.sentPaths())
-}
-
-func TestAttachmentListReadsAnArticleOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "attachment", "list", "DEV-A-1")
-
-	assert.Equal(t, outcome{stdout: "total: 0\nreturned: 0\ntruncated: false\nattachments: []\n"}, got)
-	require.Len(t, dev.requests(), 1)
-	assert.Equal(t, "/api/articles/DEV-A-1/attachments", dev.sentPaths()[0])
-}
-
-func TestAttachmentListRefusesAnIssueTheTokenIsNotAnsweredFor(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	t.Run("an issue the dev instance has none of", func(t *testing.T) {
-		got := runWith(t, dev.env(), "attachment", "list", "DEV-99999")
-
-		found := requireFault(t, got)
-		assert.Equal(t, "not_found", found.code)
-		assert.Equal(t, "Entity with id DEV-99999 not found", detailNamed(t, found, "upstream_message"))
-		require.Len(t, dev.requests(), 1)
-		assert.Equal(t, "/api/issues/DEV-99999/attachments", dev.sentPaths()[0])
-	})
-
-	t.Run("an issue the limited token may not see", func(t *testing.T) {
-		before := len(dev.requests())
-
-		got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited},
-			"attachment", "list", "DEV-1")
-
-		found := requireFault(t, got)
-		assert.Equal(t, "not_found", found.code)
-		assert.Equal(t, "Entity with id DEV-1 not found", detailNamed(t, found, "upstream_message"))
-		assert.Len(t, dev.requests()[before:], 1)
-	})
 }

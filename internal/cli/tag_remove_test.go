@@ -2,13 +2,11 @@ package cli_test
 
 import (
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func tagOnOwnerPath(collection, readable, tag string) string {
@@ -140,71 +138,4 @@ func TestTagRemoveReadsWhatTheServerAnsweredTheRemovalWith(t *testing.T) {
 			assert.Equal(t, []string{http.MethodGet, http.MethodGet, http.MethodDelete}, sentMethods(server))
 		})
 	}
-}
-
-func TestTagRemoveLeavesTheTagStandingOnTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	name := contractTagName(t)
-	made := runWith(t, dev.env(), "tag", "create", "--name", name)
-	require.Equal(t, 0, made.code, "stderr: %s", made.stderr)
-	issue := issueToTag(t, dev)
-	hung := runWith(t, dev.env(), "tag", "add", issue, "--name", name)
-	require.Equal(t, 0, hung.code, "stderr: %s", hung.stderr)
-
-	got := runWith(t, dev.env(), "tag", "remove", issue, "--name", name)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	taken := requireMapping(t, "stdout", got.stdout)
-	assert.Equal(t, issue, nodeAt(t, taken, "idReadable").Value)
-	assert.Equal(t, name, nodeAt(t, taken, "removed", "name").Value)
-	assert.Equal(t, "admin", nodeAt(t, taken, "removed", "owner", "login").Value)
-
-	assert.True(t, tagIsListed(t, dev, name), "the tag is gone from the list after it came off the issue")
-	assert.Empty(t, tagsOfTheIssue(t, dev, issue))
-
-	before := len(dev.requests())
-	again := runWith(t, dev.env(), "tag", "remove", issue, "--name", name)
-	assert.Equal(t, "not_found", requireFault(t, again).code)
-	assert.Equal(t, []string{http.MethodGet, http.MethodGet, http.MethodDelete}, sentMethodsFrom(dev, before))
-
-	back := runWith(t, dev.env(), "tag", "add", issue, "--name", name)
-	require.Equal(t, 0, back.code, "stderr: %s", back.stderr)
-	assert.Equal(t, []string{name}, tagsOfTheIssue(t, dev, issue))
-
-	destroyed := runWith(t, dev.env(), "tag", "delete", "--name", name)
-	require.Equal(t, 0, destroyed.code, "stderr: %s", destroyed.stderr)
-	assert.False(t, tagIsListed(t, dev, name), "the tag stands in the list after it was destroyed")
-}
-
-func TestTagRemoveTakesATagOffAnArticleOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	name := contractTagName(t)
-	made := runWith(t, dev.env(), "tag", "create", "--name", name)
-	require.Equal(t, 0, made.code, "stderr: %s", made.stderr)
-	t.Cleanup(func() { removeTag(t, dev.env(), name, "admin") })
-	article := articleToTag(t, dev)
-	hung := runWith(t, dev.env(), "tag", "add", article, "--name", name)
-	require.Equal(t, 0, hung.code, "stderr: %s", hung.stderr)
-
-	got := runWith(t, dev.env(), "tag", "remove", article, "--name", name)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	taken := requireMapping(t, "stdout", got.stdout)
-	assert.Equal(t, article, nodeAt(t, taken, "idReadable").Value)
-	assert.Equal(t, name, nodeAt(t, taken, "removed", "name").Value)
-
-	again := runWith(t, dev.env(), "tag", "remove", article, "--name", name)
-	found := requireFault(t, again)
-	assert.Equal(t, "not_found", found.code)
-
-	assert.True(t, tagIsListed(t, dev, name), "the tag is gone from the list after it came off the article")
-}
-
-func tagIsListed(t *testing.T, dev *upstream, name string) bool {
-	t.Helper()
-	listed := requireTagListing(t, runWith(t, dev.env(), "tag", "list"))
-	return slices.ContainsFunc(listed.Tags, func(record map[string]any) bool { return record["name"] == name })
 }

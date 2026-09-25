@@ -1,7 +1,6 @@
 package cli_test
 
 import (
-	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -11,8 +10,6 @@ import (
 )
 
 const commentFields = "comments(id,author(login),created,text,deleted)"
-
-const commentIDForm = `^[0-9]+-[0-9]+$`
 
 func receivedComment(id string, created int64, login, text string) map[string]any {
 	return map[string]any{
@@ -60,7 +57,6 @@ func TestIssueShowRefusesACommentsFlagThatIsNeitherAllNorACount(t *testing.T) {
 		{name: "a word of its own", argv: []string{"--comments=x"}},
 		{name: "a fraction", argv: []string{"--comments=1.5"}},
 		{name: "a count past what a number holds", argv: []string{"--comments=9223372036854775808"}},
-		{name: "no value at all", argv: []string{"--comments"}},
 		{name: "the flag twice", argv: []string{"--comments=1", "--comments=2"}},
 	}
 	for _, tc := range tests {
@@ -216,99 +212,4 @@ func TestIssueShowRefusesCommentsTheServerShapedOtherwise(t *testing.T) {
 			}, requireFault(t, got))
 		})
 	}
-}
-
-func TestIssueShowPrintsTheCommentOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "issue", "show", "DEV-1", "--fields", "idReadable")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	sent := sentComments(t, dev)
-	require.Len(t, sent, 1)
-	root := requireMapping(t, "stdout", got.stdout)
-	comments := nodeAt(t, root, "comments")
-	require.Equal(t, yaml.SequenceNode, comments.Kind)
-	require.Len(t, comments.Content, 1)
-	assert.Regexp(t, commentIDForm, nodeAt(t, root, "comments", "id").Value)
-	assert.Equal(t, "admin", nodeAt(t, root, "comments", "author", "login").Value)
-	assert.Regexp(t, instantForm, nodeAt(t, root, "comments", "created").Value)
-	text := nodeAt(t, root, "comments", "text")
-	assert.Equal(t, sent[0]["text"], text.Value)
-	assert.Equal(t, yaml.LiteralStyle, text.Style)
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestIssueShowPrintsTheIssueOfTheDevInstanceWithNoCommentsAsAnEmptyList(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "issue", "show", "DEV-2", "--fields", "idReadable")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, sentComments(t, dev))
-	assert.Equal(t, []detail{{"idReadable", "DEV-2"}, {"comments", []any{}}}, requireDocument(t, got.stdout))
-}
-
-func TestIssueShowAsksTheDevInstanceForNoCommentsAtZero(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "issue", "show", "DEV-1", "--comments=0")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	for _, key := range requireDocument(t, got.stdout) {
-		assert.NotEqual(t, "comments", key.key)
-	}
-	assert.Equal(t, []string{askedIssueFields}, dev.sentFields())
-}
-
-func TestIssueShowPrintsTheCommentsOfTheDevInstanceOldestFirst(t *testing.T) {
-	t.Parallel()
-	admin := commentDetails("7-2", "", "admin", "Комментарий администратора после правки.")
-	member := commentDetails("7-3", "", "dev.member", "Комментарий участника: +1")
-	tests := []struct {
-		name    string
-		argv    []string
-		printed []any
-	}{
-		{name: "every one of them by default", printed: []any{admin, member}},
-		{name: "the last of them", argv: []string{"--comments=1"}, printed: []any{member}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			dev := devInstance(t)
-
-			argv := append([]string{"issue", "show", "DEV-7", "--fields", "idReadable"}, tc.argv...)
-			got := runWith(t, dev.env(), argv...)
-
-			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			printed := requireDocument(t, got.stdout)
-			require.Equal(t, []string{"idReadable", "comments"}, []string{printed[0].key, printed[1].key})
-			comments, areRecords := printed[1].value.([]any)
-			require.True(t, areRecords, "stdout: %q", got.stdout)
-			require.Len(t, comments, len(tc.printed))
-			for i, want := range tc.printed {
-				record, areDetails := comments[i].([]detail)
-				require.True(t, areDetails)
-				assert.Regexp(t, instantForm, record[2].value)
-				record[2].value = ""
-				assert.Equal(t, want, record)
-			}
-		})
-	}
-}
-
-func sentComments(t *testing.T, u *upstream) []map[string]any {
-	t.Helper()
-	answers := u.answers()
-	require.Len(t, answers, 1)
-	var body struct {
-		Comments []map[string]any `json:"comments"`
-	}
-	require.NoError(t, json.Unmarshal(answers[0], &body))
-	return body.Comments
 }

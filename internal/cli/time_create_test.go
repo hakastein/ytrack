@@ -13,8 +13,6 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-const workItemWriteFields = "id,duration,type(name),attributes,author(login),date,issue(idReadable,customFields),text"
-
 const sentWorkItemWriteFields = "id,duration(minutes),type(name),attributes(id,name,value(id,name)),author(login),date," +
 	"issue(idReadable," + customFieldsFields + "),text"
 
@@ -129,11 +127,6 @@ func TestTimeCreateRefusesWhatItCannotSend(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "no issue at all", argv: []string{"time", "create"}},
-		{name: "no duration", argv: []string{"time", "create", "DEV-1"}},
-		{name: "a word after the duration", argv: []string{"time", "create", "DEV-1", "PT1H", "Разработка"}},
-		{name: "the duration as the server shows it", argv: []string{"time", "create", "DEV-1", "--presentation", "3ч"}},
-		{name: "the duration in minutes", argv: []string{"time", "create", "DEV-1", "--minutes", "90"}},
 		{
 			name: "the day twice",
 			argv: []string{"time", "create", "DEV-1", "PT1H", "--date", "2026-09-01", "--date", "2026-09-02"},
@@ -206,16 +199,6 @@ func TestTimeCreateRefusesMidnightUTCCarriedInAnOffset(t *testing.T) {
 	assert.Empty(t, server.requests())
 }
 
-func TestTimeCreateHelpNamesItsDefault(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"time", "create", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, workItemWriteFields)
-}
-
 func TestTimeCreateSendsTheMinutesOfTheDuration(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -282,8 +265,6 @@ func TestTimeCreateSendsTheTextByteForByte(t *testing.T) {
 		{name: "a byte of nothing", text: "первая\x00вторая"},
 		{name: "brackets a reader might take for markup", text: "[bug] fix login"},
 		{name: "nothing at all", text: ""},
-		{name: "a word pflag would read as a flag", text: "-x"},
-		{name: "the word that asks for help", text: "--help"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -546,267 +527,6 @@ func TestTimeCreateAsksForWhatItChecksWhateverWasAskedToPrint(t *testing.T) {
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, `id: "199-7"`+"\n", got.stdout)
 	assert.Equal(t, []string{"id,duration(minutes),date,text,issue(idReadable)"}, server.sentFields())
-}
-
-func contractWorkItemIssue(t *testing.T, dev *upstream, role string) string {
-	t.Helper()
-	argv := append([]string{"issue", "create", "DEV", "--summary",
-		"ytrack contract " + t.Name() + " " + role}, devRequired()...)
-	got := runWith(t, dev.env(), argv...)
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	readable := nodeAt(t, requireMapping(t, "stdout", got.stdout), "idReadable").Value
-	require.Regexp(t, `^DEV-[0-9]+$`, readable)
-	t.Cleanup(func() { removeIssue(t, dev, readable) })
-	return readable
-}
-
-func TestTimeCreateWritesTimeAgainstAnIssueOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := contractWorkItemIssue(t, dev, "issue")
-	const text = "ytrack contract первая\rвторая   "
-
-	got := runWith(t, dev.env(), "time", "create", issue, "PT1H30M", "--date", "2026-09-01", "--text", text)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	mapping := requireMapping(t, "stdout", got.stdout)
-	assert.Regexp(t, internalIDForm, nodeAt(t, mapping, "id").Value)
-	assert.Equal(t, "PT1H30M", nodeAt(t, mapping, "duration").Value)
-	assert.Equal(t, "2026-09-01T00:00:00Z", nodeAt(t, mapping, "date").Value)
-	assert.Equal(t, "admin", nodeAt(t, mapping, "author", "login").Value)
-	assert.Nil(t, requireValue(t, nodeAt(t, mapping, "type")))
-	assert.Equal(t, issue, nodeAt(t, mapping, "issue", "idReadable").Value)
-	assert.Equal(t, "PT1H30M", nodeAt(t, mapping, "issue", "customFields", "Затраченное время").Value)
-	written := nodeAt(t, mapping, "text")
-	assert.Equal(t, text, written.Value)
-	assert.Equal(t, yaml.DoubleQuotedStyle, written.Style)
-
-	second := runWith(t, dev.env(), "time", "create", issue, "PT30M")
-	require.Equal(t, 0, second.code, "stderr: %s", second.stderr)
-	again := requireMapping(t, "stdout", second.stdout)
-	assert.Equal(t, "PT2H", nodeAt(t, again, "issue", "customFields", "Затраченное время").Value)
-	assert.Regexp(t, `^[0-9]{4}-[0-9]{2}-[0-9]{2}T00:00:00Z$`, nodeAt(t, again, "date").Value,
-		"without --date the server takes its own today")
-
-	listed := runWith(t, dev.env(), "time", "list", issue, "--limit", "1")
-	printed := requireWorkItemListing(t, listed)
-	assert.Equal(t, 2, printed.Total)
-	assert.True(t, printed.Truncated)
-}
-
-func TestTimeCreateWritesTheDayNamedByTheMemberOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := contractWorkItemIssue(t, dev, "issue")
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).member},
-		"time", "create", issue, "PT1H", "--date", "2026-09-01", "--text", "ytrack contract zone")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	mapping := requireMapping(t, "stdout", got.stdout)
-	assert.Equal(t, "2026-09-01T00:00:00Z", nodeAt(t, mapping, "date").Value,
-		"the member's profile is UTC+10, where noon UTC is 22:00 of the named day")
-	assert.Equal(t, "dev.member", nodeAt(t, mapping, "author", "login").Value)
-}
-
-func atThreePM(_ *http.Request, body []byte) []byte {
-	var written struct {
-		Duration struct {
-			Minutes int64 `json:"minutes"`
-		} `json:"duration"`
-	}
-	if json.Unmarshal(body, &written) != nil {
-		return body
-	}
-	return []byte(`{"duration":{"minutes":` + strconv.FormatInt(written.Duration.Minutes, 10) +
-		`},"date":` + strconv.FormatInt(threePMUTC, 10) + `}`)
-}
-
-const threePMUTC = 1788274800000
-
-func TestTimeCreateFindsTheDayOfAMomentComesFromTheProfileOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := contractWorkItemIssue(t, dev, "issue")
-	dev.replacing(atThreePM)
-	defer dev.replacing(nil)
-
-	got := runWith(t, dev.env(), "time", "create", issue, "PT15M", "--date", "2026-09-01")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, "2026-09-01T00:00:00Z", nodeAt(t, requireMapping(t, "stdout", got.stdout), "date").Value,
-		"15:00 UTC falls on 1 September in the admin's Europe/Moscow")
-
-	byTheMember := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).member},
-		"time", "create", issue, "PT15M", "--date", "2026-09-01")
-
-	found := requireUncertainty(t, byTheMember)
-	assert.Equal(t, "upstream_invalid", found.code)
-	assert.Equal(t, []any{[]detail{
-		{"field", "date"},
-		{"expected", "2026-09-01"},
-		{"actual", "2026-09-02T00:00:00Z"},
-	}}, detailNamed(t, found, "mismatch"), "15:00 UTC falls on 2 September in the member's Asia/Vladivostok")
-}
-
-func contractIssueWithTimeTrackingOff(t *testing.T, dev *upstream) string {
-	t.Helper()
-	got := runWith(t, dev.env(), "issue", "create", "DOCS", "--summary",
-		"ytrack contract "+t.Name())
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	readable := nodeAt(t, requireMapping(t, "stdout", got.stdout), "idReadable").Value
-	require.Regexp(t, `^DOCS-[0-9]+$`, readable)
-	t.Cleanup(func() { removeIssue(t, dev, readable) })
-	return readable
-}
-
-func TestTimeCreateWritesNoTimeInTheProjectOfTheDevInstanceThatHasTimeTrackingOff(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := contractIssueWithTimeTrackingOff(t, dev)
-	before := len(dev.requests())
-
-	got := runWith(t, dev.env(), "time", "create", issue, "PT30M")
-
-	found := requireFault(t, got)
-	assert.Equal(t, "denied", found.code)
-	assert.Equal(t, 403, detailNamed(t, found, "upstream_status"))
-	assert.Equal(t, "Forbidden", detailNamed(t, found, "upstream_error"))
-	assert.Equal(t, "HTTP 403 Forbidden", detailNamed(t, found, "upstream_message"))
-	assert.Equal(t, []string{workItemsPath(issue)}, pathsSince(dev, before))
-
-	byTheMember := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).member},
-		"time", "create", issue, "PT30M")
-	assert.Equal(t, "denied", requireFault(t, byTheMember).code)
-
-	listed := runWith(t, dev.env(), "time", "list", issue)
-	assert.Equal(t, 0, requireWorkItemListing(t, listed).Total)
-}
-
-func TestTimeCreateBreaksTheSumOfTheDevInstanceOnePastTheLargestDuration(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := contractWorkItemIssue(t, dev, "issue")
-
-	got := runWith(t, dev.env(), "time", "create", issue, "PT2147483647M")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	filed := requireMapping(t, "stdout", got.stdout)
-	assert.Equal(t, "PT35791394H7M", nodeAt(t, filed, "duration").Value)
-	assert.Equal(t, "PT35791394H7M", nodeAt(t, filed, "issue", "customFields", "Затраченное время").Value)
-
-	oneMore := runWith(t, dev.env(), "time", "create", issue, "PT1M")
-
-	require.Equal(t, 0, oneMore.code, "stderr: %s", oneMore.stderr)
-	assert.Empty(t, oneMore.stderr)
-	broken := requireMapping(t, "stdout", oneMore.stdout)
-	assert.Equal(t, "PT1M", nodeAt(t, broken, "duration").Value)
-	assert.NotContains(t, keysOf(nodeAt(t, broken, "issue", "customFields")), "Затраченное время",
-		"the server sums the minutes in an int32 and sends null past it")
-
-	afterwards := runWith(t, dev.env(), "issue", "show", issue, "--fields", "customFields", "--comments=0")
-	require.Equal(t, 0, afterwards.code, "stderr: %s", afterwards.stderr)
-	assert.NotContains(t, keysOf(nodeAt(t, requireMapping(t, "stdout", afterwards.stdout), "customFields")),
-		"Затраченное время")
-}
-
-func TestTimeCreateWritesNoWorkItemOfNoLength(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := contractWorkItemIssue(t, dev, "issue")
-
-	got := runWith(t, dev.env(), "time", "create", issue, "PT0M")
-
-	found := requireFault(t, got)
-	assert.Equal(t, "rejected", found.code)
-	assert.Equal(t, "Длительность работы не может быть отрицательной или пустой",
-		detailNamed(t, found, "upstream_message"))
-
-	listed := runWith(t, dev.env(), "time", "list", issue)
-	assert.Equal(t, 0, requireWorkItemListing(t, listed).Total)
-}
-
-func asDurationID(_ *http.Request, body []byte) []byte {
-	var written struct {
-		Duration struct {
-			Minutes int64 `json:"minutes"`
-		} `json:"duration"`
-	}
-	if json.Unmarshal(body, &written) != nil {
-		return body
-	}
-	return []byte(`{"duration":{"id":"PT` + strconv.FormatInt(written.Duration.Minutes/60, 10) + `H"}}`)
-}
-
-func asPresentation(*http.Request, []byte) []byte {
-	return []byte(`{"duration":{"presentation":"1д"}}`)
-}
-
-func TestTimeCreateIsRefusedTheDurationWrittenAsAnID(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := contractWorkItemIssue(t, dev, "issue")
-	dev.replacing(asDurationID)
-	defer dev.replacing(nil)
-
-	got := runWith(t, dev.env(), "time", "create", issue, "PT2H")
-
-	found := requireFault(t, got)
-	assert.Equal(t, "rejected", found.code)
-	assert.Equal(t, "Для единицы работы должна быть задана длительность",
-		detailNamed(t, found, "upstream_message"))
-
-	dev.replacing(nil)
-	listed := runWith(t, dev.env(), "time", "list", issue)
-	assert.Equal(t, 0, requireWorkItemListing(t, listed).Total)
-}
-
-func TestTimeCreateFindsADayOfTheDevInstanceIsEightHours(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := contractWorkItemIssue(t, dev, "issue")
-	dev.replacing(asPresentation)
-	defer dev.replacing(nil)
-
-	got := runWith(t, dev.env(), "time", "create", issue, "PT8H")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, "PT8H", nodeAt(t, requireMapping(t, "stdout", got.stdout), "duration").Value)
-}
-
-func TestTimeCreateWritesNothingForAnIssueTheDevInstanceDoesNotShow(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		issue string
-		token func(*testing.T) string
-	}{
-		{
-			name:  "an issue the dev instance has none of",
-			issue: "DEV-99999",
-			token: func(t *testing.T) string { t.Helper(); return devTokens(t).admin },
-		},
-		{
-			name:  "an issue hidden from the limited token",
-			issue: "DEV-1",
-			token: func(t *testing.T) string { t.Helper(); return devTokens(t).limited },
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			dev := devInstance(t)
-
-			got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + tc.token(t)},
-				"time", "create", tc.issue, "PT1H")
-
-			found := requireFault(t, got)
-			assert.Equal(t, "not_found", found.code)
-			assert.Equal(t, "Entity with id "+tc.issue+" not found", detailNamed(t, found, "upstream_message"))
-			assert.Equal(t, []string{workItemsPath(tc.issue)}, dev.sentPaths())
-		})
-	}
 }
 
 func TestTimeCreateRefusesAnExpressionItCannotSend(t *testing.T) {

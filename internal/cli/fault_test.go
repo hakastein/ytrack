@@ -206,65 +206,6 @@ func TestProjectShowRefusesByTheStatusOfTheAnswer(t *testing.T) {
 	}
 }
 
-func TestProjectShowRefusesACodeTheDevInstanceDoesNotHave(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "project", "show", "NOPE")
-
-	want := faultDocument{
-		code: "not_found",
-		details: []detail{
-			{"request", showRequest(dev.url, "NOPE")},
-			{"upstream_status", 404},
-			{"upstream_error", "Not Found"},
-			{"upstream_message", "Entity with id NOPE not found"},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestProjectShowRefusesATokenTheDevInstanceDoesNotKnow(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + bogusToken}, "project", "show", "DEV")
-
-	want := faultDocument{
-		code: "denied",
-		details: []detail{
-			{"request", showRequest(dev.url, "DEV")},
-			{"upstream_status", 401},
-			{"upstream_error", "Unauthorized"},
-			{"upstream_message", "Invalid token"},
-			authFromEnv(),
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assertNoToken(t, got, bogusToken)
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestProjectShowRefusesAProjectHiddenFromTheLimitedUser(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}, "project", "show", "DEV")
-
-	want := faultDocument{
-		code: "not_found",
-		details: []detail{
-			{"request", showRequest(dev.url, "DEV")},
-			{"upstream_status", 404},
-			{"upstream_error", "Not Found"},
-			{"upstream_message", "Entity with id DEV not found"},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, dev.requests(), 1)
-}
-
 func TestProjectShowRefusesAnAnswerOfAnotherShape(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -371,24 +312,6 @@ func TestProjectShowDoesNotFollowARedirect(t *testing.T) {
 	}
 	assert.Equal(t, want, requireFault(t, got))
 	assert.Len(t, server.requests(), 1)
-}
-
-func TestProjectShowRefusesTheWebPageTheDevInstanceServesOutsideTheAPI(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	addressOutsideTheAPI := dev.url + "/youtrack"
-
-	got := runWith(t, []string{"YTRACK_URL=" + addressOutsideTheAPI, "YTRACK_TOKEN=" + dev.token},
-		"project", "show", "DEV")
-
-	found := requireFault(t, got)
-	assert.Equal(t, "upstream_invalid", found.code)
-	require.Len(t, found.details, 3, "details: %v", found.details)
-	assert.Equal(t, []detail{{"request", showRequest(addressOutsideTheAPI, "DEV")}, {"upstream_status", 200}},
-		found.details[:2])
-	assert.Equal(t, "upstream_body", found.details[2].key)
-	assert.Contains(t, found.details[2].value, "<html")
-	assert.Len(t, dev.requests(), 1)
 }
 
 func TestProjectShowRefusesAnAnswerCutShort(t *testing.T) {

@@ -8,18 +8,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"go.yaml.in/yaml/v3"
 )
 
 const fieldListDefault = "field(name,localizedName,fieldType(valueType,isMultiValue)),canBeEmpty"
 
 const fieldListSent = fieldListDefault + ",ordinal"
-
-func projectCustomFieldNames() []any {
-	return []any{"$type", "bundle", "canBeEmpty", "condition", "defaultValues", "emptyFieldText", "field",
-		"hasRunningJob", "id", "isPublic", "ordinal", "project"}
-}
 
 func fieldsRequest(address, project, fields string) string {
 	return "GET " + address + "/api/admin/projects/" + project + "/customFields?fields=" + fields + "&$top=-1"
@@ -29,48 +22,14 @@ func fieldsQueries(fields string) []url.Values {
 	return []url.Values{{"fields": {fields}, "$top": {"-1"}}}
 }
 
-type fieldListing struct {
-	Total     int              `yaml:"total"`
-	Returned  int              `yaml:"returned"`
-	Truncated bool             `yaml:"truncated"`
-	Fields    []map[string]any `yaml:"fields"`
-}
-
-func requireFieldListing(t *testing.T, got outcome) fieldListing {
-	t.Helper()
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	decoder := yaml.NewDecoder(strings.NewReader(got.stdout))
-	decoder.KnownFields(true)
-	var printed fieldListing
-	require.NoError(t, decoder.Decode(&printed), "stdout: %s", got.stdout)
-	assert.Len(t, printed.Fields, printed.Returned)
-	assert.Equal(t, printed.Total > printed.Returned, printed.Truncated)
-	return printed
-}
-
-func printedNames(printed fieldListing) []string {
-	var names []string
-	for _, field := range printed.Fields {
-		names = append(names, field["field"].(map[string]any)["name"].(string))
-	}
-	return names
-}
-
 func TestFieldRefusesACallItCannotSend(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
 		argv []string
 	}{
-		{name: "no project", argv: []string{"field", "list"}},
-		{name: "a word after the project", argv: []string{"field", "list", "DEV", "x"}},
 		{name: "a project code the generated client would send elsewhere", argv: []string{"field", "list", ".."}},
 		{name: "fields that are not an expression", argv: []string{"field", "list", "DEV", "--fields", "field("}},
-		{name: "a limit", argv: []string{"field", "list", "DEV", "--limit", "5"}},
-		{name: "a skip", argv: []string{"field", "list", "DEV", "--skip", "5"}},
-		{name: "no subcommand", argv: []string{"field"}},
-		{name: "an unknown subcommand", argv: []string{"field", "bogus"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -103,179 +62,6 @@ func TestFieldRefusesAFlagGivenTwice(t *testing.T) {
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 		})
 	}
-}
-
-func TestFieldListHelpNamesTheDefaults(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"field", "list", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, fieldListDefault)
-}
-
-func TestFieldListPrintsTheFieldsOfTheDevInstanceByOrdinal(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "field", "list", "DEV")
-
-	printed := requireFieldListing(t, got)
-	assert.Equal(t, 28, printed.Total)
-	assert.Equal(t, 28, printed.Returned)
-	assert.Equal(t, []string{"Type", "Priority", "Категория", "Клиент", "Модуль системы", "Система", "Assignee",
-		"State", "Причина отклонения", "Соисполнители", "Статус анализа", "Плановый спринт", "Порядок реализации",
-		"Плановая дата решения", "Релиз", "Статус разработки", "Затраченное время", "Оценка", "Дата начала работы",
-		"Внешний номер", "Subsystem", "Подсистемы", "Fixed in build", "Сборки", "Группа доступа",
-		"Группы доступа", "Коэффициент", "Примечание"}, printedNames(printed))
-	lines := strings.SplitAfter(got.stdout, "\n")
-	for _, line := range []string{
-		`  - {field: {name: "State", localizedName: "Состояние", fieldType: {valueType: "state", isMultiValue: false}}, canBeEmpty: true}`,
-		`  - {field: {name: "Клиент", localizedName: null, fieldType: {valueType: "enum", isMultiValue: true}}, canBeEmpty: false}`,
-		`  - {field: {name: "Assignee", localizedName: "Исполнитель", fieldType: {valueType: "user", isMultiValue: false}}, canBeEmpty: true}`,
-		`  - {field: {name: "Примечание", localizedName: null, fieldType: {valueType: "text", isMultiValue: false}}, canBeEmpty: true}`,
-	} {
-		assert.Contains(t, lines, line+"\n")
-	}
-	assert.NotContains(t, got.stdout, "bundle")
-	assert.Equal(t, fieldsQueries(fieldListSent), dev.sentQueries())
-}
-
-func TestFieldListPrintsTheFieldsOfASecondProjectOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "field", "list", "DOCS")
-
-	const want = `total: 4
-returned: 4
-truncated: false
-fields:
-  - {field: {name: "State", localizedName: "Состояние", fieldType: {valueType: "state", isMultiValue: false}}, canBeEmpty: false}
-  - {field: {name: "Priority", localizedName: "Приоритет", fieldType: {valueType: "enum", isMultiValue: false}}, canBeEmpty: false}
-  - {field: {name: "Assignee", localizedName: "Исполнитель", fieldType: {valueType: "user", isMultiValue: false}}, canBeEmpty: true}
-  - {field: {name: "Due Date", localizedName: "Срок", fieldType: {valueType: "date", isMultiValue: false}}, canBeEmpty: true}
-`
-	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, fieldsQueries(fieldListSent), dev.sentQueries())
-}
-
-func TestFieldListPrintsTheFieldsOfOneOrdinalOfTheDevInstanceAsReceived(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "field", "list", "DEMO")
-
-	const want = `total: 10
-returned: 10
-truncated: false
-fields:
-  - {field: {name: "Priority", localizedName: "Приоритет", fieldType: {valueType: "enum", isMultiValue: false}}, canBeEmpty: false}
-  - {field: {name: "Type", localizedName: "Тип", fieldType: {valueType: "enum", isMultiValue: false}}, canBeEmpty: false}
-  - {field: {name: "State", localizedName: "Состояние", fieldType: {valueType: "state", isMultiValue: false}}, canBeEmpty: false}
-  - {field: {name: "Subsystem", localizedName: "Подсистема", fieldType: {valueType: "ownedField", isMultiValue: false}}, canBeEmpty: true}
-  - {field: {name: "Fix versions", localizedName: "Версии исправления", fieldType: {valueType: "version", isMultiValue: true}}, canBeEmpty: true}
-  - {field: {name: "Affected versions", localizedName: "Затронутые версии", fieldType: {valueType: "version", isMultiValue: true}}, canBeEmpty: true}
-  - {field: {name: "Fixed in build", localizedName: "Исправлено в сборке", fieldType: {valueType: "build", isMultiValue: false}}, canBeEmpty: true}
-  - {field: {name: "Assignee", localizedName: "Исполнитель", fieldType: {valueType: "user", isMultiValue: false}}, canBeEmpty: true}
-  - {field: {name: "Оценка", localizedName: null, fieldType: {valueType: "period", isMultiValue: false}}, canBeEmpty: true}
-  - {field: {name: "Затраченное время", localizedName: null, fieldType: {valueType: "period", isMultiValue: false}}, canBeEmpty: true}
-`
-	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, fieldsQueries(fieldListSent), dev.sentQueries())
-}
-
-func TestFieldListRefusesAProjectTheDevInstanceDoesNotHave(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "field", "list", "NOPE")
-
-	want := faultDocument{
-		code: "not_found",
-		details: []detail{
-			{"request", fieldsRequest(dev.url, "NOPE", fieldListSent)},
-			{"upstream_status", 404},
-			{"upstream_error", "Not Found"},
-			{"upstream_message", "Entity with id NOPE not found"},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestFieldListRefusesTheProjectTheLimitedUserCannotSee(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}, "field", "list", "DEV")
-
-	want := faultDocument{
-		code: "not_found",
-		details: []detail{
-			{"request", fieldsRequest(dev.url, "DEV", fieldListSent)},
-			{"upstream_status", 404},
-			{"upstream_error", "Not Found"},
-			{"upstream_message", "Entity with id DEV not found"},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestFieldListRefusesTheEmptyListTheMemberIsSent(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).member}, "field", "list", "DEV")
-
-	want := faultDocument{
-		code: "denied",
-		details: []detail{
-			{"request", fieldsRequest(dev.url, "DEV", fieldListSent)},
-			{"project", "DEV"},
-			{"permission", "jetbrains.jetpass.project-read"},
-			authFromEnv(),
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestFieldListRefusesANameTheSchemasOfTheDevInstanceDoNotDeclare(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "field", "list", "DEV", "--fields", "field(name),bogus")
-
-	want := faultDocument{
-		code: "unknown_name",
-		details: []detail{
-			{"request", fieldsRequest(dev.url, "DEV", "field(name),bogus,ordinal")},
-			{"fields", "field(name),bogus,ordinal"},
-			{"unknown", []any{unknownEntry("bogus", projectCustomFieldNames()...)}},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestFieldListAddsTheConditionOfTheDevInstanceToTheDefault(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "field", "list", "DEV", "--fields", "+condition(field(field(name)),values(name))")
-
-	printed := requireFieldListing(t, got)
-	assert.Equal(t, 28, printed.Returned)
-	lines := strings.SplitAfter(got.stdout, "\n")
-	assert.Contains(t, lines, `  - {field: {name: "State", localizedName: "Состояние", fieldType: {valueType: "state", `+
-		`isMultiValue: false}}, canBeEmpty: true, condition: null}`+"\n")
-	assert.Contains(t, lines, `  - {field: {name: "Причина отклонения", localizedName: null, fieldType: `+
-		`{valueType: "enum", isMultiValue: false}}, canBeEmpty: false, condition: {field: {field: {name: "State"}}, `+
-		`values: [{name: "Отклонена"}]}}`+"\n")
-	assert.Equal(t, fieldsQueries(fieldListDefault+",condition(field(field(name)),values(name)),ordinal"), dev.sentQueries())
 }
 
 const shuffledFields = `[

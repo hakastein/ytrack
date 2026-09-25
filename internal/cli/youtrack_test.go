@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"mime"
 	"mime/multipart"
 	"net"
@@ -23,32 +22,19 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/dnaeon/go-vcr.v4/pkg/cassette"
-	"gopkg.in/dnaeon/go-vcr.v4/pkg/recorder"
 
 	"github.com/hakastein/ytrack/internal/cli"
 )
 
 const token = "perm-ytrack-test-token"
 
-const devInstanceURL = "http://localhost:8091"
-
 type upstream struct {
 	url      string
 	token    string
 	server   *httptest.Server
 	mu       sync.Mutex
-	rewrite  func(*url.URL)
-	replace  func(*http.Request, []byte) []byte
 	received []*http.Request
 	asked    [][]byte
-	answered [][]byte
-}
-
-type devInstanceTokens struct {
-	admin   string
-	limited string
-	member  string
 }
 
 func serve(t *testing.T, handler http.HandlerFunc) *upstream {
@@ -59,19 +45,6 @@ func serve(t *testing.T, handler http.HandlerFunc) *upstream {
 func (u *upstream) serving(t *testing.T, handler http.HandlerFunc) *upstream {
 	t.Helper()
 	return u.start(t, httptest.NewUnstartedServer(u.recording(t, handler)))
-}
-
-func appending(added string) func(*url.URL) {
-	if added == "" {
-		return nil
-	}
-	return func(u *url.URL) {
-		if u.RawQuery == "" {
-			u.RawQuery = added
-			return
-		}
-		u.RawQuery += "&" + added
-	}
 }
 
 func serveWithoutKeepAlive(t *testing.T, handler http.HandlerFunc) *upstream {
@@ -111,26 +84,12 @@ func dialRefused(address string) bool {
 func (u *upstream) recording(t *testing.T, handler http.HandlerFunc) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
-		body := u.edited(t, r)
+		body, err := io.ReadAll(r.Body)
+		assert.NoError(t, err, "reading the body of %s %s", r.Method, r.URL)
 		u.logRequest(r, body)
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		handler(w, r)
 	}
-}
-
-func (u *upstream) edited(t *testing.T, r *http.Request) []byte {
-	t.Helper()
-	rewrite, replace := u.editing()
-	if rewrite != nil {
-		rewrite(r.URL)
-	}
-	body, err := io.ReadAll(r.Body)
-	assert.NoError(t, err, "reading the body of %s %s", r.Method, r.URL)
-	if replace != nil {
-		body = replace(r, body)
-		r.ContentLength = int64(len(body))
-	}
-	return body
 }
 
 func (u *upstream) logRequest(r *http.Request, body []byte) {
@@ -138,132 +97,6 @@ func (u *upstream) logRequest(r *http.Request, body []byte) {
 	defer u.mu.Unlock()
 	u.received = append(u.received, r.Clone(r.Context()))
 	u.asked = append(u.asked, body)
-}
-
-func (u *upstream) editing() (func(*url.URL), func(*http.Request, []byte) []byte) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	return u.rewrite, u.replace
-}
-
-func (u *upstream) rewriting(rewrite func(*url.URL)) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	u.rewrite = rewrite
-}
-
-func (u *upstream) replacing(replace func(*http.Request, []byte) []byte) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	u.replace = replace
-}
-
-func devInstance(t *testing.T) *upstream {
-	t.Helper()
-	return devInstanceWithRewrite(t, nil)
-}
-
-func devInstanceAsking(t *testing.T, added string) *upstream {
-	t.Helper()
-	return devInstanceWithRewrite(t, appending(added))
-}
-
-func devInstanceWithRewrite(t *testing.T, rewrite func(*url.URL)) *upstream {
-	t.Helper()
-	tokens := devTokens(t)
-	rec, err := recorder.New("testdata/cassettes/"+t.Name(),
-		recorder.WithMode(cassetteMode),
-		recorder.WithRealTransport(realTransport(t)),
-		recorder.WithSkipRequestLatency(true),
-		recorder.WithMatcher(matchingMultipartByItsParts()),
-		recorder.WithHook(scrub(tokens), recorder.BeforeSaveHook),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() { writeTheCassetteUnlessFailed(t, rec) })
-	dev := &upstream{token: tokens.admin, rewrite: rewrite}
-	dev.serving(t, func(w http.ResponseWriter, r *http.Request) {
-		response, err := forward(rec, r)
-		if err != nil {
-			t.Errorf("cassette %s: %v", t.Name(), err)
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		defer response.Body.Close()
-		body, err := io.ReadAll(response.Body)
-		if err != nil {
-			t.Errorf("cassette %s: %v", t.Name(), err)
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		dev.keep(body)
-		maps.Copy(w.Header(), response.Header)
-		w.WriteHeader(response.StatusCode)
-		_, _ = w.Write(body)
-	})
-	return dev
-}
-
-func writeTheCassetteUnlessFailed(t *testing.T, rec *recorder.Recorder) {
-	t.Helper()
-	if !t.Failed() {
-		assert.NoError(t, rec.Stop())
-	}
-}
-
-func scrub(tokens devInstanceTokens) recorder.HookFunc {
-	return func(i *cassette.Interaction) error {
-		i.Request.Headers.Del("Authorization")
-		i.Response.Headers.Del("Date")
-		i.Response.Headers.Del("Last-Modified")
-		i.Response.Headers.Del("X-Version")
-		i.Response.Duration = 0
-		recorded, err := json.Marshal(i)
-		if err != nil {
-			return err
-		}
-		for _, secret := range []string{tokens.admin, tokens.limited, tokens.member} {
-			if bytes.Contains(recorded, []byte(secret)) {
-				return fmt.Errorf("interaction %d holds a token of the dev instance", i.ID)
-			}
-		}
-		return nil
-	}
-}
-
-func TestCassetteRefusesATokenOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	tokens := devTokens(t)
-	tests := []struct {
-		name  string
-		token string
-	}{
-		{name: "the admin's", token: tokens.admin},
-		{name: "the limited user's", token: tokens.limited},
-		{name: "the member's", token: tokens.member},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			interaction := &cassette.Interaction{Response: cassette.Response{Body: `{"token":"` + tc.token + `"}`}}
-
-			assert.EqualError(t, scrub(tokens)(interaction), "interaction 0 holds a token of the dev instance")
-		})
-	}
-}
-
-func forward(rec *recorder.Recorder, r *http.Request) (*http.Response, error) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		return nil, err
-	}
-	out, err := http.NewRequestWithContext(r.Context(), r.Method, devInstanceURL+r.URL.RequestURI(), bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	out.Header = r.Header.Clone()
-	// net/http ungzips only what it asked for; a forwarded Accept-Encoding leaves !!binary gzip in the cassette.
-	out.Header.Del("Accept-Encoding")
-	return rec.RoundTrip(out)
 }
 
 const assistPath = "/api/search/assist"
@@ -340,27 +173,6 @@ func respondWith(status int, body string) http.HandlerFunc {
 	}
 }
 
-func anonymousClient() *http.Client {
-	return &http.Client{
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}
-}
-
-func fetched(t *testing.T, address, bearer string) (*http.Response, []byte) {
-	t.Helper()
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, address, nil)
-	require.NoError(t, err)
-	if bearer != "" {
-		request.Header.Set("Authorization", "Bearer "+bearer)
-	}
-	response, err := anonymousClient().Do(request)
-	require.NoError(t, err)
-	defer response.Body.Close()
-	body, err := io.ReadAll(response.Body)
-	require.NoError(t, err)
-	return response, body
-}
-
 func (u *upstream) env() []string {
 	return []string{"YTRACK_URL=" + u.url, "YTRACK_TOKEN=" + u.token}
 }
@@ -369,12 +181,6 @@ func (u *upstream) requests() []*http.Request {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	return slices.Clone(u.received)
-}
-
-func (u *upstream) keep(body []byte) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	u.answered = append(u.answered, body)
 }
 
 func (u *upstream) asks() []string {
@@ -393,12 +199,6 @@ func lastAsk(u *upstream) string {
 		return ""
 	}
 	return asked[len(asked)-1]
-}
-
-func (u *upstream) answers() [][]byte {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	return slices.Clone(u.answered)
 }
 
 func (u *upstream) sentFields() []string {
@@ -461,31 +261,6 @@ type formPart struct {
 	file        string
 	content     string
 	disposition string
-}
-
-// multipart.Writer draws a new random boundary on every send.
-func matchingMultipartByItsParts() cassette.MatcherFunc {
-	byDefault := cassette.NewDefaultMatcher(cassette.WithIgnoreAuthorization(), cassette.WithIgnoreUserAgent())
-	return func(r *http.Request, i cassette.Request) bool {
-		recorded, wasForm := partsOf([]byte(i.Body), i.Headers.Get("Content-Type"))
-		sent, isForm := partsSent(r)
-		if !wasForm || !isForm {
-			return byDefault(r, i)
-		}
-		return r.Method == i.Method && r.URL.String() == i.URL && slices.Equal(sent, recorded)
-	}
-}
-
-func partsSent(r *http.Request) ([]formPart, bool) {
-	if _, isForm := formBoundary(r.Header.Get("Content-Type")); !isForm || r.Body == nil {
-		return nil, false
-	}
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		return nil, false
-	}
-	r.Body = io.NopCloser(bytes.NewReader(body))
-	return partsOf(body, r.Header.Get("Content-Type"))
 }
 
 func partsOf(body []byte, contentType string) ([]formPart, bool) {

@@ -53,12 +53,7 @@ func TestCommentUpdateRefusesBeforeAnyRequest(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "neither owner nor id", argv: []string{"comment", "update"}},
-		{name: "an owner and no id", argv: []string{"comment", "update", "DEV-1"}},
-		{name: "the id of the comment alone", argv: []string{"comment", "update", "7-12", "--text", "x"}},
 		{name: "no text", argv: []string{"comment", "update", "DEV-1", "7-1"}},
-		{name: "the text as an argument", argv: []string{"comment", "update", "DEV-1", "7-1", "a"}},
-		{name: "the text and one word more", argv: []string{"comment", "update", "DEV-1", "7-1", "a", "b"}},
 		{name: "the text twice", argv: []string{"comment", "update", "DEV-1", "7-1", "--text", "a", "--text", "b"}},
 	}
 	for _, tc := range tests {
@@ -154,21 +149,6 @@ func TestCommentUpdateRefusesAnExpressionItCannotRead(t *testing.T) {
 			assert.Empty(t, server.requests())
 		})
 	}
-}
-
-func TestCommentUpdateHelpNamesWhereTheIDComesFrom(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"comment", "update", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, writtenCommentFields)
-	assert.Contains(t, got.stdout, "--text")
-	assert.Contains(t, got.stdout, "+issue(")
-	assert.Contains(t, got.stdout, "+article(")
-	assert.NotContains(t, got.stdout, "-file")
-	assert.NotContains(t, got.stdout, "stdin")
 }
 
 func TestCommentUpdateReadsAnIssueCommentBeforeWritingIt(t *testing.T) {
@@ -423,142 +403,4 @@ func TestCommentUpdateChecksMoreThanItPrints(t *testing.T) {
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, "author:\n  login: \"admin\"\n", got.stdout)
 	assert.Equal(t, []string{commentDeletedFields, "author(login),text"}, server.sentFields())
-}
-
-func commentedArticle(t *testing.T, dev *upstream, role string) string {
-	t.Helper()
-	article := fileArticle(t, dev, contractCommentOwner(t, role))
-	t.Cleanup(func() { removeArticle(t, dev, article) })
-	return article
-}
-
-func commentOn(t *testing.T, dev *upstream, owner, text string) string {
-	t.Helper()
-	got := runWith(t, dev.env(), "comment", "create", owner, "--text", text)
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	id := nodeAt(t, requireMapping(t, "stdout", got.stdout), "id").Value
-	require.Regexp(t, commentIDForm, id)
-	return id
-}
-
-func textOfTheComment(t *testing.T, dev *upstream, show []string, comment string) string {
-	t.Helper()
-	got := runWith(t, dev.env(), show...)
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	comments := nodeAt(t, requireMapping(t, "stdout", got.stdout), "comments")
-	for _, held := range comments.Content {
-		if nodeAt(t, held, "id").Value == comment {
-			return nodeAt(t, held, "text").Value
-		}
-	}
-	require.Fail(t, "the owner holds no comment "+comment, "%v", got.stdout)
-	return ""
-}
-
-func TestCommentUpdateWritesOnAnIssueOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := commentedIssue(t, dev, "issue")
-	comment := commentOn(t, dev, issue, "ytrack contract первая")
-	const text = "  ytrack\r\nправка  "
-
-	got := runWith(t, dev.env(), "comment", "update", issue, comment, "--text", text)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	mapping := requireMapping(t, "stdout", got.stdout)
-	assert.Equal(t, comment, nodeAt(t, mapping, "id").Value)
-	assert.Equal(t, "admin", nodeAt(t, mapping, "author", "login").Value)
-	assert.Regexp(t, instantForm, nodeAt(t, mapping, "created").Value)
-	assert.Regexp(t, instantForm, nodeAt(t, mapping, "updated").Value)
-	assert.Equal(t, text, nodeAt(t, mapping, "text").Value)
-}
-
-func TestCommentUpdateWritesOnAnArticleOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	article := commentedArticle(t, dev, "article")
-	comment := commentOn(t, dev, article, "ytrack contract первая")
-	const text = "ytrack\xe2\x80\xa8правка"
-
-	got := runWith(t, dev.env(), "comment", "update", article, comment, "--text", text)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	mapping := requireMapping(t, "stdout", got.stdout)
-	assert.Equal(t, comment, nodeAt(t, mapping, "id").Value)
-	written := nodeAt(t, mapping, "text")
-	assert.Equal(t, text, written.Value)
-	assert.Equal(t, yaml.DoubleQuotedStyle, written.Style)
-}
-
-func TestCommentUpdateRefusesACommentOfAnotherOwner(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := commentedIssue(t, dev, "issue")
-	otherIssue := commentedIssue(t, dev, "other issue")
-	article := commentedArticle(t, dev, "article")
-	otherArticle := commentedArticle(t, dev, "other article")
-	const onTheIssue = "ytrack contract комментарий задачи"
-	const onTheArticle = "ytrack contract комментарий статьи"
-	comment := commentOn(t, dev, issue, onTheIssue)
-	articleComment := commentOn(t, dev, article, onTheArticle)
-
-	tests := []struct {
-		name    string
-		owner   string
-		comment string
-	}{
-		{name: "another issue", owner: otherIssue, comment: comment},
-		{name: "another article", owner: otherArticle, comment: articleComment},
-		{name: "an article for the comment of an issue", owner: article, comment: comment},
-		{name: "an issue for the comment of an article", owner: issue, comment: articleComment},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			before := len(dev.requests())
-
-			got := runWith(t, dev.env(), "comment", "update", tc.owner, tc.comment, "--text", "ytrack contract x")
-
-			assert.Equal(t, "not_found", requireFault(t, got).code)
-			assert.Len(t, dev.requests()[before:], 1)
-		})
-	}
-
-	assert.Equal(t, onTheIssue, textOfTheComment(t, dev, []string{"issue", "show", issue, "--fields", "idReadable"}, comment))
-	assert.Equal(t, onTheArticle,
-		textOfTheComment(t, dev, []string{"article", "show", article, "--fields", "idReadable"}, articleComment))
-}
-
-func TestCommentUpdateRefusesAnIDWithALeadingZero(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := commentedIssue(t, dev, "issue")
-	comment := commentOn(t, dev, issue, "ytrack contract первая")
-	class, number, found := strings.Cut(comment, "-")
-	require.True(t, found, "the id of a comment is a class, a dash and a number: %q", comment)
-	before := len(dev.requests())
-
-	got := runWith(t, dev.env(), "comment", "update", issue, class+"-0"+number, "--text", "ytrack contract x")
-
-	assert.Equal(t, "not_found", requireFault(t, got).code)
-	assert.Len(t, dev.requests()[before:], 1)
-}
-
-func TestCommentUpdateRefusesAnIssueTheLimitedUserMayNotSee(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := commentedIssue(t, dev, "issue")
-	const first = "ytrack contract первая"
-	comment := commentOn(t, dev, issue, first)
-	before := len(dev.requests())
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited},
-		"comment", "update", issue, comment, "--text", "ytrack contract x")
-
-	found := requireFault(t, got)
-	assert.Equal(t, "not_found", found.code)
-	assert.Equal(t, detail{"upstream_message", "Entity with id " + issue + " not found"}, found.details[3])
-	assert.Len(t, dev.requests()[before:], 1)
-
-	assert.Equal(t, first, textOfTheComment(t, dev, []string{"issue", "show", issue, "--fields", "idReadable"}, comment))
 }

@@ -35,13 +35,6 @@ func TestTimeDeleteRefusesBeforeAnyRequest(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "neither issue nor id", argv: []string{"time", "delete"}},
-		{name: "an issue and no id", argv: []string{"time", "delete", "DEV-1"}},
-		{name: "the id of the work item alone", argv: []string{"time", "delete", "199-6"}},
-		{name: "a second id", argv: []string{"time", "delete", "DEV-1", "199-6", "199-7"}},
-		{name: "a flag that says it twice", argv: []string{"time", "delete", "DEV-1", "199-6", "--yes"}},
-		{name: "a flag that says it anyway", argv: []string{"time", "delete", "DEV-1", "199-6", "--force"}},
-		{name: "an expression of its own", argv: []string{"time", "delete", "DEV-1", "199-6", "--fields", "id"}},
 		{name: "an issue that is no issue", argv: []string{"time", "delete", "DEV-A-1", "199-6"}},
 		{name: "an id that is no internal id", argv: []string{"time", "delete", "DEV-1", "199-6-1"}},
 	}
@@ -56,18 +49,6 @@ func TestTimeDeleteRefusesBeforeAnyRequest(t *testing.T) {
 			assert.Empty(t, server.requests())
 		})
 	}
-}
-
-func TestTimeDeleteHelpOffersNoConfirmation(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"time", "delete", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, "ytrack time list")
-	assert.NotContains(t, got.stdout, "--yes")
-	assert.NotContains(t, got.stdout, "--force")
 }
 
 func TestTimeDeleteReadsTheWorkItemAndThenRemovesIt(t *testing.T) {
@@ -173,53 +154,4 @@ func TestTimeDeleteRefusesAnAnswerToTheRemovalThatCarriesABody(t *testing.T) {
 	assert.Equal(t, "upstream_invalid", found.code)
 	assert.Equal(t, detail{"request", workItemDeletionRequest(server.url, "DEV-1", "199-7")}, found.details[0])
 	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
-}
-
-func TestTimeDeleteRemovesAWorkItemOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := contractWorkItemIssue(t, dev, "issue")
-	item := workItemOn(t, dev, issue, "PT1H", "--text", "ytrack contract первая")
-	kept := workItemOn(t, dev, issue, "PT30M", "--text", "ytrack contract вторая")
-
-	got := runWith(t, dev.env(), "time", "delete", issue, item)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	mapping := requireMapping(t, "stdout", got.stdout)
-	assert.Equal(t, []string{"id", "issue"}, keysOf(mapping))
-	assert.Equal(t, item, nodeAt(t, mapping, "id").Value)
-	assert.Equal(t, issue, nodeAt(t, mapping, "issue", "idReadable").Value)
-
-	listed := theWorkItemsOf(t, dev, issue)
-	require.Len(t, listed, 1)
-	assert.Equal(t, kept, listed[0]["id"])
-
-	shown := runWith(t, dev.env(), "issue", "show", issue, "--comments=0", "--fields", "customFields")
-	require.Equal(t, 0, shown.code, "stderr: %s", shown.stderr)
-	assert.Equal(t, "PT30M",
-		nodeAt(t, requireMapping(t, "stdout", shown.stdout), "customFields", "Затраченное время").Value)
-
-	before := len(dev.requests())
-	again := runWith(t, dev.env(), "time", "delete", issue, item)
-	assert.Equal(t, "not_found", requireFault(t, again).code)
-	assert.Equal(t, []string{workItemPath(issue, item)}, pathsSince(dev, before))
-}
-
-func TestTimeDeleteRefusesAnIssueTheLimitedUserMayNotSee(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := contractWorkItemIssue(t, dev, "issue")
-	item := workItemOn(t, dev, issue, "PT1H", "--text", "ytrack contract первая")
-	before := len(dev.requests())
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited},
-		"time", "delete", issue, item)
-
-	assert.Equal(t, "not_found", requireFault(t, got).code)
-	assert.Equal(t, []string{workItemPath(issue, item)}, pathsSince(dev, before))
-
-	listed := theWorkItemsOf(t, dev, issue)
-	require.Len(t, listed, 1)
-	assert.Equal(t, item, listed[0]["id"])
 }

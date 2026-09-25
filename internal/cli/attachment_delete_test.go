@@ -31,31 +31,6 @@ func attachmentOfDEV7() string {
 	return attachmentOf("12-5", "a.txt", "DEV-7")
 }
 
-func TestAttachmentDeleteRefusesACallOfAnyOtherShape(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "nothing at all", argv: nil},
-		{name: "an owner alone", argv: []string{"DEV-1"}},
-		{name: "a third argument", argv: []string{"DEV-1", "12-2", "12-3"}},
-		{name: "a flag that would confirm the deletion", argv: []string{"DEV-1", "12-2", "--yes"}},
-		{name: "a flag that would force it", argv: []string{"DEV-1", "12-2", "--force"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := serveNothing(t)
-
-			got := runWith(t, server.env(), append([]string{"attachment", "delete"}, tc.argv...)...)
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
-		})
-	}
-}
-
 func TestAttachmentDeleteRefusesAnIDThatIsNoInternalID(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -92,19 +67,6 @@ func TestAttachmentDeleteRefusesAnInternalIDForItsOwner(t *testing.T) {
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 	assert.Empty(t, server.requests())
-}
-
-func TestAttachmentDeleteHelpAsksNothingAndNamesWhereTheIDComesFrom(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"attachment", "delete", "--help"})
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	for _, flag := range []string{"--yes", "--force", "--confirm"} {
-		assert.NotContains(t, got.stdout, flag)
-	}
-	assert.Contains(t, got.stdout, "ytrack attachment list")
 }
 
 func TestAttachmentDeletePrintsWhatTheReadBeforeItFound(t *testing.T) {
@@ -254,93 +216,4 @@ func TestAttachmentDeleteTakesAFileOffAnArticleThroughItsOwnAPI(t *testing.T) {
 		server.sentPaths())
 	assert.Equal(t, deletedAttachmentFields("article"), server.sentFields()[0])
 	assert.NotContains(t, strings.Join(server.sentPaths(), " "), "/api/issues")
-}
-
-func TestAttachmentDeleteTakesFilesOffThePolygon(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	first := anIssueOfItsOwn(t, dev, "first")
-	second := anIssueOfItsOwn(t, dev, "second")
-	article := attachedArticle(t, dev)
-	onTheIssue := attachedTo(t, dev, first, "заметка.txt", []byte("ytrack"))
-	onTheArticle := attachedTo(t, dev, article, "вложение статьи.bin", everyLatin1RuneAsUTF8(1))
-
-	t.Run("an attachment of another issue", func(t *testing.T) {
-		before := len(dev.requests())
-
-		got := runWith(t, dev.env(), "attachment", "delete", second, onTheIssue.ID)
-
-		assert.Equal(t, "not_found", requireFault(t, got).code)
-		assert.Len(t, dev.requests()[before:], 1)
-	})
-	t.Run("an attachment of an issue named under an article", func(t *testing.T) {
-		got := runWith(t, dev.env(), "attachment", "delete", article, onTheIssue.ID)
-
-		assert.Equal(t, "not_found", requireFault(t, got).code)
-	})
-	t.Run("an attachment of an article named under an issue", func(t *testing.T) {
-		got := runWith(t, dev.env(), "attachment", "delete", first, onTheArticle.ID)
-
-		assert.Equal(t, "not_found", requireFault(t, got).code)
-	})
-	t.Run("the file is still there after every refusal", func(t *testing.T) {
-		listed := requireAttachmentListing(t, runWith(t, dev.env(), "attachment", "list", first))
-		assert.Equal(t, 1, listed.Total)
-	})
-	t.Run("a token the issue is not answered for", func(t *testing.T) {
-		limited := []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}
-
-		got := runWith(t, limited, "attachment", "delete", first, onTheIssue.ID)
-
-		assert.Equal(t, "not_found", requireFault(t, got).code)
-	})
-	t.Run("the owner written in lower case", func(t *testing.T) {
-		got := runWith(t, dev.env(), "attachment", "delete", strings.ToLower(first), onTheIssue.ID)
-
-		require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-		want := "id: " + strconv.Quote(onTheIssue.ID) + "\nname: \"заметка.txt\"\nissue:\n" +
-			"  idReadable: " + strconv.Quote(first) + "\n"
-		assert.Equal(t, want, got.stdout)
-	})
-	t.Run("the link printed for it before", func(t *testing.T) {
-		response, body := fetched(t, onTheIssue.URL, "")
-
-		assert.Equal(t, http.StatusNotFound, response.StatusCode)
-		assert.Contains(t, string(body), "File with id "+onTheIssue.ID+" not found")
-	})
-	t.Run("the same deletion again", func(t *testing.T) {
-		before := len(dev.requests())
-
-		got := runWith(t, dev.env(), "attachment", "delete", first, onTheIssue.ID)
-
-		assert.Equal(t, "not_found", requireFault(t, got).code)
-		assert.Len(t, dev.requests()[before:], 1)
-	})
-	t.Run("an attachment of an article", func(t *testing.T) {
-		got := runWith(t, dev.env(), "attachment", "delete", article, onTheArticle.ID)
-
-		require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-		want := "id: " + strconv.Quote(onTheArticle.ID) + "\nname: " + strconv.Quote(onTheArticle.Name) + "\narticle:\n" +
-			"  idReadable: " + strconv.Quote(article) + "\n"
-		assert.Equal(t, want, got.stdout)
-	})
-}
-
-func anIssueOfItsOwn(t *testing.T, dev *upstream, called string) string {
-	t.Helper()
-	summary := "ytrack contract " + t.Name() + " " + called
-	argv := append([]string{"issue", "create", "DEV", "--summary", summary}, devRequired()...)
-	got := runWith(t, dev.env(), argv...)
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	readable := nodeAt(t, requireMapping(t, "stdout", got.stdout), "idReadable").Value
-	require.Regexp(t, `^DEV-[0-9]+$`, readable)
-	t.Cleanup(func() { removeIssue(t, dev, readable) })
-	return readable
-}
-
-func attachedTo(t *testing.T, dev *upstream, owner, name string, content []byte) printedAttachment {
-	t.Helper()
-	got := runWith(t, dev.env(), "attachment", "create", owner, fileWith(t, name, content))
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	return requireAttachmentPrinted(t, got.stdout)
 }

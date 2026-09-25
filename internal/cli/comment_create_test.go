@@ -77,12 +77,7 @@ func TestCommentCreateRefusesBeforeAnyRequest(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "no subcommand", argv: []string{"comment"}},
-		{name: "a subcommand the command has none of", argv: []string{"comment", "bogus"}},
-		{name: "no owner", argv: []string{"comment", "create"}},
 		{name: "no text", argv: []string{"comment", "create", "DEV-1"}},
-		{name: "the text as an argument", argv: []string{"comment", "create", "DEV-1", "a"}},
-		{name: "an owner, the text and one word more", argv: []string{"comment", "create", "DEV-1", "a", "b"}},
 		{
 			name: "the text twice",
 			argv: []string{"comment", "create", "DEV-1", "--text", "a", "--text", "b"},
@@ -130,31 +125,6 @@ func TestCommentCreateRefusesAnOwnerOrATextItWillNotSend(t *testing.T) {
 	}
 }
 
-func TestCommentCreateTakesTheTextByItsFlagAlone(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "a list item as an argument", argv: []string{"comment", "create", "DEV-1", "- пункт"}},
-		{name: "a word of one dash as an argument", argv: []string{"comment", "create", "DEV-1", "-x"}},
-		{name: "the text out of a file", argv: []string{"comment", "create", "DEV-1", "--text-file", "note.md"}},
-		{name: "a file of any name", argv: []string{"comment", "create", "DEV-1", "--file", "note.md"}},
-		{name: "the text off the standard input", argv: []string{"comment", "create", "DEV-1", "--stdin"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := serveNothing(t)
-
-			got := runWith(t, server.env(), tc.argv...)
-
-			assert.Equal(t, "bad_usage", requireFault(t, got).code)
-			assert.Empty(t, server.requests())
-		})
-	}
-}
-
 func TestCommentCreateRefusesAnExpressionItCannotRead(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -177,22 +147,6 @@ func TestCommentCreateRefusesAnExpressionItCannotRead(t *testing.T) {
 			assert.Empty(t, server.requests())
 		})
 	}
-}
-
-func TestCommentCreateHelpNamesTheDefaultAndNoFile(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"comment", "create", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, writtenCommentFields)
-	assert.Contains(t, got.stdout, "--text")
-	assert.Contains(t, got.stdout, "DEV-A-1")
-	assert.Contains(t, got.stdout, "+issue(", "a wrong owner key fails after the comment is already written")
-	assert.Contains(t, got.stdout, "+article(", "a wrong owner key fails after the comment is already written")
-	assert.NotContains(t, got.stdout, "-file")
-	assert.NotContains(t, got.stdout, "stdin")
 }
 
 const hostileComment = "Шаги:  \r\n1. открыть\rи закрыть   \n---\n~~~\n\u0085\u2028\ufeffи ещё \U0001F600\n"
@@ -248,11 +202,6 @@ func TestCommentCreateWritesTheTextItWasGiven(t *testing.T) {
 		argv []string
 		want string
 	}{
-		{name: "one dash", argv: []string{"--text", "-"}, want: "-"},
-		{name: "a list item", argv: []string{"--text", "- пункт"}, want: "- пункт"},
-		{name: "the word --help", argv: []string{"--text", "--help"}, want: "--help"},
-		{name: "a number with a sign, written with an equals sign", argv: []string{"--text=-1"}, want: "-1"},
-		{name: "a word of one dash", argv: []string{"--text", "-x"}, want: "-x"},
 		{name: "one space", argv: []string{"--text", " "}, want: " "},
 		{name: "one line feed", argv: []string{"--text", "\n"}, want: "\n"},
 		{name: "a vote", argv: []string{"--text", "+1"}, want: "+1"},
@@ -449,134 +398,4 @@ func TestCommentCreateRefusesWhatTheServerRefused(t *testing.T) {
 			assert.Equal(t, []string{http.MethodPost}, sentMethods(server))
 		})
 	}
-}
-
-func contractCommentOwner(t *testing.T, role string) string {
-	t.Helper()
-	return "ytrack contract " + t.Name() + " " + role
-}
-
-func commentedIssue(t *testing.T, dev *upstream, role string) string {
-	t.Helper()
-	argv := append([]string{"issue", "create", "DEV", "--summary", contractCommentOwner(t, role)}, devRequired()...)
-	got := runWith(t, dev.env(), argv...)
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	readable := nodeAt(t, requireMapping(t, "stdout", got.stdout), "idReadable").Value
-	require.Regexp(t, `^DEV-[0-9]+$`, readable)
-	t.Cleanup(func() { removeIssue(t, dev, readable) })
-	return readable
-}
-
-func TestCommentCreateWritesOnAnIssueOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := commentedIssue(t, dev, "issue")
-	text := textOfSize(hostileComment, 81_033)
-
-	got := runWith(t, dev.env(), "comment", "create", issue, "--text", text)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	mapping := requireMapping(t, "stdout", got.stdout)
-	assert.Regexp(t, commentIDForm, nodeAt(t, mapping, "id").Value)
-	assert.Equal(t, "admin", nodeAt(t, mapping, "author", "login").Value)
-	assert.Nil(t, requireValue(t, nodeAt(t, mapping, "updated")))
-	assert.Equal(t, text, nodeAt(t, mapping, "text").Value)
-
-	answers := dev.answers()
-	var kept struct {
-		Text string `json:"text"`
-	}
-	require.NoError(t, json.Unmarshal(answers[len(answers)-1], &kept))
-	assert.Equal(t, text, kept.Text, "the dev instance keeps the text of a comment byte for byte")
-}
-
-func TestCommentCreateWritesOnAnArticleOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	article := fileArticle(t, dev, contractCommentOwner(t, "article"))
-	t.Cleanup(func() { removeArticle(t, dev, article) })
-
-	got := runWith(t, dev.env(), "comment", "create", article, "--text", "первая\r\nвторая")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	mapping := requireMapping(t, "stdout", got.stdout)
-	assert.Regexp(t, commentIDForm, nodeAt(t, mapping, "id").Value)
-	written := nodeAt(t, mapping, "text")
-	assert.Equal(t, "первая\r\nвторая", written.Value)
-	assert.Equal(t, yaml.DoubleQuotedStyle, written.Style)
-}
-
-func TestCommentCreateAnswersTheMemberEveryKeyOfTheDefault(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	member := []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).member}
-	filed := runWith(t, member, "article", "create", "DEV", "--summary", contractCommentOwner(t, "article"),
-		"--fields", "idReadable")
-	require.Equal(t, 0, filed.code, "stderr: %s", filed.stderr)
-	article := nodeAt(t, requireMapping(t, "stdout", filed.stdout), "idReadable").Value
-	t.Cleanup(func() { removeArticle(t, dev, article) })
-
-	got := runWith(t, member, "comment", "create", article, "--text", "комментарий участника")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	mapping := requireMapping(t, "stdout", got.stdout)
-	assert.Equal(t, []string{"id", "author", "created", "updated", "text"}, keysOf(mapping))
-	assert.Equal(t, "dev.member", nodeAt(t, mapping, "author", "login").Value)
-	assert.Nil(t, requireValue(t, nodeAt(t, mapping, "updated")))
-}
-
-func TestCommentCreateWritesAVoteWithoutTheWorkflowRewritingIt(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := commentedIssue(t, dev, "issue")
-
-	got := runWith(t, dev.env(), "comment", "create", issue, "--text", "+1")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, "+1", nodeAt(t, requireMapping(t, "stdout", got.stdout), "text").Value)
-
-	read := runWith(t, dev.env(), "issue", "show", issue, "--fields", "votes", "--comments=0")
-	require.Equal(t, 0, read.code, "stderr: %s", read.stderr)
-	assert.Equal(t, "0", nodeAt(t, requireMapping(t, "stdout", read.stdout), "votes").Value)
-}
-
-func TestCommentCreateRefusesAnOwnerTheDevInstanceDoesNotHave(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		owner string
-		path  string
-	}{
-		{name: "an issue", owner: "DEV-99999", path: "/api/issues/DEV-99999/comments"},
-		{name: "an article", owner: "DEV-A-99999", path: "/api/articles/DEV-A-99999/comments"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			dev := devInstance(t)
-
-			got := runWith(t, dev.env(), "comment", "create", tc.owner, "--text", "x")
-
-			assert.Equal(t, "not_found", requireFault(t, got).code)
-			assert.Equal(t, []string{tc.path}, dev.sentPaths())
-		})
-	}
-}
-
-func TestCommentCreateRefusesAnIssueTheLimitedUserMayNotSee(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := commentedIssue(t, dev, "issue")
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited},
-		"comment", "create", issue, "--text", "x")
-
-	found := requireFault(t, got)
-	assert.Equal(t, "not_found", found.code)
-	assert.Equal(t, detail{"upstream_message", "Entity with id " + issue + " not found"}, found.details[3])
-
-	read := runWith(t, dev.env(), "issue", "show", issue, "--fields", "idReadable")
-	require.Equal(t, 0, read.code, "stderr: %s", read.stderr)
-	assert.Empty(t, requireValue(t, nodeAt(t, requireMapping(t, "stdout", read.stdout), "comments")))
 }

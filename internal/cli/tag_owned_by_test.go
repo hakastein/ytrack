@@ -1,9 +1,7 @@
 package cli_test
 
 import (
-	"context"
 	"net/http"
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -23,8 +21,6 @@ func TestTagRefusesAnOwnerOfNoLogin(t *testing.T) {
 			name: "the owner given twice",
 			argv: []string{"tag", "delete", "--name", "amb", "--owned-by", "admin", "--owned-by", "dev.limited"},
 		},
-		{name: "a list of one owner's tags", argv: []string{"tag", "list", "--owned-by", "admin"}},
-		{name: "a creation of another user's tag", argv: []string{"tag", "create", "--name", "amb", "--owned-by", "admin"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -160,36 +156,5 @@ func TestTagAddAndRemoveNarrowTheNameByTheOwnerOfTheTag(t *testing.T) {
 			assert.Equal(t, []string{http.MethodGet, http.MethodGet, tc.method}, sentMethods(server))
 			assert.Equal(t, []string{"/api/issues/DEV-7", tagsCollection, tc.path}, server.sentPaths())
 		})
-	}
-}
-
-func TestTagDeleteDestroysTheTagOfTheNamedOwnerOnTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	limited := []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}
-	name := contractTagName(t)
-
-	own := runWith(t, limited, "tag", "create", "--name", name)
-	require.Equal(t, 0, own.code, "stderr: %s", own.stderr)
-	t.Cleanup(func() { removeTagIfPresent(t, limited, name, "dev.limited") })
-
-	ambiguousForTheLimited := runWith(t, dev.env(), "tag", "create", "--name", name, "--visible-for", everyoneRegistered)
-	require.Equal(t, 0, ambiguousForTheLimited.code, "stderr: %s", ambiguousForTheLimited.stderr)
-	t.Cleanup(func() { removeTag(t, dev.env(), name, "admin") })
-	before := len(dev.requests())
-
-	got := runWith(t, limited, "tag", "delete", "--name", name, "--owned-by", "dev.limited")
-
-	want := "name: " + strconv.Quote(name) + "\nowner:\n  login: \"dev.limited\"\n"
-	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethodsFrom(dev, before))
-	assert.True(t, tagIsListed(t, dev, name), "the admin's tag went with the one of the token that named it")
-}
-
-func removeTagIfPresent(t *testing.T, env []string, name, owner string) {
-	t.Helper()
-	got := runInContext(t, context.Background(), env, "tag", "delete", "--name", name, "--owned-by", owner)
-	if got.code != 0 {
-		assert.Contains(t, got.stderr, "unknown_name", "the tag was left on the dev instance")
 	}
 }

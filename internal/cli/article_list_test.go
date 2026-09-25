@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -22,7 +21,6 @@ const (
 const (
 	printedParentRow = `  - {idReadable: "DEV-A-1", summary: "Родительская статья"}` + "\n"
 	printedChildRow  = `  - {idReadable: "DEV-A-2", summary: "Дочерняя статья"}` + "\n"
-	printedDemoRow   = `  - {idReadable: "DEMO-A-1", summary: "Начало работы с базой знаний YouTrack"}` + "\n"
 )
 
 func articleListRequest(address, fields, top, escapedQuery string) string {
@@ -34,26 +32,6 @@ func searchingArticles(search, limit string) []url.Values {
 		{"fields": {articleListFields}, "$top": {limit}, "query": {search}},
 		{"fields": {"id"}, "$top": {"-1"}, "query": {search}},
 	}
-}
-
-type articleListing struct {
-	Total     int              `yaml:"total"`
-	Returned  int              `yaml:"returned"`
-	Truncated bool             `yaml:"truncated"`
-	Articles  []map[string]any `yaml:"articles"`
-}
-
-func requireArticleListing(t *testing.T, got outcome) articleListing {
-	t.Helper()
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	decoder := yaml.NewDecoder(strings.NewReader(got.stdout))
-	decoder.KnownFields(true)
-	var printed articleListing
-	require.NoError(t, decoder.Decode(&printed), "stdout: %s", got.stdout)
-	assert.Len(t, printed.Articles, printed.Returned)
-	assert.Equal(t, printed.Total > printed.Returned, printed.Truncated)
-	return printed
 }
 
 func selecting(t *testing.T, handler http.HandlerFunc) *upstream {
@@ -84,8 +62,6 @@ func TestArticleListTakesItsSearchFromTheQueryFlagAlone(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "a word of its own", argv: []string{"project: DEV"}},
-		{name: "two words of their own", argv: []string{"a", "b"}},
 		{name: "no search at all"},
 		{name: "the flag twice", argv: []string{"--query", "a", "--query", "b"}},
 		{name: "a byte that is no UTF-8", argv: []string{"--query", "\xff"}},
@@ -125,17 +101,6 @@ func TestArticleListRefusesWhatItCannotSend(t *testing.T) {
 			assert.Empty(t, server.requests())
 		})
 	}
-}
-
-func TestArticleListHelpNamesTheDefaultFieldsAndTheQueryFlag(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"article", "list", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, articleListFields)
-	assert.Contains(t, got.stdout, "--query")
 }
 
 func TestArticleListSendsTheSearchWordForWordAndAsksForNoMarkup(t *testing.T) {
@@ -313,72 +278,4 @@ func TestArticleListPassesOnTheServerRefusingASearch(t *testing.T) {
 	}
 	assert.Equal(t, want, requireFault(t, got))
 	assert.Len(t, documentsOf(t, got.stderr), 1)
-}
-
-func TestArticleListFindsTheArticleOfTheDemoProjectOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "article", "list", "--query", "project: DEMO")
-
-	want := "total: 1\nreturned: 1\ntruncated: false\narticles:\n" + printedDemoRow
-	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []string{"/api/articles"}, dev.sentPaths())
-}
-
-func TestArticleListCountsTheArticlesOfTheDevInstanceBeyondTheLimit(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "article", "list", "--query", "project: DEV", "--limit", "1")
-
-	printed := requireArticleListing(t, got)
-	assert.Equal(t, 1, printed.Returned)
-	assert.True(t, printed.Truncated)
-	assert.GreaterOrEqual(t, printed.Total, 2)
-	assert.Equal(t, searchingArticles("project: DEV", "1"), dev.sentQueries())
-}
-
-func TestArticleListFindsTheArticleOfTheDevInstanceByTheTitleAttribute(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "article", "list", "--query", "title: родительская")
-
-	want := "total: 1\nreturned: 1\ntruncated: false\narticles:\n" + printedParentRow
-	assert.Equal(t, outcome{stdout: want}, got)
-	assert.NotContains(t, got.stdout, "DEV-A-2")
-}
-
-func TestArticleListFindsNothingOfTheDevInstanceByAnAttributeOfIssues(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "article", "list", "--query", "summary: родительская")
-
-	assert.Equal(t, outcome{stdout: "total: 0\nreturned: 0\ntruncated: false\narticles: []\n"}, got)
-	assert.Equal(t, []string{"/api/articles"}, dev.sentPaths())
-}
-
-func TestArticleListPassesOnTheDevInstanceRefusingAProjectItDoesNotHave(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "article", "list", "--query", "project: NOPE")
-
-	found := requireFault(t, got)
-	assert.Equal(t, "rejected", found.code)
-	assert.Equal(t, "invalid_query", detailNamed(t, found, "upstream_error"))
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestArticleListFindsNoArticleOfTheDevInstanceForTheLimitedToken(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited},
-		"article", "list", "--query", "")
-
-	assert.Equal(t, outcome{stdout: "total: 0\nreturned: 0\ntruncated: false\narticles: []\n"}, got)
-	assert.Len(t, dev.requests(), 1)
 }

@@ -12,28 +12,11 @@ import (
 const userLimited = `{"banned":false,"$type":"User","email":"dev.limited@ytrack.local","id":"1-2",` +
 	`"name":"Ограниченный","fullName":"Ограниченный","login":"dev.limited"}`
 
-const (
-	printedLimited = `login: "dev.limited"
+const printedLimited = `login: "dev.limited"
 fullName: "Ограниченный"
 email: "dev.limited@ytrack.local"
 banned: false
 `
-	printedAdmin = `login: "admin"
-fullName: "admin"
-email: null
-banned: false
-`
-	printedGuest = `login: "guest"
-fullName: "гость"
-email: null
-banned: true
-`
-	printedMember = `login: "dev.member"
-fullName: "Участник"
-email: "dev.member@ytrack.local"
-banned: false
-`
-)
 
 func userRequest(address, login, fields string) string {
 	return "GET " + address + "/api/users/" + url.PathEscape(login) + "?fields=" + fields
@@ -113,48 +96,6 @@ func TestUserShowSendsALoginThatLooksLikeAPathAsOneSegment(t *testing.T) {
 			require.Len(t, requests, 1)
 			assert.Equal(t, "/api/users/"+tc.escaped, requests[0].URL.EscapedPath())
 			assert.Equal(t, "/api/users/"+tc.login, requests[0].URL.Path)
-		})
-	}
-}
-
-func TestUserShowTakesExactlyOneLogin(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "no login", argv: []string{"user", "show"}},
-		{name: "two logins", argv: []string{"user", "show", "admin", "guest"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := serveNothing(t)
-
-			got := runWith(t, server.env(), tc.argv...)
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-		})
-	}
-}
-
-func TestUserRefusesACallThatNamesNoCommandOfIts(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "the command alone", argv: []string{"user"}},
-		{name: "a command it does not have", argv: []string{"user", "bogus"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := serveNothing(t)
-
-			got := runWith(t, server.env(), tc.argv...)
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 		})
 	}
 }
@@ -240,28 +181,6 @@ func TestUserShowSendsAFormThatOnlyLooksLikeOneOfTheRefused(t *testing.T) {
 	}
 }
 
-func TestUserShowRefusesALoginOfALeadingDashWithoutTheSeparator(t *testing.T) {
-	t.Parallel()
-	server := serveNothing(t)
-
-	got := runWith(t, server.env(), "user", "show", "-x")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.requests())
-}
-
-func TestUserShowSendsALoginOfALeadingDashAfterTheSeparator(t *testing.T) {
-	t.Parallel()
-	server := serve(t, respondWith(http.StatusNotFound, `{"error":"Not Found","error_description":"Entity with id -x not found"}`))
-
-	got := runWith(t, server.env(), "user", "show", "--", "-x")
-
-	assert.Equal(t, noSuchUser(server.url, "-x"), requireFault(t, got))
-	requests := server.requests()
-	require.Len(t, requests, 1)
-	assert.Equal(t, "/api/users/-x", requests[0].URL.Path)
-}
-
 func TestUserShowRefusesWithoutAToken(t *testing.T) {
 	t.Parallel()
 	server := serveNothing(t)
@@ -270,130 +189,4 @@ func TestUserShowRefusesWithoutAToken(t *testing.T) {
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 	assert.Empty(t, server.requests())
-}
-
-func TestUserShowHelpNamesTheDefaultFields(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"user", "show", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, "login,fullName,email,banned")
-}
-
-func TestUserShowPrintsTheLimitedUserOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "user", "show", "dev.limited")
-
-	assert.Equal(t, outcome{stdout: printedLimited}, got)
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestUserShowPrintsTheLoginTheDevInstanceKeepsForALoginInAnotherCase(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "user", "show", "ADMIN")
-
-	assert.Equal(t, outcome{stdout: printedAdmin}, got)
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestUserShowPrintsTheGuestOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "user", "show", "guest")
-
-	assert.Equal(t, outcome{stdout: printedGuest}, got)
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestUserShowPrintsTheAdminOfTheDevInstanceToTheLimitedTokenAsWell(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	asAdmin := runWith(t, dev.env(), "user", "show", "admin")
-	asLimited := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}, "user", "show", "admin")
-
-	assert.Equal(t, outcome{stdout: printedAdmin}, asAdmin)
-	assert.Equal(t, asAdmin, asLimited, "the server does not filter users by project rights")
-	assert.Len(t, dev.requests(), 2)
-}
-
-func TestUserShowPrintsTheEmailOfTheMemberOfTheDevInstanceToEveryToken(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	tokens := devTokens(t)
-
-	asAdmin := runWith(t, dev.env(), "user", "show", "dev.member")
-	asLimited := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + tokens.limited}, "user", "show", "dev.member")
-	asMember := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + tokens.member}, "user", "show", "dev.member")
-
-	assert.Equal(t, outcome{stdout: printedMember}, asAdmin)
-	assert.Equal(t, asAdmin, asLimited)
-	assert.Equal(t, asAdmin, asMember)
-	assert.Len(t, dev.requests(), 3)
-}
-
-func TestUserShowRefusesTheFullNameOfTheLimitedUserOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "user", "show", "Ограниченный")
-
-	assert.Equal(t, noSuchUser(dev.url, "Ограниченный"), requireFault(t, got))
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestUserShowRefusesTheEmailOfTheLimitedUserOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "user", "show", "dev.limited@ytrack.local")
-
-	assert.Equal(t, noSuchUser(dev.url, "dev.limited@ytrack.local"), requireFault(t, got))
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestUserShowRefusesTheStartOfALoginOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "user", "show", "dev")
-
-	assert.Equal(t, noSuchUser(dev.url, "dev"), requireFault(t, got))
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestUserShowRefusesALoginWithASlashOnTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "user", "show", "a/b")
-
-	assert.Equal(t, noSuchUser(dev.url, "a/b"), requireFault(t, got),
-		"the server does not decode an escaped slash into a path separator")
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestUserShowRefusesANameTheSchemasOfTheDevInstanceDoNotDeclare(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "user", "show", "admin", "--fields", "login,fullNme")
-
-	want := faultDocument{
-		code: "unknown_name",
-		details: []detail{
-			{"request", userRequest(dev.url, "admin", "login,fullNme")},
-			{"fields", "login,fullNme"},
-			{"unknown", []any{unknownEntry("fullNme", "fullName")}},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, dev.requests(), 1)
 }

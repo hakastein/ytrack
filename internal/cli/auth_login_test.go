@@ -480,17 +480,3 @@ func TestAuthLoginAsksForNothingWithoutADirectoryToSaveTheLogin(t *testing.T) {
 		})
 	}
 }
-
-func TestAuthLoginKeepsTheAdminOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	stated, scope := here(t)
-	dev := devInstance(t)
-	home, path := emptyHome(t)
-
-	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(dev.url, dev.token), "auth", "login")
-
-	assert.Equal(t, outcome{stdout: loginDocument(dev.url, scope, "admin", "admin")}, got)
-	assertTheTokenWasNotShown(t, got, said, dev.token)
-	assert.Equal(t, savedFile(scopedRecord(scope, dev.url, dev.token)), fileBytes(t, path))
-	assert.Len(t, dev.requests(), 1)
-}

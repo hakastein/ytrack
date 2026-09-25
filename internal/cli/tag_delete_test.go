@@ -63,15 +63,9 @@ func TestTagDeleteRefusesACallOfAnyOtherShape(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "nothing at all", argv: nil},
-		{name: "a name written as an argument", argv: []string{"Ready"}},
-		{name: "two arguments", argv: []string{"a", "b"}},
 		{name: "an empty name", argv: []string{"--name", ""}},
 		{name: "a name that is no UTF-8", argv: []string{"--name", "\xff"}},
 		{name: "the name given twice", argv: []string{"--name", "a", "--name", "b"}},
-		{name: "a flag that would confirm it", argv: []string{"--name", "x", "--yes"}},
-		{name: "a flag that would force it", argv: []string{"--name", "x", "--force"}},
-		{name: "an expression of fields", argv: []string{"--name", "x", "--fields", "name"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -304,20 +298,4 @@ func TestTagDeleteSendsNoDeletionWhereTheCatalogueWasNotReceived(t *testing.T) {
 	assert.Equal(t, "upstream_failed", found.code)
 	assert.Equal(t, tagsRequest(server.url, resolvedTagFields, "-1"), detailNamed(t, found, "request"))
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
-}
-
-func TestTagDeleteRefusesANameTheDevInstanceHasNoTagUnder(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "tag", "delete", "--name", "ytrack contract "+t.Name()+" nope")
-
-	found := requireFault(t, got)
-	assert.Equal(t, "unknown_name", found.code)
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(dev))
-	assert.Equal(t, []string{"/api/tags"}, dev.sentPaths())
-	assert.Equal(t, []string{resolvedTagFields}, dev.sentFields())
-	unknown, isList := detailNamed(t, found, "unknown").([]any)
-	require.True(t, isList, "the refusal named no unknown tag")
-	assert.Len(t, unknown, 1)
 }

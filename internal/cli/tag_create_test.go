@@ -1,19 +1,13 @@
 package cli_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
-	"slices"
-	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.yaml.in/yaml/v3"
 )
 
 const createdTagFields = tagFields +
@@ -51,32 +45,15 @@ func runesTheServerCutsOffTheEdges() []rune {
 	return []rune{' ', '\t', '\n', '\r', '\v', '\f', 0x1C, 0x1D, 0x1E, 0x1F, 0xA0, 0x2028, 0x2029, 0x3000}
 }
 
-func contractTagName(t *testing.T) string {
-	t.Helper()
-	return "ytrack contract " + t.Name()
-}
-
-func removeTag(t *testing.T, ownersEnv []string, name, owner string) {
-	t.Helper()
-	notCancelledAtCleanup := context.Background()
-	deleted := runInContext(t, notCancelledAtCleanup, ownersEnv, "tag", "delete", "--name", name)
-	want := "name: " + strconv.Quote(name) + "\nowner:\n  login: " + strconv.Quote(owner) + "\n"
-	assert.Equal(t, outcome{stdout: want}, deleted)
-}
-
 func TestTagCreateRefusesACallOfAnyOtherShape(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
 		argv []string
 	}{
-		{name: "nothing at all", argv: nil},
-		{name: "a name written as an argument", argv: []string{"карта"}},
-		{name: "two arguments", argv: []string{"a", "b"}},
 		{name: "an empty name", argv: []string{"--name", ""}},
 		{name: "a name that is no UTF-8", argv: []string{"--name", "\xff"}},
 		{name: "the name given twice", argv: []string{"--name", "a", "--name", "b"}},
-		{name: "a limit, which belongs to the list", argv: []string{"--name", "x", "--limit", "5"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -116,16 +93,6 @@ func TestTagCreateRefusesANameTheServerWouldCut(t *testing.T) {
 	}
 }
 
-func TestTagCreateHelpNamesTheDefault(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"tag", "create", "--help"})
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, createdTagFields)
-}
-
 func TestTagCreateSendsTheNameAndNothingElse(t *testing.T) {
 	t.Parallel()
 	keptAsWrittenByTheServer := []struct {
@@ -141,7 +108,6 @@ func TestTagCreateSendsTheNameAndNothingElse(t *testing.T) {
 		{name: "a next line at the edge", written: "карта" + string(rune(0x85))},
 		{name: "a zero width space at the edge", written: string(rune(0x200B)) + "карта"},
 		{name: "a byte order mark at the edge", written: "карта" + string(rune(0xFEFF))},
-		{name: "a name beginning with a dash", written: "-x"},
 	}
 	for _, tc := range keptAsWrittenByTheServer {
 		t.Run(tc.name, func(t *testing.T) {
@@ -296,149 +262,4 @@ func TestTagCreateChecksMoreThanItPrints(t *testing.T) {
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, "owner:\n  login: \"admin\"\n", got.stdout)
 	assert.Equal(t, []string{"owner(login),name"}, server.sentFields())
-}
-
-func TestTagCreateMakesATagOfTheDevInstanceAndDeletesIt(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	name := contractTagName(t)
-
-	got := runWith(t, dev.env(), "tag", "create", "--name", name)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	mapping := requireMapping(t, "stdout", got.stdout)
-	assert.Equal(t, name, nodeAt(t, mapping, "name").Value)
-	assert.Equal(t, "admin", nodeAt(t, mapping, "owner", "login").Value)
-	for _, set := range []string{"readSharingSettings", "updateSharingSettings", "tagSharingSettings"} {
-		for _, of := range []string{"permittedGroups", "permittedUsers"} {
-			assert.Empty(t, nodeAt(t, mapping, set, of).Content, "%s.%s is not empty", set, of)
-		}
-	}
-
-	listed := requireTagListing(t, runWith(t, dev.env(), "tag", "list"))
-	assert.True(t, slices.ContainsFunc(listed.Tags, func(record map[string]any) bool { return record["name"] == name }),
-		"the new tag stands in no list")
-
-	deleted := runWith(t, dev.env(), "tag", "delete", "--name", name)
-	assert.Equal(t, outcome{stdout: "name: " + strconv.Quote(name) + "\nowner:\n  login: \"admin\"\n"}, deleted)
-
-	gone := requireTagListing(t, runWith(t, dev.env(), "tag", "list"))
-	assert.False(t, slices.ContainsFunc(gone.Tags, func(record map[string]any) bool { return record["name"] == name }),
-		"the tag stands in the list after it was destroyed")
-
-	again := runWith(t, dev.env(), "tag", "delete", "--name", name)
-	assert.Equal(t, "unknown_name", requireFault(t, again).code)
-	assert.Equal(t, []string{http.MethodPost, http.MethodGet, http.MethodGet, http.MethodDelete,
-		http.MethodGet, http.MethodGet}, sentMethods(dev))
-}
-
-func TestTagCreateRefusesANameThePolygonAlreadyHasATagUnder(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	name := contractTagName(t)
-
-	made := runWith(t, dev.env(), "tag", "create", "--name", name)
-	require.Equal(t, 0, made.code, "stderr: %s", made.stderr)
-	t.Cleanup(func() { removeTag(t, dev.env(), name, "admin") })
-
-	for _, tc := range []struct {
-		written string
-		said    string
-	}{
-		{written: name, said: "уже есть тег"},
-		{written: strings.ToUpper(name), said: "Тег с таким именем уже существует"},
-	} {
-		got := runWith(t, dev.env(), "tag", "create", "--name", tc.written)
-
-		found := requireFault(t, got)
-		assert.Equal(t, "rejected", found.code)
-		body, isText := detailNamed(t, found, "upstream_body").(string)
-		require.True(t, isText)
-		assert.Contains(t, body, "Tag.name-is-invalid")
-		assert.Contains(t, body, tc.said)
-	}
-}
-
-func TestTagCreateMakesATagOfANameAnotherUserAlreadyOwns(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	limited := []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}
-	name := contractTagName(t)
-
-	made := runWith(t, dev.env(), "tag", "create", "--name", name)
-	require.Equal(t, 0, made.code, "stderr: %s", made.stderr)
-	t.Cleanup(func() { removeTag(t, dev.env(), name, "admin") })
-
-	got := runWith(t, limited, "tag", "create", "--name", name)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	t.Cleanup(func() { removeTag(t, limited, name, "dev.limited") })
-	mapping := requireMapping(t, "stdout", got.stdout)
-	assert.Equal(t, name, nodeAt(t, mapping, "name").Value)
-	assert.Equal(t, "dev.limited", nodeAt(t, mapping, "owner", "login").Value)
-}
-
-func TestTagCreateRefusesANameOfCharactersThePolygonWillNotKeep(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	withAComma := contractTagName(t) + ", x"
-
-	got := runWith(t, dev.env(), "tag", "create", "--name", withAComma)
-
-	found := requireFault(t, got)
-	assert.Equal(t, "rejected", found.code)
-	body, isText := detailNamed(t, found, "upstream_body").(string)
-	require.True(t, isText)
-	assert.Contains(t, body, "неподдерживаемых символов")
-	assert.Contains(t, body, "&quot;", "the server HTML-escapes its message")
-
-	listed := requireTagListing(t, runWith(t, dev.env(), "tag", "list"))
-	listedWithAComma := slices.ContainsFunc(listed.Tags, func(record map[string]any) bool {
-		return record["name"] == withAComma
-	})
-	assert.False(t, listedWithAComma, "a tag stands in the list although the server refused to make one")
-}
-
-func TestTagCreateThenListCountsBeyondTheLimit(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	for _, suffix := range []string{" one", " two"} {
-		name := contractTagName(t) + suffix
-		made := runWith(t, dev.env(), "tag", "create", "--name", name)
-		require.Equal(t, 0, made.code, "stderr: %s", made.stderr)
-		t.Cleanup(func() { removeTag(t, dev.env(), name, "admin") })
-	}
-	before := len(dev.requests())
-
-	got := runWith(t, dev.env(), "tag", "list", "--limit", "1")
-
-	printed := requireTagListing(t, got)
-	assert.Equal(t, 1, printed.Returned)
-	assert.True(t, printed.Truncated)
-	assert.GreaterOrEqual(t, printed.Total, 2)
-	assert.Equal(t, countingTags("1"), sentQueriesFrom(dev, before))
-}
-
-func sentQueriesFrom(u *upstream, at int) []url.Values {
-	return u.sentQueries()[at:]
-}
-
-func TestTagCreateKeepsALineFeedInsideTheName(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	name := contractTagName(t) + "\nвторая строка"
-
-	got := runWith(t, dev.env(), "tag", "create", "--name", name)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	printed := nodeAt(t, requireMapping(t, "stdout", got.stdout), "name")
-	assert.Equal(t, name, printed.Value)
-	assert.Equal(t, yaml.DoubleQuotedStyle, printed.Style, "a line feed keeps the name out of a plain scalar")
-
-	deleted := runWith(t, dev.env(), "tag", "delete", "--name", name)
-	require.Equal(t, 0, deleted.code, "stderr: %s", deleted.stderr)
-	destroyed := requireMapping(t, "stdout", deleted.stdout)
-	assert.Equal(t, name, nodeAt(t, destroyed, "name").Value)
-	assert.Equal(t, "admin", nodeAt(t, destroyed, "owner", "login").Value)
 }

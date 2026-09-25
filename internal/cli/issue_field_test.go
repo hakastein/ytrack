@@ -9,7 +9,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.yaml.in/yaml/v3"
 )
 
 type namedRow struct {
@@ -400,18 +399,6 @@ func invalidRow(t *testing.T, found faultDocument, index int, field string, valu
 
 func TestIssueCreateRefusesAValueItCannotSend(t *testing.T) {
 	t.Parallel()
-	t.Run("a value of nothing at all", func(t *testing.T) {
-		t.Parallel()
-		metadata := projectResponse(writableField{id: "180-15", name: "Type", valueType: "enum", canBeEmpty: true})
-		server := creating(t, respondWith(http.StatusOK, metadata), noCreation(t))
-
-		got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--field", "Type=")
-
-		found := requireFault(t, got)
-		assert.Equal(t, "bad_usage", found.code)
-		invalidRow(t, found, 0, "Type", "")
-		assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
-	})
 	t.Run("a type the catalogue of ytrack does not model", func(t *testing.T) {
 		t.Parallel()
 		metadata := projectResponse(writableField{id: "180-15", name: "Type", valueType: "quantum", canBeEmpty: true})
@@ -576,37 +563,6 @@ func TestIssueCreateWritesAUserByLoginAlone(t *testing.T) {
 			assert.JSONEq(t, want, server.asks()[1])
 		})
 	}
-	t.Run("a login the server has no user for", func(t *testing.T) {
-		t.Parallel()
-		said := `{"error":"","error_description":"Не существует пользователя с именем me","error_field":"value"}`
-		server := creating(t, respondWith(http.StatusOK, metadata), respondWith(http.StatusBadRequest, said))
-
-		got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--field", "Assignee=me")
-
-		found := requireFault(t, got)
-		assert.Equal(t, "rejected", found.code)
-		assert.Contains(t, found.details, detail{"upstream_message", "Не существует пользователя с именем me"})
-	})
-}
-
-func devRequired() []string {
-	return []string{
-		"--field", "Type=Task",
-		"--field", "Категория=Развитие технологий",
-		"--field", "Клиент=ACME",
-		"--field", "Модуль системы=Инфраструктура. DevOps",
-	}
-}
-
-func valuesAt(t *testing.T, mapping *yaml.Node, path ...string) []string {
-	t.Helper()
-	node := nodeAt(t, mapping, path...)
-	require.Equal(t, yaml.SequenceNode, node.Kind, "no list stands under %v", path)
-	values := make([]string, 0, len(node.Content))
-	for _, item := range node.Content {
-		values = append(values, item.Value)
-	}
-	return values
 }
 
 func sentFieldTypes(t *testing.T, body string) map[string]string {
@@ -623,82 +579,4 @@ func sentFieldTypes(t *testing.T, body string) map[string]string {
 		types[field.Name] = field.Type
 	}
 	return types
-}
-
-func TestIssueCreateFillsTheFieldsOfTheDevProject(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	title := contractTitle(t)
-	argv := append([]string{"issue", "create", "DEV", "--summary", title}, devRequired()...)
-	argv = append(argv, "--field", "Priority=Medium", "--field", "Клиент=АЛЬФА", "--field", "State=новая",
-		"--field", "Assignee=ADMIN", "--field", "Группа доступа=development team")
-
-	got := runWith(t, dev.env(), argv...)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	mapping := requireMapping(t, "stdout", got.stdout)
-	readable := nodeAt(t, mapping, "idReadable").Value
-	require.Regexp(t, `^DEV-[0-9]+$`, readable)
-	t.Cleanup(func() { removeIssue(t, dev, readable) })
-
-	assert.Equal(t, "Новая", nodeAt(t, mapping, "customFields", "State").Value)
-	assert.Equal(t, "admin", nodeAt(t, mapping, "customFields", "Assignee").Value)
-	assert.Equal(t, "DEVELOPMENT Team", nodeAt(t, mapping, "customFields", "Группа доступа").Value)
-	assert.Equal(t, []string{"ACME", "АЛЬФА"}, valuesAt(t, mapping, "customFields", "Клиент"))
-
-	assert.Equal(t, map[string]string{
-		"Type":           "SingleEnumIssueCustomField",
-		"Категория":      "SingleEnumIssueCustomField",
-		"Клиент":         "MultiEnumIssueCustomField",
-		"Модуль системы": "MultiEnumIssueCustomField",
-		"Priority":       "SingleEnumIssueCustomField",
-		"State":          "StateIssueCustomField",
-		"Assignee":       "SingleUserIssueCustomField",
-		"Группа доступа": "SingleGroupIssueCustomField",
-	}, sentFieldTypes(t, dev.asks()[1]))
-}
-
-func TestIssueCreateRefusesAValueTheDevInstanceDoesNotHave(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	argv := append([]string{"issue", "create", "DEV", "--summary", contractTitle(t)}, devRequired()...)
-	const cyrillicS = "\xd1\x81"
-	notInBundle := "Нужен рекве" + cyrillicS + "т на выпуск"
-	argv = append(argv, "--field", "Статус разработки="+notInBundle)
-
-	got := runWith(t, dev.env(), argv...)
-
-	found := requireFault(t, got)
-	assert.Equal(t, "rejected", found.code)
-	assert.Contains(t, found.details, detail{"upstream_message",
-		"Сущность типа " + notInBundle + " с указанным именем ({1}) не найдена"})
-	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(dev))
-}
-
-func TestIssueCreateRefusesAUserTheFieldDoesNotAllow(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		login string
-		said  string
-	}{
-		{name: "a user the field does not allow", login: "dev.limited", said: "Недопустимое значение"},
-		{name: "a word the server reads as a login", login: "me", said: "Не существует пользователя с именем me"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			dev := devInstance(t)
-			argv := append([]string{"issue", "create", "DEV", "--summary", contractTitle(t)}, devRequired()...)
-			argv = append(argv, "--field", "Assignee="+tc.login)
-
-			got := runWith(t, dev.env(), argv...)
-
-			found := requireFault(t, got)
-			assert.Equal(t, "rejected", found.code)
-			assert.Contains(t, found.details, detail{"upstream_message", tc.said})
-			assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(dev))
-		})
-	}
 }

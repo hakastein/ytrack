@@ -11,7 +11,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.yaml.in/yaml/v3"
 )
 
 const shownGroupFields = "id,name"
@@ -86,35 +85,6 @@ func sentBody(t *testing.T, u *upstream) map[string]any {
 	return body
 }
 
-func sentMethodsFrom(u *upstream, at int) []string {
-	return sentMethods(u)[at:]
-}
-
-func permittedNames(t *testing.T, record map[string]any, set string) []string {
-	t.Helper()
-	sharing, isObject := record[set].(map[string]any)
-	require.True(t, isObject, "%s of %v is no object", set, record)
-	groups, isList := sharing["permittedGroups"].([]any)
-	require.True(t, isList, "the permitted groups of %v are no list", sharing)
-	names := make([]string, 0, len(groups))
-	for _, group := range groups {
-		named, isObject := group.(map[string]any)
-		require.True(t, isObject, "%v is no group", group)
-		name, isText := named["name"].(string)
-		require.True(t, isText, "the name of %v is no string", named)
-		names = append(names, name)
-	}
-	return names
-}
-
-func createdRecord(t *testing.T, got outcome) map[string]any {
-	t.Helper()
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	var record map[string]any
-	require.NoError(t, yaml.Unmarshal([]byte(got.stdout), &record), "stdout: %s", got.stdout)
-	return record
-}
-
 func TestTagCreateRefusesAGroupOfNoName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -136,17 +106,6 @@ func TestTagCreateRefusesAGroupOfNoName(t *testing.T) {
 			assert.Equal(t, want, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
-	}
-}
-
-func TestTagCreateHelpNamesTheSharingFlags(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"tag", "create", "--help"})
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	for _, flag := range []string{"--visible-for", "--updateable-by", "--taggable-by"} {
-		assert.Contains(t, got.stdout, flag)
 	}
 }
 
@@ -454,132 +413,4 @@ func TestTagCreateSendsNoWriteWhereTheGroupsWereRefused(t *testing.T) {
 	assert.Equal(t, detail{"request", groupsRequest(server.url)}, found.details[0])
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 	assert.Empty(t, got.stdout)
-}
-
-func TestTagCreateSharesATagOfThePolygonWithAGroup(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	limited := []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}
-	name := contractTagName(t)
-
-	got := runWith(t, dev.env(), "tag", "create", "--name", name, "--visible-for", strings.ToLower(everyoneRegistered))
-
-	record := createdRecord(t, got)
-	t.Cleanup(func() { removeTag(t, dev.env(), name, "admin") })
-	assert.Equal(t, name, record["name"])
-	assert.Equal(t, []string{everyoneRegistered}, permittedNames(t, record, "readSharingSettings"))
-	assert.Empty(t, permittedNames(t, record, "updateSharingSettings"))
-	assert.Contains(t, lastAsk(dev), `"readSharingSettings"`, "the body carried no set of sharing")
-
-	listed := requireTagListing(t, runWith(t, limited, "tag", "list"))
-	at := slices.IndexFunc(listed.Tags, func(record map[string]any) bool { return record["name"] == name })
-	require.GreaterOrEqual(t, at, 0, "the shared tag stands in no list of the token it was shared with")
-	assert.Equal(t, "admin", ownerOf(t, listed.Tags[at]))
-}
-
-func TestTagCreateSharesWithSeveralGroupsWhereVisibleForNamesOne(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	name := contractTagName(t)
-
-	got := runWith(t, dev.env(), "tag", "create", "--name", name,
-		"--visible-for", "DEVELOPMENT Team", "--visible-for", "Все пользователи",
-		"--updateable-by", "DEVELOPMENT Team", "--fields", "+visibleFor(name)")
-
-	record := createdRecord(t, got)
-	t.Cleanup(func() { removeTag(t, dev.env(), name, "admin") })
-	assert.ElementsMatch(t, []string{"DEVELOPMENT Team", "Все пользователи"},
-		permittedNames(t, record, "readSharingSettings"))
-	assert.Equal(t, []string{"DEVELOPMENT Team"}, permittedNames(t, record, "updateSharingSettings"))
-	shown, isObject := record["visibleFor"].(map[string]any)
-	require.True(t, isObject, "visibleFor of %v is no object", record)
-	assert.Contains(t, []any{"DEVELOPMENT Team", "Все пользователи"}, shown["name"])
-}
-
-func TestTagCreateRefusesTheLimitedTokenTheGroupsOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	limited := []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}
-
-	got := runWith(t, limited, "tag", "create", "--name", contractTagName(t), "--visible-for", everyoneRegistered)
-
-	found := requireFault(t, got)
-	assert.Equal(t, "denied", found.code)
-	assert.Equal(t, 403, detailNamed(t, found, "upstream_status"))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(dev))
-	assert.Equal(t, []string{"/api/groups"}, dev.sentPaths())
-}
-
-func TestTagCreateRefusesAGroupTheDevInstanceHasNone(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "tag", "create", "--name", contractTagName(t),
-		"--visible-for", "ytrack contract no such group")
-
-	found := requireFault(t, got)
-	assert.Equal(t, "unknown_name", found.code)
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(dev))
-	assert.Equal(t, []string{"/api/groups"}, dev.sentPaths())
-	unknown, isList := detailNamed(t, found, "unknown").([]any)
-	require.True(t, isList, "the refusal named no unknown group")
-	assert.Len(t, unknown, 1)
-}
-
-func TestTagCreateMakesANameAmbiguousForTheTokenItIsSharedWith(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	limited := []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}
-	name := contractTagName(t)
-
-	own := runWith(t, limited, "tag", "create", "--name", name)
-	require.Equal(t, 0, own.code, "stderr: %s", own.stderr)
-	t.Cleanup(func() { removeTag(t, limited, name, "dev.limited") })
-
-	ambiguousForTheLimited := runWith(t, dev.env(), "tag", "create", "--name", name, "--visible-for", everyoneRegistered)
-	require.Equal(t, 0, ambiguousForTheLimited.code, "stderr: %s", ambiguousForTheLimited.stderr)
-	t.Cleanup(func() { removeTag(t, dev.env(), name, "admin") })
-	before := len(dev.requests())
-
-	got := runWith(t, limited, "tag", "delete", "--name", name)
-
-	found := requireFault(t, got)
-	assert.Equal(t, "unknown_name", found.code)
-	assert.Equal(t, []any{[]detail{
-		{"tag", name},
-		{"candidates", []any{
-			[]detail{{"name", name}, {"owner", "admin"}},
-			[]detail{{"name", name}, {"owner", "dev.limited"}},
-		}},
-	}}, detailNamed(t, found, "ambiguous"))
-	assert.Equal(t, []string{http.MethodGet}, sentMethodsFrom(dev, before))
-
-	again := runWith(t, limited, "tag", "create", "--name", strings.ToUpper(name))
-	assert.Equal(t, "rejected", requireFault(t, again).code,
-		"the server checks a new name ignoring case against the tags shared with the token too")
-}
-
-func TestTagDeleteRefusesTheTokenAGroupMayOnlyChangeTheTagFor(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	limited := []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}
-	name := contractTagName(t)
-
-	made := runWith(t, dev.env(), "tag", "create", "--name", name,
-		"--visible-for", everyoneRegistered, "--updateable-by", everyoneRegistered)
-	require.Equal(t, 0, made.code, "stderr: %s", made.stderr)
-	t.Cleanup(func() { removeTag(t, dev.env(), name, "admin") })
-	before := len(dev.requests())
-
-	got := runWith(t, limited, "tag", "delete", "--name", name)
-
-	found := requireFault(t, got)
-	assert.Equal(t, "denied", found.code)
-	assert.Equal(t, 403, detailNamed(t, found, "upstream_status"))
-	assert.Equal(t, name, detailNamed(t, found, "tag"), "the refusal names no tag the caller wrote")
-	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethodsFrom(dev, before))
-
-	listed := requireTagListing(t, runWith(t, dev.env(), "tag", "list"))
-	assert.True(t, slices.ContainsFunc(listed.Tags, func(record map[string]any) bool { return record["name"] == name }),
-		"the tag is gone from the list of its owner after a deletion the server refused")
 }

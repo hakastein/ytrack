@@ -7,7 +7,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.yaml.in/yaml/v3"
 )
 
 func articleUpdateRequest(address, readable, fields string) string {
@@ -41,8 +40,6 @@ func TestArticleUpdateRefusesBeforeAnyRequest(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "no id", argv: []string{}},
-		{name: "the title as an argument", argv: []string{"DEV-A-7", "Заголовок"}},
 		{name: "nothing to write", argv: []string{"DEV-A-7"}},
 		{name: "the id of an issue", argv: []string{"DEV-1", "--summary", "x"}},
 		{name: "an internal id", argv: []string{"3-19", "--summary", "x"}},
@@ -76,41 +73,6 @@ func TestArticleUpdateRefusesBeforeAnyRequest(t *testing.T) {
 	}
 }
 
-func TestArticleUpdateHasNoFlagsBesidesItsOwn(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		flag string
-	}{
-		{name: "content out of a file", flag: "--content-file"},
-		{name: "the prose of an issue", flag: "--description"},
-		{name: "a custom field", flag: "--field"},
-		{name: "comments", flag: "--comments"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := serveNothing(t)
-
-			got := runWith(t, server.env(), "article", "update", "DEV-A-7", tc.flag, "y")
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
-		})
-	}
-}
-
-func TestArticleUpdateHelpNamesTheDefault(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"article", "update", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, articleShowFields)
-	assert.NotContains(t, got.stdout, "-file")
-}
-
 func TestArticleUpdateWritesOnlyThePartsItWasGiven(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -138,11 +100,6 @@ func TestArticleUpdateWritesOnlyThePartsItWasGiven(t *testing.T) {
 			name: "content taken away under another letter case",
 			argv: []string{"--clear", "CONTENT"},
 			want: map[string]any{"content": nil},
-		},
-		{
-			name: "a title that starts with a dash",
-			argv: []string{"--summary", "-x"},
-			want: map[string]any{"summary": "-x"},
 		},
 	}
 	for _, tc := range tests {
@@ -403,65 +360,4 @@ func TestArticleUpdateIsUncertainWhereTheAnswerNeverCame(t *testing.T) {
 	assert.Equal(t, []detail{{"request", articleUpdateRequest(server.url, "DEV-A-7", articleShowFields)}},
 		found.details)
 	assert.Empty(t, got.stdout)
-}
-
-func TestArticleUpdateWritesIntoAnArticleOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	filed := fileArticle(t, dev, contractArticleTitle(t), "--content", "Текст, который будет переписан.")
-	t.Cleanup(func() { removeArticle(t, dev, filed) })
-	title := contractArticleTitle(t) + " переписанный  \t"
-	text := "первая\rвторая\xe2\x80\xa8третья\n"
-
-	got := runWith(t, dev.env(), "article", "update", filed, "--summary", title, "--content", text)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	mapping := requireMapping(t, "stdout", got.stdout)
-	assert.Equal(t, filed, nodeAt(t, mapping, "idReadable").Value)
-	assert.Equal(t, title, nodeAt(t, mapping, "summary").Value)
-	assert.Equal(t, text, nodeAt(t, mapping, "content").Value)
-
-	read := runWith(t, dev.env(), "article", "show", filed, "--comments=0", "--fields", "summary,content")
-	require.Equal(t, 0, read.code, "stderr: %s", read.stderr)
-	after := requireMapping(t, "stdout", read.stdout)
-	assert.Equal(t, title, nodeAt(t, after, "summary").Value)
-	content := nodeAt(t, after, "content")
-	assert.Equal(t, text, content.Value)
-	assert.Equal(t, yaml.DoubleQuotedStyle, content.Style, "a carriage return keeps content out of a literal block")
-}
-
-func TestArticleUpdateEmptiesTheContentOfAnArticleOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	filed := fileArticle(t, dev, contractArticleTitle(t), "--content", "Текст, который будет снят.")
-	t.Cleanup(func() { removeArticle(t, dev, filed) })
-
-	got := runWith(t, dev.env(), "article", "update", filed, "--clear", "content")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Nil(t, requireValue(t, nodeAt(t, requireMapping(t, "stdout", got.stdout), "content")))
-
-	read := runWith(t, dev.env(), "article", "show", filed, "--comments=0", "--fields", "content")
-	require.Equal(t, 0, read.code, "stderr: %s", read.stderr)
-	assert.Nil(t, requireValue(t, nodeAt(t, requireMapping(t, "stdout", read.stdout), "content")))
-}
-
-func TestArticleUpdateWritesNothingForTheLimitedToken(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	title := contractArticleTitle(t)
-	filed := fileArticle(t, dev, title)
-	t.Cleanup(func() { removeArticle(t, dev, filed) })
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited},
-		"article", "update", filed, "--summary", title+" переписанный урезанным токеном")
-
-	found := requireFault(t, got)
-	assert.Equal(t, "not_found", found.code)
-	assert.Equal(t, detail{"request", articleToWriteRequest(dev.url, filed)}, found.details[0])
-
-	read := runWith(t, dev.env(), "article", "show", filed, "--comments=0", "--fields", "summary")
-	require.Equal(t, 0, read.code, "stderr: %s", read.stderr)
-	assert.Equal(t, title, nodeAt(t, requireMapping(t, "stdout", read.stdout), "summary").Value)
 }

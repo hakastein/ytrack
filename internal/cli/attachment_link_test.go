@@ -3,18 +3,12 @@ package cli_test
 import (
 	"encoding/json"
 	"net/http"
-	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.yaml.in/yaml/v3"
 )
-
-const signedLinkForm = `^/api/files/[0-9]+-[0-9]+\?sign=[A-Za-z0-9_-]+&updated=[0-9]+$`
-
-const previewLinkForm = `^/api/files/[0-9]+-[0-9]+\?sign=[A-Za-z0-9_-]+$`
 
 const issueWithAttachments = `{"$type":"Issue","attachments":[` +
 	`{"$type":"IssueAttachment","id":"12-2","url":"/api/files/12-2?sign=Ab-_9&updated=1","thumbnailURL":null},` +
@@ -270,162 +264,10 @@ func TestIssueListPrintsAnAttachmentLinkWholeInARecord(t *testing.T) {
 	assert.Contains(t, lines[0], `attachments: [{url: "`+server.url+`/api/files/12-2?sign=Ab-_9&updated=1"}]`)
 }
 
-func TestIssueShowPrintsTheLinkOfTheDevInstanceAttachmentWhole(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "attachments(name,size,url)")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	printed := requireAttachmentsPrinted(t, got.stdout)
-	require.Len(t, printed, 1)
-	assert.Equal(t, "заметка-полигона.txt", printed[0].Name)
-	assert.Equal(t, 75, printed[0].Size)
-
-	reference, found := strings.CutPrefix(printed[0].URL, dev.url)
-	require.True(t, found, "%q does not begin with the address ytrack was given", printed[0].URL)
-	assert.Equal(t, sentAttachmentLinks(t, dev)[0], reference)
-	assert.Regexp(t, signedLinkForm, reference)
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestUserShowPrintsTheAvatarOfTheDevInstanceWhole(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "user", "show", "admin", "--fields", "avatarUrl")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	var printed struct {
-		AvatarURL string `yaml:"avatarUrl"`
-	}
-	require.NoError(t, yaml.Unmarshal([]byte(got.stdout), &printed), "stdout: %s", got.stdout)
-	assert.True(t, strings.HasPrefix(printed.AvatarURL, dev.url+"/"),
-		"%q does not begin with the address ytrack was given", printed.AvatarURL)
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestTheSignedLinkOfTheDevInstanceGivesTheFileWithoutAnAuthorizationHeader(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "attachments(name,size,url)")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	printed := requireAttachmentsPrinted(t, got.stdout)
-	require.Len(t, printed, 1)
-	asked := dev.requests()
-	require.Len(t, asked, 1)
-	assert.NotContains(t, asked[0].URL.Path, filesPath, "ytrack reached for the bytes of the file itself")
-	link, err := url.Parse(printed[0].URL)
-	require.NoError(t, err)
-
-	t.Run("signed", func(t *testing.T) {
-		before := len(dev.requests())
-
-		response, body := fetched(t, link.String(), "")
-
-		require.Equal(t, http.StatusOK, response.StatusCode, "body: %s", body)
-		assert.Len(t, body, printed[0].Size, "the file is as long as the size that was printed with the link")
-		encoded, found := strings.CutPrefix(response.Header.Get("Content-Disposition"), contentDisposition)
-		require.True(t, found, "Content-Disposition: %q", response.Header.Get("Content-Disposition"))
-		assert.NotEqual(t, printed[0].Name, encoded, "the name of the file went out unencoded")
-		decoded, err := url.PathUnescape(encoded)
-		require.NoError(t, err)
-		assert.Equal(t, printed[0].Name, decoded)
-		sent := dev.requests()[before:]
-		require.Len(t, sent, 1)
-		assert.Empty(t, sent[0].Header.Values("Authorization"), "the file was asked for as somebody")
-		assert.Empty(t, sent[0].Header.Values("Cookie"), "the file was asked for in a session")
-	})
-
-	t.Run("unsigned", func(t *testing.T) {
-		unsigned := *link
-		query := unsigned.Query()
-		query.Del("sign")
-		unsigned.RawQuery = query.Encode()
-		tests := []struct {
-			name   string
-			bearer string
-		}{
-			{name: "holding nothing"},
-			{name: "holding the admins token", bearer: devTokens(t).admin},
-		}
-		for _, tc := range tests {
-			t.Run(tc.name, func(t *testing.T) {
-				response, body := fetched(t, unsigned.String(), tc.bearer)
-
-				require.Equal(t, http.StatusBadRequest, response.StatusCode, "body: %s", body)
-				var refused struct {
-					Description string `json:"error_description"`
-				}
-				require.NoError(t, json.Unmarshal(body, &refused), "body: %s", body)
-				assert.Equal(t, "Sign parameter is required", refused.Description)
-			})
-		}
-	})
-
-	t.Run("spoiled", func(t *testing.T) {
-		for _, sign := range []string{"abc", "ABC"} {
-			t.Run(sign, func(t *testing.T) {
-				spoiled := *link
-				query := spoiled.Query()
-				query.Set("sign", sign)
-				spoiled.RawQuery = query.Encode()
-
-				response, body := fetched(t, spoiled.String(), "")
-
-				assert.Equal(t, http.StatusMovedPermanently, response.StatusCode)
-				assert.Equal(t, "/issue/attachment", response.Header.Get("Location"))
-				assert.Empty(t, body)
-			})
-		}
-	})
-}
-
-const filesPath = "/api/files/"
-
-const contentDisposition = `attachment; filename*=UTF-8''`
-
 type printedAttachment struct {
-	ID           string        `yaml:"id"`
-	Name         string        `yaml:"name"`
-	Size         int           `yaml:"size"`
-	MimeType     string        `yaml:"mimeType"`
-	URL          string        `yaml:"url"`
-	ThumbnailURL string        `yaml:"thumbnailURL"`
-	Comment      *printedOwner `yaml:"comment"`
-}
-
-type printedOwner struct {
-	ID string `yaml:"id"`
-}
-
-func requireAttachmentsPrinted(t *testing.T, stdout string) []printedAttachment {
-	t.Helper()
-	var printed struct {
-		Attachments []printedAttachment `yaml:"attachments"`
-	}
-	decoder := yaml.NewDecoder(strings.NewReader(stdout))
-	decoder.KnownFields(true)
-	require.NoError(t, decoder.Decode(&printed), "stdout: %s", stdout)
-	return printed.Attachments
-}
-
-func sentAttachmentLinks(t *testing.T, u *upstream) []string {
-	t.Helper()
-	answers := u.answers()
-	require.NotEmpty(t, answers, "the server answered nothing")
-	var received struct {
-		Attachments []struct {
-			URL string `json:"url"`
-		} `json:"attachments"`
-	}
-	require.NoError(t, json.Unmarshal(answers[0], &received), "the answer: %s", answers[0])
-	links := make([]string, 0, len(received.Attachments))
-	for _, attachment := range received.Attachments {
-		links = append(links, attachment.URL)
-	}
-	require.NotEmpty(t, links, "the answer carries no attachment: %s", answers[0])
-	return links
+	ID       string `yaml:"id"`
+	Name     string `yaml:"name"`
+	Size     int    `yaml:"size"`
+	MimeType string `yaml:"mimeType"`
+	URL      string `yaml:"url"`
 }

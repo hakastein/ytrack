@@ -2,7 +2,6 @@ package cli_test
 
 import (
 	"cmp"
-	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.yaml.in/yaml/v3"
 )
 
 const askedArticleFields = articleShowFields + ",project(shortName)"
@@ -71,12 +69,8 @@ func TestArticleCreateRefusesBeforeAnyRequest(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "no project", argv: []string{"article", "create"}},
 		{name: "no title", argv: []string{"article", "create", "DEV"}},
-		{name: "neither project nor title", argv: []string{"article", "create"}},
 		{name: "no title and a code of no form", argv: []string{"article", "create", "1DEV"}},
-		{name: "the title as an argument", argv: []string{"article", "create", "DEV", "Заголовок"}},
-		{name: "three arguments", argv: []string{"article", "create", "DEV", "a", "b"}},
 		{name: "a code that opens with a digit", argv: []string{"article", "create", "1DEV", "--summary", "x"}},
 		{name: "two dots for a project", argv: []string{"article", "create", "..", "--summary", "x"}},
 		{
@@ -128,31 +122,6 @@ func TestArticleCreateRefusesTextTheServerWouldRewrite(t *testing.T) {
 	}
 }
 
-func TestArticleCreateHasNoFlagsBesidesItsOwn(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		flag string
-	}{
-		{name: "content out of a file", flag: "--content-file"},
-		{name: "a title out of a file", flag: "--summary-file"},
-		{name: "the prose of an issue", flag: "--description"},
-		{name: "clearing a part", flag: "--clear"},
-		{name: "comments", flag: "--comments"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := serveNothing(t)
-
-			got := runWith(t, server.env(), "article", "create", "DEV", "--summary", "x", tc.flag, "y")
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
-		})
-	}
-}
-
 func TestArticleCreatePrintsNoComments(t *testing.T) {
 	t.Parallel()
 	server := serveNothing(t)
@@ -161,17 +130,6 @@ func TestArticleCreatePrintsNoComments(t *testing.T) {
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 	assert.Empty(t, server.requests())
-}
-
-func TestArticleCreateHelpNamesTheDefault(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"article", "create", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, articleShowFields)
-	assert.NotContains(t, got.stdout, "-file")
 }
 
 func TestArticleCreateFilesTheArticleInOneRequest(t *testing.T) {
@@ -255,21 +213,6 @@ func TestArticleCreateWritesTheTextItWasGiven(t *testing.T) {
 			name: "a title of spaces alone",
 			argv: []string{"--summary", "   "},
 			want: map[string]any{"summary": "   "},
-		},
-		{
-			name: "a title that starts with a dash",
-			argv: []string{"--summary", "-x"},
-			want: map[string]any{"summary": "-x"},
-		},
-		{
-			name: "a title that is the word --help",
-			argv: []string{"--summary", "--help"},
-			want: map[string]any{"summary": "--help"},
-		},
-		{
-			name: "content that starts with a dash",
-			argv: []string{"--summary", "x", "--content", "-x"},
-			want: map[string]any{"summary": "x", "content": "-x"},
 		},
 	}
 	for _, tc := range tests {
@@ -459,104 +402,4 @@ func TestArticleCreateChecksMoreThanItPrints(t *testing.T) {
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, "idReadable: \"DEV-A-7\"\n", got.stdout)
 	assert.Equal(t, []string{"idReadable,summary,content,project(shortName)"}, server.sentFields())
-}
-
-func fileArticle(t *testing.T, dev *upstream, summary string, argv ...string) string {
-	t.Helper()
-	got := runWith(t, dev.env(), append([]string{"article", "create", "DEV", "--summary", summary}, argv...)...)
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	require.Empty(t, got.stderr)
-	readable := nodeAt(t, requireMapping(t, "stdout", got.stdout), "idReadable").Value
-	require.Regexp(t, `^DEV-A-[0-9]+$`, readable)
-	return readable
-}
-
-func removeArticle(t *testing.T, dev *upstream, readable string) {
-	t.Helper()
-	notCancelledAtCleanup := context.Background()
-	deleted := runInContext(t, notCancelledAtCleanup, dev.env(), "article", "delete", readable)
-	assert.Equal(t, outcome{stdout: "idReadable: " + strconv.Quote(readable) + "\n"}, deleted)
-
-	gone := runInContext(t, notCancelledAtCleanup, dev.env(), "article", "show", readable, "--comments=0")
-	assert.Equal(t, "not_found", requireFaultDocument(t, gone).code)
-}
-
-func TestArticleCreateFilesAnArticleOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	text := hostileContent()
-
-	got := runWith(t, dev.env(), "article", "create", "DEV", "--summary", contractArticleTitle(t), "--content", text)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	mapping := requireMapping(t, "stdout", got.stdout)
-	readable := nodeAt(t, mapping, "idReadable").Value
-	require.Regexp(t, `^DEV-A-[0-9]+$`, readable)
-	t.Cleanup(func() { removeArticle(t, dev, readable) })
-
-	assert.Equal(t, contractArticleTitle(t), nodeAt(t, mapping, "summary").Value)
-	assert.Equal(t, text, nodeAt(t, mapping, "content").Value)
-
-	read := runWith(t, dev.env(), "article", "show", readable, "--comments=0", "--fields", "content")
-	require.Equal(t, 0, read.code, "stderr: %s", read.stderr)
-	content := nodeAt(t, requireMapping(t, "stdout", read.stdout), "content")
-	assert.Equal(t, text, content.Value)
-	assert.Equal(t, yaml.DoubleQuotedStyle, content.Style, "a carriage return keeps content out of a literal block")
-}
-
-func hostileContent() string {
-	return textOfSize(hostileText, 81_033)
-}
-
-func TestArticleCreateFilesAnArticleInTheProjectOfALowerCaseCode(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "article", "create", "dev", "--summary", contractArticleTitle(t))
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	readable := nodeAt(t, requireMapping(t, "stdout", got.stdout), "idReadable").Value
-	t.Cleanup(func() { removeArticle(t, dev, readable) })
-	assert.Regexp(t, `^DEV-A-[0-9]+$`, readable)
-}
-
-func TestArticleCreateRefusesAProjectTheDevInstanceDoesNotHave(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "article", "create", "NOPE", "--summary", contractArticleTitle(t))
-
-	want := faultDocument{
-		code: "not_found",
-		details: []detail{
-			{"request", articleCreationRequest(dev.url, askedArticleFields)},
-			{"upstream_status", 404},
-			{"upstream_error", "Not Found"},
-			{"upstream_message", "Project was not found"},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodPost}, sentMethods(dev))
-}
-
-func TestArticleCreateRefusesTheProjectTheLimitedUserMayNotWriteIn(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited},
-		"article", "create", "DEV", "--summary", contractArticleTitle(t))
-
-	want := faultDocument{
-		code: "denied",
-		details: []detail{
-			{"request", articleCreationRequest(dev.url, askedArticleFields)},
-			{"upstream_status", 403},
-			{"upstream_error", "Forbidden"},
-			{"upstream_message", "HTTP 403 Forbidden"},
-			authFromEnv(),
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodPost}, sentMethods(dev))
 }

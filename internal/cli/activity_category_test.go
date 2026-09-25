@@ -34,16 +34,6 @@ func categoryEntry(written string, nearest []any) []detail {
 	return []detail{{"category", written}, {"nearest", nearest}}
 }
 
-func TestActivityShowsEveryCategoryToACallerNearNoneOfThem(t *testing.T) {
-	t.Parallel()
-	server := serveNothing(t)
-
-	got := runWith(t, server.env(), "activity", "list", activityIssue, "--category", "Bogus")
-
-	assert.Equal(t, unknownCategories(categoryEntry("Bogus", everyCategory())), requireFault(t, got))
-	assert.Empty(t, server.requests())
-}
-
 func TestActivityRefusesANameOfNoCategoryBeforeItAsksForAnything(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

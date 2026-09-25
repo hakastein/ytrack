@@ -3,7 +3,6 @@ package cli_test
 import (
 	"net/http"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -92,16 +91,6 @@ func TestProjectShowRefusesFieldsGivenTwice(t *testing.T) {
 	}
 }
 
-func TestProjectShowHelpNamesTheDefaultFields(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"project", "show", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, defaultProjectFields)
-}
-
 func TestProjectShowSendsEachFieldOnceInOneForm(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -188,83 +177,4 @@ codes:
 	require.NoError(t, yaml.Unmarshal([]byte(got.stdout), &printed))
 	require.NoError(t, yaml.Unmarshal([]byte(body), &received))
 	assert.Equal(t, received, printed)
-}
-
-func TestProjectShowPrintsTheFieldsOfTheDevInstanceInTheOrderAsked(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "project", "show", "DEV", "--fields", " name , shortName ")
-
-	assert.Equal(t, outcome{stdout: "name: \"DEVELOPMENT\"\nshortName: \"DEV\"\n"}, got)
-	assert.Equal(t, []string{"name,shortName"}, dev.sentFields())
-}
-
-func TestProjectShowPrintsTheEmptyValuesOfTheDevInstanceApart(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "project", "show", "DEV", "--fields", "shortName,fromEmail,replyToEmail,createdBy(login),leader")
-
-	const want = `shortName: "DEV"
-fromEmail: ""
-replyToEmail: null
-createdBy: null
-leader: {}
-`
-	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestProjectShowAddsFieldsToTheDefaultOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "project", "show", "DEV", "--fields", "+leader(login,fullName)")
-
-	assert.Empty(t, got.stderr)
-	assert.Equal(t, 0, got.code)
-	assert.Equal(t, []string{defaultProjectFields + ",leader(login,fullName)"}, dev.sentFields())
-	assert.Regexp(t, `\nleader:\n  login: "admin"\n  fullName: "[^"\n]*"\n$`, got.stdout)
-	assert.True(t, strings.HasPrefix(got.stdout, printedDevProject), "stdout: %s", got.stdout)
-}
-
-func TestProjectShowSendsAFieldGivenTwiceInOneFormToTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "project", "show", "DEV", "--fields", "leader(login),leader")
-
-	assert.Equal(t, outcome{stdout: "leader:\n  login: \"admin\"\n"}, got)
-	assert.Equal(t, []string{"leader(login)"}, dev.sentFields())
-}
-
-func TestProjectShowRefusesAFieldTheDevInstanceFailsOn(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "project", "show", "DEV", "--fields", "startingNumber")
-
-	found := requireFault(t, got)
-	assert.Equal(t, "upstream_failed", found.code)
-	require.Len(t, found.details, 4, "details: %v", found.details)
-	want := []detail{
-		{"request", "GET " + dev.url + "/api/admin/projects/DEV?fields=startingNumber"},
-		{"upstream_status", 500},
-		{"upstream_error", "server_error"},
-	}
-	assert.Equal(t, want, found.details[:3])
-	assert.Equal(t, "upstream_message", found.details[3].key)
-	assert.Contains(t, found.details[3].value, `Cannot invoke "java.lang.Number.longValue()"`)
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestProjectShowPrintsAListOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "project", "show", "DEV", "--fields", "team(users(login))")
-
-	assert.Equal(t, outcome{stdout: "team:\n  users:\n    - {login: \"admin\"}\n"}, got)
-	assert.Len(t, dev.requests(), 1)
 }

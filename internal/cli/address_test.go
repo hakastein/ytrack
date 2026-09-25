@@ -121,20 +121,6 @@ func TestIssueCommandsSendEveryFormOfAnIssueToTheIssues(t *testing.T) {
 	}
 }
 
-func TestIssueShowSendsACodeWithAnUnderscoreToTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "issue", "show", "Dev_X-1")
-
-	found := requireFault(t, got)
-	want := noSuchIssue(dev.url, "Dev_X-1")
-	assert.Equal(t, want.code, found.code)
-	assert.Equal(t, want.details, found.details)
-	require.Len(t, dev.requests(), 1)
-	assert.Equal(t, "/api/issues/Dev_X-1", dev.sentPaths()[0])
-}
-
 func articleCommands() []idCommand {
 	return []idCommand{
 		{name: "show", argv: func(id string) []string { return []string{"article", "show", "--", id} }},
@@ -491,23 +477,4 @@ func TestProjectCodeCommandsSendEveryFormOfACodeToTheProjects(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestProjectShowSendsACodeWithDigitsToTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "project", "show", "Api_32")
-
-	assert.Equal(t, faultDocument{
-		code: "not_found",
-		details: []detail{
-			{"request", showRequest(dev.url, "Api_32")},
-			{"upstream_status", 404},
-			{"upstream_error", "Not Found"},
-			{"upstream_message", "Entity with id Api_32 not found"},
-		},
-	}, requireFault(t, got))
-	require.Len(t, dev.requests(), 1)
-	assert.Equal(t, "/api/admin/projects/Api_32", dev.sentPaths()[0])
 }

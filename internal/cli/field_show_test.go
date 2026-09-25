@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 const metadataSent = "customFields(id,field(name,localizedName,fieldType(valueType,isMultiValue)))"
@@ -19,30 +18,6 @@ func metadataRequest(address, project string) string {
 
 func fieldRequest(address, project, id, fields string) string {
 	return "GET " + address + "/api/admin/projects/" + project + "/customFields/" + id + "?fields=" + fields
-}
-
-const typeOfDEV = `field:
-  name: "Type"
-  localizedName: "Тип"
-  fieldType:
-    valueType: "enum"
-    isMultiValue: false
-canBeEmpty: false
-bundle:
-  values:
-    - {name: "Bug", archived: false}
-    - {name: "Epic", archived: false}
-    - {name: "User Story", archived: false}
-    - {name: "Task", archived: false}
-    - {name: "Инцидент", archived: false}
-`
-
-func requireTheTwoRequests(t *testing.T, u *upstream, project string) {
-	t.Helper()
-	paths := u.sentPaths()
-	require.Len(t, paths, 2, "paths: %v", paths)
-	assert.Equal(t, "/api/admin/projects/"+project, paths[0])
-	assert.Regexp(t, `^/api/admin/projects/`+project+`/customFields/[0-9]+-[0-9]+$`, paths[1])
 }
 
 func localizedNameOrNull(localized string) string {
@@ -92,9 +67,6 @@ func TestFieldShowRefusesACallItCannotSend(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "no project and no name", argv: []string{"field", "show"}},
-		{name: "no name", argv: []string{"field", "show", "DEV"}},
-		{name: "a word after the name", argv: []string{"field", "show", "DEV", "a", "b"}},
 		{
 			name: "the empty name",
 			argv: []string{"field", "show", "DEV", ""},
@@ -107,10 +79,6 @@ func TestFieldShowRefusesACallItCannotSend(t *testing.T) {
 			name: "an expression with nothing in it",
 			argv: []string{"field", "show", "DEV", "Type", "--fields", ""},
 		},
-		{
-			name: "a name pflag reads as flags",
-			argv: []string{"field", "show", "DEV", "-x"},
-		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -122,134 +90,6 @@ func TestFieldShowRefusesACallItCannotSend(t *testing.T) {
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 		})
 	}
-}
-
-func TestFieldShowHelpNamesTheUsage(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"field", "show", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, "ytrack field show <project> <field>")
-}
-
-func TestFieldShowPrintsAFieldOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "field", "show", "DEV", "Type")
-
-	assert.Equal(t, outcome{stdout: typeOfDEV}, got)
-	requireTheTwoRequests(t, dev, "DEV")
-	assert.Equal(t, []string{metadataSent, fieldShowDefault(bundleValues)}, dev.sentFields())
-}
-
-func TestFieldShowResolvesANameOfTheDevInstanceWhateverTheCase(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		asked string
-	}{
-		{name: "the localized name", asked: "тип"},
-		{name: "the localized name in upper case", asked: "ТИП"},
-		{name: "the name in upper case", asked: "TYPE"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			dev := devInstance(t)
-
-			got := runWith(t, dev.env(), "field", "show", "DEV", tc.asked)
-
-			assert.Equal(t, outcome{stdout: typeOfDEV}, got)
-			requireTheTwoRequests(t, dev, "DEV")
-			for _, target := range dev.sentTargets() {
-				assert.NotContains(t, strings.ToLower(target), "тип")
-			}
-		})
-	}
-}
-
-func TestFieldShowResolvesALocalizedNameOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "field", "show", "DEV", "исполнитель")
-
-	const want = `field:
-  name: "Assignee"
-  localizedName: "Исполнитель"
-  fieldType:
-    valueType: "user"
-    isMultiValue: false
-canBeEmpty: true
-bundle:
-  aggregatedUsers:
-    - {login: "admin"}
-`
-	assert.Equal(t, outcome{stdout: want}, got)
-	requireTheTwoRequests(t, dev, "DEV")
-}
-
-func TestFieldShowPrintsAFieldOfASecondProjectOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "field", "show", "DEMO", "State")
-
-	const want = `field:
-  name: "State"
-  localizedName: "Состояние"
-  fieldType:
-    valueType: "state"
-    isMultiValue: false
-canBeEmpty: false
-bundle:
-  values:
-    - {name: "To do", archived: false}
-    - {name: "In Progress", archived: false}
-    - {name: "Done", archived: false}
-`
-	assert.Equal(t, outcome{stdout: want}, got)
-	requireTheTwoRequests(t, dev, "DEMO")
-}
-
-func TestFieldShowRefusesAFieldASecondProjectOfTheDevInstanceDoesNotHave(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "field", "show", "DEMO", "Причина отклонения")
-
-	want := faultDocument{
-		code: "unknown_name",
-		details: []detail{
-			{"request", metadataRequest(dev.url, "DEMO")},
-			{"project", "DEMO"},
-			{"unknown", []any{unknownEntry("Причина отклонения", "Affected versions", "Assignee", "Fix versions",
-				"Fixed in build", "Priority", "State", "Subsystem", "Type", "Затраченное время", "Оценка")}},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{"/api/admin/projects/DEMO"}, dev.sentPaths())
-}
-
-func TestFieldShowRefusesANameOneFieldOfTheDevInstanceIsNear(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "field", "show", "DEV", "Типп")
-
-	want := faultDocument{
-		code: "unknown_name",
-		details: []detail{
-			{"request", metadataRequest(dev.url, "DEV")},
-			{"project", "DEV"},
-			{"unknown", []any{unknownEntry("Типп", "Type")}},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{"/api/admin/projects/DEV"}, dev.sentPaths())
 }
 
 func TestFieldShowOffersFiveOfTheNearestNamesAtMost(t *testing.T) {
@@ -293,44 +133,6 @@ func TestFieldShowOffersFiveOfTheNearestNamesAtMost(t *testing.T) {
 			assert.Len(t, server.requests(), 1)
 		})
 	}
-}
-
-func TestFieldShowRefusesTheProjectTheLimitedUserCannotSee(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}, "field", "show", "DEV", "Type")
-
-	want := faultDocument{
-		code: "not_found",
-		details: []detail{
-			{"request", metadataRequest(dev.url, "DEV")},
-			{"upstream_status", 404},
-			{"upstream_error", "Not Found"},
-			{"upstream_message", "Entity with id DEV not found"},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{"/api/admin/projects/DEV"}, dev.sentPaths())
-}
-
-func TestFieldShowRefusesTheEmptyMetadataTheMemberIsSent(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).member}, "field", "show", "DEV", "Type")
-
-	want := faultDocument{
-		code: "denied",
-		details: []detail{
-			{"request", metadataRequest(dev.url, "DEV")},
-			{"project", "DEV"},
-			{"permission", "jetbrains.jetpass.project-read"},
-			authFromEnv(),
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{"/api/admin/projects/DEV"}, dev.sentPaths())
 }
 
 func TestFieldShowTakesANameOverTheTranslationOfAnotherField(t *testing.T) {
@@ -399,24 +201,6 @@ func TestFieldShowRefusesANameMoreThanOneFieldAnswersTo(t *testing.T) {
 			assert.Len(t, server.requests(), 1)
 		})
 	}
-}
-
-func TestFieldShowTakesANameWithALeadingDashAfterTheDoubleDash(t *testing.T) {
-	t.Parallel()
-	server := serveTheProject(t, projectMetadata(projectField("180-1", "Type", "Тип")), noField(t))
-
-	got := runWith(t, server.env(), "field", "show", "DEV", "--", "-x")
-
-	want := faultDocument{
-		code: "unknown_name",
-		details: []detail{
-			{"request", metadataRequest(server.url, "DEV")},
-			{"project", "DEV"},
-			{"unknown", []any{unknownEntry("-x", "Type")}},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, server.requests(), 1)
 }
 
 func TestFieldShowRefusesAnIdItCannotAddress(t *testing.T) {

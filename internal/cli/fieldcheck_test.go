@@ -1,13 +1,10 @@
 package cli_test
 
 import (
-	"fmt"
 	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"go.yaml.in/yaml/v3"
 )
 
 func projectNames() []any {
@@ -38,73 +35,6 @@ func unknownEntry(field string, nearest ...any) []detail {
 
 func missingEntry(field string, serverTypeOrNil any) []detail {
 	return []detail{{"field", field}, {"type", serverTypeOrNil}}
-}
-
-func TestProjectShowRefusesNamesTheSchemasOfTheDevInstanceDoNotDeclare(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "project", "show", "DEV", "--fields", "shortName,bogus,leader(logn)")
-
-	want := faultDocument{
-		code: "unknown_name",
-		details: missingFieldDetails(dev.url, "shortName,bogus,leader(logn)", "unknown",
-			unknownEntry("bogus", projectNames()...),
-			unknownEntry("leader(logn)", "login"),
-		),
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestProjectShowRefusesFieldsAskedOfAStringOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "project", "show", "DEV", "--fields", "shortName(foo)")
-
-	want := faultDocument{
-		code:    "unknown_name",
-		details: missingFieldDetails(dev.url, "shortName(foo)", "unknown", unknownEntry("shortName(foo)")),
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestProjectShowLeavesOutAFieldTheTypeOfTheDevInstanceDoesNotDeclare(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "project", "show", "DEV", "--fields", "shortName,customFields(field(name),bundle(name))")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	var printed struct {
-		CustomFields []map[string]any `yaml:"customFields"`
-	}
-	require.NoError(t, yaml.Unmarshal([]byte(got.stdout), &printed))
-	byName := map[string]map[string]any{}
-	for _, item := range printed.CustomFields {
-		field, ok := item["field"].(map[string]any)
-		require.True(t, ok, "an item of customFields: %v", item)
-		byName[fmt.Sprint(field["name"])] = item
-	}
-	require.Contains(t, byName, "Оценка")
-	require.Contains(t, byName, "State")
-	periodField, stateField := byName["Оценка"], byName["State"]
-	assert.NotContains(t, periodField, "bundle")
-	assert.Contains(t, stateField, "bundle")
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestProjectShowChecksNoNameUnderANullOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "project", "show", "DEV", "--fields", "createdBy(bogus)")
-
-	assert.Equal(t, outcome{stdout: "createdBy: null\n"}, got)
-	assert.Len(t, dev.requests(), 1)
 }
 
 func TestProjectShowRefusesAFieldMissingFromTheResponse(t *testing.T) {

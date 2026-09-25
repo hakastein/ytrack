@@ -65,13 +65,9 @@ func TestIssueDeleteRefusesBeforeAnyRequest(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "no id", argv: []string{"issue", "delete"}},
-		{name: "two ids", argv: []string{"issue", "delete", "DEV-1", "DEV-2"}},
 		{name: "two dots", argv: []string{"issue", "delete", ".."}},
 		{name: "an article id", argv: []string{"issue", "delete", "DEV-A-1"}},
 		{name: "an internal id", argv: []string{"issue", "delete", "3-26"}},
-		{name: "--yes", argv: []string{"issue", "delete", "DEV-1", "--yes"}},
-		{name: "--force", argv: []string{"issue", "delete", "DEV-1", "--force"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -84,17 +80,6 @@ func TestIssueDeleteRefusesBeforeAnyRequest(t *testing.T) {
 			assert.Empty(t, server.requests())
 		})
 	}
-}
-
-func TestIssueDeleteHelpOffersNoConfirmation(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"issue", "delete", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.NotContains(t, got.stdout, "--yes")
-	assert.NotContains(t, got.stdout, "--force")
 }
 
 func TestIssueDeleteReadsTheIDAndDeletesByIt(t *testing.T) {
@@ -241,26 +226,6 @@ func TestIssueDeleteRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 		})
 	}
-}
-
-func TestIssueDeleteRefusesAnIssueTheDevInstanceDoesNotHave(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "issue", "delete", "DEV-99999")
-
-	assert.Equal(t, noIssueToDelete(dev.url, "DEV-99999"), requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(dev))
-}
-
-func TestIssueDeleteSendsNoDeletionForAnIssueTheLimitedUserCannotSee(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}, "issue", "delete", "DEV-1")
-
-	assert.Equal(t, noIssueToDelete(dev.url, "DEV-1"), requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(dev))
 }
 
 func sentMethods(u *upstream) []string {

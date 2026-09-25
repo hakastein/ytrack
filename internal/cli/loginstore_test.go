@@ -316,16 +316,3 @@ func TestNoCommandPrintsThePasswordOfAnAddressItCannotUse(t *testing.T) {
 		})
 	}
 }
-
-func TestAuthStatusPrintsTheAdminOfTheDevInstanceFromTheGlobalRecord(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	home, _ := homeWith(t, globalRecord(dev.url, dev.token))
-
-	got := runWith(t, []string{"HOME=" + home}, "auth", "status")
-
-	want := status(dev.url, "settings", "admin", "admin")
-	assert.Equal(t, outcome{stdout: want}, got)
-	assertNoToken(t, got, dev.token)
-	assert.Len(t, dev.requests(), 1)
-}

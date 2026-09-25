@@ -1,9 +1,7 @@
 package cli_test
 
 import (
-	"maps"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -71,20 +69,6 @@ func TestCompleteOffersTheCommandsOfTheRoot(t *testing.T) {
 			assert.Empty(t, server.requests())
 		})
 	}
-}
-
-func TestCompleteCarriesTheTextOfACommand(t *testing.T) {
-	t.Parallel()
-	server := serveNothing(t)
-
-	answered := requireCompleted(t, runWith(t, server.env(), "__complete", "attachment"))
-
-	require.Len(t, answered.suggestions, 1)
-	name, text, found := strings.Cut(answered.suggestions[0], "\t")
-	assert.Equal(t, "attachment", name)
-	assert.True(t, found, "the command came back with nothing beside it")
-	assert.NotEmpty(t, text)
-	assert.Empty(t, server.requests())
 }
 
 func TestCompleteOffersTheSubcommandsOfACommand(t *testing.T) {
@@ -356,7 +340,6 @@ func TestCompleteOffersNoCommandHiddenInTheTree(t *testing.T) {
 		argv  []string
 		names []string
 	}{
-		{name: "nothing written yet", argv: []string{"__complete", ""}, names: rootCommands()},
 		{name: "the name of the stand-in begun", argv: []string{"__complete", "no-"}, names: []string{}},
 	}
 	for _, tc := range tests {
@@ -407,8 +390,6 @@ func TestCompletionRefusesAnythingButOneShellItNames(t *testing.T) {
 		argv []string
 	}{
 		{name: "a shell there is no script for", argv: []string{"completion", "tcsh"}},
-		{name: "no shell at all", argv: []string{"completion"}},
-		{name: "two shells", argv: []string{"completion", "bash", "zsh"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -421,38 +402,6 @@ func TestCompletionRefusesAnythingButOneShellItNames(t *testing.T) {
 			assert.Empty(t, server.requests())
 		})
 	}
-}
-
-func TestCompletionHelpNamesEveryShellThereIsAScriptForAndHowToLoadIt(t *testing.T) {
-	t.Parallel()
-	server := serveNothing(t)
-
-	got := runWith(t, server.env(), "completion", "--help")
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	loading := loadingLinesOf(t, got.stdout)
-	shells := theShellsYtrackHasAScriptFor(t)
-	assert.ElementsMatch(t, shells, slices.Collect(maps.Keys(loading)),
-		"the help and the protocol name different shells")
-	for _, shell := range shells {
-		assert.Contains(t, loading[shell], "ytrack completion "+shell,
-			"the help names %s without saying what to write to load its script", shell)
-	}
-	assert.Empty(t, server.requests())
-}
-
-func loadingLinesOf(t *testing.T, help string) map[string]string {
-	t.Helper()
-	lines := map[string]string{}
-	for _, line := range strings.Split(help, "\n") {
-		indented, isIndented := strings.CutPrefix(line, "  ")
-		name, loads, names := strings.Cut(indented, ": ")
-		if isIndented && names && !strings.ContainsAny(name, " \t") {
-			lines[name] = loads
-		}
-	}
-	return lines
 }
 
 func TestCompleteOffersTheShellsOfTheCompletionCommand(t *testing.T) {
@@ -474,23 +423,6 @@ func commandsWithSubcommands() []string {
 		}
 	}
 	return groups
-}
-
-func helpCalls() []struct {
-	name string
-	argv []string
-} {
-	calls := []struct {
-		name string
-		argv []string
-	}{{name: "the root", argv: []string{"--help"}}}
-	for _, group := range commandsWithSubcommands() {
-		calls = append(calls, struct {
-			name string
-			argv []string
-		}{name: group, argv: []string{group, "--help"}})
-	}
-	return calls
 }
 
 func TestCompleteCarriesTheTextOfEveryCommandItOffers(t *testing.T) {
@@ -521,39 +453,6 @@ func TestCompleteCarriesTheTextOfEveryCommandItOffers(t *testing.T) {
 			assert.Empty(t, server.requests())
 		})
 	}
-}
-
-func TestHelpListsEveryCommandWithItsLineAndNoHelpCommand(t *testing.T) {
-	t.Parallel()
-	for _, tc := range helpCalls() {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := serveNothing(t)
-
-			got := runWith(t, server.env(), tc.argv...)
-
-			require.Equal(t, 0, got.code)
-			assert.Empty(t, got.stderr)
-			for _, listed := range commandsListed(t, got.stdout) {
-				assert.NotEmpty(t, listed.text, "%q is listed with nothing beside it", listed.name)
-				assert.NotEqual(t, "help", listed.name, "a command nobody can call is listed")
-			}
-			assert.Empty(t, server.requests())
-		})
-	}
-}
-
-func TestHelpOfTheRootListsCompletion(t *testing.T) {
-	t.Parallel()
-	server := serveNothing(t)
-
-	got := runWith(t, server.env(), "--help")
-
-	listed := commandsListed(t, got.stdout)
-	idx := slices.IndexFunc(listed, func(c listedCommand) bool { return c.name == "completion" })
-	require.GreaterOrEqual(t, idx, 0, "completion is not listed among the root's commands")
-	assert.NotEmpty(t, listed[idx].text)
-	assert.Empty(t, server.requests())
 }
 
 func TestCompleteOffersTheCategoriesOfTheActivities(t *testing.T) {

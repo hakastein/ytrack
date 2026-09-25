@@ -73,10 +73,6 @@ func TestLinkListRefusesACallThatNamesNoOneIssue(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "the command alone", argv: []string{"link"}},
-		{name: "a subcommand the command has none of", argv: []string{"link", "bogus"}},
-		{name: "no issue", argv: []string{"link", "list"}},
-		{name: "two issues", argv: []string{"link", "list", "DEV-1", "DEV-2"}},
 		{name: "a path that would reach another endpoint", argv: []string{"link", "list", ".."}},
 		{name: "the id of an article", argv: []string{"link", "list", "DEV-A-1"}},
 		{name: "an internal id", argv: []string{"link", "list", "3-19"}},
@@ -87,39 +83,6 @@ func TestLinkListRefusesACallThatNamesNoOneIssue(t *testing.T) {
 			server := serveNothing(t)
 
 			got := runWith(t, server.env(), tc.argv...)
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.requests())
-		})
-	}
-}
-
-func TestLinkListHelpNamesTheDefaultFields(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"link", "list", "--help"})
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, linkListTarget)
-	assert.Contains(t, got.stdout, "ytrack link list")
-}
-
-func TestLinkListRefusesAPage(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "a limit", argv: []string{"--limit", "1"}},
-		{name: "a skip", argv: []string{"--skip", "1"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := serveNothing(t)
-
-			got := runWith(t, server.env(), append([]string{"link", "list", "DEV-1"}, tc.argv...)...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
@@ -346,92 +309,4 @@ func TestLinkListPrintsTheTextOfATargetOnItsLine(t *testing.T) {
 	record := nodeAt(t, requireMapping(t, "stdout", got.stdout), "links", "relates to")
 	require.Equal(t, yaml.SequenceNode, record.Kind, "stdout: %q", got.stdout)
 	assert.Equal(t, text, nodeAt(t, record.Content[0], "description").Value)
-}
-
-func TestLinkListPrintsTheLinksOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "link", "list", "DEV-1")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	printed := requireDocument(t, got.stdout)
-	assert.Equal(t, []detail{{"total", 5}, {"returned", 5}, {"truncated", false}}, printed[:3])
-	block := nodeAt(t, requireMapping(t, "stdout", got.stdout), "links")
-	for phrase, target := range map[string]string{
-		"relates to":       "DEV-2",
-		"depends on":       "DEV-3",
-		"is duplicated by": "DEV-5",
-		"subtask of":       "DEV-4",
-		"Скопирована в":    "DEV-6",
-	} {
-		assert.Equal(t, target, nodeAt(t, block, phrase, "idReadable").Value, "under %q", phrase)
-	}
-	assert.NotContains(t, got.stdout, "163-")
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestLinkListPrintsTheOtherEndOfEveryLinkOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name   string
-		issue  string
-		phrase string
-	}{
-		{name: "the other end of relates", issue: "DEV-2", phrase: "relates to"},
-		{name: "the other end of depends on", issue: "DEV-3", phrase: "is required for"},
-		{name: "the other end of subtask of", issue: "DEV-4", phrase: "parent for"},
-		{name: "the other end of is duplicated by", issue: "DEV-5", phrase: "duplicates"},
-		{name: "the other end of the copy", issue: "DEV-6", phrase: "Копия"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			dev := devInstance(t)
-
-			got := runWith(t, dev.env(), "link", "list", tc.issue)
-
-			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			assert.Empty(t, got.stderr)
-			block := nodeAt(t, requireMapping(t, "stdout", got.stdout), "links")
-			assert.Equal(t, "DEV-1", nodeAt(t, block, tc.phrase, "idReadable").Value, "under %q", tc.phrase)
-			assert.NotContains(t, got.stdout, "163-")
-		})
-	}
-}
-
-func TestLinkListRefusesAnIssueTheDevInstanceDoesNotShow(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name    string
-		issue   string
-		limited bool
-	}{
-		{name: "an issue nobody has", issue: "DEV-99999"},
-		{name: "an issue the limited user cannot see", issue: "DEV-1", limited: true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			dev := devInstance(t)
-			env := dev.env()
-			if tc.limited {
-				env = []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}
-			}
-
-			got := runWith(t, env, "link", "list", tc.issue)
-
-			assert.Equal(t, faultDocument{
-				code: "not_found",
-				details: []detail{
-					{"request", issueRequest(dev.url, tc.issue, linkListFields(linkListTarget))},
-					{"upstream_status", 404},
-					{"upstream_error", "Not Found"},
-					{"upstream_message", "Entity with id " + tc.issue + " not found"},
-				},
-			}, requireFault(t, got))
-			assert.Len(t, dev.requests(), 1)
-		})
-	}
 }

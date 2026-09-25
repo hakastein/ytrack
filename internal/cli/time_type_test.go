@@ -64,10 +64,6 @@ func sentWorkItemType(t *testing.T, u *upstream) any {
 
 const typeKeyName = "type"
 
-func pathsSince(u *upstream, before int) []string {
-	return u.sentPaths()[before:]
-}
-
 func TestTimeCreateRefusesATypeItCannotResolve(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -303,50 +299,4 @@ func TestTimeCreateReadsNothingWhereNoTypeIsNamed(t *testing.T) {
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, []string{http.MethodPost}, sentMethods(server))
 	assert.NotContains(t, sentWorkItem(t, server), typeKeyName)
-}
-
-func TestTimeCreateWritesNoTimeAgainstATypeOutsideTheProjectOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	const typeOfTheInstanceDEVDoesNotUse = "ИИРазработка"
-	dev := devInstance(t)
-	issue := contractWorkItemIssue(t, dev, "issue")
-	before := len(dev.requests())
-
-	got := runWith(t, dev.env(), "time", "create", issue, "PT15M", "--type", typeOfTheInstanceDEVDoesNotUse)
-
-	found := requireFault(t, got)
-	assert.Equal(t, "unknown_name", found.code)
-	assert.Equal(t, "DEV", detailNamed(t, found, "project"))
-	assert.Equal(t, []any{[]detail{{"type", typeOfTheInstanceDEVDoesNotUse}, {"nearest", []any{"Разработка"}}}},
-		detailNamed(t, found, "unknown"))
-	assert.Equal(t, []string{"/api/issues/" + issue}, pathsSince(dev, before))
-
-	listed := runWith(t, dev.env(), "time", "list", issue)
-	assert.Equal(t, 0, requireWorkItemListing(t, listed).Total)
-}
-
-func TestTimeCreateWritesTimeAgainstATypeOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := contractWorkItemIssue(t, dev, "issue")
-	before := len(dev.requests())
-
-	got := runWith(t, dev.env(), "time", "create", issue, "PT15M", "--type", "кодревью")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, "Кодревью", nodeAt(t, requireMapping(t, "stdout", got.stdout), "type", "name").Value)
-	assert.Equal(t, []string{"/api/issues/" + issue, workItemsPath(issue)}, pathsSince(dev, before))
-}
-
-func TestTimeCreateWritesTimeAgainstNoTypeOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := contractWorkItemIssue(t, dev, "issue")
-	before := len(dev.requests())
-
-	got := runWith(t, dev.env(), "time", "create", issue, "PT15M")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Nil(t, requireValue(t, nodeAt(t, requireMapping(t, "stdout", got.stdout), "type")))
-	assert.Equal(t, []string{workItemsPath(issue)}, pathsSince(dev, before))
 }

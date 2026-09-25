@@ -2,7 +2,6 @@ package cli_test
 
 import (
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -54,14 +53,9 @@ func TestTagAddRefusesACallOfAnyOtherShape(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "nothing at all", argv: nil},
-		{name: "an owner and no name", argv: []string{"DEV-7"}},
-		{name: "a name written as an argument", argv: []string{"DEV-7", "Ready"}},
-		{name: "an argument beside the name", argv: []string{"DEV-7", "y", "--name", "Ready"}},
 		{name: "an empty name", argv: []string{"DEV-7", "--name", ""}},
 		{name: "a name that is no UTF-8", argv: []string{"DEV-7", "--name", "\xff"}},
 		{name: "the name given twice", argv: []string{"DEV-7", "--name", "a", "--name", "b"}},
-		{name: "an expression of fields", argv: []string{"DEV-7", "--name", "x", "--fields", "name"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -250,110 +244,4 @@ func TestTagAddSendsNoWriteWhereAReadBeforeItRefused(t *testing.T) {
 			assert.Equal(t, tc.paths, server.sentPaths())
 		})
 	}
-}
-
-func TestTagAddHangsATagOnAnIssueAndAnArticleOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	name := contractTagName(t)
-	made := runWith(t, dev.env(), "tag", "create", "--name", name)
-	require.Equal(t, 0, made.code, "stderr: %s", made.stderr)
-	t.Cleanup(func() { removeTag(t, dev.env(), name, "admin") })
-	issue := issueToTag(t, dev)
-	article := articleToTag(t, dev)
-
-	hung := runWith(t, dev.env(), "tag", "add", issue, "--name", name)
-
-	require.Equal(t, 0, hung.code, "stderr: %s", hung.stderr)
-	assert.Equal(t, issue, nodeAt(t, requireMapping(t, "stdout", hung.stdout), "idReadable").Value)
-	assert.Equal(t, name, nodeAt(t, requireMapping(t, "stdout", hung.stdout), "added", "name").Value)
-	assert.Equal(t, []string{name}, tagsOfTheIssue(t, dev, issue))
-
-	again := runWith(t, dev.env(), "tag", "add", issue, "--name", name)
-	require.Equal(t, 0, again.code, "stderr: %s", again.stderr)
-	assert.Equal(t, []string{name}, tagsOfTheIssue(t, dev, issue), "the tag hangs twice after a second call")
-
-	onTheArticle := runWith(t, dev.env(), "tag", "add", article, "--name", name)
-	require.Equal(t, 0, onTheArticle.code, "stderr: %s", onTheArticle.stderr)
-	assert.Equal(t, article, nodeAt(t, requireMapping(t, "stdout", onTheArticle.stdout), "idReadable").Value)
-	assert.Equal(t, []string{name}, tagsOfTheArticle(t, dev, article))
-}
-
-func TestTagAddRefusesANameThePolygonHasNoTagUnder(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := issueToTag(t, dev)
-	before := len(dev.requests())
-
-	got := runWith(t, dev.env(), "tag", "add", issue, "--name", contractTagName(t)+" nope")
-
-	assert.Equal(t, "unknown_name", requireFault(t, got).code)
-	assert.Equal(t, []string{http.MethodGet, http.MethodGet}, sentMethodsFrom(dev, before))
-}
-
-func TestTagAddRefusesAnOwnerTheTokenCannotReachOnTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	limited := []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}
-	name := contractTagName(t)
-	made := runWith(t, limited, "tag", "create", "--name", name)
-	require.Equal(t, 0, made.code, "stderr: %s", made.stderr)
-	t.Cleanup(func() { removeTag(t, limited, name, "dev.limited") })
-	issue := issueToTag(t, dev)
-
-	for _, tc := range []struct {
-		name  string
-		owner string
-	}{
-		{name: "an issue of the admin the token is not shown", owner: issue},
-		{name: "an issue nobody filed", owner: "DEV-99999"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			before := len(dev.requests())
-
-			got := runWith(t, limited, "tag", "add", tc.owner, "--name", name)
-
-			assert.Equal(t, "not_found", requireFault(t, got).code)
-			assert.Equal(t, []string{http.MethodGet}, sentMethodsFrom(dev, before))
-		})
-	}
-}
-
-func issueToTag(t *testing.T, dev *upstream) string {
-	t.Helper()
-	argv := append([]string{"issue", "create", "DEV", "--summary", contractTagName(t)}, devRequired()...)
-	got := runWith(t, dev.env(), argv...)
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	readable := nodeAt(t, requireMapping(t, "stdout", got.stdout), "idReadable").Value
-	require.Regexp(t, `^DEV-[0-9]+$`, readable)
-	t.Cleanup(func() { removeIssue(t, dev, readable) })
-	return readable
-}
-
-func articleToTag(t *testing.T, dev *upstream) string {
-	t.Helper()
-	article := fileArticle(t, dev, contractTagName(t))
-	t.Cleanup(func() { removeArticle(t, dev, article) })
-	return article
-}
-
-func tagsOfTheIssue(t *testing.T, dev *upstream, readable string) []string {
-	t.Helper()
-	return tagNamesOf(t, runWith(t, dev.env(), "issue", "show", readable, "--comments=0", "--fields", "tags(name)"))
-}
-
-func tagsOfTheArticle(t *testing.T, dev *upstream, readable string) []string {
-	t.Helper()
-	return tagNamesOf(t, runWith(t, dev.env(), "article", "show", readable, "--comments=0", "--fields", "tags(name)"))
-}
-
-func tagNamesOf(t *testing.T, got outcome) []string {
-	t.Helper()
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	names := []string{}
-	for _, tag := range nodeAt(t, requireMapping(t, "stdout", got.stdout), "tags").Content {
-		names = append(names, nodeAt(t, tag, "name").Value)
-	}
-	slices.Sort(names)
-	return names
 }

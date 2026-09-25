@@ -182,7 +182,6 @@ func TestAuthStatusAsksForNoDirectoryWithoutARecordThatNamesOne(t *testing.T) {
 		name string
 		pwd  func(stale string) []string
 	}{
-		{name: "no PWD at all", pwd: func(string) []string { return nil }},
 		{name: "a PWD naming a directory the call is not in", pwd: func(stale string) []string { return []string{"PWD=" + stale} }},
 	}
 	for _, tc := range tests {

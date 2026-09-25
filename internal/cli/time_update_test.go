@@ -16,20 +16,6 @@ func workItemUpdateRequest(address, issue, id, fields string) string {
 	return "POST " + address + workItemPath(issue, id) + "?fields=" + fields
 }
 
-func workItemOn(t *testing.T, dev *upstream, issue string, argv ...string) string {
-	t.Helper()
-	got := runWith(t, dev.env(), append([]string{"time", "create", issue}, argv...)...)
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	id := nodeAt(t, requireMapping(t, "stdout", got.stdout), "id").Value
-	require.Regexp(t, internalIDForm, id)
-	return id
-}
-
-func theWorkItemsOf(t *testing.T, dev *upstream, issue string) []map[string]any {
-	t.Helper()
-	return requireWorkItemListing(t, runWith(t, dev.env(), "time", "list", issue)).WorkItems
-}
-
 func TestTimeUpdateRefusesWhatItCannotSend(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -318,90 +304,4 @@ func TestTimeUpdateRefusesWhatTheServerRefused(t *testing.T) {
 	}
 	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodPost}, sentMethods(server))
-}
-
-func TestTimeUpdateWritesIntoAWorkItemOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := contractWorkItemIssue(t, dev, "issue")
-	item := workItemOn(t, dev, issue, "PT1H", "--type", "Разработка", "--text", "ytrack contract a")
-
-	got := runWith(t, dev.env(), "time", "update", issue, item, "--duration", "PT2H")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	mapping := requireMapping(t, "stdout", got.stdout)
-	assert.Equal(t, "PT2H", nodeAt(t, mapping, "duration").Value)
-	assert.Equal(t, "Разработка", nodeAt(t, mapping, "type", "name").Value)
-	assert.Equal(t, "ytrack contract a", nodeAt(t, mapping, "text").Value)
-	assert.Equal(t, "PT2H", nodeAt(t, mapping, "issue", "customFields", "Затраченное время").Value)
-
-	emptied := runWith(t, dev.env(), "time", "update", issue, item, "--clear", "type", "--clear", "text")
-	require.Equal(t, 0, emptied.code, "stderr: %s", emptied.stderr)
-	afterwards := requireMapping(t, "stdout", emptied.stdout)
-	assert.Nil(t, requireValue(t, nodeAt(t, afterwards, "type")))
-	assert.Nil(t, requireValue(t, nodeAt(t, afterwards, "text")))
-
-	moved := runWith(t, dev.env(), "time", "update", issue, item, "--date", "2026-09-05")
-	require.Equal(t, 0, moved.code, "stderr: %s", moved.stderr)
-	assert.Equal(t, "2026-09-05T00:00:00Z", nodeAt(t, requireMapping(t, "stdout", moved.stdout), "date").Value)
-}
-
-func TestTimeUpdateRefusesAWorkItemOfAnotherIssueOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := contractWorkItemIssue(t, dev, "issue")
-	other := contractWorkItemIssue(t, dev, "other issue")
-	item := workItemOn(t, dev, issue, "PT1H", "--text", "ytrack contract a")
-	before := len(dev.requests())
-
-	got := runWith(t, dev.env(), "time", "update", other, item, "--text", "ytrack contract via-B")
-
-	assert.Equal(t, "not_found", requireFault(t, got).code)
-	assert.Equal(t, []string{workItemPath(other, item)}, pathsSince(dev, before))
-
-	kept := theWorkItemsOf(t, dev, issue)
-	require.Len(t, kept, 1)
-	assert.Equal(t, "ytrack contract a", kept[0]["text"])
-}
-
-func TestTimeUpdateIsRefusedTheDurationWrittenAsAnID(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := contractWorkItemIssue(t, dev, "issue")
-	item := workItemOn(t, dev, issue, "PT1H")
-	dev.replacing(asDurationID)
-	defer dev.replacing(nil)
-
-	got := runWith(t, dev.env(), "time", "update", issue, item, "--duration", "PT3H")
-
-	found := requireFault(t, got)
-	assert.Equal(t, "rejected", found.code)
-	assert.Equal(t, "Для единицы работы должна быть задана длительность",
-		detailNamed(t, found, "upstream_message"))
-
-	dev.replacing(nil)
-	kept := theWorkItemsOf(t, dev, issue)
-	require.Len(t, kept, 1)
-	assert.Equal(t, "PT1H", kept[0]["duration"])
-}
-
-func TestTimeUpdateRefusesAnIssueTheLimitedUserMayNotSee(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := contractWorkItemIssue(t, dev, "issue")
-	item := workItemOn(t, dev, issue, "PT1H", "--text", "ytrack contract a")
-	before := len(dev.requests())
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited},
-		"time", "update", issue, item, "--text", "ytrack contract x")
-
-	found := requireFault(t, got)
-	assert.Equal(t, "not_found", found.code)
-	assert.Equal(t, "Entity with id "+issue+" not found", detailNamed(t, found, "upstream_message"))
-	assert.Len(t, pathsSince(dev, before), 1)
-
-	kept := theWorkItemsOf(t, dev, issue)
-	require.Len(t, kept, 1)
-	assert.Equal(t, "ytrack contract a", kept[0]["text"])
 }

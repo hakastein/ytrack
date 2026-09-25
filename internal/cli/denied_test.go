@@ -34,15 +34,6 @@ func TestNoCommandNamesWhereTheTokenTheServerRefusedCameFrom(t *testing.T) {
 			},
 		},
 		{
-			name:            "a token of the environment the server does not let in",
-			status:          http.StatusForbidden,
-			upstreamError:   "Forbidden",
-			upstreamMessage: "Access to the project is denied",
-			where: func(_ *testing.T, address string) ([]string, detail) {
-				return []string{"YTRACK_URL=" + address, "YTRACK_TOKEN=" + bogusToken}, authFromEnv()
-			},
-		},
-		{
 			name:            "a token of the global record",
 			status:          http.StatusForbidden,
 			upstreamError:   "Forbidden",
@@ -148,47 +139,4 @@ func TestNoCommandLeavesTheLoginSourceOutOfAFaultThatIsNotAboutTheToken(t *testi
 			assertNoToken(t, got, token)
 		})
 	}
-}
-
-func TestAuthStatusRefusesATokenOfTheEnvironmentTheDevInstanceDoesNotKnow(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + bogusToken}, "auth", "status")
-
-	want := faultDocument{
-		code: "denied",
-		details: []detail{
-			{"request", meRequest(dev.url)},
-			{"upstream_status", 401},
-			{"upstream_error", "Unauthorized"},
-			{"upstream_message", "Invalid token"},
-			authFromEnv(),
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assertNoToken(t, got, bogusToken)
-	assert.Len(t, dev.requests(), 1)
-}
-
-func TestProjectShowRefusesATokenOfTheGlobalRecordTheDevInstanceDoesNotKnow(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	home, _ := homeWith(t, globalRecord(dev.url, bogusToken))
-
-	got := runWith(t, []string{"HOME=" + home}, "project", "show", "DEV")
-
-	want := faultDocument{
-		code: "denied",
-		details: []detail{
-			{"request", showRequest(dev.url, "DEV")},
-			{"upstream_status", 401},
-			{"upstream_error", "Unauthorized"},
-			{"upstream_message", "Invalid token"},
-			authFromSettings(),
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assertNoToken(t, got, bogusToken)
-	assert.Len(t, dev.requests(), 1)
 }

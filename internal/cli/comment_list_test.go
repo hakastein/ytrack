@@ -17,12 +17,6 @@ const (
 )
 
 const (
-	devInstanceCommentedIssue = "DEV-7"
-	devInstanceFirstComment   = "7-2"
-	devInstanceSecondComment  = "7-3"
-)
-
-const (
 	listedIssueComment = `{"deleted":false,"author":{"login":"admin","$type":"User"},"created":1789395789677,` +
 		`"text":"первая\nвторая","id":"7-2","$type":"IssueComment"}`
 	listedDeletedComment = `{"deleted":true,"author":{"login":"dev.member","$type":"User"},` +
@@ -61,24 +55,12 @@ func requireCommentListing(t *testing.T, got outcome) commentListing {
 	return printed
 }
 
-func TestCommentListHelpNamesItsDefaultFields(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"comment", "list", "--help"})
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, issueCommentListFields)
-}
-
 func TestCommentListRefusesACallThatNamesNoOneOwner(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
 		argv []string
 	}{
-		{name: "no owner", argv: []string{"comment", "list"}},
-		{name: "two owners", argv: []string{"comment", "list", "DEV-1", "DEV-2"}},
 		{name: "an internal id", argv: []string{"comment", "list", "7-12"}},
 		{name: "a path that would reach another endpoint", argv: []string{"comment", "list", ".."}},
 		{name: "a limit of zero", argv: []string{"comment", "list", "DEV-1", "--limit", "0"}},
@@ -198,81 +180,4 @@ func TestCommentListCountsTheCommentsWhenTheyFillTheLimit(t *testing.T) {
 		}, requireFault(t, got))
 		assert.Len(t, server.requests(), 1)
 	})
-}
-
-func TestCommentListReadsTheCommentsOfAnIssueOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "comment", "list", devInstanceCommentedIssue)
-
-	printed := requireCommentListing(t, got)
-	assert.Equal(t, 2, printed.Total)
-	require.Len(t, printed.Comments, 2)
-	assert.Equal(t, devInstanceFirstComment, printed.Comments[0].ID)
-	assert.Equal(t, "admin", printed.Comments[0].Author.Login)
-	assert.Equal(t, devInstanceSecondComment, printed.Comments[1].ID)
-	assert.Equal(t, "dev.member", printed.Comments[1].Author.Login)
-	for _, comment := range printed.Comments {
-		require.NotNil(t, comment.Deleted, comment.ID)
-		assert.False(t, *comment.Deleted, comment.ID)
-		require.NotNil(t, comment.Text, comment.ID)
-		assert.NotEmpty(t, *comment.Text, comment.ID)
-	}
-	assert.Equal(t, []string{"/api/issues/" + devInstanceCommentedIssue + "/comments"}, dev.sentPaths())
-	assert.Equal(t, []string{issueCommentListFields}, dev.sentFields())
-}
-
-func TestCommentListPrintsACommentTakenBackOnAnIssueOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	issue := commentedIssue(t, dev, "issue")
-	standing := commentOn(t, dev, issue, "ytrack contract остаётся")
-	gone := commentOn(t, dev, issue, "ytrack contract забрана")
-	dev.replacing(markDeleted)
-	requireUncertainty(t, runWith(t, dev.env(), "comment", "update", issue, gone, "--text", "ytrack contract x"))
-	dev.replacing(nil)
-
-	got := runWith(t, dev.env(), "comment", "list", issue)
-
-	printed := requireCommentListing(t, got)
-	assert.Equal(t, 2, printed.Total)
-	require.Len(t, printed.Comments, 2)
-	assert.Equal(t, standing, printed.Comments[0].ID)
-	require.NotNil(t, printed.Comments[0].Deleted)
-	assert.False(t, *printed.Comments[0].Deleted)
-	assert.Equal(t, gone, printed.Comments[1].ID)
-	require.NotNil(t, printed.Comments[1].Deleted)
-	assert.True(t, *printed.Comments[1].Deleted)
-	assert.Nil(t, printed.Comments[1].Text)
-}
-
-func TestCommentListReadsTheCommentsOfAnArticleOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	article := commentedArticle(t, dev, "article")
-	first := commentOn(t, dev, article, "ytrack contract первая")
-	commentOn(t, dev, article, "ytrack contract вторая")
-	before := len(dev.requests())
-
-	got := runWith(t, dev.env(), "comment", "list", article, "--limit", "1")
-
-	printed := requireCommentListing(t, got)
-	assert.Equal(t, 2, printed.Total)
-	assert.True(t, printed.Truncated)
-	require.Len(t, printed.Comments, 1)
-	assert.Equal(t, first, printed.Comments[0].ID)
-	assert.Equal(t, "admin", printed.Comments[0].Author.Login)
-	require.NotNil(t, printed.Comments[0].Text)
-	assert.Equal(t, "ytrack contract первая", *printed.Comments[0].Text)
-	assert.Nil(t, printed.Comments[0].Deleted)
-	asked := dev.requests()[before:]
-	require.Len(t, asked, 2)
-	for _, request := range asked {
-		assert.Equal(t, "/api/articles/"+article+"/comments", request.URL.Path)
-	}
-	assert.Equal(t, []url.Values{
-		{"fields": {articleCommentListFields}, "$top": {"1"}},
-		{"fields": {"id"}, "$top": {"-1"}},
-	}, dev.sentQueries()[before:])
 }

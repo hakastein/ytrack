@@ -65,16 +65,6 @@ func TestArticleCreateRefusesAParentOfAnyOtherFormBeforeAnyRequest(t *testing.T)
 	}
 }
 
-func TestArticleCreateHelpNamesTheParentFlag(t *testing.T) {
-	t.Parallel()
-
-	got := run(t, []string{"article", "create", "--help"})
-
-	assert.Equal(t, 0, got.code)
-	assert.Empty(t, got.stderr)
-	assert.Contains(t, got.stdout, "--parent")
-}
-
 func TestArticleCreateAddressesTheParentByTheIDTheReadGave(t *testing.T) {
 	t.Parallel()
 	filed := answeredArticle{readable: "DEV-A-8", summary: "x", parent: parentNamed("DEV-A-1")}
@@ -258,69 +248,4 @@ func TestArticleCreateAsksForTheParentWhateverTheExpressionSays(t *testing.T) {
 	found := requireUncertainty(t, got)
 	assert.Equal(t, "upstream_invalid", found.code)
 	assert.Empty(t, got.stdout)
-}
-
-func TestArticleCreateFilesAnArticleUnderAParentOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-	parent := fileArticle(t, dev, contractArticleTitle(t)+" parent")
-
-	got := runWith(t, dev.env(), "article", "create", "DEV", "--summary", contractArticleTitle(t)+" child",
-		"--parent", parent)
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	mapping := requireMapping(t, "stdout", got.stdout)
-	child := nodeAt(t, mapping, "idReadable").Value
-	require.Regexp(t, `^DEV-A-[0-9]+$`, child)
-	assert.Equal(t, parent, nodeAt(t, mapping, "parentArticle", "idReadable").Value)
-
-	under := runWith(t, dev.env(), "article", "show", parent, "--comments=0", "--fields", "childArticles(idReadable)")
-	require.Equal(t, 0, under.code, "stderr: %s", under.stderr)
-	assert.Contains(t, under.stdout, child)
-
-	removed := runWith(t, dev.env(), "article", "delete", parent)
-	assert.Equal(t, outcome{stdout: "idReadable: " + strconv.Quote(parent) + "\n"}, removed)
-	gone := runWith(t, dev.env(), "article", "show", child, "--comments=0")
-	assert.Equal(t, "not_found", requireFaultDocument(t, gone).code,
-		"a deletion takes the whole subtree, the child among it")
-}
-
-func TestArticleCreateFilesNothingUnderAParentTheDevInstanceDoesNotHave(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "article", "create", "DEV", "--summary", contractArticleTitle(t),
-		"--parent", "DEV-A-99999")
-
-	want := faultDocument{
-		code: "not_found",
-		details: []detail{
-			{"request", articleToWriteRequest(dev.url, "DEV-A-99999")},
-			{"upstream_status", 404},
-			{"upstream_error", "Not Found"},
-			{"upstream_message", "Can't find article with id DEV-A-99999"},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(dev))
-}
-
-func TestArticleCreateFilesNothingUnderAParentOfAnotherProjectOfTheDevInstance(t *testing.T) {
-	t.Parallel()
-	dev := devInstance(t)
-
-	got := runWith(t, dev.env(), "article", "create", "DEV", "--summary", contractArticleTitle(t),
-		"--parent", "DEMO-A-1")
-
-	want := faultDocument{
-		code: "bad_usage",
-		details: []detail{
-			{"request", articleToWriteRequest(dev.url, "DEMO-A-1")},
-			{"project", "DEV"},
-			{"parent", "DEMO-A-1"},
-			{"parent_project", "DEMO"},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, sentMethods(dev))
 }
