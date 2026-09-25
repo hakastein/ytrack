@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The field of the polygon a condition hides, and the field that condition watches.
 const (
 	rejection      = "Причина отклонения"
 	rejectionValue = "Дубль"
@@ -107,19 +106,19 @@ func TestIssueCreateSendsNoValueAConditionHides(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			metadata := projectToWrite(tc.state, writableField{id: "180-23", name: rejection, valueType: "enum",
+			metadata := projectResponse(tc.state, writableField{id: "180-23", name: rejection, valueType: "enum",
 				canBeEmpty: true, condition: tc.condition})
-			held := []arrivedField{{name: rejection, valueType: "enum", ordinal: "2", binding: "180-23",
+			held := []receivedField{{name: rejection, valueType: "enum", ordinal: "2", binding: "180-23",
 				value: bundleElement(rejectionValue)}}
 			creation := noCreation(t)
 			if !tc.hidden {
 				if len(tc.writes) > 0 {
-					held = append(held, arrivedField{name: "State", valueType: "state", binding: "180-14",
+					held = append(held, receivedField{name: "State", valueType: "state", binding: "180-14",
 						value: stateElement("Отклонена")})
 				}
-				creation = answer(http.StatusOK, filedIssueHolding("DEV-7", "x", "null", arrivedFields(held...)))
+				creation = respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", receivedFields(held...)))
 			}
-			server := creating(t, answer(http.StatusOK, metadata), creation)
+			server := creating(t, respondWith(http.StatusOK, metadata), creation)
 			argv := append([]string{"issue", "create", "DEV", "--summary", "x",
 				"--field", rejection + "=" + rejectionValue}, tc.writes...)
 
@@ -143,7 +142,7 @@ func TestIssueCreateSendsNoValueAConditionHides(t *testing.T) {
 
 // requireInvalidField is the one row a refusal over a field a condition hides prints under invalid: which field
 // and value the call gave, and that a reason came with them — its wording is not part of the contract.
-func requireInvalidField(t *testing.T, found refusal, field, value string) {
+func requireInvalidField(t *testing.T, found faultDocument, field, value string) {
 	t.Helper()
 	invalid, ok := detailNamed(t, found, "invalid").([]any)
 	require.True(t, ok, "invalid: %v", detailNamed(t, found, "invalid"))
@@ -184,28 +183,28 @@ func TestIssueCreateRequiresTheFieldTheBodyUncovers(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			metadata := projectToWrite(
+			metadata := projectResponse(
 				writableField{id: "180-14", name: "State", valueType: "state", canBeEmpty: true,
 					defaults: []string{"Новая"}},
 				writableField{id: "180-23", name: rejection, valueType: "enum",
 					condition: onlyWhen("180-14", false, "Отклонена")},
 			)
-			held := make([]arrivedField, 0, 2)
+			held := make([]receivedField, 0, 2)
 			for _, written := range tc.writes {
 				switch written {
 				case "State=Отклонена":
-					held = append(held, arrivedField{name: "State", valueType: "state", binding: "180-14",
+					held = append(held, receivedField{name: "State", valueType: "state", binding: "180-14",
 						value: stateElement("Отклонена")})
 				case rejection + "=" + rejectionValue:
-					held = append(held, arrivedField{name: rejection, valueType: "enum", ordinal: "2",
+					held = append(held, receivedField{name: rejection, valueType: "enum", ordinal: "2",
 						binding: "180-23", value: bundleElement(rejectionValue)})
 				}
 			}
-			creation := answer(http.StatusOK, filedIssueHolding("DEV-7", "x", "null", arrivedFields(held...)))
+			creation := respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", receivedFields(held...)))
 			if tc.missing != nil {
 				creation = noCreation(t)
 			}
-			server := creating(t, answer(http.StatusOK, metadata), creation)
+			server := creating(t, respondWith(http.StatusOK, metadata), creation)
 			argv := append([]string{"issue", "create", "DEV", "--summary", "x"}, tc.writes...)
 
 			got := runWith(t, server.env(), argv...)
@@ -223,10 +222,6 @@ func TestIssueCreateRequiresTheFieldTheBodyUncovers(t *testing.T) {
 	}
 }
 
-// The polygon holds Причина отклонения under a condition on State, and the three answers to it are the
-// three the caller can get: the value is refused while State stays Новая, the field is required as soon as the
-// call sets State to Отклонена, and both go in one body once it fills them both. Nothing is sent until the
-// last of them.
 func TestIssueCreateHoldsTheDevProjectToItsCondition(t *testing.T) {
 	t.Parallel()
 	t.Run("a value the condition of the project hides", func(t *testing.T) {

@@ -95,8 +95,8 @@ func TestArticleCreateAddressesTheParentByTheIDTheReadGave(t *testing.T) {
 	t.Parallel()
 	filed := answeredArticle{readable: "DEV-A-8", summary: "x", parent: parentNamed("DEV-A-1")}
 	server := filingUnderAParent(t,
-		answer(http.StatusOK, articleOfDEVToWrite("177-1", "DEV-A-1")),
-		answer(http.StatusOK, filed.json()))
+		respondWith(http.StatusOK, articleOfDEVToWrite("177-1", "DEV-A-1")),
+		respondWith(http.StatusOK, filed.json()))
 
 	got := runWith(t, server.env(), "article", "create", "DEV", "--summary", "x", "--parent", "dev-A-1")
 
@@ -123,11 +123,11 @@ func TestArticleCreateAddressesTheParentByTheIDTheReadGave(t *testing.T) {
 func TestArticleCreateRefusesAParentTheServerDoesNotHave(t *testing.T) {
 	t.Parallel()
 	said := `{"error":"Not Found","error_description":"Can't find article with id DEV-A-99999"}`
-	server := filingUnderAParent(t, answer(http.StatusNotFound, said), noCreation(t))
+	server := filingUnderAParent(t, respondWith(http.StatusNotFound, said), noCreation(t))
 
 	got := runWith(t, server.env(), "article", "create", "DEV", "--summary", "x", "--parent", "DEV-A-99999")
 
-	want := refusal{
+	want := faultDocument{
 		code: "not_found",
 		details: []detail{
 			{"request", articleToWriteRequest(server.url, "DEV-A-99999")},
@@ -147,11 +147,11 @@ func TestArticleCreateRefusesAParentOfAnotherProject(t *testing.T) {
 	t.Parallel()
 	found := `{"$type":"Article","id":"177-50","idReadable":"DEMO-A-1",` +
 		`"project":{"$type":"Project","shortName":"DEMO"}}`
-	server := filingUnderAParent(t, answer(http.StatusOK, found), noCreation(t))
+	server := filingUnderAParent(t, respondWith(http.StatusOK, found), noCreation(t))
 
 	got := runWith(t, server.env(), "article", "create", "DEV", "--summary", "x", "--parent", "DEMO-A-1")
 
-	want := refusal{
+	want := faultDocument{
 		code: "bad_usage",
 		details: []detail{
 			{"request", articleToWriteRequest(server.url, "DEMO-A-1")},
@@ -164,10 +164,7 @@ func TestArticleCreateRefusesAParentOfAnotherProject(t *testing.T) {
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 }
 
-// The judgment of names says the members of the parent arrived, not what they hold: a null under the id or
-// under the project of it passes that judgment, and the body would then address the parent by an empty string
-// and the article would be filed at the root of the tree under a 200.
-func TestArticleCreateRefusesAParentTheAnswerHoldsNothingIn(t *testing.T) {
+func TestArticleCreateRefusesAParentLeftEmptyInTheResponse(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
@@ -191,12 +188,12 @@ func TestArticleCreateRefusesAParentTheAnswerHoldsNothingIn(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := filingUnderAParent(t, answer(http.StatusOK, tc.found), noCreation(t))
+			server := filingUnderAParent(t, respondWith(http.StatusOK, tc.found), noCreation(t))
 
 			got := runWith(t, server.env(), "article", "create", "DEV", "--summary", "x", "--parent", "DEV-A-1")
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", articleToWriteRequest(server.url, "DEV-A-1")},
 					{"upstream_status", 200},
@@ -216,8 +213,8 @@ func TestArticleCreateFilesUnderAParentOfTheProjectInAnotherLetterCase(t *testin
 	t.Parallel()
 	filed := answeredArticle{readable: "DEV-A-8", summary: "x", parent: parentNamed("DEV-A-1")}
 	server := filingUnderAParent(t,
-		answer(http.StatusOK, articleOfDEVToWrite("177-1", "DEV-A-1")),
-		answer(http.StatusOK, filed.json()))
+		respondWith(http.StatusOK, articleOfDEVToWrite("177-1", "DEV-A-1")),
+		respondWith(http.StatusOK, filed.json()))
 
 	got := runWith(t, server.env(), "article", "create", "dev", "--summary", "x", "--parent", "DEV-A-1")
 
@@ -239,30 +236,30 @@ func TestArticleCreateFilesUnderAParentOfTheProjectInAnotherLetterCase(t *testin
 func TestArticleCreateRefusesAnAnswerCarryingAnotherParent(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		parent  string
-		arrived any
+		name     string
+		parent   string
+		received any
 	}{
-		{name: "no parent at all", parent: "null", arrived: nil},
-		{name: "another parent", parent: parentNamed("DEV-A-2"), arrived: "DEV-A-2"},
+		{name: "no parent at all", parent: "null", received: nil},
+		{name: "another parent", parent: parentNamed("DEV-A-2"), received: "DEV-A-2"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			filed := answeredArticle{readable: "DEV-A-8", summary: "x", parent: tc.parent}
 			server := filingUnderAParent(t,
-				answer(http.StatusOK, articleOfDEVToWrite("177-1", "DEV-A-1")),
-				answer(http.StatusOK, filed.json()))
+				respondWith(http.StatusOK, articleOfDEVToWrite("177-1", "DEV-A-1")),
+				respondWith(http.StatusOK, filed.json()))
 
 			got := runWith(t, server.env(), "article", "create", "DEV", "--summary", "x", "--parent", "DEV-A-1")
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", articleCreationRequest(server.url, askedArticleFields)},
 					{"article", "DEV-A-8"},
 					{"mismatch", []any{
-						[]detail{{"field", "parentArticle"}, {"written", "DEV-A-1"}, {"arrived", tc.arrived}},
+						[]detail{{"field", "parentArticle"}, {"expected", "DEV-A-1"}, {"actual", tc.received}},
 					}},
 				},
 			}
@@ -281,8 +278,8 @@ func TestArticleCreateAsksForTheParentWhateverTheExpressionSays(t *testing.T) {
 	filed := `{"$type":"Article","idReadable":"DEV-A-8","summary":"x","content":null,` +
 		`"project":{"$type":"Project","shortName":"DEV"},"parentArticle":{"$type":"Article","id":"177-1"}}`
 	server := filingUnderAParent(t,
-		answer(http.StatusOK, articleOfDEVToWrite("177-1", "DEV-A-1")),
-		answer(http.StatusOK, filed))
+		respondWith(http.StatusOK, articleOfDEVToWrite("177-1", "DEV-A-1")),
+		respondWith(http.StatusOK, filed))
 
 	got := runWith(t, server.env(), "article", "create", "DEV", "--summary", "x", "--parent", "DEV-A-1",
 		"--fields", "idReadable")
@@ -290,13 +287,10 @@ func TestArticleCreateAsksForTheParentWhateverTheExpressionSays(t *testing.T) {
 	asked := "idReadable,summary,content,project(shortName),parentArticle(idReadable)"
 	assert.Equal(t, []string{articleToWriteFields, asked}, server.sentFields())
 	found := requireUncertainty(t, got)
-	assert.Equal(t, "upstream_lied", found.code)
+	assert.Equal(t, "upstream_invalid", found.code)
 	assert.Empty(t, got.stdout)
 }
 
-// A tree of the polygon, built and taken away for real: the child hangs from the parent on both sides, and
-// deleting the parent takes the child with it, which is what makes one deletion enough to clean up after a
-// whole scenario.
 func TestArticleCreateFilesAnArticleUnderAParentOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -322,8 +316,6 @@ func TestArticleCreateFilesAnArticleUnderAParentOfTheDevInstance(t *testing.T) {
 		"a deletion takes the whole subtree, the child among it")
 }
 
-// The polygon has no such article, and the read says so: nothing is filed, so there is no article at the
-// root of the knowledge base to find and delete afterwards.
 func TestArticleCreateFilesNothingUnderAParentTheDevInstanceDoesNotHave(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -331,7 +323,7 @@ func TestArticleCreateFilesNothingUnderAParentTheDevInstanceDoesNotHave(t *testi
 	got := runWith(t, dev.env(), "article", "create", "DEV", "--summary", contractArticleTitle(t),
 		"--parent", "DEV-A-99999")
 
-	want := refusal{
+	want := faultDocument{
 		code: "not_found",
 		details: []detail{
 			{"request", articleToWriteRequest(dev.url, "DEV-A-99999")},
@@ -344,8 +336,6 @@ func TestArticleCreateFilesNothingUnderAParentTheDevInstanceDoesNotHave(t *testi
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(dev))
 }
 
-// DEMO-A-1 is a fixture of another project, and the polygon would file the article there under a 200: the
-// read finds the project before the write and nothing is sent, so the fixture keeps the children it had.
 func TestArticleCreateFilesNothingUnderAParentOfAnotherProjectOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -353,7 +343,7 @@ func TestArticleCreateFilesNothingUnderAParentOfAnotherProjectOfTheDevInstance(t
 	got := runWith(t, dev.env(), "article", "create", "DEV", "--summary", contractArticleTitle(t),
 		"--parent", "DEMO-A-1")
 
-	want := refusal{
+	want := faultDocument{
 		code: "bad_usage",
 		details: []detail{
 			{"request", articleToWriteRequest(dev.url, "DEMO-A-1")},

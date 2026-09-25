@@ -38,9 +38,9 @@ func filedAs(name, size string) string {
 		`"url":"/api/files/12-9?sign=s&updated=1"}]`
 }
 
-// fileHolding writes a file of that name into a directory of the test's own and gives back its path. The
+// fileWith writes a file of that name into a directory of the test's own and gives back its path. The
 // bytes are the scenario's, so a name and a content that would each go wrong on their own are told apart.
-func fileHolding(t *testing.T, name string, content []byte) string {
+func fileWith(t *testing.T, name string, content []byte) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
 	require.NoError(t, os.WriteFile(path, content, 0o600))
@@ -51,7 +51,7 @@ func fileHolding(t *testing.T, name string, content []byte) string {
 // the answer of the server still needs one to send.
 func aFileToAttach(t *testing.T) string {
 	t.Helper()
-	return fileHolding(t, "attached.txt", []byte("ytrack"))
+	return fileWith(t, "attached.txt", []byte("ytrack"))
 }
 
 // requireOnePart holds the body of the upload to being the one part it is written as and gives that part back.
@@ -112,7 +112,7 @@ func TestAttachmentCreateRefusesAPathThatIsNoRegularFile(t *testing.T) {
 				if os.Geteuid() == 0 {
 					t.Skip("root reads a file of any mode")
 				}
-				path := fileHolding(t, "locked.txt", []byte("x"))
+				path := fileWith(t, "locked.txt", []byte("x"))
 				require.NoError(t, os.Chmod(path, 0o000))
 				return path
 			},
@@ -141,7 +141,7 @@ func TestAttachmentCreateReadsALoneDashAsAFileOfThatName(t *testing.T) {
 	t.Run("no file of that name here", func(t *testing.T) {
 		t.Parallel()
 		server := serveNothing(t)
-		stdin, err := os.Open(fileHolding(t, "standard-input.bin", []byte("the bytes of standard input")))
+		stdin, err := os.Open(fileWith(t, "standard-input.bin", []byte("the bytes of standard input")))
 		require.NoError(t, err)
 		t.Cleanup(func() { assert.NoError(t, stdin.Close()) })
 
@@ -156,8 +156,8 @@ func TestAttachmentCreateReadsALoneDashAsAFileOfThatName(t *testing.T) {
 
 	t.Run("a file of that name goes out under it", func(t *testing.T) {
 		t.Parallel()
-		server := serve(t, answer(http.StatusOK, filed("-", 1)))
-		path := fileHolding(t, "-", []byte("x"))
+		server := serve(t, respondWith(http.StatusOK, filed("-", 1)))
+		path := fileWith(t, "-", []byte("x"))
 
 		got := runWith(t, server.env(), "attachment", "create", "DEV-1", path)
 
@@ -192,7 +192,7 @@ func TestAttachmentCreateRefusesANameTheServerWouldRewrite(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := serveNothing(t)
-			path := fileHolding(t, tc.file, []byte("x"))
+			path := fileWith(t, tc.file, []byte("x"))
 
 			got := runWith(t, server.env(), "attachment", "create", "DEV-1", path)
 
@@ -221,8 +221,8 @@ func TestAttachmentCreateSendsTheFileAsOneStreamedPart(t *testing.T) {
 	t.Parallel()
 	const name = "[bug] заметка; 100%.bin"
 	content := repeatedBytes(300 * 1024)
-	server := serve(t, answer(http.StatusOK, filed(name, len(content))))
-	path := fileHolding(t, name, content)
+	server := serve(t, respondWith(http.StatusOK, filed(name, len(content))))
+	path := fileWith(t, name, content)
 
 	got := runWith(t, server.env(), "attachment", "create", "DEV-1", path)
 
@@ -250,7 +250,7 @@ func TestAttachmentCreateSendsTheFileAsOneStreamedPart(t *testing.T) {
 // Everything the rules of the name leave alone goes out byte for byte, in the header of the part as well
 // as in the document: a space, a semicolon, a tab inside the name, a line separator, a non-breaking space,
 // three dots, a name of 254 bytes and a name with no extension at all.
-func TestAttachmentCreateSendsEveryOtherNameAsItStands(t *testing.T) {
+func TestAttachmentCreateSendsEveryOtherNameUnchanged(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
@@ -271,8 +271,8 @@ func TestAttachmentCreateSendsEveryOtherNameAsItStands(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, filed(tc.file, 1)))
-			path := fileHolding(t, tc.file, []byte("x"))
+			server := serve(t, respondWith(http.StatusOK, filed(tc.file, 1)))
+			path := fileWith(t, tc.file, []byte("x"))
 
 			got := runWith(t, server.env(), "attachment", "create", "DEV-1", path)
 
@@ -293,7 +293,7 @@ func TestAttachmentCreateReadsARelativePathAgainstTheWorkingDirectory(t *testing
 	t.Parallel()
 	const name = "relative.bin"
 	content := repeatedBytes(1024)
-	absolute := fileHolding(t, name, content)
+	absolute := fileWith(t, name, content)
 	here, err := os.Getwd()
 	require.NoError(t, err)
 	relative, err := filepath.Rel(here, absolute)
@@ -303,7 +303,7 @@ func TestAttachmentCreateReadsARelativePathAgainstTheWorkingDirectory(t *testing
 	for _, path := range []string{absolute, relative} {
 		t.Run(map[bool]string{true: "absolute", false: "relative"}[filepath.IsAbs(path)], func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, filed(name, len(content))))
+			server := serve(t, respondWith(http.StatusOK, filed(name, len(content))))
 
 			got := runWith(t, server.env(), "attachment", "create", "DEV-1", path)
 
@@ -319,8 +319,8 @@ func TestAttachmentCreateReadsARelativePathAgainstTheWorkingDirectory(t *testing
 // go out whatever the caller wrote, and the document still holds only what the caller asked to print.
 func TestAttachmentCreateAsksForTheNameAndTheSizeItChecks(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, filed("one.txt", 1)))
-	path := fileHolding(t, "one.txt", []byte("x"))
+	server := serve(t, respondWith(http.StatusOK, filed("one.txt", 1)))
+	path := fileWith(t, "one.txt", []byte("x"))
 
 	got := runWith(t, server.env(), "attachment", "create", "DEV-1", path, "--fields", "id")
 
@@ -342,19 +342,19 @@ func TestAttachmentCreateRefusesAnAnswerThatIsNotTheFileThatWentOut(t *testing.T
 		{
 			name:    "no attachment at all",
 			body:    `[]`,
-			details: []detail{{"arrived_count", 0}, {"upstream_body", `[]`}},
+			details: []detail{{"actual_count", 0}, {"upstream_body", `[]`}},
 		},
 		{
 			name:    "two attachments",
 			body:    twice(filed(name, len(content))),
-			details: []detail{{"arrived_count", 2}},
+			details: []detail{{"actual_count", 2}},
 		},
 		{
 			name: "a name the server kept as another",
 			body: filed(`"b.txt`, len(content)),
 			details: []detail{
 				{"attachment", "12-9"},
-				{"mismatch", []any{[]detail{{"field", "name"}, {"written", name}, {"arrived", `"b.txt`}}}},
+				{"mismatch", []any{[]detail{{"field", "name"}, {"expected", name}, {"actual", `"b.txt`}}}},
 			},
 		},
 		{
@@ -362,7 +362,7 @@ func TestAttachmentCreateRefusesAnAnswerThatIsNotTheFileThatWentOut(t *testing.T
 			body: filed(name, len(content)+1),
 			details: []detail{
 				{"attachment", "12-9"},
-				{"mismatch", []any{[]detail{{"field", "size"}, {"written", len(content)}, {"arrived", len(content) + 1}}}},
+				{"mismatch", []any{[]detail{{"field", "size"}, {"expected", len(content)}, {"actual", len(content) + 1}}}},
 			},
 		},
 		// A size that is no number at all is a disagreement like any other, and what stands under arrived is
@@ -372,7 +372,7 @@ func TestAttachmentCreateRefusesAnAnswerThatIsNotTheFileThatWentOut(t *testing.T
 			body: filedAs(strconv.Quote(name), strconv.Quote(strconv.Itoa(len(content)))),
 			details: []detail{
 				{"attachment", "12-9"},
-				{"mismatch", []any{[]detail{{"field", "size"}, {"written", len(content)}, {"arrived", "6"}}}},
+				{"mismatch", []any{[]detail{{"field", "size"}, {"expected", len(content)}, {"actual", "6"}}}},
 			},
 		},
 		// The same for the name, which is held to text: a number came back, and the refusal names that number.
@@ -381,20 +381,20 @@ func TestAttachmentCreateRefusesAnAnswerThatIsNotTheFileThatWentOut(t *testing.T
 			body: filedAs("7", strconv.Itoa(len(content))),
 			details: []detail{
 				{"attachment", "12-9"},
-				{"mismatch", []any{[]detail{{"field", "name"}, {"written", name}, {"arrived", 7}}}},
+				{"mismatch", []any{[]detail{{"field", "name"}, {"expected", name}, {"actual", 7}}}},
 			},
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, tc.body))
-			path := fileHolding(t, name, content)
+			server := serve(t, respondWith(http.StatusOK, tc.body))
+			path := fileWith(t, name, content)
 
 			got := runWith(t, server.env(), "attachment", "create", "DEV-1", path)
 
 			found := requireUncertainty(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Equal(t, detail{"request", attachmentWriteRequest(server.url, "DEV-1", attachmentFields)},
 				found.details[0])
 			assert.Subset(t, found.details, tc.details)
@@ -440,7 +440,7 @@ func TestAttachmentCreateRefusesWhatTheServerAnswered(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(tc.status, tc.body))
+			server := serve(t, respondWith(tc.status, tc.body))
 			path := aFileToAttach(t)
 
 			got := runWith(t, server.env(), "attachment", "create", "DEV-1", path)
@@ -483,16 +483,13 @@ func everyLatinRune(times int) []byte {
 	return bytes.Repeat([]byte(string(runes)), times)
 }
 
-// A file attached to an issue of the polygon for real: the document names it as it went out, the
-// signed link it prints hands the very bytes back to whoever holds it, and the list of the issue holds the
-// attachment the write says it filed.
 func TestAttachmentCreateAttachesAFileToAnIssueOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 	issue := attachedIssue(t, dev)
 	const name = "заметка контракта; 100%.bin"
 	content := everyLatinRune(2)
-	path := fileHolding(t, name, content)
+	path := fileWith(t, name, content)
 
 	got := runWith(t, dev.env(), "attachment", "create", issue, path)
 
@@ -517,13 +514,11 @@ func TestAttachmentCreateAttachesAFileToAnIssueOfTheDevInstance(t *testing.T) {
 	assert.Equal(t, written.ID, listed.Attachments[0].ID)
 }
 
-// A file with nothing in it is a file: the polygon keeps it, names it and prints a size of zero, and
-// nothing about an empty stream makes the check of the answer say otherwise.
 func TestAttachmentCreateAttachesAnEmptyFileToAnIssueOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 	issue := attachedIssue(t, dev)
-	path := fileHolding(t, "пусто.bin", nil)
+	path := fileWith(t, "пусто.bin", nil)
 
 	got := runWith(t, dev.env(), "attachment", "create", issue, path)
 
@@ -535,10 +530,10 @@ func TestAttachmentCreateAttachesAnEmptyFileToAnIssueOfTheDevInstance(t *testing
 
 // An issue nobody filed is answered 404 by the server itself, and nothing about the file was asked
 // beforehand: one request is the whole call.
-func TestAttachmentCreateRefusesAnIssueThePolygonHasNoneOf(t *testing.T) {
+func TestAttachmentCreateRefusesAnIssueTheDevInstanceHasNoneOf(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
-	path := fileHolding(t, "заметка.bin", []byte("ytrack"))
+	path := fileWith(t, "заметка.bin", []byte("ytrack"))
 
 	got := runWith(t, dev.env(), "attachment", "create", "DEV-99999", path)
 
@@ -555,7 +550,7 @@ func TestAttachmentCreateRefusesAnIssueTheTokenIsNotAnsweredFor(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 	issue := attachedIssue(t, dev)
-	path := fileHolding(t, "заметка.bin", []byte("ytrack"))
+	path := fileWith(t, "заметка.bin", []byte("ytrack"))
 	before := len(dev.requests())
 
 	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited},

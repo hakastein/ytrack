@@ -40,7 +40,7 @@ func (a answeredComment) json() string {
 		`,"text":` + cmp.Or(a.text, "null") + `}`
 }
 
-func writtenComment(id, text string) string {
+func createdComment(id, text string) string {
 	return answeredComment{id: id, text: asJSON(text)}.json()
 }
 
@@ -231,8 +231,8 @@ const hostileComment = "Шаги:  \r\n1. открыть\rи закрыть   \n
 // nothing else, and the answer as the document. The text is the most argv carries.
 func TestCommentCreateWritesOnAnIssueInOneRequest(t *testing.T) {
 	t.Parallel()
-	text := filling(hostileComment, 131_071)
-	server := commenting(t, answer(http.StatusOK, writtenComment("7-12", text)))
+	text := textOfSize(hostileComment, 131_071)
+	server := commenting(t, respondWith(http.StatusOK, createdComment("7-12", text)))
 
 	got := runWith(t, server.env(), "comment", "create", "DEV-7", "--text", text)
 
@@ -258,7 +258,7 @@ func TestCommentCreateWritesOnAnIssueInOneRequest(t *testing.T) {
 func TestCommentCreateWritesOnAnArticleInOneRequest(t *testing.T) {
 	t.Parallel()
 	const text = "первая\n  вторая   \n"
-	server := commenting(t, answer(http.StatusOK, writtenArticleComment("8-5", text)))
+	server := commenting(t, respondWith(http.StatusOK, writtenArticleComment("8-5", text)))
 
 	got := runWith(t, server.env(), "comment", "create", "dev-A-3", "--text", text)
 
@@ -296,7 +296,7 @@ func TestCommentCreateWritesTheTextItWasGiven(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := commenting(t, answer(http.StatusOK, writtenComment("7-12", tc.want)))
+			server := commenting(t, respondWith(http.StatusOK, createdComment("7-12", tc.want)))
 
 			got := runWith(t, server.env(), append([]string{"comment", "create", "DEV-7"}, tc.argv...)...)
 
@@ -319,24 +319,24 @@ func TestCommentCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 	}{
 		{
 			name:     "a text the server stored otherwise",
-			written:  writtenComment("7-12", "другое"),
-			mismatch: []any{[]detail{{"field", "text"}, {"written", "первая"}, {"arrived", "другое"}}},
+			written:  createdComment("7-12", "другое"),
+			mismatch: []any{[]detail{{"field", "text"}, {"expected", "первая"}, {"actual", "другое"}}},
 		},
 		{
 			name:     "a comment the server kept no text of",
 			written:  answeredComment{id: "7-12", text: "null"}.json(),
-			mismatch: []any{[]detail{{"field", "text"}, {"written", "первая"}, {"arrived", nil}}},
+			mismatch: []any{[]detail{{"field", "text"}, {"expected", "первая"}, {"actual", nil}}},
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := commenting(t, answer(http.StatusOK, tc.written))
+			server := commenting(t, respondWith(http.StatusOK, tc.written))
 
 			got := runWith(t, server.env(), "comment", "create", "DEV-7", "--text", "первая")
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", issueCommentRequest(server.url, "DEV-7", writtenCommentFields)},
 					{"comment", "7-12"},
@@ -355,7 +355,7 @@ func TestCommentCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 // expression reaches the document.
 func TestCommentCreateChecksMoreThanItPrints(t *testing.T) {
 	t.Parallel()
-	server := commenting(t, answer(http.StatusOK, writtenComment("7-12", "первая")))
+	server := commenting(t, respondWith(http.StatusOK, createdComment("7-12", "первая")))
 
 	got := runWith(t, server.env(), "comment", "create", "DEV-7", "--text", "первая", "--fields", "author(login)")
 
@@ -387,7 +387,7 @@ func TestCommentCreatePrintsTheOwnerWhereItWasAskedFor(t *testing.T) {
 			written := `{"$type":"` + tc.schema + `","id":"7-12","author":{"$type":"User","login":"admin"},` +
 				`"created":1789035410875,"updated":null,"text":"первая",` +
 				`"` + tc.key + `":{"$type":"` + tc.stood + `","idReadable":"` + tc.owner + `"}}`
-			server := commenting(t, answer(http.StatusOK, written))
+			server := commenting(t, respondWith(http.StatusOK, written))
 
 			got := runWith(t, server.env(), "comment", "create", tc.owner, "--text", "первая",
 				"--fields", "+"+tc.key+"(idReadable)")
@@ -401,11 +401,7 @@ func TestCommentCreatePrintsTheOwnerWhereItWasAskedFor(t *testing.T) {
 	}
 }
 
-// The schema the answer is judged at follows from the kind of the owner, like everything else the two are
-// told apart by: the two comments declare different names — deleted stands at an issue's alone, article at an
-// article's — so a caller who asks for the wrong one is told the name is not declared, with the names that are
-// beside it, rather than that their rights may have hidden a field.
-func TestCommentCreateJudgesTheAnswerAtTheSchemaOfTheOwner(t *testing.T) {
+func TestCommentCreateChecksTheResponseAgainstTheSchemaOfTheOwner(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name       string
@@ -425,14 +421,14 @@ func TestCommentCreateJudgesTheAnswerAtTheSchemaOfTheOwner(t *testing.T) {
 			name:       "the owner of a comment of an article, asked of an issue",
 			owner:      "DEV-7",
 			expression: "+article(idReadable)",
-			written:    writtenComment("7-12", "первая"),
+			written:    createdComment("7-12", "первая"),
 			unknown:    unknownEntry("article", issueCommentNames()...),
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := commenting(t, answer(http.StatusOK, tc.written))
+			server := commenting(t, respondWith(http.StatusOK, tc.written))
 
 			got := runWith(t, server.env(), "comment", "create", tc.owner, "--text", "первая",
 				"--fields", tc.expression)
@@ -484,11 +480,11 @@ func TestCommentCreateRefusesWhatTheServerRefused(t *testing.T) {
 			t.Parallel()
 			said := `{"error":` + strconv.Quote(tc.upstreamError) + `,"error_description":` +
 				strconv.Quote(tc.upstreamMessage) + `}`
-			server := commenting(t, answer(tc.status, said))
+			server := commenting(t, respondWith(tc.status, said))
 
 			got := runWith(t, server.env(), "comment", "create", "DEV-7", "--text", "x")
 
-			want := refusal{
+			want := faultDocument{
 				code: tc.code,
 				details: append([]detail{
 					{"request", issueCommentRequest(server.url, "DEV-7", writtenCommentFields)},
@@ -524,13 +520,11 @@ func commentedIssue(t *testing.T, dev *upstream, role string) string {
 	return readable
 }
 
-// A comment of eighty kilobytes written on the polygon for real, carriage returns and all: what the
-// document prints is what went out, and so is the text of the answer the polygon sent.
 func TestCommentCreateWritesOnAnIssueOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 	issue := commentedIssue(t, dev, "issue")
-	text := filling(hostileComment, 81_033)
+	text := textOfSize(hostileComment, 81_033)
 
 	got := runWith(t, dev.env(), "comment", "create", issue, "--text", text)
 
@@ -547,11 +541,9 @@ func TestCommentCreateWritesOnAnIssueOfTheDevInstance(t *testing.T) {
 		Text string `json:"text"`
 	}
 	require.NoError(t, json.Unmarshal(answers[len(answers)-1], &kept))
-	assert.Equal(t, text, kept.Text, "the polygon keeps the text of a comment byte for byte")
+	assert.Equal(t, text, kept.Text, "the dev instance keeps the text of a comment byte for byte")
 }
 
-// The same on an article of the polygon: a lone carriage return survives the write and keeps the text out
-// of a literal block when it is read back.
 func TestCommentCreateWritesOnAnArticleOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -568,9 +560,6 @@ func TestCommentCreateWritesOnAnArticleOfTheDevInstance(t *testing.T) {
 	assert.Equal(t, yaml.DoubleQuotedStyle, written.Style)
 }
 
-// Nothing of the default is hidden from a reader without the rights of an admin: the member writes on an
-// article of their own and is answered every key of it. The keys of a comment of an article are not readable
-// anywhere else on the polygon — its articles carry none — so this is where they are pinned.
 func TestCommentCreateAnswersTheMemberEveryKeyOfTheDefault(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -591,9 +580,6 @@ func TestCommentCreateAnswersTheMemberEveryKeyOfTheDefault(t *testing.T) {
 	assert.Nil(t, requireValue(t, nodeAt(t, mapping, "updated")))
 }
 
-// A workflow of the polygon votes for an issue whose comment holds +1, and it leaves the comment alone, so
-// the check of the write passes. The vote itself is a cascade on the owner and no part of this document: the
-// author of the issue is the one commenting here, and YouTrack counts no vote of theirs.
 func TestCommentCreateWritesAVoteWithoutTheWorkflowRewritingIt(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -609,8 +595,6 @@ func TestCommentCreateWritesAVoteWithoutTheWorkflowRewritingIt(t *testing.T) {
 	assert.Equal(t, "0", nodeAt(t, requireMapping(t, "stdout", read.stdout), "votes").Value)
 }
 
-// An owner the polygon has none of is the server's own refusal, and each kind of owner is asked exactly
-// once: the form settles the API, so a 404 from one is never a reason to try the other.
 func TestCommentCreateRefusesAnOwnerTheDevInstanceDoesNotHave(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -634,8 +618,6 @@ func TestCommentCreateRefusesAnOwnerTheDevInstanceDoesNotHave(t *testing.T) {
 	}
 }
 
-// A token that may not see the issue is answered as if the issue were not there, which is the whole of what
-// the polygon says about an entity hidden from it, and the issue comes back holding the comments it held.
 func TestCommentCreateRefusesAnIssueTheLimitedUserMayNotSee(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

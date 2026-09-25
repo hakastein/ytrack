@@ -9,9 +9,6 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// One of the twenty rows of the catalogue of custom-field types, as the polygon's DEV holds it: the field of
-// that type, what the call gives it, the class the body names the field by, the value the body carries and the
-// identity the issue comes back holding.
 type liveRow struct {
 	row   string
 	field string
@@ -26,8 +23,6 @@ type liveRow struct {
 	block bool
 }
 
-// The twenty rows, each filled with a value the polygon has. Which field stands for which row is the project's
-// doing: DEV binds one of every type, single-valued and multi-valued alike.
 func liveRows() []liveRow {
 	return []liveRow{
 		{row: "enum 1", field: "Type", given: []string{"Task"}, sent: "SingleEnumIssueCustomField",
@@ -178,9 +173,6 @@ func creationOfEveryRow(t *testing.T, rows []liveRow) []string {
 	return argv
 }
 
-// One issue of the polygon filled with a value of every one of the twenty types, and every row held to the
-// class the table gives it and to the shape its value takes in the body. The issue is then read back, so that
-// the identity each type is named by is a measurement of the instance rather than of the answer to the write.
 func TestIssueCreateFillsEveryRowOfTheTableOfTypes(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

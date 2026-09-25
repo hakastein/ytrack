@@ -25,10 +25,6 @@ const (
 	topLevelArticleComments = "articleComments"
 )
 
-// topLevel is the rewrite of a request on its way to the polygon: a comment addressed under its owner is
-// addressed by itself instead, under the collection a top-level comment would live in. Every request naming no
-// comment — the creation, the show of the owner, the deletion of the owner — stands as ytrack sent it, so the
-// fixtures of the scenario are filed and taken away over this very proxy.
 func topLevel(collection string) func(*url.URL) {
 	return func(u *url.URL) {
 		_, comment, found := strings.Cut(u.Path, underItsOwner)
@@ -40,19 +36,13 @@ func topLevel(collection string) func(*url.URL) {
 	}
 }
 
-// takenBack is the replacement of the body of a write: the text the caller wrote becomes the one field that
-// takes a comment of an issue back, and the read before the write, which carries no body, is left alone. It is
-// how the scenario has the polygon take a comment back over the write ytrack really sends.
-func takenBack(r *http.Request, body []byte) []byte {
+func markDeleted(r *http.Request, body []byte) []byte {
 	if r.Method != http.MethodPost || !strings.Contains(r.URL.Path, underItsOwner) {
 		return body
 	}
 	return []byte(`{"deleted":true}`)
 }
 
-// requireRoutedNowhere holds a refusal to being the server's word about the address: the status is a 404 and
-// the word with it names the protocol rather than an entity, which no comment of the polygon is ever answered
-// with.
 func requireRoutedNowhere(t *testing.T, got outcome) {
 	t.Helper()
 	found := requireRefusal(t, got)
@@ -61,11 +51,6 @@ func requireRoutedNowhere(t *testing.T, got outcome) {
 	assert.Equal(t, noSuchRoute, detailNamed(t, found, "upstream_message"))
 }
 
-// ytrack addresses a comment under its owner and has no way to address it otherwise, so the address without the
-// owner is put on the wire between ytrack and the polygon: the reading before a write and the removal both come
-// back a 404 about the route. The same calls against the address ytrack does send go through, so the 404 is the
-// address and not the comment, and a comment of that owner that is really missing is refused in the server's
-// other words.
 func TestCommentHasNoAddressOfItsOwnOnAnIssueOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -187,11 +172,6 @@ func TestCommentHasNoAddressOfItsOwnOnAnArticleOfTheDevInstance(t *testing.T) {
 	})
 }
 
-// What the read before a write of an issue's comment is there for, held to the polygon from end to end. A
-// comment is taken back by a write ytrack never sends, so the write it does send carries that body instead;
-// the answer comes back a 200 whose text is gone, and the check of the write is what says so. Afterwards the
-// comment is out of the show of the issue, no write reaches it at all, and the removal is what takes it away
-// for good.
 func TestCommentTakenBackOnTheDevInstanceIsRemovedAndNeverWritten(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -200,18 +180,18 @@ func TestCommentTakenBackOnTheDevInstanceIsRemovedAndNeverWritten(t *testing.T) 
 	show := []string{"issue", "show", issue, "--fields", "idReadable"}
 
 	t.Run("soft_delete", func(t *testing.T) {
-		dev.replacing(takenBack)
+		dev.replacing(markDeleted)
 		defer dev.replacing(nil)
 
 		got := runWith(t, dev.env(), "comment", "update", issue, comment, "--text", "ytrack contract x")
 
 		found := requireUncertainty(t, got)
-		assert.Equal(t, "upstream_lied", found.code)
+		assert.Equal(t, "upstream_invalid", found.code)
 		assert.Equal(t, comment, detailNamed(t, found, "comment"))
 		assert.Equal(t, []any{[]detail{
 			{"field", "text"},
-			{"written", "ytrack contract x"},
-			{"arrived", nil},
+			{"expected", "ytrack contract x"},
+			{"actual", nil},
 		}}, detailNamed(t, found, "mismatch"))
 	})
 

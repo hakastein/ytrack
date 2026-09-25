@@ -27,7 +27,7 @@ func openLocalFile(path string) (youtrack.AttachedFile, *diag.Fault) {
 		return youtrack.AttachedFile{}, unreadableFile(path, err)
 	}
 	if !before.Mode().IsRegular() {
-		return youtrack.AttachedFile{}, refusedFile(path, "is "+whatItIs(before.Mode()))
+		return youtrack.AttachedFile{}, invalidFileFault(path, "is "+describeFileMode(before.Mode()))
 	}
 	file, err := os.Open(path)
 	if err != nil {
@@ -42,7 +42,7 @@ func openLocalFile(path string) (youtrack.AttachedFile, *diag.Fault) {
 	// between them the path may have come to stand for something else entirely.
 	if !os.SameFile(before, opened) {
 		_ = file.Close()
-		return youtrack.AttachedFile{}, refusedFile(path, "is no longer the file it stood for a moment ago")
+		return youtrack.AttachedFile{}, invalidFileFault(path, "is no longer the file it stood for a moment ago")
 	}
 	return youtrack.AttachedFile{Name: filepath.Base(path), Body: file}, nil
 }
@@ -57,13 +57,13 @@ func unreadableFile(path string, err error) *diag.Fault {
 	return &diag.Fault{Code: diag.BadUsage, Message: fmt.Sprintf("file %s cannot be read: %s", render.Quote(path), err)}
 }
 
-func refusedFile(path, because string) *diag.Fault {
+func invalidFileFault(path, because string) *diag.Fault {
 	message := fmt.Sprintf("file %s %s, and an attachment is the bytes of one regular file", render.Quote(path), because)
 	return &diag.Fault{Code: diag.BadUsage, Message: message}
 }
 
 // What the path stands for where it is no regular file, in the words a caller would use.
-func whatItIs(mode fs.FileMode) string {
+func describeFileMode(mode fs.FileMode) string {
 	switch {
 	case mode.IsDir():
 		return "a directory"

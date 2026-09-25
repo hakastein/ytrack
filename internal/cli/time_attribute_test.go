@@ -38,8 +38,8 @@ func sentAttributes(t *testing.T, u *upstream) any {
 // found without regard to letter case; the work item prints the attribute under its name.
 func TestTimeCreateWritesAnAttributeByTheIDsOfTheProject(t *testing.T) {
 	t.Parallel()
-	server := writingTimeOfAType(t, answer(http.StatusOK, devIssueWithAttributes()),
-		answer(http.StatusOK, answeredWorkItem{attributes: sentAgentAttribute}.json()))
+	server := writingTimeOfAType(t, respondWith(http.StatusOK, devIssueWithAttributes()),
+		respondWith(http.StatusOK, answeredWorkItem{attributes: sentAgentAttribute}.json()))
 
 	got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M", "--attribute", "формат работы=ииагент",
 		"--fields", "id,attributes")
@@ -54,8 +54,8 @@ func TestTimeCreateWritesAnAttributeByTheIDsOfTheProject(t *testing.T) {
 // A type and an attribute named together cost the one read: both are settings of the same project.
 func TestTimeCreateReadsTheTypeAndTheAttributeInOneRequest(t *testing.T) {
 	t.Parallel()
-	server := writingTimeOfAType(t, answer(http.StatusOK, devIssueWithAttributes()),
-		answer(http.StatusOK, answeredWorkItem{workType: `{"$type":"WorkItemType","id":"178-0","name":"Разработка"}`,
+	server := writingTimeOfAType(t, respondWith(http.StatusOK, devIssueWithAttributes()),
+		respondWith(http.StatusOK, answeredWorkItem{workType: `{"$type":"WorkItemType","id":"178-0","name":"Разработка"}`,
 			attributes: sentAgentAttribute}.json()))
 
 	got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M", "--type", "Разработка",
@@ -69,7 +69,7 @@ func TestTimeCreateReadsTheTypeAndTheAttributeInOneRequest(t *testing.T) {
 // once with the names nearest it, and nothing is written.
 func TestTimeUpdateRefusesAnAttributeTheProjectHasNot(t *testing.T) {
 	t.Parallel()
-	server := writingTimeOfAType(t, answer(http.StatusOK, devIssueWithAttributes()),
+	server := writingTimeOfAType(t, respondWith(http.StatusOK, devIssueWithAttributes()),
 		func(http.ResponseWriter, *http.Request) { t.Error("a work item was written") })
 
 	got := runWith(t, server.env(), "time", "update", "DEV-1", "199-6", "--attribute", "Формат работы=ИИ",
@@ -88,8 +88,8 @@ func TestTimeUpdateRefusesAnAttributeTheProjectHasNot(t *testing.T) {
 // --clear takes an attribute away by an explicit null, and a name that is neither type nor text is an attribute.
 func TestTimeUpdateTakesAnAttributeAway(t *testing.T) {
 	t.Parallel()
-	server := writingTimeOfAType(t, answer(http.StatusOK, devIssueWithAttributes()),
-		answer(http.StatusOK, answeredWorkItem{}.json()))
+	server := writingTimeOfAType(t, respondWith(http.StatusOK, devIssueWithAttributes()),
+		respondWith(http.StatusOK, answeredWorkItem{}.json()))
 
 	got := runWith(t, server.env(), "time", "update", "DEV-1", "199-7", "--clear", "Формат работы")
 
@@ -98,28 +98,28 @@ func TestTimeUpdateTakesAnAttributeAway(t *testing.T) {
 }
 
 // One attribute set and taken away in one call is two writes of one place, refused before anything is read.
-func TestTimeUpdateRefusesAnAttributeSetAndTakenAway(t *testing.T) {
+func TestTimeUpdateRefusesAnAttributeSetAndRemoved(t *testing.T) {
 	t.Parallel()
 	server := serveNothing(t)
 
 	got := runWith(t, server.env(), "time", "update", "DEV-1", "199-7", "--attribute", "Формат работы=Сам",
 		"--clear", "ФОРМАТ РАБОТЫ")
 
-	assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 	assert.Empty(t, server.requests())
 }
 
 // A value the server kept other than the one written is the write going through and landing elsewhere.
 func TestTimeCreateRefusesAnAttributeTheServerKeptOtherwise(t *testing.T) {
 	t.Parallel()
-	server := writingTimeOfAType(t, answer(http.StatusOK, devIssueWithAttributes()),
-		answer(http.StatusOK, answeredWorkItem{attributes: sentNoAttribute}.json()))
+	server := writingTimeOfAType(t, respondWith(http.StatusOK, devIssueWithAttributes()),
+		respondWith(http.StatusOK, answeredWorkItem{attributes: sentNoAttribute}.json()))
 
 	got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M", "--attribute", "Формат работы=ИИагент")
 
 	found := requireUncertainty(t, got)
-	assert.Equal(t, "upstream_lied", found.code)
-	assert.Equal(t, []any{[]detail{{"field", "Формат работы"}, {"written", "ИИагент"}, {"arrived", nil}}},
+	assert.Equal(t, "upstream_invalid", found.code)
+	assert.Equal(t, []any{[]detail{{"field", "Формат работы"}, {"expected", "ИИагент"}, {"actual", nil}}},
 		detailNamed(t, found, "mismatch"))
 }
 
@@ -130,7 +130,7 @@ func TestTimeListRefusesANameUnderTheAttributes(t *testing.T) {
 
 	got := runWith(t, server.env(), "time", "list", "DEV-1", "--fields", "id,attributes(id)")
 
-	assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 	assert.Empty(t, server.requests())
 }
 
@@ -150,7 +150,7 @@ func TestTimeCreateRefusesAnAttributeItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), slices.Concat([]string{"time", "create", "DEV-1", "PT1H"}, argv)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -164,8 +164,6 @@ func methodsOf(u *upstream) []string {
 	return methods
 }
 
-// The attribute of DEV on the polygon, set on a creation, taken away by an update and printed under its name
-// both times.
 func TestTimeWritesAndTakesAwayAnAttributeOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

@@ -48,7 +48,7 @@ func TestCommentGroupHasNoCommandThatShowsOneComment(t *testing.T) {
 
 	got := runWith(t, server.env(), "comment", "show", "DEV-1", "7-1")
 
-	want := refusal{code: "bad_usage"}
+	want := faultDocument{code: "bad_usage"}
 	assert.Equal(t, want, requireRefusal(t, got))
 	assert.Empty(t, server.requests())
 }

@@ -25,9 +25,9 @@ const textStyle = "text"
 
 const freeTextMessage = "part of the search names no field of the instance and is looked for as text"
 
-// A Warn is where a call says what it does not stop for. The command that warns is handed one, so nothing in
+// A WarnFunc is where a call says what it does not stop for. The command that warns is handed one, so nothing in
 // this package knows where a warning is printed.
-type Warn func(*diag.Warning)
+type WarnFunc func(*diag.Warning)
 
 // A stretch of the caller's search the server gave a style to. start and length count units of UTF-16, the way
 // the server counts them, and neither runes nor bytes.
@@ -46,50 +46,50 @@ func markupFields() []requestedField {
 	}
 }
 
-// markUp is the search as the server reads it: which stretch of the text is a field name, a value, an operator,
+// searchMarkup is the search as the server reads it: which stretch of the text is a field name, a value, an operator,
 // free text or an error. It is asked for every search ytrack runs, before the search runs, so a selection is
 // never printed over a query nothing was said about; ytrack reads no token of the query language itself.
-func (c *Client) markUp(ctx context.Context, spec *schemas, query string) ([]styleRange, *diag.Fault) {
+func (c *Client) searchMarkup(ctx context.Context, spec *schemas, query string) ([]styleRange, *diag.Fault) {
 	body := searchBody(query)
-	answer, fault := c.passing(ctx, spec, suggestionsSchema, markupFields(), func(ctx context.Context, fields string) (*http.Response, error) {
-		return c.assistSearch(ctx, body, fields)
+	decoded, fault := c.request(ctx, spec, suggestionsSchema, markupFields(), func(ctx context.Context, fields string) (*http.Response, error) {
+		return c.apiAssistSearch(ctx, body, fields)
 	})
 	if fault != nil {
 		return nil, fault
 	}
-	marked := answer.objects[0]
+	marked := decoded.objects[0]
 	// The offsets point into the text the server read back, so a markup of any other text says nothing of this one.
 	if echoed, isText := marked[queryKey].(string); !isText || echoed != query {
 		message := "the search the markup came back with is not the one that was sent"
-		return nil, shapeFailure(answer.response, answer.body, message)
+		return nil, shapeFailure(decoded.httpResponse, decoded.body, message)
 	}
-	arrived, isList := marked[styleRangesKey].([]any)
+	received, isList := marked[styleRangesKey].([]any)
 	if !isList {
 		message := "the styled ranges of the search arrived as something other than an array"
-		return nil, shapeFailure(answer.response, answer.body, message)
+		return nil, shapeFailure(decoded.httpResponse, decoded.body, message)
 	}
 	within := utf16Units(query)
-	ranges := make([]styleRange, 0, len(arrived))
-	for _, item := range arrived {
+	ranges := make([]styleRange, 0, len(received))
+	for _, item := range received {
 		styled, isObject := item.(map[string]any)
 		if !isObject {
 			message := "a styled range of the search arrived as something other than an object"
-			return nil, shapeFailure(answer.response, answer.body, message)
+			return nil, shapeFailure(decoded.httpResponse, decoded.body, message)
 		}
-		start, startIsWhole := wholeNumber(styled[startKey])
-		length, lengthIsWhole := wholeNumber(styled[lengthKey])
+		start, startIsWhole := parseInt64(styled[startKey])
+		length, lengthIsWhole := parseInt64(styled[lengthKey])
 		style, styleIsText := styled[styleKey].(string)
 		switch {
 		case !startIsWhole || !lengthIsWhole:
 			message := "where a styled range of the search begins, or how far it runs on, is no whole number"
-			return nil, shapeFailure(answer.response, answer.body, message)
+			return nil, shapeFailure(decoded.httpResponse, decoded.body, message)
 		case !styleIsText:
 			message := "the style of a range of the search arrived as something other than text"
-			return nil, shapeFailure(answer.response, answer.body, message)
+			return nil, shapeFailure(decoded.httpResponse, decoded.body, message)
 		// The end is measured backwards from the text, since two counts the server chose could overflow added up.
 		case start < 0 || length < 0 || start > int64(within)-length:
 			message := "a styled range of the search lies outside the text that was sent"
-			return nil, shapeFailure(answer.response, answer.body, message)
+			return nil, shapeFailure(decoded.httpResponse, decoded.body, message)
 		}
 		ranges = append(ranges, styleRange{start: int(start), length: int(length), style: style})
 	}

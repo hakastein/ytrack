@@ -17,9 +17,9 @@ type Fault struct {
 	Code    Code
 	Message string
 	Details []render.Pair
-	// Wrote is a refusal that follows a write the server answered 2xx: whatever the refusal is about, the
+	// AfterWrite is a refusal that follows a write the server answered 2xx: whatever the refusal is about, the
 	// instance changed, so sending the call again would write a second time.
-	Wrote bool
+	AfterWrite bool
 }
 
 // Only *Fault is an error, so errors.As into a *Fault finds every Fault.
@@ -31,17 +31,17 @@ func (f *Fault) Error() string {
 // a write whose answer never arrived, and any refusal about a write the server carried
 // out. Only the second tells the caller whether sending the call again is safe.
 func (f *Fault) ExitCode() int {
-	if f.Code == WriteUncertain || f.Wrote {
+	if f.Code == WriteUncertain || f.AfterWrite {
 		return 2
 	}
 	return 1
 }
 
 func (f *Fault) Node() *render.Node {
-	return f.printed().node()
+	return f.document().node()
 }
 
-func (f *Fault) printed() document {
+func (f *Fault) document() document {
 	return document{Code: f.Code, Message: f.Message, Details: f.Details}
 }
 

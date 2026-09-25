@@ -45,7 +45,7 @@ func Run(ctx context.Context, argv, env []string, build *debug.BuildInfo, stdin 
 	if !errors.As(err, &fault) {
 		fault = &diag.Fault{Code: diag.BadUsage, Message: cobraMessage(err)}
 	}
-	stream.Refuse(fault)
+	stream.Fail(fault)
 	return fault.ExitCode()
 }
 
@@ -77,7 +77,7 @@ func newRoot(env []string, build *debug.BuildInfo, stdin *os.File, stdout io.Wri
 		if version {
 			return printNode(stdout, renderer, versionNode(build))
 		}
-		return refuseGroup(cmd, args)
+		return rejectGroup(cmd, args)
 	})
 	root.SilenceErrors = true
 	root.SilenceUsage = true
@@ -86,7 +86,7 @@ func newRoot(env []string, build *debug.BuildInfo, stdin *os.File, stdout io.Wri
 	root.CompletionOptions.DisableDefaultCmd = true
 	// That leaves the hidden completion protocol, which argv reaches even behind a flag,
 	// where Run does not answer it and cobra would; no shell writes such a call.
-	root.PersistentPreRunE = faultE(func(cmd *cobra.Command, _ []string) *diag.Fault {
+	root.PersistentPreRunE = runE(func(cmd *cobra.Command, _ []string) *diag.Fault {
 		switch cmd.CalledAs() {
 		case cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
 			return unknownCommand(cmd.Root(), cmd.CalledAs())
@@ -112,7 +112,7 @@ func newRoot(env []string, build *debug.BuildInfo, stdin *os.File, stdout io.Wri
 	// With errors silenced and the completion protocol refused, cobra has nothing left
 	// to write to its error writer; the error itself reaches Run as a refusal.
 	root.SetErr(io.Discard)
-	root.SetFlagErrorFunc(faultE(func(_ *cobra.Command, err error) *diag.Fault {
+	root.SetFlagErrorFunc(runE(func(_ *cobra.Command, err error) *diag.Fault {
 		return &diag.Fault{Code: diag.BadUsage, Message: flagMessage(err)}
 	}))
 	// Local and not persistent, so the flag stands on ytrack alone. cobra's own Version field is left
@@ -130,7 +130,7 @@ func newRoot(env []string, build *debug.BuildInfo, stdin *os.File, stdout io.Wri
 }
 
 func newTag(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {
-	tag := newCommand("tag", refuseGroup)
+	tag := newCommand("tag", rejectGroup)
 	tag.Short = "Manage tags"
 	tag.AddCommand(newTagList(env, stdout, renderer), newTagCreate(env, stdout, renderer),
 		newTagDelete(env, stdout, renderer), newTagAdd(env, stdout, renderer),
@@ -141,14 +141,14 @@ func newTag(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Com
 func newTagRemove(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {
 	var name, ownedBy string
 	remove := newCommand("remove <issue or article>", func(cmd *cobra.Command, args []string) *diag.Fault {
-		if fault := refuseNoName(cmd); fault != nil {
+		if fault := rejectNoName(cmd); fault != nil {
 			return fault
 		}
-		call, fault := youtrack.RemoveTag(args[0], name, written(cmd, ownedByFlag, &ownedBy))
+		call, fault := youtrack.RemoveTag(args[0], name, flagValue(cmd, ownedByFlag, &ownedBy))
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	remove.Args = cobra.ExactArgs(1)
 	remove.Short = "Untag an issue or article"
@@ -156,7 +156,7 @@ func newTagRemove(env []string, stdout io.Writer, renderer render.Renderer) *cob
 		example(render.NewMap(render.Pair{Key: "idReadable", Value: render.NewString("DEV-1")},
 			render.Pair{Key: "removed", Value: render.NewMap(render.Pair{Key: "name", Value: render.NewString("Tag")}, render.Pair{Key: "owner", Value: byLogin()})}))
 	remove.Flags().StringVar(&name, nameFlag, "", "tag `name`")
-	refuseRepeat(remove.Flags().Lookup(nameFlag))
+	rejectRepeat(remove.Flags().Lookup(nameFlag))
 	ownedByFlagOf(remove, &ownedBy)
 	return remove
 }
@@ -164,14 +164,14 @@ func newTagRemove(env []string, stdout io.Writer, renderer render.Renderer) *cob
 func newTagAdd(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {
 	var name, ownedBy string
 	add := newCommand("add <issue or article>", func(cmd *cobra.Command, args []string) *diag.Fault {
-		if fault := refuseNoName(cmd); fault != nil {
+		if fault := rejectNoName(cmd); fault != nil {
 			return fault
 		}
-		call, fault := youtrack.AddTag(args[0], name, written(cmd, ownedByFlag, &ownedBy))
+		call, fault := youtrack.AddTag(args[0], name, flagValue(cmd, ownedByFlag, &ownedBy))
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	add.Args = cobra.ExactArgs(1)
 	add.Short = "Tag an issue or article"
@@ -179,7 +179,7 @@ func newTagAdd(env []string, stdout io.Writer, renderer render.Renderer) *cobra.
 		example(render.NewMap(render.Pair{Key: "idReadable", Value: render.NewString("DEV-1")},
 			render.Pair{Key: "added", Value: render.NewMap(render.Pair{Key: "name", Value: render.NewString("Tag")}, render.Pair{Key: "owner", Value: byLogin()})}))
 	add.Flags().StringVar(&name, nameFlag, "", "tag `name`")
-	refuseRepeat(add.Flags().Lookup(nameFlag))
+	rejectRepeat(add.Flags().Lookup(nameFlag))
 	ownedByFlagOf(add, &ownedBy)
 	return add
 }
@@ -188,14 +188,14 @@ func newTagCreate(env []string, stdout io.Writer, renderer render.Renderer) *cob
 	var fields, name string
 	var shared youtrack.TagSharing
 	create := newCommand("create", func(cmd *cobra.Command, _ []string) *diag.Fault {
-		if fault := refuseNoName(cmd); fault != nil {
+		if fault := rejectNoName(cmd); fault != nil {
 			return fault
 		}
-		call, fault := youtrack.CreateTag(name, shared, writtenFields(cmd, &fields))
+		call, fault := youtrack.CreateTag(name, shared, fieldsFlagValue(cmd, &fields))
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	create.Args = cobra.ExactArgs(0)
 	create.Short = "Create a tag"
@@ -206,12 +206,12 @@ func newTagCreate(env []string, stdout io.Writer, renderer render.Renderer) *cob
 			render.Pair{Key: "tagSharingSettings", Value: sharedWith()})) + "\n\n" +
 		"Without flags only the owner sees the tag. Only --taggable-by lets a group hang it."
 	create.Flags().StringVar(&name, nameFlag, "", "tag `name`")
-	refuseRepeat(create.Flags().Lookup(nameFlag))
-	create.Flags().StringArrayVar((*[]string)(&shared.ShownTo), visibleForFlag, nil,
+	rejectRepeat(create.Flags().Lookup(nameFlag))
+	create.Flags().StringArrayVar((*[]string)(&shared.VisibleFor), visibleForFlag, nil,
 		"`group` that sees the tag; repeatable")
-	create.Flags().StringArrayVar((*[]string)(&shared.ChangedBy), updateableByFlag, nil,
+	create.Flags().StringArrayVar((*[]string)(&shared.UpdatableBy), updateableByFlag, nil,
 		"`group` that may edit the tag; repeatable")
-	create.Flags().StringArrayVar((*[]string)(&shared.Tagging), taggableByFlag, nil,
+	create.Flags().StringArrayVar((*[]string)(&shared.TaggableBy), taggableByFlag, nil,
 		"`group` that may tag with it; repeatable")
 	fieldsFlag(create, &fields, youtrack.TagCreateFields)
 	return create
@@ -220,14 +220,14 @@ func newTagCreate(env []string, stdout io.Writer, renderer render.Renderer) *cob
 func newTagDelete(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {
 	var name, ownedBy string
 	remove := newCommand("delete", func(cmd *cobra.Command, _ []string) *diag.Fault {
-		if fault := refuseNoName(cmd); fault != nil {
+		if fault := rejectNoName(cmd); fault != nil {
 			return fault
 		}
-		call, fault := youtrack.DeleteTag(name, written(cmd, ownedByFlag, &ownedBy))
+		call, fault := youtrack.DeleteTag(name, flagValue(cmd, ownedByFlag, &ownedBy))
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	remove.Args = cobra.ExactArgs(0)
 	remove.Short = "Delete a tag"
@@ -235,7 +235,7 @@ func newTagDelete(env []string, stdout io.Writer, renderer render.Renderer) *cob
 		example(render.NewMap(render.Pair{Key: "name", Value: render.NewString("Tag")}, render.Pair{Key: "owner", Value: byLogin()})) + "\n\n" +
 		"An administrator's token deletes a tag of another user as well."
 	remove.Flags().StringVar(&name, nameFlag, "", "tag `name`")
-	refuseRepeat(remove.Flags().Lookup(nameFlag))
+	rejectRepeat(remove.Flags().Lookup(nameFlag))
 	ownedByFlagOf(remove, &ownedBy)
 	return remove
 }
@@ -245,16 +245,10 @@ func newTagDelete(env []string, stdout io.Writer, renderer render.Renderer) *cob
 // the tag by its name alone.
 func ownedByFlagOf(cmd *cobra.Command, login *string) {
 	cmd.Flags().StringVar(login, ownedByFlag, "", "owner `login`, when names clash")
-	refuseRepeat(cmd.Flags().Lookup(ownedByFlag))
+	rejectRepeat(cmd.Flags().Lookup(ownedByFlag))
 }
 
-// A tag is addressed by its name, so a call that writes none names no tag at all. An empty name is a different
-// mistake — YouTrack keeps no tag under one — and only the flag tells the two apart.
-//
-// Named after the flag, the way refuseNoQuery is, and for the same reason: the flag is the whole of what it
-// reads. What was written under the flag is judged in the youtrack package, which is the one place that says
-// what name no tag could carry, and the two are not to be looked for under one name.
-func refuseNoName(cmd *cobra.Command) *diag.Fault {
+func rejectNoName(cmd *cobra.Command) *diag.Fault {
 	if cmd.Flags().Changed(nameFlag) {
 		return nil
 	}
@@ -266,11 +260,11 @@ func newTagList(env []string, stdout io.Writer, renderer render.Renderer) *cobra
 	var fields string
 	var page youtrack.Page
 	list := newCommand("list", func(cmd *cobra.Command, _ []string) *diag.Fault {
-		call, fault := youtrack.ListTags(writtenFields(cmd, &fields), page)
+		call, fault := youtrack.ListTags(fieldsFlagValue(cmd, &fields), page)
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	list.Args = cobra.ExactArgs(0)
 	list.Short = "List tags"
@@ -285,11 +279,11 @@ func newTagList(env []string, stdout io.Writer, renderer render.Renderer) *cobra
 func newLink(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {
 	var listFields string
 	list := newCommand("list <issue>", func(cmd *cobra.Command, args []string) *diag.Fault {
-		call, fault := youtrack.ListLinks(args[0], writtenFields(cmd, &listFields))
+		call, fault := youtrack.ListLinks(args[0], fieldsFlagValue(cmd, &listFields))
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	list.Args = cobra.ExactArgs(1)
 	list.Short = "List links of an issue"
@@ -301,11 +295,11 @@ func newLink(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Co
 
 	var addFields string
 	add := newCommand("add <id> <phrase> <id>", func(cmd *cobra.Command, args []string) *diag.Fault {
-		call, fault := youtrack.AddLink(args[0], args[1], args[2], writtenFields(cmd, &addFields))
+		call, fault := youtrack.AddLink(args[0], args[1], args[2], fieldsFlagValue(cmd, &addFields))
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	add.Args = cobra.ExactArgs(3)
 	add.Short = "Link two issues"
@@ -320,7 +314,7 @@ func newLink(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Co
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	remove.Args = cobra.ExactArgs(3)
 	remove.Short = "Unlink two issues"
@@ -331,14 +325,14 @@ func newLink(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Co
 			render.Pair{Key: "removed", Value: render.NewMap(render.FromData("depends on",
 				render.NewList(render.NewMap(render.Pair{Key: "idReadable", Value: render.NewString("DEV-2")}))))}))
 
-	link := newCommand("link", refuseGroup)
+	link := newCommand("link", rejectGroup)
 	link.Short = "Manage issue links"
 	link.AddCommand(list, add, remove)
 	return link
 }
 
 func newArticle(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {
-	article := newCommand("article", refuseGroup)
+	article := newCommand("article", rejectGroup)
 	article.Short = "Manage articles"
 	article.AddCommand(newArticleShow(env, stdout, renderer), newArticleList(env, stdout, renderer),
 		newArticleCreate(env, stdout, renderer), newArticleUpdate(env, stdout, renderer),
@@ -354,23 +348,23 @@ func newArticleCreate(env []string, stdout io.Writer, renderer render.Renderer) 
 			message := "no --summary was given: it carries the title of the article, which YouTrack files none without"
 			return &diag.Fault{Code: diag.BadUsage, Message: message}
 		}
-		call, fault := youtrack.CreateArticle(args[0], summary, written(cmd, contentFlag, &content),
-			written(cmd, parentFlag, &parent), writtenFields(cmd, &fields))
+		call, fault := youtrack.CreateArticle(args[0], summary, flagValue(cmd, contentFlag, &content),
+			flagValue(cmd, parentFlag, &parent), fieldsFlagValue(cmd, &fields))
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	create.Args = cobra.ExactArgs(1)
 	create.Short = "Create an article"
 	create.Long = "Create an article in a project.\n\n" +
 		example(articleExample(false))
 	create.Flags().StringVar(&summary, summaryFlag, "", "`title`")
-	refuseRepeat(create.Flags().Lookup(summaryFlag))
+	rejectRepeat(create.Flags().Lookup(summaryFlag))
 	create.Flags().StringVar(&content, contentFlag, "", "article `text`")
-	refuseRepeat(create.Flags().Lookup(contentFlag))
+	rejectRepeat(create.Flags().Lookup(contentFlag))
 	create.Flags().StringVar(&parent, parentFlag, "", "parent article `id`")
-	refuseRepeat(create.Flags().Lookup(parentFlag))
+	rejectRepeat(create.Flags().Lookup(parentFlag))
 	fieldsFlag(create, &fields, youtrack.ArticleShowFields)
 	return create
 }
@@ -379,24 +373,24 @@ func newArticleUpdate(env []string, stdout io.Writer, renderer render.Renderer) 
 	var fields, summary, content, parent string
 	var emptied []string
 	update := newCommand("update <id>", func(cmd *cobra.Command, args []string) *diag.Fault {
-		call, fault := youtrack.UpdateArticle(args[0], written(cmd, summaryFlag, &summary),
-			written(cmd, contentFlag, &content), written(cmd, parentFlag, &parent), emptied,
-			writtenFields(cmd, &fields))
+		call, fault := youtrack.UpdateArticle(args[0], flagValue(cmd, summaryFlag, &summary),
+			flagValue(cmd, contentFlag, &content), flagValue(cmd, parentFlag, &parent), emptied,
+			fieldsFlagValue(cmd, &fields))
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	update.Args = cobra.ExactArgs(1)
 	update.Short = "Update an article"
 	update.Long = "Update an article; unflagged parts stay.\n\n" +
 		example(articleExample(false))
 	update.Flags().StringVar(&summary, summaryFlag, "", "`title`")
-	refuseRepeat(update.Flags().Lookup(summaryFlag))
+	rejectRepeat(update.Flags().Lookup(summaryFlag))
 	update.Flags().StringVar(&content, contentFlag, "", "article `text`")
-	refuseRepeat(update.Flags().Lookup(contentFlag))
+	rejectRepeat(update.Flags().Lookup(contentFlag))
 	update.Flags().StringVar(&parent, parentFlag, "", "parent article `id`")
-	refuseRepeat(update.Flags().Lookup(parentFlag))
+	rejectRepeat(update.Flags().Lookup(parentFlag))
 	update.Flags().StringArrayVar(&emptied, clearFlag, nil, "empty a `part`: content or parent")
 	fieldsFlag(update, &fields, youtrack.ArticleShowFields)
 	return update
@@ -408,7 +402,7 @@ func newArticleDelete(env []string, stdout io.Writer, renderer render.Renderer) 
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	del.Args = cobra.ExactArgs(1)
 	del.Short = "Delete an article with its children"
@@ -421,11 +415,11 @@ func newArticleList(env []string, stdout io.Writer, renderer render.Renderer) *c
 	var fields, query, parent string
 	var page youtrack.Page
 	list := newCommand("list", func(cmd *cobra.Command, _ []string) *diag.Fault {
-		call, fault := articlesListed(cmd, query, parent, writtenFields(cmd, &fields), page)
+		call, fault := articlesListed(cmd, query, parent, fieldsFlagValue(cmd, &fields), page)
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	list.Args = cobra.ExactArgs(0)
 	list.Short = "Search articles"
@@ -437,9 +431,9 @@ func newArticleList(env []string, stdout io.Writer, renderer render.Renderer) *c
 		"the server cannot parse finds every article, neither with an error.\n\n" +
 		"--parent lists the children of an article instead, and takes no --query."
 	list.Flags().StringVar(&query, "query", "", "YouTrack `search`")
-	refuseRepeat(list.Flags().Lookup("query"))
+	rejectRepeat(list.Flags().Lookup("query"))
 	list.Flags().StringVar(&parent, parentFlag, "", "parent article `id`")
-	refuseRepeat(list.Flags().Lookup(parentFlag))
+	rejectRepeat(list.Flags().Lookup(parentFlag))
 	fieldsFlag(list, &fields, youtrack.ArticleListFields)
 	pageFlags(list, &page, "articles")
 	return list
@@ -447,7 +441,7 @@ func newArticleList(env []string, stdout io.Writer, renderer render.Renderer) *c
 
 func articlesListed(cmd *cobra.Command, query, parent string, expression *string, page youtrack.Page) (youtrack.Call, *diag.Fault) {
 	if !cmd.Flags().Changed(parentFlag) {
-		if fault := refuseNoQuery(cmd, "the search to run", "article"); fault != nil {
+		if fault := rejectNoQuery(cmd, "the search to run", "article"); fault != nil {
 			return nil, fault
 		}
 		return youtrack.ListArticles(query, expression, page)
@@ -463,11 +457,11 @@ func newArticleShow(env []string, stdout io.Writer, renderer render.Renderer) *c
 	var fields string
 	comments := commentsValue{comments: youtrack.AllComments()}
 	show := newCommand("show <id>", func(cmd *cobra.Command, args []string) *diag.Fault {
-		call, fault := youtrack.ShowArticle(args[0], writtenFields(cmd, &fields), comments.comments)
+		call, fault := youtrack.ShowArticle(args[0], fieldsFlagValue(cmd, &fields), comments.comments)
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	show.Args = cobra.ExactArgs(1)
 	show.Short = "Show an article"
@@ -479,7 +473,7 @@ func newArticleShow(env []string, stdout io.Writer, renderer render.Renderer) *c
 }
 
 func newAttachment(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {
-	attachment := newCommand("attachment", refuseGroup)
+	attachment := newCommand("attachment", rejectGroup)
 	attachment.Short = "Manage attachments"
 	attachment.AddCommand(newAttachmentCreate(env, stdout, renderer), newAttachmentDelete(env, stdout, renderer),
 		newAttachmentList(env, stdout, renderer))
@@ -492,7 +486,7 @@ func newAttachmentDelete(env []string, stdout io.Writer, renderer render.Rendere
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	remove.Args = cobra.ExactArgs(2)
 	remove.Short = "Delete an attachment"
@@ -509,11 +503,11 @@ func newAttachmentCreate(env []string, stdout io.Writer, renderer render.Rendere
 	create := newCommand("create <owner> <path>", func(cmd *cobra.Command, args []string) *diag.Fault {
 		call, fault := youtrack.CreateAttachment(args[0], func() (youtrack.AttachedFile, *diag.Fault) {
 			return openLocalFile(args[1])
-		}, writtenFields(cmd, &fields))
+		}, fieldsFlagValue(cmd, &fields))
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	create.Args = cobra.ExactArgs(2)
 	// The one command of ytrack an argument of which is a file, and it is the second argument: the shell
@@ -531,11 +525,11 @@ func newAttachmentList(env []string, stdout io.Writer, renderer render.Renderer)
 	var fields string
 	var page youtrack.Page
 	list := newCommand("list <owner>", func(cmd *cobra.Command, args []string) *diag.Fault {
-		call, fault := youtrack.ListAttachments(args[0], writtenFields(cmd, &fields), page)
+		call, fault := youtrack.ListAttachments(args[0], fieldsFlagValue(cmd, &fields), page)
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	list.Args = cobra.ExactArgs(1)
 	list.Short = "List attachments"
@@ -550,7 +544,7 @@ func newAttachmentList(env []string, stdout io.Writer, renderer render.Renderer)
 }
 
 func newComment(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {
-	comment := newCommand("comment", refuseGroup)
+	comment := newCommand("comment", rejectGroup)
 	comment.Short = "Manage comments"
 	comment.AddCommand(newCommentList(env, stdout, renderer), newCommentCreate(env, stdout, renderer),
 		newCommentUpdate(env, stdout, renderer), newCommentDelete(env, stdout, renderer))
@@ -561,11 +555,11 @@ func newCommentList(env []string, stdout io.Writer, renderer render.Renderer) *c
 	var fields string
 	var page youtrack.Page
 	list := newCommand("list <owner>", func(cmd *cobra.Command, args []string) *diag.Fault {
-		call, fault := youtrack.ListComments(args[0], writtenFields(cmd, &fields), page)
+		call, fault := youtrack.ListComments(args[0], fieldsFlagValue(cmd, &fields), page)
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	list.Args = cobra.ExactArgs(1)
 	list.Short = "List comments"
@@ -600,11 +594,11 @@ func newCommentCreate(env []string, stdout io.Writer, renderer render.Renderer) 
 		if !cmd.Flags().Changed(textFlag) {
 			return &diag.Fault{Code: diag.BadUsage, Message: noCommentText}
 		}
-		call, fault := youtrack.CreateComment(args[0], text, writtenFields(cmd, &fields))
+		call, fault := youtrack.CreateComment(args[0], text, fieldsFlagValue(cmd, &fields))
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	create.Args = cobra.ExactArgs(1)
 	create.Short = "Add a comment"
@@ -612,7 +606,7 @@ func newCommentCreate(env []string, stdout io.Writer, renderer render.Renderer) 
 		"<owner> is a readable id such as DEV-1 or DEV-A-1.\n\n" +
 		example(commentExample(render.NewNull())) + "\n\n" + commentOwner
 	create.Flags().StringVar(&text, textFlag, "", "comment `text`")
-	refuseRepeat(create.Flags().Lookup(textFlag))
+	rejectRepeat(create.Flags().Lookup(textFlag))
 	fieldsFlag(create, &fields, youtrack.CommentFields)
 	return create
 }
@@ -623,11 +617,11 @@ func newCommentUpdate(env []string, stdout io.Writer, renderer render.Renderer) 
 		if !cmd.Flags().Changed(textFlag) {
 			return &diag.Fault{Code: diag.BadUsage, Message: noCommentText}
 		}
-		call, fault := youtrack.UpdateComment(args[0], args[1], text, writtenFields(cmd, &fields))
+		call, fault := youtrack.UpdateComment(args[0], args[1], text, fieldsFlagValue(cmd, &fields))
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	update.Args = cobra.ExactArgs(2)
 	update.Short = "Replace a comment's text"
@@ -636,7 +630,7 @@ func newCommentUpdate(env []string, stdout io.Writer, renderer render.Renderer) 
 		"list prints.\n\n" +
 		example(commentExample(moment())) + "\n\n" + commentOwner
 	update.Flags().StringVar(&text, textFlag, "", "comment `text`")
-	refuseRepeat(update.Flags().Lookup(textFlag))
+	rejectRepeat(update.Flags().Lookup(textFlag))
 	fieldsFlag(update, &fields, youtrack.CommentFields)
 	return update
 }
@@ -647,7 +641,7 @@ func newCommentDelete(env []string, stdout io.Writer, renderer render.Renderer) 
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	del.Args = cobra.ExactArgs(2)
 	del.Short = "Delete a comment"
@@ -659,7 +653,7 @@ func newCommentDelete(env []string, stdout io.Writer, renderer render.Renderer) 
 }
 
 func newIssue(env []string, stdout io.Writer, renderer render.Renderer, stream *diag.Stream) *cobra.Command {
-	issue := newCommand("issue", refuseGroup)
+	issue := newCommand("issue", rejectGroup)
 	issue.Short = "Manage issues"
 	issue.AddCommand(newIssueShow(env, stdout, renderer), newIssueList(env, stdout, renderer, stream),
 		newIssueCreate(env, stdout, renderer), newIssueUpdate(env, stdout, renderer),
@@ -671,11 +665,11 @@ func newIssueShow(env []string, stdout io.Writer, renderer render.Renderer) *cob
 	var fields string
 	comments := commentsValue{comments: youtrack.AllComments()}
 	show := newCommand("show <id>", func(cmd *cobra.Command, args []string) *diag.Fault {
-		call, fault := youtrack.ShowIssue(args[0], writtenFields(cmd, &fields), comments.comments)
+		call, fault := youtrack.ShowIssue(args[0], fieldsFlagValue(cmd, &fields), comments.comments)
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	show.Args = cobra.ExactArgs(1)
 	show.Short = "Show an issue"
@@ -694,14 +688,14 @@ func newIssueList(env []string, stdout io.Writer, renderer render.Renderer, stre
 	var fields, query string
 	var page youtrack.Page
 	list := newCommand("list", func(cmd *cobra.Command, _ []string) *diag.Fault {
-		if fault := refuseNoQuery(cmd, "the search to run", "issue"); fault != nil {
+		if fault := rejectNoQuery(cmd, "the search to run", "issue"); fault != nil {
 			return fault
 		}
-		call, fault := youtrack.ListIssues(query, writtenFields(cmd, &fields), page, stream.Warn)
+		call, fault := youtrack.ListIssues(query, fieldsFlagValue(cmd, &fields), page, stream.Warn)
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	list.Args = cobra.ExactArgs(0)
 	list.Short = "Search issues"
@@ -714,7 +708,7 @@ func newIssueList(env []string, stdout io.Writer, renderer render.Renderer, stre
 		"that holds something; a named field is printed even when empty, and one the issue does not have is left out. " +
 		"Links print under their phrase: --fields '+links(issues(idReadable))'."
 	list.Flags().StringVar(&query, "query", "", "YouTrack `search`")
-	refuseRepeat(list.Flags().Lookup("query"))
+	rejectRepeat(list.Flags().Lookup("query"))
 	fieldsFlag(list, &fields, youtrack.IssueListFields)
 	pageFlags(list, &page, "issues")
 	return list
@@ -729,23 +723,21 @@ func newIssueCreate(env []string, stdout io.Writer, renderer render.Renderer) *c
 			message := "no --summary was given: it carries the title of the issue, which YouTrack files none without"
 			return &diag.Fault{Code: diag.BadUsage, Message: message}
 		}
-		// A description nobody wrote leaves the key out of the body altogether, which is a third thing beside
-		// prose and an explicit empty.
-		call, fault := youtrack.CreateIssue(args[0], summary, written(cmd, descriptionFlag, &description), filled,
-			writtenFields(cmd, &fields))
+		call, fault := youtrack.CreateIssue(args[0], summary, flagValue(cmd, descriptionFlag, &description), filled,
+			fieldsFlagValue(cmd, &fields))
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	create.Args = cobra.ExactArgs(1)
 	create.Short = "Create an issue"
 	create.Long = "Create an issue in a project.\n\n" +
 		example(issueExample(false))
 	create.Flags().StringVar(&summary, summaryFlag, "", "`title`")
-	refuseRepeat(create.Flags().Lookup(summaryFlag))
+	rejectRepeat(create.Flags().Lookup(summaryFlag))
 	create.Flags().StringVar(&description, descriptionFlag, "", "`text` of the description")
-	refuseRepeat(create.Flags().Lookup(descriptionFlag))
+	rejectRepeat(create.Flags().Lookup(descriptionFlag))
 	create.Flags().StringArrayVar(&filled, fieldFlag, nil,
 		"custom field `Name=value`; repeatable")
 	fieldsFlag(create, &fields, youtrack.IssueShowFields)
@@ -756,12 +748,12 @@ func newIssueUpdate(env []string, stdout io.Writer, renderer render.Renderer) *c
 	var fields, summary, description string
 	var filled, emptied []string
 	update := newCommand("update <id>", func(cmd *cobra.Command, args []string) *diag.Fault {
-		call, fault := youtrack.UpdateIssue(args[0], written(cmd, summaryFlag, &summary),
-			written(cmd, descriptionFlag, &description), filled, emptied, writtenFields(cmd, &fields))
+		call, fault := youtrack.UpdateIssue(args[0], flagValue(cmd, summaryFlag, &summary),
+			flagValue(cmd, descriptionFlag, &description), filled, emptied, fieldsFlagValue(cmd, &fields))
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	update.Args = cobra.ExactArgs(1)
 	update.Short = "Update an issue"
@@ -770,9 +762,9 @@ func newIssueUpdate(env []string, stdout io.Writer, renderer render.Renderer) *c
 		"them.\n\n" +
 		example(issueExample(false))
 	update.Flags().StringVar(&summary, summaryFlag, "", "`title`")
-	refuseRepeat(update.Flags().Lookup(summaryFlag))
+	rejectRepeat(update.Flags().Lookup(summaryFlag))
 	update.Flags().StringVar(&description, descriptionFlag, "", "`text` of the description")
-	refuseRepeat(update.Flags().Lookup(descriptionFlag))
+	rejectRepeat(update.Flags().Lookup(descriptionFlag))
 	update.Flags().StringArrayVar(&filled, fieldFlag, nil,
 		"custom field `Name=value`; repeatable")
 	update.Flags().StringArrayVar(&emptied, clearFlag, nil,
@@ -787,7 +779,7 @@ func newIssueDelete(env []string, stdout io.Writer, renderer render.Renderer) *c
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	del.Args = cobra.ExactArgs(1)
 	del.Short = "Delete an issue"
@@ -801,11 +793,11 @@ func newActivity(env []string, stdout io.Writer, renderer render.Renderer) *cobr
 	var categories []string
 	var page youtrack.Page
 	list := newCommand("list <issue>", func(cmd *cobra.Command, args []string) *diag.Fault {
-		call, fault := youtrack.ListActivities(args[0], writtenFields(cmd, &fields), page, categories)
+		call, fault := youtrack.ListActivities(args[0], fieldsFlagValue(cmd, &fields), page, categories)
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	list.Args = cobra.ExactArgs(1)
 	list.Short = "List the journal of an issue"
@@ -830,15 +822,15 @@ func newActivity(env []string, stdout io.Writer, renderer render.Renderer) *cobr
 	fieldsFlag(list, &fields, youtrack.ActivityListFields)
 	pageFlags(list, &page, "activities")
 
-	activity := newCommand("activity", refuseGroup)
+	activity := newCommand("activity", rejectGroup)
 	activity.Short = "Read issue journals"
 	activity.AddCommand(list)
 	return activity
 }
 
-// written is the value of a flag the caller wrote, and nothing where they wrote no such flag: an empty value
+// flagValue is the value of a flag the caller wrote, and nothing where they wrote no such flag: an empty value
 // and no flag at all are two different things to say, and pflag holds the same empty string for both.
-func written(cmd *cobra.Command, flag string, value *string) *string {
+func flagValue(cmd *cobra.Command, flag string, value *string) *string {
 	if !cmd.Flags().Changed(flag) {
 		return nil
 	}
@@ -880,7 +872,7 @@ func newUser(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Co
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	show.Args = cobra.ExactArgs(1)
 	show.Short = "Show a user"
@@ -893,14 +885,14 @@ func newUser(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Co
 	var listFields, search string
 	var page youtrack.Page
 	list := newCommand("list", func(cmd *cobra.Command, _ []string) *diag.Fault {
-		if fault := refuseNoQuery(cmd, "the text to search for", "user"); fault != nil {
+		if fault := rejectNoQuery(cmd, "the text to search for", "user"); fault != nil {
 			return fault
 		}
 		call, fault := youtrack.ListUsers(search, listFields, page)
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	list.Args = cobra.ExactArgs(0)
 	list.Short = "Search users"
@@ -909,11 +901,11 @@ func newUser(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Co
 		example(listed(1, false, "users", render.NewMap(render.Pair{Key: "login", Value: render.NewString("user")}, render.Pair{Key: "fullName", Value: render.NewString("User")},
 			render.Pair{Key: "banned", Value: render.NewBool(false)})))
 	list.Flags().StringVar(&search, "query", "", "login or name prefix")
-	refuseRepeat(list.Flags().Lookup("query"))
+	rejectRepeat(list.Flags().Lookup("query"))
 	fieldsFlag(list, &listFields, youtrack.UserListFields)
 	pageFlags(list, &page, "users")
 
-	user := newCommand("user", refuseGroup)
+	user := newCommand("user", rejectGroup)
 	user.Short = "Find users"
 	user.AddCommand(show, list)
 	return user
@@ -926,7 +918,7 @@ func newField(env []string, stdout io.Writer, renderer render.Renderer) *cobra.C
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	list.Args = cobra.ExactArgs(1)
 	list.Short = "List custom fields of a project"
@@ -938,11 +930,11 @@ func newField(env []string, stdout io.Writer, renderer render.Renderer) *cobra.C
 	show := newCommand("show <project> <field>", func(cmd *cobra.Command, args []string) *diag.Fault {
 		// What field show prints by default is a function of what the field holds, so no string stands in for
 		// it here.
-		call, fault := youtrack.ShowField(args[0], args[1], writtenFields(cmd, &showFields))
+		call, fault := youtrack.ShowField(args[0], args[1], fieldsFlagValue(cmd, &showFields))
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	show.Args = cobra.ExactArgs(2)
 	show.Short = "Show a custom field"
@@ -951,7 +943,7 @@ func newField(env []string, stdout io.Writer, renderer render.Renderer) *cobra.C
 		"A field of users prints bundle.aggregatedUsers(login) instead, where an empty list means anyone."
 	fieldsFlag(show, &showFields, "")
 
-	field := newCommand("field", refuseGroup)
+	field := newCommand("field", rejectGroup)
 	field.Short = "Read custom fields"
 	field.AddCommand(list, show)
 	return field
@@ -964,7 +956,7 @@ func newProject(env []string, stdout io.Writer, renderer render.Renderer) *cobra
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	show.Args = cobra.ExactArgs(1)
 	show.Short = "Show a project"
@@ -982,7 +974,7 @@ func newProject(env []string, stdout io.Writer, renderer render.Renderer) *cobra
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	list.Args = cobra.ExactArgs(0)
 	list.Short = "List projects"
@@ -991,14 +983,14 @@ func newProject(env []string, stdout io.Writer, renderer render.Renderer) *cobra
 	fieldsFlag(list, &listFields, youtrack.ProjectListFields)
 	pageFlags(list, &page, "projects")
 
-	project := newCommand("project", refuseGroup)
+	project := newCommand("project", rejectGroup)
 	project.Short = "Read projects"
 	project.AddCommand(show, list)
 	return project
 }
 
 func newTime(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {
-	tracking := newCommand("time", refuseGroup)
+	tracking := newCommand("time", rejectGroup)
 	tracking.Short = "Manage logged time"
 	tracking.AddCommand(newTimeList(env, stdout, renderer), newTimeCreate(env, stdout, renderer),
 		newTimeUpdate(env, stdout, renderer), newTimeDelete(env, stdout, renderer))
@@ -1009,11 +1001,11 @@ func newTimeList(env []string, stdout io.Writer, renderer render.Renderer) *cobr
 	var fields string
 	var page youtrack.Page
 	list := newCommand("list <issue>", func(cmd *cobra.Command, args []string) *diag.Fault {
-		call, fault := youtrack.ListWorkItems(args[0], writtenFields(cmd, &fields), page)
+		call, fault := youtrack.ListWorkItems(args[0], fieldsFlagValue(cmd, &fields), page)
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	list.Args = cobra.ExactArgs(1)
 	list.Short = "List work items"
@@ -1033,12 +1025,12 @@ func newTimeCreate(env []string, stdout io.Writer, renderer render.Renderer) *co
 	var attributes []string
 	create := newCommand("create <issue> <duration>", func(cmd *cobra.Command, args []string) *diag.Fault {
 		// YouTrack itself defaults an omitted day to today, the type to none and the text to empty.
-		call, fault := youtrack.CreateWorkItem(args[0], args[1], written(cmd, dateFlag, &date),
-			written(cmd, textFlag, &text), written(cmd, typeFlag, &workType), attributes, writtenFields(cmd, &fields))
+		call, fault := youtrack.CreateWorkItem(args[0], args[1], flagValue(cmd, dateFlag, &date),
+			flagValue(cmd, textFlag, &text), flagValue(cmd, typeFlag, &workType), attributes, fieldsFlagValue(cmd, &fields))
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	create.Args = cobra.ExactArgs(2)
 	create.Short = "Log time"
@@ -1047,11 +1039,11 @@ func newTimeCreate(env []string, stdout io.Writer, renderer render.Renderer) *co
 		"--type is one of the workItemTypes ytrack project show prints, --attribute one of its attributes.\n\n" +
 		example(workItemExample())
 	create.Flags().StringVar(&date, dateFlag, "", "`day`, as in 2026-09-01")
-	refuseRepeat(create.Flags().Lookup(dateFlag))
+	rejectRepeat(create.Flags().Lookup(dateFlag))
 	create.Flags().StringVar(&workType, typeFlag, "", "work item type `name`")
-	refuseRepeat(create.Flags().Lookup(typeFlag))
+	rejectRepeat(create.Flags().Lookup(typeFlag))
 	create.Flags().StringVar(&text, textFlag, "", "work item `text`")
-	refuseRepeat(create.Flags().Lookup(textFlag))
+	rejectRepeat(create.Flags().Lookup(textFlag))
 	create.Flags().StringArrayVar(&attributes, attributeFlag, nil, "work item attribute `Name=value`; repeatable")
 	fieldsFlag(create, &fields, youtrack.WorkItemWriteFields)
 	return create
@@ -1061,13 +1053,13 @@ func newTimeUpdate(env []string, stdout io.Writer, renderer render.Renderer) *co
 	var fields, spent, date, text, workType string
 	var attributes, emptied []string
 	update := newCommand("update <issue> <id>", func(cmd *cobra.Command, args []string) *diag.Fault {
-		call, fault := youtrack.UpdateWorkItem(args[0], args[1], written(cmd, durationFlag, &spent),
-			written(cmd, dateFlag, &date), written(cmd, textFlag, &text),
-			written(cmd, typeFlag, &workType), attributes, emptied, writtenFields(cmd, &fields))
+		call, fault := youtrack.UpdateWorkItem(args[0], args[1], flagValue(cmd, durationFlag, &spent),
+			flagValue(cmd, dateFlag, &date), flagValue(cmd, textFlag, &text),
+			flagValue(cmd, typeFlag, &workType), attributes, emptied, fieldsFlagValue(cmd, &fields))
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	update.Args = cobra.ExactArgs(2)
 	update.Short = "Update a work item"
@@ -1075,13 +1067,13 @@ func newTimeUpdate(env []string, stdout io.Writer, renderer render.Renderer) *co
 		"<id> is the work item id such as 150-1 that ytrack time list prints.\n\n" +
 		example(workItemExample())
 	update.Flags().StringVar(&spent, durationFlag, "", "`duration`, as in PT1H30M")
-	refuseRepeat(update.Flags().Lookup(durationFlag))
+	rejectRepeat(update.Flags().Lookup(durationFlag))
 	update.Flags().StringVar(&date, dateFlag, "", "`day`, as in 2026-09-01")
-	refuseRepeat(update.Flags().Lookup(dateFlag))
+	rejectRepeat(update.Flags().Lookup(dateFlag))
 	update.Flags().StringVar(&workType, typeFlag, "", "work item type `name`")
-	refuseRepeat(update.Flags().Lookup(typeFlag))
+	rejectRepeat(update.Flags().Lookup(typeFlag))
 	update.Flags().StringVar(&text, textFlag, "", "work item `text`")
-	refuseRepeat(update.Flags().Lookup(textFlag))
+	rejectRepeat(update.Flags().Lookup(textFlag))
 	update.Flags().StringArrayVar(&attributes, attributeFlag, nil, "work item attribute `Name=value`; repeatable")
 	update.Flags().StringArrayVar(&emptied, clearFlag, nil, "empty a `part`: type, text or an attribute name")
 	fieldsFlag(update, &fields, youtrack.WorkItemWriteFields)
@@ -1094,7 +1086,7 @@ func newTimeDelete(env []string, stdout io.Writer, renderer render.Renderer) *co
 		if fault != nil {
 			return fault
 		}
-		return send(cmd.Context(), env, stdout, renderer, call)
+		return runCall(cmd.Context(), env, stdout, renderer, call)
 	})
 	del.Args = cobra.ExactArgs(2)
 	del.Short = "Delete a work item"
@@ -1130,25 +1122,25 @@ const listLimit = 50
 
 func pageFlags(cmd *cobra.Command, page *youtrack.Page, plural string) {
 	cmd.Flags().IntVar(&page.Limit, "limit", listLimit, "max "+plural)
-	refuseRepeat(cmd.Flags().Lookup("limit"))
+	rejectRepeat(cmd.Flags().Lookup("limit"))
 	cmd.Flags().IntVar(&page.Skip, "skip", 0, plural+" to pass over before the first")
-	refuseRepeat(cmd.Flags().Lookup("skip"))
+	rejectRepeat(cmd.Flags().Lookup("skip"))
 }
 
 func fieldsFlag(cmd *cobra.Command, expression *string, defaults string) {
 	cmd.Flags().StringVar(expression, "fields", defaults, "YouTrack fields `expression`; +expr adds to the default")
-	refuseRepeat(cmd.Flags().Lookup("fields"))
+	rejectRepeat(cmd.Flags().Lookup("fields"))
 }
 
 func commentsFlag(cmd *cobra.Command, comments *commentsValue) {
 	cmd.Flags().Var(comments, "comments",
 		"latest comments to print, 0 for none")
-	refuseRepeat(cmd.Flags().Lookup("comments"))
+	rejectRepeat(cmd.Flags().Lookup("comments"))
 }
 
-// writtenFields is the expression the caller wrote, and nil where they wrote none: what pflag holds then is the
+// fieldsFlagValue is the expression the caller wrote, and nil where they wrote none: what pflag holds then is the
 // default of the command, which stands for no expression at all.
-func writtenFields(cmd *cobra.Command, expression *string) *string {
+func fieldsFlagValue(cmd *cobra.Command, expression *string) *string {
 	if !cmd.Flags().Changed("fields") {
 		return nil
 	}
@@ -1157,7 +1149,7 @@ func writtenFields(cmd *cobra.Command, expression *string) *string {
 
 // An empty --query is the caller asking for every record there is, so only the flag itself tells a search from
 // none. carries is what the flag holds, and thing what one record of the command is.
-func refuseNoQuery(cmd *cobra.Command, carries, thing string) *diag.Fault {
+func rejectNoQuery(cmd *cobra.Command, carries, thing string) *diag.Fault {
 	if cmd.Flags().Changed("query") {
 		return nil
 	}
@@ -1165,28 +1157,28 @@ func refuseNoQuery(cmd *cobra.Command, carries, thing string) *diag.Fault {
 	return &diag.Fault{Code: diag.BadUsage, Message: message}
 }
 
-// send is a command that prints what the server answered and nothing besides.
-func send(ctx context.Context, env []string, stdout io.Writer, renderer render.Renderer, call youtrack.Call) *diag.Fault {
-	_, answer, fault := ask(ctx, env, call)
+// runCall is a command that prints what the server answered and nothing besides.
+func runCall(ctx context.Context, env []string, stdout io.Writer, renderer render.Renderer, call youtrack.Call) *diag.Fault {
+	_, node, fault := connectAndCall(ctx, env, call)
 	if fault != nil {
 		return fault
 	}
-	return printNode(stdout, renderer, answer)
+	return printNode(stdout, renderer, node)
 }
 
-// ask is the one place a command reaches YouTrack from, and the connection comes back out for the command whose
+// connectAndCall is the one place a command reaches YouTrack from, and the connection comes back out for the command whose
 // document says more than the answer did. Only a call that assembled reads the address and the token, so a call
 // that did not is bad_usage whatever env holds.
-func ask(ctx context.Context, env []string, call youtrack.Call) (connection, *render.Node, *diag.Fault) {
+func connectAndCall(ctx context.Context, env []string, call youtrack.Call) (connection, *render.Node, *diag.Fault) {
 	c, fault := connect(env)
 	if fault != nil {
 		return connection{}, nil, fault
 	}
-	answer, fault := call(ctx, c.client)
+	node, fault := call(ctx, c.client)
 	if fault != nil {
-		return connection{}, nil, c.refused(fault)
+		return connection{}, nil, c.withOrigin(fault)
 	}
-	return c, answer, nil
+	return c, node, nil
 }
 
 // A failure ytrack has no code for goes under upstream_failed (ADR-0005).
@@ -1198,7 +1190,7 @@ func printNode(stdout io.Writer, renderer render.Renderer, node *render.Node) *d
 }
 
 // pflag keeps the last of the values a flag is given, so a flag that takes one refuses the second.
-func refuseRepeat(flag *pflag.Flag) {
+func rejectRepeat(flag *pflag.Flag) {
 	flag.Value = &onceValue{Value: flag.Value}
 }
 
@@ -1217,7 +1209,7 @@ func (v *onceValue) Set(value string) error {
 
 // Without RunE, cobra answers a call that names none of a group's commands as it answers
 // --help, with exit code 0.
-func refuseGroup(cmd *cobra.Command, args []string) *diag.Fault {
+func rejectGroup(cmd *cobra.Command, args []string) *diag.Fault {
 	if len(args) == 0 {
 		return &diag.Fault{Code: diag.BadUsage, Message: "no command given"}
 	}
@@ -1278,12 +1270,12 @@ func unknownCommand(parent *cobra.Command, word string) *diag.Fault {
 }
 
 func newCommand(use string, run func(cmd *cobra.Command, args []string) *diag.Fault) *cobra.Command {
-	return &cobra.Command{Use: use, RunE: faultE(run)}
+	return &cobra.Command{Use: use, RunE: runE(run)}
 }
 
 // Every function ytrack hands cobra is built here, so it fails with a *diag.Fault or not
 // at all; a nil *diag.Fault handed on as an error would not be nil.
-func faultE[T any](f func(cmd *cobra.Command, arg T) *diag.Fault) func(*cobra.Command, T) error {
+func runE[T any](f func(cmd *cobra.Command, arg T) *diag.Fault) func(*cobra.Command, T) error {
 	return func(cmd *cobra.Command, arg T) error {
 		if fault := f(cmd, arg); fault != nil {
 			return fault

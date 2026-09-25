@@ -141,8 +141,8 @@ func runOnATerminalUntil(t *testing.T, ctx context.Context, env []string, answer
 	return outcome{code: code, stdout: stdout.String(), stderr: stderr.String()}, said
 }
 
-// answering waits for each prompt and types after it, the token once the echo has gone off.
-func answering(address, secret string) func(t *testing.T, k *keyboard) {
+// typeAnswers waits for each prompt and types after it, the token once the echo has gone off.
+func typeAnswers(address, secret string) func(t *testing.T, k *keyboard) {
 	return func(t *testing.T, k *keyboard) {
 		t.Helper()
 		k.waitForThePrompt(t, addressPrompt)
@@ -175,7 +175,7 @@ func TestAuthLoginKeepsTheLoginTypedForTheDirectoryItWasCalledIn(t *testing.T) {
 	env := []string{"HOME=" + home, "PWD=" + stated}
 	before := entries(t, stated)
 
-	got, said := runOnATerminal(t, env, answering(server.url, typedToken), "auth", "login")
+	got, said := runOnATerminal(t, env, typeAnswers(server.url, typedToken), "auth", "login")
 
 	assert.Equal(t, outcome{stdout: loginDocument(server.url, scope, typedUser, typedUser)}, got)
 	assertTheTokenWasNotShown(t, got, said, typedToken)
@@ -215,7 +215,7 @@ func TestAuthLoginGlobalKeepsTheLoginForEverywhere(t *testing.T) {
 	held := scopedRecord(scope, "http://elsewhere.example", hereToken)
 	home, path := homeWith(t, recordFile(held))
 
-	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, answering(server.url, typedToken), "auth", "login", "--global")
+	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(server.url, typedToken), "auth", "login", "--global")
 
 	assert.Equal(t, outcome{stdout: loginDocument(server.url, "global", typedUser, typedUser)}, got)
 	assertTheTokenWasNotShown(t, got, said, typedToken)
@@ -225,14 +225,14 @@ func TestAuthLoginGlobalKeepsTheLoginForEverywhere(t *testing.T) {
 
 // Logging in for everywhere again is what a rotated token calls for, and a second record without a scope would
 // make the whole file unreadable for every command until a human took one of them out.
-func TestAuthLoginGlobalReplacesTheLoginHeldForEverywhere(t *testing.T) {
+func TestAuthLoginGlobalReplacesTheSavedGlobalLogin(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
 	server := serveUserOfTheToken(t, map[string]string{typedToken: typedUser})
 	held := scopedRecord(scope, "http://elsewhere.example", hereToken)
 	home, path := homeWith(t, recordFile(unscopedRecord("http://was.example", everywhereToken), held))
 
-	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, answering(server.url, typedToken), "auth", "login", "--global")
+	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(server.url, typedToken), "auth", "login", "--global")
 
 	assert.Equal(t, outcome{stdout: loginDocument(server.url, "global", typedUser, typedUser)}, got)
 	assertTheTokenWasNotShown(t, got, said, typedToken)
@@ -251,7 +251,7 @@ func TestAuthLoginPrintsTheAddressWithoutItsPassword(t *testing.T) {
 	behind.User = url.UserPassword("svc", "secret")
 	home, path := emptyHome(t)
 
-	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, answering(behind.String(), typedToken), "auth", "login")
+	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(behind.String(), typedToken), "auth", "login")
 
 	printed := "http://svc:xxxxx@" + behind.Host
 	assert.Equal(t, outcome{stdout: loginDocument(printed, scope, typedUser, typedUser)}, got)
@@ -261,7 +261,7 @@ func TestAuthLoginPrintsTheAddressWithoutItsPassword(t *testing.T) {
 	assert.Equal(t, savedFile(scopedRecord(scope, behind.String(), typedToken)), fileBytes(t, path))
 }
 
-func TestAuthLoginReplacesTheLoginHeldForTheSamePlace(t *testing.T) {
+func TestAuthLoginReplacesTheLoginSavedForTheSameDirectory(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
 	server := serveUserOfTheToken(t, map[string]string{typedToken: typedUser})
@@ -269,7 +269,7 @@ func TestAuthLoginReplacesTheLoginHeldForTheSamePlace(t *testing.T) {
 	held := recordFile(scopedRecord(scope, "http://was.example", hereToken), everywhere)
 	home, path := homeWith(t, held)
 
-	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, answering(server.url, typedToken), "auth", "login")
+	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(server.url, typedToken), "auth", "login")
 
 	assert.Equal(t, outcome{stdout: loginDocument(server.url, scope, typedUser, typedUser)}, got)
 	assertTheTokenWasNotShown(t, got, said, typedToken)
@@ -282,13 +282,13 @@ func TestAuthLoginReplacesTheLoginHeldForTheSamePlace(t *testing.T) {
 func TestAuthLoginKeepsNoLoginTheServerRefuses(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
-	server := serve(t, answer(http.StatusUnauthorized, `{"error":"Unauthorized","error_description":"Invalid token"}`))
+	server := serve(t, respondWith(http.StatusUnauthorized, `{"error":"Unauthorized","error_description":"Invalid token"}`))
 	held := recordFile(scopedRecord(scope, "http://was.example", hereToken))
 	home, path := homeWith(t, held)
 
-	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, answering(server.url, typedToken), "auth", "login")
+	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(server.url, typedToken), "auth", "login")
 
-	want := refusal{
+	want := faultDocument{
 		code: "denied",
 		details: []detail{
 			{"request", meRequest(server.url)},
@@ -312,7 +312,7 @@ func TestAuthLoginKeepsNoLoginWhenNothingAnswersAtTheAddress(t *testing.T) {
 	require.NoError(t, listening.Close())
 	home, path := emptyHome(t)
 
-	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, answering(closed, typedToken), "auth", "login")
+	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(closed, typedToken), "auth", "login")
 
 	found := requireRefusal(t, got)
 	assert.Equal(t, "upstream_failed", found.code)
@@ -322,8 +322,6 @@ func TestAuthLoginKeepsNoLoginWhenNothingAnswersAtTheAddress(t *testing.T) {
 	assert.Empty(t, entries(t, home))
 }
 
-// An address is judged the moment it is typed, so a caller who mistyped it is told before they have gone looking for
-// a token to type after it.
 func TestAuthLoginRefusesAnAddressItCannotUseBeforeAskingForTheToken(t *testing.T) {
 	t.Parallel()
 	stated, _ := here(t)
@@ -347,7 +345,7 @@ func TestAuthLoginRefusesAnAddressItCannotUseBeforeAskingForTheToken(t *testing.
 				k.typeLine(t, tc.address)
 			}, "auth", "login")
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Contains(t, said.shown, addressPrompt)
 			assert.NotContains(t, said.shown, tokenPrompt, "the token was asked for after the address was refused")
 			assert.NoFileExists(t, path)
@@ -367,7 +365,7 @@ func TestAuthLoginRefusesAnEndOfInputAtTheAddressPrompt(t *testing.T) {
 		k.typeTheEndOfInput(t)
 	}, "auth", "login")
 
-	assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 	assert.NotContains(t, said.shown, tokenPrompt)
 	assert.True(t, said.echoes)
 	assert.NoFileExists(t, path)
@@ -392,9 +390,9 @@ func TestAuthLoginRefusesATokenOfNothingAtAll(t *testing.T) {
 			held := recordFile(scopedRecord(scope, "http://was.example", hereToken))
 			home, path := homeWith(t, held)
 
-			got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, answering(server.url, tc.typed), "auth", "login")
+			got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(server.url, tc.typed), "auth", "login")
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.True(t, said.echoes)
 			assert.Equal(t, held, fileBytes(t, path))
 			assert.Empty(t, server.requests())
@@ -421,9 +419,9 @@ func TestAuthLoginRefusesATokenItCannotSend(t *testing.T) {
 			held := recordFile(scopedRecord(scope, "http://was.example", hereToken))
 			home, path := homeWith(t, held)
 
-			got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, answering(server.url, tc.typed), "auth", "login")
+			got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(server.url, tc.typed), "auth", "login")
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assertTheTokenWasNotShown(t, got, said, tc.typed)
 			assert.True(t, said.echoes, "the terminal was left without its echo")
 			assert.Equal(t, held, fileBytes(t, path))
@@ -432,8 +430,6 @@ func TestAuthLoginRefusesATokenItCannotSend(t *testing.T) {
 	}
 }
 
-// The file is read before a word is asked for: a file that cannot be read is no place to keep an answer in, and
-// judging it after the dialogue would throw away a token already typed for a state the file was in all along.
 func TestAuthLoginUsesNoFileOfLoginRecordsItCannotRead(t *testing.T) {
 	t.Parallel()
 	stated, _ := here(t)
@@ -445,7 +441,7 @@ func TestAuthLoginUsesNoFileOfLoginRecordsItCannotRead(t *testing.T) {
 		k.typeTheEndOfInput(t)
 	}, "auth", "login")
 
-	want := refusal{code: "bad_usage", details: []detail{fileDetail(path)}}
+	want := faultDocument{code: "bad_usage", details: []detail{fileDetail(path)}}
 	assert.Equal(t, want, requireRefusal(t, got))
 	assert.NotContains(t, said.shown, addressPrompt, "an address was asked for before the file that would hold it was read")
 	assert.Equal(t, held, fileBytes(t, path))
@@ -460,7 +456,7 @@ func TestAuthLoginSendsTheTokenWithoutTheSpacesAroundIt(t *testing.T) {
 	server := serveUserOfTheToken(t, map[string]string{typedToken: typedUser})
 	home, path := emptyHome(t)
 
-	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, answering(server.url, "  "+typedToken+"\t"), "auth", "login")
+	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(server.url, "  "+typedToken+"\t"), "auth", "login")
 
 	assert.Equal(t, outcome{stdout: loginDocument(server.url, scope, typedUser, typedUser)}, got)
 	assertTheTokenWasNotShown(t, got, said, typedToken)
@@ -485,7 +481,7 @@ func TestAuthLoginGivesTheEchoBackWhenItIsStoppedAtTheTokenPrompt(t *testing.T) 
 		stop()
 	}, "auth", "login")
 
-	want := refusal{code: "upstream_failed"}
+	want := faultDocument{code: "upstream_failed"}
 	assert.Equal(t, want, requireRefusal(t, got))
 	assert.True(t, said.echoes, "the terminal was left without its echo")
 	assert.NoFileExists(t, path)
@@ -495,7 +491,7 @@ func TestAuthLoginGivesTheEchoBackWhenItIsStoppedAtTheTokenPrompt(t *testing.T) 
 
 // Which login a call is about is settled before a word is asked for: a refusal afterwards would throw away a token
 // already typed.
-func TestAuthLoginAsksForNothingWithoutAPlaceToKeepTheAnswer(t *testing.T) {
+func TestAuthLoginAsksForNothingWithoutADirectoryToSaveTheLogin(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
 	tests := []struct {
@@ -521,7 +517,7 @@ func TestAuthLoginAsksForNothingWithoutAPlaceToKeepTheAnswer(t *testing.T) {
 
 			got, said := runOnATerminal(t, tc.env(home, stale), sayingNothing, "auth", "login")
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, said.shown, "the terminal was asked something before there was a place to keep the answer")
 			assertNoRecordedToken(t, got)
 			assert.Equal(t, held, fileBytes(t, path))
@@ -536,7 +532,7 @@ func TestAuthLoginKeepsTheAdminOfTheDevInstance(t *testing.T) {
 	dev := devInstance(t)
 	home, path := emptyHome(t)
 
-	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, answering(dev.url, dev.token), "auth", "login")
+	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(dev.url, dev.token), "auth", "login")
 
 	assert.Equal(t, outcome{stdout: loginDocument(dev.url, scope, "admin", "admin")}, got)
 	assertTheTokenWasNotShown(t, got, said, dev.token)

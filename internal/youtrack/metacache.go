@@ -33,11 +33,11 @@ func newMetaCache(cache, address, token string) metaCache {
 
 // A cached custom field is the metadata of one field, written as the members it was read as.
 type cachedField struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	LocalizedName localized `json:"localizedName"`
-	ValueType     string    `json:"valueType"`
-	IsMultiValue  bool      `json:"isMultiValue"`
+	ID            string       `json:"id"`
+	Name          string       `json:"name"`
+	LocalizedName optionalName `json:"localizedName"`
+	ValueType     string       `json:"valueType"`
+	IsMultiValue  bool         `json:"isMultiValue"`
 }
 
 // load is the metadata written for target, if any is there and every byte of it reads back. Nothing here is
@@ -57,9 +57,9 @@ func (c metaCache) load(target string) ([]customField, bool) {
 	}
 	fields := make([]customField, 0, len(held))
 	for _, field := range held {
-		found := naming{name: field.Name, localizedName: field.LocalizedName,
+		found := fieldInfo{name: field.Name, localizedName: field.LocalizedName,
 			valueType: field.ValueType, isMultiValue: field.IsMultiValue}
-		fields = append(fields, customField{id: field.ID, naming: found})
+		fields = append(fields, customField{id: field.ID, info: found})
 	}
 	return fields, true
 }
@@ -76,10 +76,10 @@ func (c metaCache) store(target string, fields []customField) {
 	for _, field := range fields {
 		held = append(held, cachedField{
 			ID:            field.id,
-			Name:          field.naming.name,
-			LocalizedName: field.naming.localizedName,
-			ValueType:     field.naming.valueType,
-			IsMultiValue:  field.naming.isMultiValue,
+			Name:          field.info.name,
+			LocalizedName: field.info.localizedName,
+			ValueType:     field.info.valueType,
+			IsMultiValue:  field.info.isMultiValue,
 		})
 	}
 	// Marshalling strings and bools cannot fail: the values encoding/json refuses are ones no metadata holds.

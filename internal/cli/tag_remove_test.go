@@ -71,7 +71,7 @@ func TestTagRemoveTakesTheTagOffTheOwnerAndNotOutOfTheInstance(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := takingATagOff(t, answer(http.StatusOK, tc.owner), shownTags(), deletionDone())
+			server := takingATagOff(t, respondWith(http.StatusOK, tc.owner), shownTags(), deletionDone())
 
 			got := runWith(t, server.env(), "tag", "remove", tc.written, "--name", "ready")
 
@@ -111,7 +111,7 @@ func TestTagRemoveReadsWhatTheServerAnsweredTheRemovalWith(t *testing.T) {
 	}{
 		{
 			name:    "a tag the owner does not carry",
-			removal: answer(http.StatusNotFound, missing),
+			removal: respondWith(http.StatusNotFound, missing),
 			code:    "not_found",
 			exit:    1,
 			details: []detail{
@@ -122,8 +122,8 @@ func TestTagRemoveReadsWhatTheServerAnsweredTheRemovalWith(t *testing.T) {
 		},
 		{
 			name:    "an answer carrying a body where the call is answered with none",
-			removal: answer(http.StatusOK, `{"x":1}`),
-			code:    "upstream_lied",
+			removal: respondWith(http.StatusOK, `{"x":1}`),
+			code:    "upstream_invalid",
 			exit:    2,
 			details: []detail{
 				{"upstream_status", 200},
@@ -134,13 +134,13 @@ func TestTagRemoveReadsWhatTheServerAnsweredTheRemovalWith(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := takingATagOff(t, answer(http.StatusOK, issueNamed("DEV-7")), shownTags(), tc.removal)
+			server := takingATagOff(t, respondWith(http.StatusOK, issueNamed("DEV-7")), shownTags(), tc.removal)
 
 			got := runWith(t, server.env(), "tag", "remove", "DEV-7", "--name", "ready")
 
 			found := requireRefusalDocument(t, got)
 			assert.Equal(t, tc.exit, got.code)
-			want := refusal{
+			want := faultDocument{
 				code: tc.code,
 				details: append([]detail{
 					{"request", tagRemovalRequest(server.url, "issues", "DEV-7", "10-5")},
@@ -154,17 +154,13 @@ func TestTagRemoveReadsWhatTheServerAnsweredTheRemovalWith(t *testing.T) {
 	}
 }
 
-// What a removal is against the polygon: the tag comes off the issue and goes on standing.
-// The list shows it afterwards, the issue does not, taking it off a second time is the server saying the issue
-// carries no such tag, and the very same tag hangs back on. Only the deletion takes it out of the instance,
-// and that is a different call with a different shape.
 func TestTagRemoveLeavesTheTagStandingOnTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 	name := contractTagName(t)
 	made := runWith(t, dev.env(), "tag", "create", "--name", name)
 	require.Equal(t, 0, made.code, "stderr: %s", made.stderr)
-	issue := taggedIssue(t, dev)
+	issue := issueToTag(t, dev)
 	hung := runWith(t, dev.env(), "tag", "add", issue, "--name", name)
 	require.Equal(t, 0, hung.code, "stderr: %s", hung.stderr)
 
@@ -203,7 +199,7 @@ func TestTagRemoveTakesATagOffAnArticleOfTheDevInstance(t *testing.T) {
 	made := runWith(t, dev.env(), "tag", "create", "--name", name)
 	require.Equal(t, 0, made.code, "stderr: %s", made.stderr)
 	t.Cleanup(func() { removeTag(t, dev.env(), name, "admin") })
-	article := taggedArticle(t, dev)
+	article := articleToTag(t, dev)
 	hung := runWith(t, dev.env(), "tag", "add", article, "--name", name)
 	require.Equal(t, 0, hung.code, "stderr: %s", hung.stderr)
 

@@ -142,7 +142,7 @@ func TestAuthLogoutRefusesWhereTheDirectoryHasNoRecordOfItsOwn(t *testing.T) {
 
 			got := runWith(t, []string{"HOME=" + home, "PWD=" + stated}, "auth", "logout")
 
-			want := refusal{code: "bad_usage"}
+			want := faultDocument{code: "bad_usage"}
 			assert.Equal(t, want, requireRefusal(t, got))
 			assertNoRecordedToken(t, got)
 			assert.Equal(t, held, fileBytes(t, path))
@@ -160,7 +160,7 @@ func TestAuthLogoutGlobalRefusesWithoutARecordForEverywhere(t *testing.T) {
 
 	got := runWith(t, []string{"HOME=" + home, "PWD=" + stated}, "auth", "logout", "--global")
 
-	want := refusal{code: "bad_usage"}
+	want := faultDocument{code: "bad_usage"}
 	assert.Equal(t, want, requireRefusal(t, got))
 	assertNoRecordedToken(t, got)
 	assert.Equal(t, held, fileBytes(t, path))
@@ -176,7 +176,7 @@ func TestAuthLogoutRefusesWithoutAFileOrADirectoryToTakeARecordFrom(t *testing.T
 
 		got := runWith(t, []string{"HOME=" + home, "PWD=" + stated}, "auth", "logout")
 
-		want := refusal{code: "bad_usage"}
+		want := faultDocument{code: "bad_usage"}
 		assert.Equal(t, want, requireRefusal(t, got))
 		assert.NoFileExists(t, path)
 		assert.Empty(t, entries(t, home))
@@ -285,7 +285,7 @@ func TestAuthLogoutUsesNoFileOfLoginRecordsItCannotRead(t *testing.T) {
 
 	got := runWith(t, []string{"HOME=" + home, "PWD=" + stated}, "auth", "logout")
 
-	want := refusal{code: "bad_usage", details: []detail{fileDetail(path)}}
+	want := faultDocument{code: "bad_usage", details: []detail{fileDetail(path)}}
 	assert.Equal(t, want, requireRefusal(t, got))
 	assert.Equal(t, held, fileBytes(t, path))
 }

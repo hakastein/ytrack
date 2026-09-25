@@ -1,7 +1,5 @@
 //go:build ignore
 
-// Command catalogue writes the schemas of the specification as the Go source the passage judges
-// names by: go run scripts/catalogue.go <openapi.json> <output.go>.
 package main
 
 import (
@@ -18,14 +16,11 @@ import (
 
 const refPrefix = "#/components/schemas/"
 
-// An int64 and a string property are written apart until classify settles their class; timeElement and
-// proseElement are what an instant and prose end up written as, and internal/youtrack/catalogue.go reads
-// those two back.
 const (
 	int64Element  = "!int64"
 	stringElement = "!string"
 	timeElement   = "!time"
-	proseElement  = "!prose"
+	textElement   = "!text"
 )
 
 // Every key the specification uses is named, those the catalogue ignores included, so that a key of a
@@ -123,7 +118,6 @@ func run(specPath, outPath string) error {
 		}
 		catalogue[names[name]] = s
 	}
-	// The passage walks up from a schema to the schemas it extends until there are none.
 	for _, name := range slices.Sorted(maps.Keys(catalogue)) {
 		steps := 0
 		for s := catalogue[name]; s.parent != ""; s = catalogue[s.parent] {
@@ -219,13 +213,6 @@ func read(object schemaObject, names map[string]string, objects map[string]schem
 	return s, nil
 }
 
-// The specification gives an instant and a count the same type and format, so neither the class of a name nor
-// the completeness of the two classes can be read off it: every int64 is named here and nowhere else, and one
-// that is in neither class stops the generation. The cost of a name nobody classified is then a failed make
-// ytapi, not a size printed as a date.
-//
-// Prose is named the same way and needs no completeness of its own: a string outside the class is quoted,
-// which loses nothing, so a name nobody classified costs the layout of a value rather than the value.
 func classify(owner string, properties map[string]string) error {
 	instants := []string{
 		"added", "assembleDate", "created", "creationDate", "date", "fetched", "finish", "releaseDate",
@@ -235,11 +222,11 @@ func classify(owner string, properties map[string]string) error {
 		"availableDiskSpace", "count", "maxUploadFileSize", "numberInProject", "ordinal", "size",
 		"startingNumber", "totalTransactions", "usersCount",
 	}
-	prose := []string{"content", "description", "text"}
+	textNames := []string{"content", "description", "text"}
 	for _, name := range slices.Sorted(maps.Keys(properties)) {
 		if written, isString := strings.CutSuffix(properties[name], stringElement); isString {
-			if slices.Contains(prose, name) {
-				written += proseElement
+			if slices.Contains(textNames, name) {
+				written += textElement
 			}
 			properties[name] = written
 			continue

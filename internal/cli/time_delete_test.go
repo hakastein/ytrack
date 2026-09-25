@@ -61,7 +61,7 @@ func TestTimeDeleteRefusesBeforeAnyRequest(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -86,7 +86,7 @@ func TestTimeDeleteHelpOffersNoConfirmation(t *testing.T) {
 // is the document — nothing is read after a write.
 func TestTimeDeleteReadsTheWorkItemAndThenRemovesIt(t *testing.T) {
 	t.Parallel()
-	server := removingTime(t, answer(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1")), deletionDone())
+	server := removingTime(t, respondWith(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1")), deletionDone())
 
 	got := runWith(t, server.env(), "time", "delete", "dev-1", "199-7")
 
@@ -115,25 +115,25 @@ func TestTimeDeleteReadsTheAnswerOfEachHalf(t *testing.T) {
 	}{
 		{
 			name:     "a work item the read does not find",
-			read:     answer(http.StatusNotFound, entityNotFound("199-7")),
+			read:     respondWith(http.StatusNotFound, entityNotFound("199-7")),
 			deletion: noDeletion,
 			code:     "not_found",
 			methods:  []string{http.MethodGet},
 		},
 		{
 			name: "a work item taken away between the read and the removal",
-			read: answer(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1")),
+			read: respondWith(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1")),
 			deletion: func(*testing.T) http.HandlerFunc {
-				return answer(http.StatusNotFound, entityNotFound("199-7"))
+				return respondWith(http.StatusNotFound, entityNotFound("199-7"))
 			},
 			code:    "not_found",
 			methods: []string{http.MethodGet, http.MethodDelete},
 		},
 		{
 			name: "a token that may read the work item and not remove it",
-			read: answer(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1")),
+			read: respondWith(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1")),
 			deletion: func(*testing.T) http.HandlerFunc {
-				return answer(http.StatusForbidden, `{"error":"Forbidden","error_description":"HTTP 403 Forbidden"}`)
+				return respondWith(http.StatusForbidden, `{"error":"Forbidden","error_description":"HTTP 403 Forbidden"}`)
 			},
 			code:    "denied",
 			methods: []string{http.MethodGet, http.MethodDelete},
@@ -172,11 +172,11 @@ func TestTimeDeleteRemovesNothingAddressedByWhatTheReadGave(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := removingTime(t, answer(http.StatusOK, tc.read), noDeletion(t))
+			server := removingTime(t, respondWith(http.StatusOK, tc.read), noDeletion(t))
 
 			got := runWith(t, server.env(), "time", "delete", "DEV-1", "199-7")
 
-			assert.Equal(t, "upstream_lied", requireRefusal(t, got).code)
+			assert.Equal(t, "upstream_invalid", requireRefusal(t, got).code)
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 		})
 	}
@@ -187,20 +187,17 @@ func TestTimeDeleteRemovesNothingAddressedByWhatTheReadGave(t *testing.T) {
 // answer it by sending the call again.
 func TestTimeDeleteRefusesAnAnswerToTheRemovalThatCarriesABody(t *testing.T) {
 	t.Parallel()
-	server := removingTime(t, answer(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1")),
-		answer(http.StatusOK, `{"x":1}`))
+	server := removingTime(t, respondWith(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1")),
+		respondWith(http.StatusOK, `{"x":1}`))
 
 	got := runWith(t, server.env(), "time", "delete", "DEV-1", "199-7")
 
 	found := requireUncertainty(t, got)
-	assert.Equal(t, "upstream_lied", found.code)
+	assert.Equal(t, "upstream_invalid", found.code)
 	assert.Equal(t, detail{"request", workItemDeletionRequest(server.url, "DEV-1", "199-7")}, found.details[0])
 	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
 }
 
-// A work item of the polygon removed for real: the document is the pair it went by, time list no longer
-// carries it, the time spent on the issue is what the work item left behind comes to, and the server answers
-// everything addressed to it afterwards as if it had never been written.
 func TestTimeDeleteRemovesAWorkItemOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

@@ -68,7 +68,7 @@ func warningOf(query string, parts ...string) warned {
 // A selection whose markup the scenario writes itself, answering the search with one issue.
 func markedUp(t *testing.T, marked string) *upstream {
 	t.Helper()
-	return marking(t, answer(http.StatusOK, marked), answer(http.StatusOK, `[`+listedDEV1()+`]`))
+	return marking(t, respondWith(http.StatusOK, marked), respondWith(http.StatusOK, `[`+listedDEV1()+`]`))
 }
 
 // A part of the search is a chain of the ranges the server styled as text, each beginning where the one before
@@ -152,8 +152,8 @@ func TestIssueListWarnsOfTheTextOfASearch(t *testing.T) {
 func TestIssueListPrintsTheIssuesItWarnedAbout(t *testing.T) {
 	t.Parallel()
 	const query = "Задача в работе"
-	server := marking(t, answer(http.StatusOK, markup(t, query, styled(0, 6, "text"))),
-		answer(http.StatusOK, `[`+listedDEV1()+`,`+listedDEV2()+`]`))
+	server := marking(t, respondWith(http.StatusOK, markup(t, query, styled(0, 6, "text"))),
+		respondWith(http.StatusOK, `[`+listedDEV1()+`,`+listedDEV2()+`]`))
 
 	got := runWith(t, server.env(), "issue", "list", "--query", query)
 
@@ -173,8 +173,8 @@ func TestIssueListWarnsBeforeItRefusesTheSearchTheServerWouldNotRun(t *testing.T
 	t.Parallel()
 	const query = "State: Opne привет"
 	const said = `{"error":"invalid_query","error_description":"Invalid query"}`
-	server := marking(t, answer(http.StatusOK, markup(t, query, styled(7, 4, "error"), styled(12, 6, "text"))),
-		answer(http.StatusBadRequest, said))
+	server := marking(t, respondWith(http.StatusOK, markup(t, query, styled(7, 4, "error"), styled(12, 6, "text"))),
+		respondWith(http.StatusBadRequest, said))
 
 	got := runWith(t, server.env(), "issue", "list", "--query", query)
 
@@ -204,8 +204,6 @@ func TestIssueListWarnsOfASearchThatReadsBackAsItWasWritten(t *testing.T) {
 	requireMarkedUpFirst(t, server, query)
 }
 
-// A word beside a search of fields is a text search of the polygon: the issues the search names are printed, and
-// the word is what the warning names.
 func TestIssueListWarnsOfTheWordTheDevInstanceSearchesForAsText(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -222,8 +220,6 @@ func TestIssueListWarnsOfTheWordTheDevInstanceSearchesForAsText(t *testing.T) {
 	requireMarkedUpFirst(t, dev, query)
 }
 
-// A name the polygon has no field for is no name to the server either: it searches for the name and the colon
-// after it as text, and a search of them finds nothing rather than being refused.
 func TestIssueListWarnsOfANameTheDevInstanceHasNoFieldFor(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -237,8 +233,6 @@ func TestIssueListWarnsOfANameTheDevInstanceHasNoFieldFor(t *testing.T) {
 	requireMarkedUpFirst(t, dev, query)
 }
 
-// The offsets the polygon counts are units of UTF-16: 😀 takes two of them, so the word after it is cut whole
-// only where they are counted the way the server does.
 func TestIssueListWarnsOfTheTextOfTheDevInstanceOutsideTheBasicPlane(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -251,8 +245,6 @@ func TestIssueListWarnsOfTheTextOfTheDevInstanceOutsideTheBasicPlane(t *testing.
 	requireMarkedUpFirst(t, dev, query)
 }
 
-// Brackets that never close are neither marked up nor refused: the polygon answers the whole selection, so a
-// search ytrack passes on unread can come back with the filter gone and nothing said about it.
 func TestIssueListSaysNothingOfASearchTheDevInstanceNeitherMarksUpNorRefuses(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

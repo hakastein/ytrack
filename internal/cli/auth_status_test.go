@@ -106,7 +106,7 @@ func TestAuthStatusHelpPrintsNoToken(t *testing.T) {
 func TestAuthStatusPrintsTheAddressTheOriginsAndTheUserFromEnv(t *testing.T) {
 	t.Parallel()
 	// The keys in an order other than asked: the server keeps an order of its own.
-	server := serve(t, answer(http.StatusOK, `{"fullName":"Administrator","$type":"Me","login":"admin"}`))
+	server := serve(t, respondWith(http.StatusOK, `{"fullName":"Administrator","$type":"Me","login":"admin"}`))
 
 	got := runWith(t, server.env(), "auth", "status")
 
@@ -139,7 +139,7 @@ func TestAuthStatusPrintsTheAddressInOneSpelling(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, `{"login":"admin","fullName":"Administrator","$type":"Me"}`))
+			server := serve(t, respondWith(http.StatusOK, `{"login":"admin","fullName":"Administrator","$type":"Me"}`))
 			listening, err := url.Parse(server.url)
 			require.NoError(t, err)
 			port := listening.Port()
@@ -157,7 +157,7 @@ func TestAuthStatusPrintsTheAddressInOneSpelling(t *testing.T) {
 
 func TestAuthStatusPrintsTheAddressWithoutItsPassword(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, `{"login":"admin","fullName":"Administrator","$type":"Me"}`))
+	server := serve(t, respondWith(http.StatusOK, `{"login":"admin","fullName":"Administrator","$type":"Me"}`))
 	address, err := url.Parse(server.url)
 	require.NoError(t, err)
 	address.User = url.UserPassword("svc", "secret")
@@ -170,12 +170,12 @@ func TestAuthStatusPrintsTheAddressWithoutItsPassword(t *testing.T) {
 
 func TestAuthStatusRefusesAUserWithoutTheFullName(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, `{"login":"admin","$type":"Me"}`))
+	server := serve(t, respondWith(http.StatusOK, `{"login":"admin","$type":"Me"}`))
 
 	got := runWith(t, server.env(), "auth", "status")
 
-	want := refusal{
-		code: "upstream_lied",
+	want := faultDocument{
+		code: "upstream_invalid",
 		details: []detail{
 			{"request", "GET " + server.url + "/api/users/me?fields=login,fullName"},
 			{"fields", "login,fullName"},

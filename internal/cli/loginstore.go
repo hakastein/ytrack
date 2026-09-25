@@ -46,23 +46,21 @@ type scope struct {
 	directory string
 }
 
-// everywhere is the scope of the record a file holds at most one of: the one written with no scope.
-func everywhere() scope {
+// globalScope is the scope of the record a file holds at most one of: the one written with no scope.
+func globalScope() scope {
 	return scope{}
 }
 
-func inDirectory(directory string) scope {
+func dirScope(directory string) scope {
 	return scope{directory: directory}
 }
 
-func (s scope) isEverywhere() bool {
+func (s scope) isGlobal() bool {
 	return s.directory == ""
 }
 
-// spelled is how a document and an origin name the scope. No directory is spelled "global", so the word cannot be
-// read back as one.
-func (s scope) spelled() string {
-	if s.isEverywhere() {
+func (s scope) String() string {
+	if s.isGlobal() {
 		return "global"
 	}
 	return s.directory
@@ -116,23 +114,23 @@ func readRecords(path string) ([]record, *diag.Fault) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, barred(path, "the saved logins cannot be read", err)
+		return nil, accessFault(path, "the saved logins cannot be read", err)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(content))
 	// A pointer tells null from an array of none: encoding/json puts null into a slice without a word.
 	var raw *[]json.RawMessage
 	if err := decoder.Decode(&raw); err != nil || raw == nil {
-		return nil, damaged(path)
+		return nil, corruptFileFault(path)
 	}
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
-		return nil, damaged(path)
+		return nil, corruptFileFault(path)
 	}
 	records := make([]record, 0, len(*raw))
 	seen := make(map[scope]bool, len(*raw))
 	for _, item := range *raw {
 		read, ok := readRecord(item)
 		if !ok || seen[read.scope] {
-			return nil, damaged(path)
+			return nil, corruptFileFault(path)
 		}
 		seen[read.scope] = true
 		records = append(records, read)
@@ -147,8 +145,8 @@ func readRecord(item json.RawMessage) (record, bool) {
 	if err := decoder.Decode(&held); err != nil || held.URL == "" || held.Token == "" {
 		return record{}, false
 	}
-	address, reason := usableAddress(held.URL, "")
-	if reason != "" || usableToken(held.Token, "") != "" {
+	address, reason := parseAddress(held.URL, "")
+	if reason != "" || validateToken(held.Token, "") != "" {
 		return record{}, false
 	}
 	read := record{address: address, token: held.Token, raw: item}
@@ -161,7 +159,7 @@ func readRecord(item json.RawMessage) (record, bool) {
 	if !filepath.IsAbs(directory) || filepath.Clean(directory) != directory {
 		return record{}, false
 	}
-	read.scope = inDirectory(directory)
+	read.scope = dirScope(directory)
 	return read, true
 }
 
@@ -172,7 +170,7 @@ func saveRecords(path string, records []record) *diag.Fault {
 	if len(records) == 0 {
 		// The directory stays: it is also where the metadata of projects is cached.
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return barred(path, "the saved logins cannot be removed", err)
+			return accessFault(path, "the saved logins cannot be removed", err)
 		}
 		return nil
 	}
@@ -191,7 +189,7 @@ func saveRecords(path string, records []record) *diag.Fault {
 	}
 	content.WriteString("]\n")
 	if err := replaceFile(path, content.Bytes()); err != nil {
-		return barred(path, "the saved logins cannot be written", err)
+		return accessFault(path, "the saved logins cannot be written", err)
 	}
 	return nil
 }
@@ -228,9 +226,9 @@ func replaceFile(path string, content []byte) (err error) {
 	return os.Rename(temporary.Name(), path)
 }
 
-// takeOut is the record held for exactly this place and the records without it. An ancestor's record is not it:
+// removeRecord is the record held for exactly this place and the records without it. An ancestor's record is not it:
 // logging out in a subdirectory would take away the login of the directory above.
-func takeOut(records []record, wanted scope) (record, []record, bool) {
+func removeRecord(records []record, wanted scope) (record, []record, bool) {
 	for i, held := range records {
 		if held.scope == wanted {
 			return held, slices.Delete(slices.Clone(records), i, i+1), true
@@ -239,18 +237,18 @@ func takeOut(records []record, wanted scope) (record, []record, bool) {
 	return record{}, nil, false
 }
 
-// putIn is records with the login of this place replaced by the one given. A record goes back to the file as the
+// upsertRecord is records with the login of this place replaced by the one given. A record goes back to the file as the
 // bytes it holds, so one that never came from a file is given its own here.
-func putIn(records []record, wanted scope, address *url.URL, token string) []record {
+func upsertRecord(records []record, wanted scope, address *url.URL, token string) []record {
 	held := recordJSON{URL: address.String(), Token: token}
-	if !wanted.isEverywhere() {
+	if !wanted.isGlobal() {
 		directory := wanted.directory
 		held.Scope = &directory
 	}
 	fresh := record{scope: wanted, address: address, token: token}
 	// Marshalling strings and a pointer to one cannot fail: the values encoding/json refuses are ones no record holds.
 	fresh.raw, _ = json.Marshal(held)
-	if _, kept, found := takeOut(records, wanted); found {
+	if _, kept, found := removeRecord(records, wanted); found {
 		return append(kept, fresh)
 	}
 	return append(slices.Clone(records), fresh)
@@ -259,33 +257,29 @@ func putIn(records []record, wanted scope, address *url.URL, token string) []rec
 // globalRecord is the record that applies wherever ytrack is run from.
 func globalRecord(records []record) (record, bool) {
 	for _, held := range records {
-		if held.scope.isEverywhere() {
+		if held.scope.isGlobal() {
 			return held, true
 		}
 	}
 	return record{}, false
 }
 
-// heldHere is chainTo for the directory ytrack was called in. The working directory is asked for only when a
-// record names one, so a file of a single global record is read by a caller who has no usable PWD.
-func heldHere(records []record, env []string) ([]record, *diag.Fault) {
+func recordsForWorkingDir(records []record, env []string) ([]record, *diag.Fault) {
 	var dir string
-	if slices.ContainsFunc(records, func(held record) bool { return !held.scope.isEverywhere() }) {
+	if slices.ContainsFunc(records, func(held record) bool { return !held.scope.isGlobal() }) {
 		resolved, reason := workingDirectory(env)
 		if reason != "" {
-			return nil, elsewhere(reason)
+			return nil, noWorkingDirFault(reason)
 		}
 		dir = resolved
 	}
-	return chainTo(records, dir), nil
+	return recordsFor(records, dir), nil
 }
 
-// chainTo is the records that apply in dir, the nearest directory first and the global record last. A caller that
-// has the directory already passes it here rather than through heldHere, which would resolve it a second time.
-func chainTo(records []record, dir string) []record {
+func recordsFor(records []record, dir string) []record {
 	var chain []record
 	for _, held := range records {
-		if !held.scope.isEverywhere() && held.scope.covers(dir) {
+		if !held.scope.isGlobal() && held.scope.covers(dir) {
 			chain = append(chain, held)
 		}
 	}
@@ -329,8 +323,6 @@ func workingDirectory(env []string) (dir, reason string) {
 	return physical, ""
 }
 
-// The directory a relative name resolves against, reached by opening it: the standard library's own way of naming
-// the working directory answers with PWD whenever PWD names it, which is the very thing being judged here.
 func directory(path string) (fs.FileInfo, error) {
 	opened, err := os.Open(path)
 	if err != nil {
@@ -342,14 +334,14 @@ func directory(path string) (fs.FileInfo, error) {
 
 // Which record applies cannot be told from another directory, and falling back on the global record would send the
 // call to whichever instance that one names.
-func elsewhere(reason string) *diag.Fault {
+func noWorkingDirFault(reason string) *diag.Fault {
 	message := "a login is saved for a directory, so which one applies depends on the directory of the call, and " + reason
 	return &diag.Fault{Code: diag.BadUsage, Message: message}
 }
 
-// damaged names the file and nothing inside it: the caller cannot mend a record by hand, and the path is what they
+// corruptFileFault names the file and nothing inside it: the caller cannot mend a record by hand, and the path is what they
 // hand over or take away.
-func damaged(path string) *diag.Fault {
+func corruptFileFault(path string) *diag.Fault {
 	return &diag.Fault{
 		Code:    diag.BadUsage,
 		Message: "the file of saved logins is damaged",
@@ -357,10 +349,10 @@ func damaged(path string) *diag.Fault {
 	}
 }
 
-// barred is the operating system refusing the directory ytrack keeps its things in — the rights, a read-only
+// accessFault is the operating system refusing the directory ytrack keeps its things in — the rights, a read-only
 // filesystem, a .ytrack that is not a directory. That is the caller's machine, as an unset HOME is, so the refusal
 // names the directory and the system's own words, and nothing of the file inside it.
-func barred(path, message string, err error) *diag.Fault {
+func accessFault(path, message string, err error) *diag.Fault {
 	return &diag.Fault{
 		Code:    diag.Denied,
 		Message: message + ": " + systemReason(err),

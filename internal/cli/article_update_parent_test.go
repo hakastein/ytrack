@@ -13,13 +13,13 @@ import (
 
 // How many steps of the line above an article one read asks for, which is what makes a deeper article cost
 // another request rather than one request per step.
-const ancestryStep = 10
+const ancestorsPerRequest = 10
 
 // The expression the read of a parent goes out with: what every read before a write asks, and above it the line
 // the parent hangs from, one nested member to a step.
 func articleLineFields() string {
 	line := "parentArticle(id,idReadable)"
-	for range ancestryStep - 1 {
+	for range ancestorsPerRequest - 1 {
 		line = "parentArticle(id,idReadable," + line + ")"
 	}
 	return articleToWriteFields + "," + line
@@ -30,20 +30,18 @@ func articleLineRequest(address, id string) string {
 	return "GET " + address + "/api/articles/" + url.PathEscape(id) + "?fields=" + articleLineFields()
 }
 
-// sentSince is the methods of every request that went out after mark, which is what a scenario running several
-// commands against the polygon counts one command by.
 func sentSince(u *upstream, mark int) []string {
 	return sentMethods(u)[mark:]
 }
 
 // One step of the line an answer carries: the internal id a cycle is settled by and the readable id a refusal
 // names it with.
-type above struct{ id, readable string }
+type ancestor struct{ id, readable string }
 
 // nestedLine is the parentArticle member of an answer, each step nested in the one below it. top stands at the
 // innermost: "null" is the root of the knowledge base, and "" is the expression running out before the line
 // did, which is how the server answers a line deeper than the read asked for.
-func nestedLine(top string, steps []above) string {
+func nestedLine(top string, steps []ancestor) string {
 	nested := top
 	for at := len(steps) - 1; at >= 0; at-- {
 		body := `{"$type":"Article","id":` + strconv.Quote(steps[at].id) +
@@ -58,7 +56,7 @@ func nestedLine(top string, steps []above) string {
 
 // articleAbove is an article as the read of a parent finds it: what every read before a write asks, and the
 // line it hangs from above that.
-func articleAbove(id, readable, project, top string, steps ...above) string {
+func articleAbove(id, readable, project, top string, steps ...ancestor) string {
 	body := `{"$type":"Article","id":` + strconv.Quote(id) + `,"idReadable":` + strconv.Quote(readable) +
 		`,"project":{"$type":"Project","shortName":` + strconv.Quote(project) + `}`
 	if line := nestedLine(top, steps); line != "" {
@@ -121,14 +119,12 @@ func TestArticleUpdateRefusesAParentBeforeAnyRequest(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"article", "update", "DEV-A-7"}, tc.argv...)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The help names --parent, the flag an article hangs from, and content or parent, the two names --clear
-// takes: both are interface a caller reads off the command, not prose about how it behaves.
 func TestArticleUpdateHelpNamesTheParentFlagAndWhatClearTakes(t *testing.T) {
 	t.Parallel()
 
@@ -147,9 +143,9 @@ func TestArticleUpdateMovesAnArticleUnderTheIDTheReadGave(t *testing.T) {
 	t.Parallel()
 	filed := answeredArticle{readable: "DEV-A-7", summary: "x", parent: parentNamed("DEV-A-1")}
 	server := movingAnArticle(t, map[string]http.HandlerFunc{
-		"dev-A-7": answer(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		"dev-A-1": answer(http.StatusOK, rootOfDEV("177-1", "DEV-A-1")),
-	}, answer(http.StatusOK, filed.json()))
+		"dev-A-7": respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+		"dev-A-1": respondWith(http.StatusOK, rootOfDEV("177-1", "DEV-A-1")),
+	}, respondWith(http.StatusOK, filed.json()))
 
 	got := runWith(t, server.env(), "article", "update", "dev-A-7", "--parent", "dev-A-1")
 
@@ -170,9 +166,9 @@ func TestArticleUpdateAsksForTheParentWhateverTheExpressionSays(t *testing.T) {
 	t.Parallel()
 	filed := answeredArticle{readable: "DEV-A-7", summary: "x", parent: parentNamed("DEV-A-1")}
 	server := movingAnArticle(t, map[string]http.HandlerFunc{
-		"DEV-A-7": answer(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		"DEV-A-1": answer(http.StatusOK, rootOfDEV("177-1", "DEV-A-1")),
-	}, answer(http.StatusOK, filed.json()))
+		"DEV-A-7": respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+		"DEV-A-1": respondWith(http.StatusOK, rootOfDEV("177-1", "DEV-A-1")),
+	}, respondWith(http.StatusOK, filed.json()))
 
 	got := runWith(t, server.env(), "article", "update", "DEV-A-7", "--parent", "DEV-A-1", "--fields", "idReadable")
 
@@ -189,13 +185,13 @@ func TestArticleUpdateRefusesAParentTheServerDoesNotHave(t *testing.T) {
 	t.Parallel()
 	said := `{"error":"Not Found","error_description":"Can't find article with id DEV-A-99999"}`
 	server := movingAnArticle(t, map[string]http.HandlerFunc{
-		"DEV-A-7":     answer(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		"DEV-A-99999": answer(http.StatusNotFound, said),
+		"DEV-A-7":     respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+		"DEV-A-99999": respondWith(http.StatusNotFound, said),
 	}, noUpdate(t))
 
 	got := runWith(t, server.env(), "article", "update", "DEV-A-7", "--parent", "DEV-A-99999")
 
-	want := refusal{
+	want := faultDocument{
 		code: "not_found",
 		details: []detail{
 			{"request", articleLineRequest(server.url, "DEV-A-99999")},
@@ -236,7 +232,7 @@ func TestArticleUpdateRefusesAParentThatClosesTheLine(t *testing.T) {
 			parent:   "DEV-A-9",
 			readable: "DEV-A-9",
 			found: articleAbove("177-9", "DEV-A-9", "DEV", "null",
-				above{id: "177-8", readable: "DEV-A-8"}, above{id: "177-7", readable: "DEV-A-7"}),
+				ancestor{id: "177-8", readable: "DEV-A-8"}, ancestor{id: "177-7", readable: "DEV-A-7"}),
 			chain: []any{"DEV-A-9", "DEV-A-8", "DEV-A-7"},
 		},
 		{
@@ -244,7 +240,7 @@ func TestArticleUpdateRefusesAParentThatClosesTheLine(t *testing.T) {
 			parent:   "DEV-A-9",
 			readable: "DEV-A-9",
 			found: articleAbove("177-9", "DEV-A-9", "DEV", "null",
-				above{id: "177-7", readable: "DEV-A-7"}, above{id: "177-1", readable: "DEV-A-1"}),
+				ancestor{id: "177-7", readable: "DEV-A-7"}, ancestor{id: "177-1", readable: "DEV-A-1"}),
 			chain: []any{"DEV-A-9", "DEV-A-7"},
 		},
 	}
@@ -252,13 +248,13 @@ func TestArticleUpdateRefusesAParentThatClosesTheLine(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := movingAnArticle(t, map[string]http.HandlerFunc{
-				"DEV-A-7": answer(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-				tc.parent: answer(http.StatusOK, tc.found),
+				"DEV-A-7": respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+				tc.parent: respondWith(http.StatusOK, tc.found),
 			}, noUpdate(t))
 
 			got := runWith(t, server.env(), "article", "update", "DEV-A-7", "--parent", tc.parent)
 
-			want := refusal{
+			want := faultDocument{
 				code: "bad_usage",
 				details: []detail{
 					{"request", articleLineRequest(server.url, tc.parent)},
@@ -278,18 +274,18 @@ func TestArticleUpdateRefusesAParentThatClosesTheLine(t *testing.T) {
 // read starts from that step by the internal id it arrived under.
 func TestArticleUpdateReadsOnWhereTheLineIsDeeperThanOneRequest(t *testing.T) {
 	t.Parallel()
-	steps := make([]above, 0, ancestryStep)
-	for at := range ancestryStep {
-		steps = append(steps, above{id: "177-" + strconv.Itoa(30+at), readable: "DEV-A-" + strconv.Itoa(30+at)})
+	steps := make([]ancestor, 0, ancestorsPerRequest)
+	for at := range ancestorsPerRequest {
+		steps = append(steps, ancestor{id: "177-" + strconv.Itoa(30+at), readable: "DEV-A-" + strconv.Itoa(30+at)})
 	}
 	deepest := steps[len(steps)-1]
 	filed := answeredArticle{readable: "DEV-A-7", summary: "x", parent: parentNamed("DEV-A-20")}
 	server := movingAnArticle(t, map[string]http.HandlerFunc{
-		"DEV-A-7":  answer(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		"DEV-A-20": answer(http.StatusOK, articleAbove("177-20", "DEV-A-20", "DEV", "", steps...)),
-		deepest.id: answer(http.StatusOK, articleAbove(deepest.id, deepest.readable, "DEV", "null",
-			above{id: "177-2", readable: "DEV-A-2"})),
-	}, answer(http.StatusOK, filed.json()))
+		"DEV-A-7":  respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+		"DEV-A-20": respondWith(http.StatusOK, articleAbove("177-20", "DEV-A-20", "DEV", "", steps...)),
+		deepest.id: respondWith(http.StatusOK, articleAbove(deepest.id, deepest.readable, "DEV", "null",
+			ancestor{id: "177-2", readable: "DEV-A-2"})),
+	}, respondWith(http.StatusOK, filed.json()))
 
 	got := runWith(t, server.env(), "article", "update", "DEV-A-7", "--parent", "DEV-A-20")
 
@@ -299,22 +295,20 @@ func TestArticleUpdateReadsOnWhereTheLineIsDeeperThanOneRequest(t *testing.T) {
 	assert.Equal(t, articleLineFields(), server.sentFields()[2], "the line is read on with the same expression")
 }
 
-// Every step of the line is held to its shape too: the judgment of names says the members arrived, and a
-// step holding a null for its id would settle a cycle against nothing.
-func TestArticleUpdateRefusesALineStepTheAnswerHoldsNothingIn(t *testing.T) {
+func TestArticleUpdateRefusesAnAncestorStepLeftEmptyInTheResponse(t *testing.T) {
 	t.Parallel()
 	found := `{"$type":"Article","id":"177-9","idReadable":"DEV-A-9",` +
 		`"project":{"$type":"Project","shortName":"DEV"},` +
 		`"parentArticle":{"$type":"Article","id":null,"idReadable":"DEV-A-8","parentArticle":null}}`
 	server := movingAnArticle(t, map[string]http.HandlerFunc{
-		"DEV-A-7": answer(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		"DEV-A-9": answer(http.StatusOK, found),
+		"DEV-A-7": respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+		"DEV-A-9": respondWith(http.StatusOK, found),
 	}, noUpdate(t))
 
 	got := runWith(t, server.env(), "article", "update", "DEV-A-7", "--parent", "DEV-A-9")
 
-	want := refusal{
-		code: "upstream_lied",
+	want := faultDocument{
+		code: "upstream_invalid",
 		details: []detail{
 			{"request", articleLineRequest(server.url, "DEV-A-9")},
 			{"upstream_status", 200},
@@ -330,15 +324,15 @@ func TestArticleUpdateRefusesALineStepTheAnswerHoldsNothingIn(t *testing.T) {
 func TestArticleUpdateRefusesALineThatRepeatsAnArticle(t *testing.T) {
 	t.Parallel()
 	server := movingAnArticle(t, map[string]http.HandlerFunc{
-		"DEV-A-7": answer(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		"DEV-A-9": answer(http.StatusOK, articleAbove("177-9", "DEV-A-9", "DEV", "null",
-			above{id: "177-8", readable: "DEV-A-8"}, above{id: "177-9", readable: "DEV-A-9"})),
+		"DEV-A-7": respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+		"DEV-A-9": respondWith(http.StatusOK, articleAbove("177-9", "DEV-A-9", "DEV", "null",
+			ancestor{id: "177-8", readable: "DEV-A-8"}, ancestor{id: "177-9", readable: "DEV-A-9"})),
 	}, noUpdate(t))
 
 	got := runWith(t, server.env(), "article", "update", "DEV-A-7", "--parent", "DEV-A-9")
 
-	want := refusal{
-		code: "upstream_lied",
+	want := faultDocument{
+		code: "upstream_invalid",
 		details: []detail{
 			{"request", articleLineRequest(server.url, "DEV-A-9")},
 			{"article", "DEV-A-9"},
@@ -353,13 +347,13 @@ func TestArticleUpdateRefusesALineThatRepeatsAnArticle(t *testing.T) {
 func TestArticleUpdateRefusesAParentOfAnotherProject(t *testing.T) {
 	t.Parallel()
 	server := movingAnArticle(t, map[string]http.HandlerFunc{
-		"DEV-A-7":  answer(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		"DEMO-A-1": answer(http.StatusOK, articleAbove("177-50", "DEMO-A-1", "DEMO", "null")),
+		"DEV-A-7":  respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+		"DEMO-A-1": respondWith(http.StatusOK, articleAbove("177-50", "DEMO-A-1", "DEMO", "null")),
 	}, noUpdate(t))
 
 	got := runWith(t, server.env(), "article", "update", "DEV-A-7", "--parent", "DEMO-A-1")
 
-	want := refusal{
+	want := faultDocument{
 		code: "bad_usage",
 		details: []detail{
 			{"request", articleLineRequest(server.url, "DEMO-A-1")},
@@ -378,8 +372,8 @@ func TestArticleUpdateTakesTheParentAwayWithoutReadingOne(t *testing.T) {
 	t.Parallel()
 	filed := answeredArticle{readable: "DEV-A-7", summary: "x"}
 	server := movingAnArticle(t, map[string]http.HandlerFunc{
-		"DEV-A-7": answer(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-	}, answer(http.StatusOK, filed.json()))
+		"DEV-A-7": respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+	}, respondWith(http.StatusOK, filed.json()))
 
 	got := runWith(t, server.env(), "article", "update", "DEV-A-7", "--clear", "parent")
 
@@ -405,19 +399,19 @@ func TestArticleUpdateRefusesAnAnswerThatDisagreesAboutTheParent(t *testing.T) {
 			name:     "a parent still standing where the call took it away",
 			argv:     []string{"--clear", "parent"},
 			parent:   parentNamed("DEV-A-1"),
-			mismatch: []detail{{"field", "parentArticle"}, {"written", nil}, {"arrived", "DEV-A-1"}},
+			mismatch: []detail{{"field", "parentArticle"}, {"expected", nil}, {"actual", "DEV-A-1"}},
 		},
 		{
 			name:     "no parent at all where the call wrote one",
 			argv:     []string{"--parent", "DEV-A-1"},
 			parent:   "null",
-			mismatch: []detail{{"field", "parentArticle"}, {"written", "DEV-A-1"}, {"arrived", nil}},
+			mismatch: []detail{{"field", "parentArticle"}, {"expected", "DEV-A-1"}, {"actual", nil}},
 		},
 		{
 			name:     "another parent than the one that was read",
 			argv:     []string{"--parent", "DEV-A-1"},
 			parent:   parentNamed("DEV-A-2"),
-			mismatch: []detail{{"field", "parentArticle"}, {"written", "DEV-A-1"}, {"arrived", "DEV-A-2"}},
+			mismatch: []detail{{"field", "parentArticle"}, {"expected", "DEV-A-1"}, {"actual", "DEV-A-2"}},
 		},
 	}
 	for _, tc := range tests {
@@ -425,14 +419,14 @@ func TestArticleUpdateRefusesAnAnswerThatDisagreesAboutTheParent(t *testing.T) {
 			t.Parallel()
 			filed := answeredArticle{readable: "DEV-A-7", summary: "x", parent: tc.parent}
 			server := movingAnArticle(t, map[string]http.HandlerFunc{
-				"DEV-A-7": answer(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-				"DEV-A-1": answer(http.StatusOK, rootOfDEV("177-1", "DEV-A-1")),
-			}, answer(http.StatusOK, filed.json()))
+				"DEV-A-7": respondWith(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+				"DEV-A-1": respondWith(http.StatusOK, rootOfDEV("177-1", "DEV-A-1")),
+			}, respondWith(http.StatusOK, filed.json()))
 
 			got := runWith(t, server.env(), append([]string{"article", "update", "DEV-A-7"}, tc.argv...)...)
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", articleUpdateRequest(server.url, "DEV-A-7", articleShowFields)},
 					{"article", "DEV-A-7"},
@@ -445,9 +439,6 @@ func TestArticleUpdateRefusesAnAnswerThatDisagreesAboutTheParent(t *testing.T) {
 	}
 }
 
-// A tree of the polygon moved about for real: the move that would close the line is refused off the line
-// itself, a parent the polygon has none of leaves the standing parent where it was, and taking the parent away
-// puts the article at the root of the knowledge base.
 func TestArticleUpdateMovesArticlesOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -479,7 +470,7 @@ func TestArticleUpdateMovesArticlesOfTheDevInstance(t *testing.T) {
 	standing := runWith(t, dev.env(), "article", "show", child, "--comments=0", "--fields", "parentArticle(idReadable)")
 	require.Equal(t, 0, standing.code, "stderr: %s", standing.stderr)
 	assert.Equal(t, root, nodeAt(t, requireMapping(t, "stdout", standing.stdout), "parentArticle", "idReadable").Value,
-		"a parent the polygon has none of leaves the standing one where it was")
+		"a parent the dev instance has none of leaves the standing one where it was")
 
 	taken := runWith(t, dev.env(), "article", "update", child, "--clear", "parent")
 	require.Equal(t, 0, taken.code, "stderr: %s", taken.stderr)
@@ -497,7 +488,7 @@ func TestArticleUpdateMovesNothingUnderAParentOfAnotherProjectOfTheDevInstance(t
 
 	got := runWith(t, dev.env(), "article", "update", filed, "--parent", "DEMO-A-1")
 
-	want := refusal{
+	want := faultDocument{
 		code: "bad_usage",
 		details: []detail{
 			{"request", articleLineRequest(dev.url, "DEMO-A-1")},

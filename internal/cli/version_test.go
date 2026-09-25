@@ -76,7 +76,7 @@ func TestVersionPrintsTheStampOfTheBuildAsOneDocument(t *testing.T) {
 }
 
 // The flag is the root's own and no command inherits it, which is what "only on the root" means.
-func TestVersionStandsOnTheRootAlone(t *testing.T) {
+func TestVersionIsOnlyOnTheRoot(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
@@ -96,7 +96,7 @@ func TestVersionStandsOnTheRootAlone(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -109,7 +109,7 @@ func TestVersionHasNoShorthand(t *testing.T) {
 
 	got := runWith(t, server.env(), "-v")
 
-	assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 	assert.Empty(t, server.requests())
 }
 
@@ -121,7 +121,7 @@ func TestVersionWithAWordIsRefusedAsACommand(t *testing.T) {
 
 	got := runWith(t, server.env(), "--version", "bogus")
 
-	assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 	assert.Empty(t, server.requests())
 }
 

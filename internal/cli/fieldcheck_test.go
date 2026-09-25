@@ -22,7 +22,7 @@ func userNames() []any {
 		"online", "profiles", "ringId", "savedQueries", "tags"}
 }
 
-func judgmentDetails(address, fields, key string, entries ...[]detail) []detail {
+func missingFieldDetails(address, fields, key string, entries ...[]detail) []detail {
 	listed := []any{}
 	for _, entry := range entries {
 		listed = append(listed, entry)
@@ -49,9 +49,9 @@ func TestProjectShowRefusesNamesTheSchemasOfTheDevInstanceDoNotDeclare(t *testin
 
 	got := runWith(t, dev.env(), "project", "show", "DEV", "--fields", "shortName,bogus,leader(logn)")
 
-	want := refusal{
+	want := faultDocument{
 		code: "unknown_name",
-		details: judgmentDetails(dev.url, "shortName,bogus,leader(logn)", "unknown",
+		details: missingFieldDetails(dev.url, "shortName,bogus,leader(logn)", "unknown",
 			unknownEntry("bogus", projectNames()...),
 			unknownEntry("leader(logn)", "login"),
 		),
@@ -66,9 +66,9 @@ func TestProjectShowRefusesFieldsAskedOfAStringOfTheDevInstance(t *testing.T) {
 
 	got := runWith(t, dev.env(), "project", "show", "DEV", "--fields", "shortName(foo)")
 
-	want := refusal{
+	want := faultDocument{
 		code:    "unknown_name",
-		details: judgmentDetails(dev.url, "shortName(foo)", "unknown", unknownEntry("shortName(foo)")),
+		details: missingFieldDetails(dev.url, "shortName(foo)", "unknown", unknownEntry("shortName(foo)")),
 	}
 	assert.Equal(t, want, requireRefusal(t, got))
 	assert.Len(t, dev.requests(), 1)
@@ -100,7 +100,7 @@ func TestProjectShowLeavesOutAFieldTheTypeOfTheDevInstanceDoesNotDeclare(t *test
 	assert.Len(t, dev.requests(), 1)
 }
 
-func TestProjectShowJudgesNoNameUnderANullOfTheDevInstance(t *testing.T) {
+func TestProjectShowChecksNoNameUnderANullOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
@@ -110,7 +110,7 @@ func TestProjectShowJudgesNoNameUnderANullOfTheDevInstance(t *testing.T) {
 	assert.Len(t, dev.requests(), 1)
 }
 
-func TestProjectShowRefusesAFieldThatDidNotArrive(t *testing.T) {
+func TestProjectShowRefusesAFieldMissingFromTheResponse(t *testing.T) {
 	t.Parallel()
 	const asked = "shortName,name,archived,leader(login)"
 	tests := []struct {
@@ -204,18 +204,18 @@ func TestProjectShowRefusesAFieldThatDidNotArrive(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, tc.body))
+			server := serve(t, respondWith(http.StatusOK, tc.body))
 
 			got := runWith(t, server.env(), "project", "show", "DEV", "--fields", tc.fields)
 
-			want := refusal{code: "upstream_lied", details: judgmentDetails(server.url, tc.fields, "missing", tc.missing...)}
+			want := faultDocument{code: "upstream_invalid", details: missingFieldDetails(server.url, tc.fields, "missing", tc.missing...)}
 			assert.Equal(t, want, requireRefusal(t, got))
 			assert.Len(t, server.requests(), 1)
 		})
 	}
 }
 
-func TestProjectShowRefusesANameNoSchemaOfItsPlaceDeclares(t *testing.T) {
+func TestProjectShowRefusesANameNoSchemaOfItsNodeDeclares(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
@@ -270,11 +270,11 @@ func TestProjectShowRefusesANameNoSchemaOfItsPlaceDeclares(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, tc.body))
+			server := serve(t, respondWith(http.StatusOK, tc.body))
 
 			got := runWith(t, server.env(), "project", "show", "DEV", "--fields", tc.fields)
 
-			want := refusal{code: "unknown_name", details: judgmentDetails(server.url, tc.fields, "unknown", tc.unknown...)}
+			want := faultDocument{code: "unknown_name", details: missingFieldDetails(server.url, tc.fields, "unknown", tc.unknown...)}
 			assert.Equal(t, want, requireRefusal(t, got))
 			assert.Len(t, server.requests(), 1)
 		})
@@ -348,7 +348,7 @@ func TestProjectShowLeavesOutAFieldTheNamedTypeDoesNotDeclare(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, tc.body))
+			server := serve(t, respondWith(http.StatusOK, tc.body))
 
 			got := runWith(t, server.env(), "project", "show", "DEV", "--fields", tc.fields)
 

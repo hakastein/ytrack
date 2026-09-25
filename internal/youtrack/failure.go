@@ -26,7 +26,7 @@ func transportFailure(err error) *diag.Fault {
 
 // The status arrived and the body broke off, so the status is named.
 func readFailure(response *http.Response, err error) *diag.Fault {
-	return &diag.Fault{Code: diag.UpstreamFailed, Message: err.Error(), Details: answerDetails(response)}
+	return &diag.Fault{Code: diag.UpstreamFailed, Message: err.Error(), Details: responseDetails(response)}
 }
 
 // A write whose request left whole and whose answer never came. Whether it happened is nobody's to say: ytrack
@@ -41,9 +41,9 @@ func uncertainWrite(err error) *diag.Fault {
 // The status of a write arrived and the rest of the answer did not. Under a 2xx or a 5xx the server had taken
 // the request by the time it answered, so what became of the write is unknown; under any other status it said
 // it refused the write, and an answer cut short does not unsay that.
-func brokenOffWrite(response *http.Response, body []byte, err error) *diag.Fault {
+func truncatedWriteResponse(response *http.Response, body []byte, err error) *diag.Fault {
 	fault := readFailure(response, err)
-	if !carriedOut(response.StatusCode) && !serverFailed(response.StatusCode) {
+	if !is2xx(response.StatusCode) && !is5xx(response.StatusCode) {
 		return fault
 	}
 	fault.Code = diag.WriteUncertain
@@ -60,21 +60,21 @@ func writeFailure(response *http.Response, body []byte) *diag.Fault {
 		return nil
 	}
 	tree, isJSON := decode(body)
-	if serverFailed(response.StatusCode) && !youTrackFailed(tree) {
+	if is5xx(response.StatusCode) && !isYouTrackError(tree) {
 		message := fmt.Sprintf("something other than YouTrack answered the write with status %d", response.StatusCode)
-		details := append(answerDetails(response), bodyDetail(body))
+		details := append(responseDetails(response), bodyDetail(body))
 		return &diag.Fault{Code: diag.WriteUncertain, Message: message, Details: details}
 	}
 	// Only a 5xx keeps its code over a body that is not JSON, as everywhere else a status is read.
-	if !isJSON && !serverFailed(response.StatusCode) {
-		return afterTheWrite(response, shapeFailure(response, body, notOneValue))
+	if !isJSON && !is5xx(response.StatusCode) {
+		return markWritten(response, shapeFailure(response, body, notOneValue))
 	}
-	return afterTheWrite(response, statusFailure(response, tree, body))
+	return markWritten(response, statusFailure(response, tree, body))
 }
 
 // YouTrack's own word about a failure: a JSON object carrying a string error, the shape every refusal of the
 // API arrives in.
-func youTrackFailed(tree any) bool {
+func isYouTrackError(tree any) bool {
 	said, isObject := tree.(map[string]any)
 	if !isObject {
 		return false
@@ -85,12 +85,12 @@ func youTrackFailed(tree any) bool {
 
 // A refusal about a write the server answered 2xx: it took the request and carried it out, so the instance
 // changed however the refusal reads, and the exit code says so without the document being read.
-func afterTheWrite(response *http.Response, fault *diag.Fault) *diag.Fault {
-	fault.Wrote = carriedOut(response.StatusCode)
+func markWritten(response *http.Response, fault *diag.Fault) *diag.Fault {
+	fault.AfterWrite = is2xx(response.StatusCode)
 	return fault
 }
 
-func carriedOut(status int) bool {
+func is2xx(status int) bool {
 	return status >= http.StatusOK && status < http.StatusMultipleChoices
 }
 
@@ -98,7 +98,7 @@ func carriedOut(status int) bool {
 // does not name, for a body that is no JSON object and for one holding more than string error and error_description.
 func statusFailure(response *http.Response, tree any, body []byte) *diag.Fault {
 	code, named := statusCode(response.StatusCode)
-	details := answerDetails(response)
+	details := responseDetails(response)
 	said, _ := tree.(map[string]any)
 	carried := 0
 	for _, member := range []struct{ name, key string }{{"error", "upstream_error"}, {"error_description", "upstream_message"}} {
@@ -115,8 +115,8 @@ func statusFailure(response *http.Response, tree any, body []byte) *diag.Fault {
 }
 
 func shapeFailure(response *http.Response, body []byte, message string) *diag.Fault {
-	details := append(answerDetails(response), bodyDetail(body))
-	return &diag.Fault{Code: diag.UpstreamLied, Message: message, Details: details}
+	details := append(responseDetails(response), bodyDetail(body))
+	return &diag.Fault{Code: diag.UpstreamInvalid, Message: message, Details: details}
 }
 
 // ADR-0005's table. A status it does not name is upstream_failed with the body attached, never the
@@ -129,13 +129,13 @@ func statusCode(status int) (code diag.Code, named bool) {
 		return diag.Denied, true
 	case status == http.StatusNotFound:
 		return diag.NotFound, true
-	case serverFailed(status):
+	case is5xx(status):
 		return diag.UpstreamFailed, true
 	}
 	return diag.UpstreamFailed, false
 }
 
-func serverFailed(status int) bool {
+func is5xx(status int) bool {
 	return status >= 500 && status < 600
 }
 
@@ -143,7 +143,7 @@ func bodyDetail(body []byte) render.Pair {
 	return render.Pair{Key: "upstream_body", Value: render.NewString(string(body))}
 }
 
-func answerDetails(response *http.Response) []render.Pair {
+func responseDetails(response *http.Response) []render.Pair {
 	return []render.Pair{
 		requestDetail(response.Request.Method, response.Request.URL.Redacted()),
 		{Key: "upstream_status", Value: intNode(response.StatusCode)},
@@ -161,11 +161,7 @@ func requestDetail(method, address string) render.Pair {
 
 const requestKey = "request"
 
-// afterTheRequest is how a command says what a refusal the passage built was about: what it names the entities
-// by stands between the request and whatever the server said, so a document reads from the call outwards
-// whichever code the failure came back under. A refusal naming no request at all — a write that never left
-// with nothing to name it by — carries them first.
-func afterTheRequest(details []render.Pair, own ...render.Pair) []render.Pair {
+func insertAfterRequest(details []render.Pair, own ...render.Pair) []render.Pair {
 	at := slices.IndexFunc(details, func(pair render.Pair) bool { return pair.Key == requestKey })
 	return slices.Insert(slices.Clone(details), at+1, own...)
 }

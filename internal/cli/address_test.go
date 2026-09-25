@@ -116,7 +116,7 @@ func TestIssueCommandsSendEveryFormOfAnIssueToTheIssues(t *testing.T) {
 			for _, command := range issueCommands() {
 				t.Run(command.name, func(t *testing.T) {
 					t.Parallel()
-					server := serve(t, answer(http.StatusNotFound, entityNotFound(tc.id)))
+					server := serve(t, respondWith(http.StatusNotFound, entityNotFound(tc.id)))
 
 					got := runWith(t, server.env(), command.argv(tc.id)...)
 
@@ -131,8 +131,6 @@ func TestIssueCommandsSendEveryFormOfAnIssueToTheIssues(t *testing.T) {
 	}
 }
 
-// A code with an underscore is a code like any other, and the polygon has no project under it: the form
-// sends the id to the issues and the server answers for itself.
 func TestIssueShowSendsACodeWithAnUnderscoreToTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -217,7 +215,7 @@ func TestArticleCommandsSendEveryFormOfAnArticleToTheArticles(t *testing.T) {
 			for _, command := range articleCommands() {
 				t.Run(command.name, func(t *testing.T) {
 					t.Parallel()
-					server := serve(t, answer(http.StatusNotFound, entityNotFound(tc.id)))
+					server := serve(t, respondWith(http.StatusNotFound, entityNotFound(tc.id)))
 
 					got := runWith(t, server.env(), command.argv(tc.id)...)
 
@@ -328,7 +326,7 @@ func TestOwnerCommandsSendEachFormToTheAPIOfItsKind(t *testing.T) {
 			for _, command := range ownerCommands(t) {
 				t.Run(command.name, func(t *testing.T) {
 					t.Parallel()
-					server := serve(t, answer(http.StatusNotFound, entityNotFound(tc.id)))
+					server := serve(t, respondWith(http.StatusNotFound, entityNotFound(tc.id)))
 
 					got := runWith(t, server.env(), command.argv(tc.id)...)
 
@@ -431,7 +429,7 @@ func TestChildCommandsSendEveryInternalIDToTheServer(t *testing.T) {
 	}{
 		{name: "the class of a comment of an issue", id: "7-1"},
 		{name: "the class of a comment of an article", id: "8-1"},
-		{name: "a class the polygon has none of", id: "42-1"},
+		{name: "a class the dev instance has none of", id: "42-1"},
 		{name: "leading zeros in both numbers", id: "07-01"},
 	}
 	for _, tc := range tests {
@@ -440,7 +438,7 @@ func TestChildCommandsSendEveryInternalIDToTheServer(t *testing.T) {
 			for _, command := range childCommands() {
 				t.Run(command.name, func(t *testing.T) {
 					t.Parallel()
-					server := serve(t, answer(http.StatusNotFound, entityNotFound(tc.id)))
+					server := serve(t, respondWith(http.StatusNotFound, entityNotFound(tc.id)))
 
 					got := runWith(t, server.env(), command.argv(tc.id)...)
 
@@ -525,7 +523,7 @@ func TestProjectCodeCommandsSendEveryFormOfACodeToTheProjects(t *testing.T) {
 			for _, command := range codeCommands() {
 				t.Run(command.name, func(t *testing.T) {
 					t.Parallel()
-					server := serve(t, answer(http.StatusNotFound, entityNotFound(tc.code)))
+					server := serve(t, respondWith(http.StatusNotFound, entityNotFound(tc.code)))
 
 					got := runWith(t, server.env(), command.argv(tc.code)...)
 
@@ -540,15 +538,13 @@ func TestProjectCodeCommandsSendEveryFormOfACodeToTheProjects(t *testing.T) {
 	}
 }
 
-// A code holding digits and an underscore is a code like any other, and the polygon has no project under
-// it: the form sends it to the projects and the server answers for itself.
 func TestProjectShowSendsACodeWithDigitsToTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
 	got := runWith(t, dev.env(), "project", "show", "Api_32")
 
-	assert.Equal(t, refusal{
+	assert.Equal(t, faultDocument{
 		code: "not_found",
 		details: []detail{
 			{"request", showRequest(dev.url, "Api_32")},

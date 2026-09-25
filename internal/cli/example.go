@@ -74,11 +74,11 @@ func articleExample(withComments bool) *render.Node {
 		render.Pair{Key: "tags", Value: render.NewList(named("Tag"))},
 		render.Pair{Key: "parentArticle", Value: render.NewMap(render.Pair{Key: "idReadable", Value: render.NewString("DEV-A-1")}, render.Pair{Key: "summary", Value: render.NewString("Summary")})},
 		render.Pair{Key: "childArticles", Value: render.NewList()},
-		render.Pair{Key: "content", Value: render.NewProse("Text")},
+		render.Pair{Key: "content", Value: render.NewText("Text")},
 	}
 	if withComments {
 		pairs = append(pairs, render.Pair{Key: "comments", Value: render.NewList(render.NewMap(render.Pair{Key: "id", Value: render.NewString("8-1")},
-			render.Pair{Key: "author", Value: byLogin()}, render.Pair{Key: "created", Value: moment()}, render.Pair{Key: "text", Value: render.NewProse("Text")}))})
+			render.Pair{Key: "author", Value: byLogin()}, render.Pair{Key: "created", Value: moment()}, render.Pair{Key: "text", Value: render.NewText("Text")}))})
 	}
 	return render.NewMap(pairs...)
 }
@@ -99,7 +99,7 @@ func commentExample(updated *render.Node) *render.Node {
 		render.Pair{Key: "author", Value: byLogin()},
 		render.Pair{Key: "created", Value: moment()},
 		render.Pair{Key: "updated", Value: updated},
-		render.Pair{Key: "text", Value: render.NewProse("Text")},
+		render.Pair{Key: "text", Value: render.NewText("Text")},
 	)
 }
 
@@ -119,11 +119,11 @@ func issueExample(withComments bool) *render.Node {
 		)},
 		render.Pair{Key: "links", Value: render.NewMap(render.FromData("depends on", render.NewList(
 			render.NewMap(render.Pair{Key: "idReadable", Value: render.NewString("DEV-2")}, render.Pair{Key: "summary", Value: render.NewString("Summary")}))))},
-		render.Pair{Key: "description", Value: render.NewProse("Text")},
+		render.Pair{Key: "description", Value: render.NewText("Text")},
 	}
 	if withComments {
 		pairs = append(pairs, render.Pair{Key: "comments", Value: render.NewList(render.NewMap(render.Pair{Key: "id", Value: render.NewString("7-1")},
-			render.Pair{Key: "author", Value: byLogin()}, render.Pair{Key: "created", Value: moment()}, render.Pair{Key: "text", Value: render.NewProse("Text")}))})
+			render.Pair{Key: "author", Value: byLogin()}, render.Pair{Key: "created", Value: moment()}, render.Pair{Key: "text", Value: render.NewText("Text")}))})
 	}
 	return render.NewMap(pairs...)
 }
@@ -151,6 +151,6 @@ func workItemExample() *render.Node {
 			render.Pair{Key: "idReadable", Value: render.NewString("DEV-1")},
 			render.Pair{Key: "customFields", Value: render.NewMap(render.FromData("Spent time", render.NewString("PT1H30M")))},
 		)},
-		render.Pair{Key: "text", Value: render.NewProse("Text")},
+		render.Pair{Key: "text", Value: render.NewText("Text")},
 	)
 }

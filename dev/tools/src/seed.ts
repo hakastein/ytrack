@@ -18,7 +18,7 @@ import {
 import {
   DOCS_FIELD_ORDER, DOCS_FIELDS, FIELD_ORDER, FIELDS, valueType, type Field, type TypeId, type ValueType,
 } from "./fields.ts";
-import { INSTANCE_TIME_ZONE, LIMITED, MEMBER, type PolygonUser } from "./users.ts";
+import { INSTANCE_TIME_ZONE, LIMITED, MEMBER, type DevInstanceUser } from "./users.ts";
 import { Api, ApiError, type Tree } from "./youtrack.ts";
 
 const BASE_URL = process.env.YOUTRACK_URL!.replace(/\/+$/, "");
@@ -26,25 +26,25 @@ const TOKEN_FILE = process.env.YOUTRACK_TOKEN_FILE ?? "/state/admin-token";
 const LIMITED_TOKEN_FILE = join(dirname(TOKEN_FILE), "limited-token");
 const MEMBER_TOKEN_FILE = join(dirname(TOKEN_FILE), "member-token");
 
-type PolygonProject = { key: string; name: string; fields: Field[]; order: string[]; workflows: string[] };
-const DEV_PROJECT: PolygonProject = {
+type DevInstanceProject = { key: string; name: string; fields: Field[]; order: string[]; workflows: string[] };
+const DEV_PROJECT: DevInstanceProject = {
   key: "DEV", name: "DEVELOPMENT", fields: FIELDS, order: FIELD_ORDER,
   // Каскад владельца `Subsystem` в `Assignee` и голос за `+1` в комментарии исполняют воркфлоу, а не сервер
   workflows: ["Subsystem Assignee", "One Vote Comment"],
 };
-const DOCS_PROJECT: PolygonProject = {
+const DOCS_PROJECT: DevInstanceProject = {
   key: "DOCS", name: "DOCS", fields: DOCS_FIELDS, order: DOCS_FIELD_ORDER, workflows: [],
 };
 const PROJECTS = [DEV_PROJECT, DOCS_PROJECT];
 const ADMIN_LOGIN = process.env.YOUTRACK_ADMIN_LOGIN!;
 const LIMITED_PASSWORD = process.env.YOUTRACK_LIMITED_PASSWORD ?? "ytrack-dev";
 const MEMBER_PASSWORD = process.env.YOUTRACK_MEMBER_PASSWORD ?? "ytrack-dev";
-const POLYGON_USERS = [ADMIN_LOGIN, LIMITED.login, MEMBER.login];
+const DEV_INSTANCE_USERS = [ADMIN_LOGIN, LIMITED.login, MEMBER.login];
 const VALUE_OWNER = ADMIN_LOGIN;
 const VALUE_OWNER_RULE = `владелец значения — только ${VALUE_OWNER}: поля привязываются раньше, чем заводятся ` +
   "остальные пользователи полигона";
 // Команду проекта YouTrack заводит сам, группой `<имя проекта> Team`
-const POLYGON_GROUPS = [`${DEV_PROJECT.name} Team`, MEMBER.group];
+const DEV_INSTANCE_GROUPS = [`${DEV_PROJECT.name} Team`, MEMBER.group];
 // Проект у Hub один, поэтому роль участника глобальная. В команду DEV REST добавляет только группу, а её
 // пользователи попадают в `Assignee`
 const HUB_PROJECT = "GLBL";
@@ -174,7 +174,7 @@ function divergence(want: Tree, got: Tree): string[] {
     .map(([key, value]) => `${key} ${JSON.stringify(got[key])} вместо ${JSON.stringify(value)}`);
 }
 
-const fieldOf = (project: PolygonProject, name: string): Field | undefined =>
+const fieldOf = (project: DevInstanceProject, name: string): Field | undefined =>
   project.fields.find((f) => f.name === name);
 
 const writtenValues = (issue: Issue): FieldValue[] =>
@@ -182,7 +182,7 @@ const writtenValues = (issue: Issue): FieldValue[] =>
 
 const isEmpty = (value: unknown): boolean => value === null || value === "" || (Array.isArray(value) && !value.length);
 
-function cascadeOwner(project: PolygonProject, values: FieldValue[]): string | undefined {
+function cascadeOwner(project: DevInstanceProject, values: FieldValue[]): string | undefined {
   const source = values.find((v) => v.field === SUBSYSTEM_CASCADE.source);
   return fieldOf(project, SUBSYSTEM_CASCADE.source)?.values?.find((v) => v.name === source?.value)?.owner;
 }
@@ -285,12 +285,12 @@ function checkFieldOrder(): void {
 }
 
 /** Выпавшая из описания черта не ломает ни типов, ни сверки с ответом: описание сверяется с той же константой */
-function checkProse(): void {
-  const missing = ISSUES.flatMap((issue) => (issue.prose ?? [])
+function checkTextFeatures(): void {
+  const missing = ISSUES.flatMap((issue) => (issue.textFeatures ?? [])
     .filter(([, pattern]) => !pattern.test(issue.description ?? ""))
     .map(([name]) => `${JSON.stringify(issue.summary)}: ${name}`));
   if (missing.length) {
-    fail("prose_feature_missing", `описания полигона не несут черт: ${missing.join(", ")}`);
+    fail("text_feature_missing", `описания полигона не несут черт: ${missing.join(", ")}`);
   }
 }
 
@@ -331,11 +331,11 @@ function checkHistoryTable(): void {
   }
 }
 
-function listed(project: PolygonProject, { field, value }: FieldValue): boolean {
+function listed(project: DevInstanceProject, { field, value }: FieldValue): boolean {
   const typed = fieldOf(project, field);
   if (!typed) return false;
   const type = valueType(typed);
-  const names = type === "user" ? POLYGON_USERS : type === "group" ? POLYGON_GROUPS
+  const names = type === "user" ? DEV_INSTANCE_USERS : type === "group" ? DEV_INSTANCE_GROUPS
     : BUNDLE_TYPE[type] !== null ? (typed.values ?? []).map((v) => v.name) : null;
   if (!names) return true;
   const items: unknown = typed.typeId.endsWith("[*]") ? value : [value];
@@ -536,7 +536,7 @@ async function checkLinkCoverage(api: Api): Promise<number> {
   return catalog.length;
 }
 
-async function createProject(api: Api, project: PolygonProject, leaderId: string): Promise<string> {
+async function createProject(api: Api, project: DevInstanceProject, leaderId: string): Promise<string> {
   const existing: Tree[] = await api.get("/api/admin/projects", "id,shortName");
   if (existing.some((p) => p.shortName === project.key)) {
     fail("project_exists", `проект ${project.key} уже есть: инстанс сидирован, нужен \`make reset && make install\``);
@@ -559,7 +559,7 @@ async function createPrototype(api: Api, field: Field): Promise<string> {
 }
 
 async function makeBundle(
-  api: Api, project: PolygonProject, field: Field, ownerIds: ReadonlyMap<string, string>,
+  api: Api, project: DevInstanceProject, field: Field, ownerIds: ReadonlyMap<string, string>,
 ): Promise<[bundle: Tree, owners: ValueOwner[]] | null> {
   const type = valueType(field);
   const bundleType = BUNDLE_TYPE[type];
@@ -589,7 +589,7 @@ async function makeBundle(
 }
 
 async function attach(
-  api: Api, project: PolygonProject, projectId: string, prototypes: Map<string, string>,
+  api: Api, project: DevInstanceProject, projectId: string, prototypes: Map<string, string>,
   ownerIds: ReadonlyMap<string, string>, field: Field,
 ): Promise<[attached: Tree, owners: ValueOwner[]]> {
   const type = valueType(field);
@@ -633,7 +633,7 @@ async function applyCondition(
 }
 
 async function applyDefault(
-  api: Api, project: PolygonProject, projectId: string, attached: Map<string, Tree>, field: Field,
+  api: Api, project: DevInstanceProject, projectId: string, attached: Map<string, Tree>, field: Field,
 ): Promise<FieldDefault> {
   const host = attached.get(field.name)!;
   const value = host.bundle.values.find((v: Tree) => v.name === field.defaultValue);
@@ -649,7 +649,7 @@ async function applyDefault(
 }
 
 async function attachFields(
-  api: Api, project: PolygonProject, projectId: string, prototypes: Map<string, string>,
+  api: Api, project: DevInstanceProject, projectId: string, prototypes: Map<string, string>,
   ownerIds: ReadonlyMap<string, string>,
 ): Promise<AttachedFields> {
   const attached = new Map<string, Tree>();
@@ -670,7 +670,7 @@ async function attachFields(
 }
 
 async function requireWhenShown(
-  api: Api, project: PolygonProject, projectId: string, attached: Map<string, Tree>,
+  api: Api, project: DevInstanceProject, projectId: string, attached: Map<string, Tree>,
 ): Promise<RequiredWhenShown[]> {
   const flagged: RequiredWhenShown[] = [];
   for (const field of project.fields.filter((f) => f.requiredWhenShown)) {
@@ -691,7 +691,7 @@ async function requireWhenShown(
 }
 
 async function writeFieldOrder(
-  api: Api, project: PolygonProject, projectId: string, attached: Map<string, Tree>,
+  api: Api, project: DevInstanceProject, projectId: string, attached: Map<string, Tree>,
 ): Promise<FieldOrder> {
   for (const [index, name] of project.order.entries()) {
     // С единицы: привязанное поле приходит с ordinal 0, и запись нуля сверка по ответу не отличила бы от пропущенной
@@ -706,7 +706,7 @@ async function writeFieldOrder(
 }
 
 /** Поля по умолчанию, удалённые из нового проекта, ломают использование до привязки полей из таблицы */
-async function checkWorkflowUsages(api: Api, project: PolygonProject): Promise<void> {
+async function checkWorkflowUsages(api: Api, project: DevInstanceProject): Promise<void> {
   const catalog: Tree[] = await api.get(WORKFLOW_CATALOG, "title,usages(project(shortName),isBroken)");
   const broken = project.workflows.filter((title) => !catalog.some((w) => w.title === title &&
     (w.usages as Tree[]).some((usage) => usage.project?.shortName === project.key && usage.isBroken === false)))
@@ -721,7 +721,7 @@ async function checkWorkflowUsages(api: Api, project: PolygonProject): Promise<v
  * на это не влияет, поэтому набор пишется целиком — сервер принимает его и при выключенном учёте.
  */
 async function writeTimeTracking(
-  api: Api, project: PolygonProject, projectId: string, attached: Map<string, Tree>, types: Map<string, Tree>,
+  api: Api, project: DevInstanceProject, projectId: string, attached: Map<string, Tree>, types: Map<string, Tree>,
   want: TimeTracking,
 ): Promise<TimeTracking> {
   const field = (name: string | null): Tree | undefined =>
@@ -771,7 +771,7 @@ async function ensureWorkItemAttribute(api: Api): Promise<string> {
   return prototype!.id;
 }
 
-async function attachWorkItemAttribute(api: Api, project: PolygonProject, projectId: string, prototypeId: string) {
+async function attachWorkItemAttribute(api: Api, project: DevInstanceProject, projectId: string, prototypeId: string) {
   const attached: Tree = await api.post(`/api/admin/projects/${projectId}/timeTrackingSettings/attributes`,
     { prototype: { id: prototypeId } }, "name,values(name)");
   const got: string[] = attached.values.map((v: Tree) => v.name);
@@ -782,7 +782,7 @@ async function attachWorkItemAttribute(api: Api, project: PolygonProject, projec
 
 type HubAccount = { id: string; token: string };
 
-async function createHubUser(api: Api, user: PolygonUser, password: string, tokenName: string): Promise<HubAccount> {
+async function createHubUser(api: Api, user: DevInstanceUser, password: string, tokenName: string): Promise<HubAccount> {
   const created = await api.post("/hub/api/rest/users", {
     login: user.login, name: user.name, password,
     profile: { email: { email: user.email, verified: true } },
@@ -894,7 +894,7 @@ async function checkLimited(api: Api, limited: Pick<Api, "get">, hubId: string):
   return { login: LIMITED.login, roles, projects };
 }
 
-function issueField(project: PolygonProject, { field, value }: FieldValue): Tree {
+function issueField(project: DevInstanceProject, { field, value }: FieldValue): Tree {
   const typed = fieldOf(project, field)!;
   const key = VALUE_KEY[valueType(typed)];
   const wrap = (item: string | number): unknown => key === null ? item : { [key]: item };
@@ -917,7 +917,7 @@ function identity(field: Field, value: FieldValue["value"] | null): FieldValue["
 }
 
 /** Сверенные значения задачи: записанные, умолчания незаписанных полей и `Assignee`, которого поставил каскад */
-function checkValues(project: PolygonProject, got: Tree, written: FieldValue[]): FieldValue[] {
+function checkValues(project: DevInstanceProject, got: Tree, written: FieldValue[]): FieldValue[] {
   const received = new Map<string, any>((got.customFields as Tree[]).map((f) => [f.name, f.value]));
   const read = (name: string): FieldValue["value"] | null => {
     const field = fieldOf(project, name)!;
@@ -957,7 +957,7 @@ function checkValues(project: PolygonProject, got: Tree, written: FieldValue[]):
 }
 
 async function createIssue(
-  api: Api, project: PolygonProject, projectId: string, issue: Pick<Issue, "summary" | "description">,
+  api: Api, project: DevInstanceProject, projectId: string, issue: Pick<Issue, "summary" | "description">,
   written: FieldValue[],
 ): Promise<CreatedIssue> {
   const got: Tree = await api.post("/api/issues", {
@@ -1225,7 +1225,7 @@ async function checkHistory(api: Api, issue: CreatedIssue): Promise<IssueHistory
   };
 }
 
-async function rejectWorkItem(api: Api, project: PolygonProject, issue: CreatedIssue): Promise<number> {
+async function rejectWorkItem(api: Api, project: DevInstanceProject, issue: CreatedIssue): Promise<number> {
   try {
     await api.post(`/api/issues/${issue.id}/timeTracking/workItems`, { duration: { minutes: 30 } });
   } catch (error) {
@@ -1238,7 +1238,7 @@ async function rejectWorkItem(api: Api, project: PolygonProject, issue: CreatedI
 async function main(): Promise<void> {
   checkReferences();
   checkFields();
-  checkProse();
+  checkTextFeatures();
   checkTimeZoneFixture();
   checkHistoryTable();
   checkValueTable();

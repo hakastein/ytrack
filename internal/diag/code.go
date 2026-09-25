@@ -14,6 +14,6 @@ const (
 	Denied          Code = "denied"
 	Rejected        Code = "rejected"
 	UpstreamFailed  Code = "upstream_failed"
-	UpstreamLied    Code = "upstream_lied"
+	UpstreamInvalid Code = "upstream_invalid"
 	WriteUncertain  Code = "write_uncertain"
 )

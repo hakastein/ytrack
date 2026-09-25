@@ -31,9 +31,9 @@ func gateway(status int) http.HandlerFunc {
 	}
 }
 
-// held is a handler that tells the test its request arrived whole and then waits for the caller to go away,
+// blockingHandler is a handler that tells the test its request arrived whole and then waits for the caller to go away,
 // which is what a server taking its time over a write looks like from outside.
-func held(reached chan<- struct{}) http.HandlerFunc {
+func blockingHandler(reached chan<- struct{}) http.HandlerFunc {
 	return func(_ http.ResponseWriter, r *http.Request) {
 		close(reached)
 		<-r.Context().Done()
@@ -54,7 +54,7 @@ func runInContext(t *testing.T, ctx context.Context, env []string, argv ...strin
 // may still be under way. So the caller is told that much, and nothing else goes out.
 func TestIssueDeleteIsUncertainWhereTheAnswerNeverCame(t *testing.T) {
 	t.Parallel()
-	server := deleting(t, answer(http.StatusOK, issueNamed("DEV-7")), breakOff)
+	server := deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), breakOff)
 
 	got := runWith(t, server.env(), "issue", "delete", "DEV-7")
 
@@ -74,7 +74,7 @@ func TestIssueDeleteFailsWhereTheDeletionNeverLeft(t *testing.T) {
 	// dial the server that is no longer there instead of going out over a connection that is already open.
 	server = serveWithoutKeepAlive(t, readThenDeletion(func(w http.ResponseWriter, r *http.Request) {
 		server.stopListening(t)
-		answer(http.StatusOK, issueNamed("DEV-7"))(w, r)
+		respondWith(http.StatusOK, issueNamed("DEV-7"))(w, r)
 	}, noDeletion(t)))
 
 	got := runWith(t, server.env(), "issue", "delete", "DEV-7")
@@ -86,10 +86,7 @@ func TestIssueDeleteFailsWhereTheDeletionNeverLeft(t *testing.T) {
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 }
 
-// A call given up on is judged by the same border: the deletion the server already holds may be carried
-// out after ytrack is gone, while the read that was interrupted changed nothing at all. What the two answer
-// is the whole difference between an exit code the caller may repeat blindly and one they may not.
-func TestIssueDeleteJudgesACancelledCallByWhetherTheRequestLeft(t *testing.T) {
+func TestIssueDeleteClassifiesACancelledCallByWhetherTheRequestWasSent(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
@@ -102,7 +99,7 @@ func TestIssueDeleteJudgesACancelledCallByWhetherTheRequestLeft(t *testing.T) {
 		{
 			name: "the deletion is held",
 			held: func(_ *testing.T, reached chan<- struct{}) (http.HandlerFunc, http.HandlerFunc) {
-				return answer(http.StatusOK, issueNamed("DEV-7")), held(reached)
+				return respondWith(http.StatusOK, issueNamed("DEV-7")), blockingHandler(reached)
 			},
 			code:    "write_uncertain",
 			exit:    2,
@@ -112,7 +109,7 @@ func TestIssueDeleteJudgesACancelledCallByWhetherTheRequestLeft(t *testing.T) {
 		{
 			name: "the read before it is held",
 			held: func(t *testing.T, reached chan<- struct{}) (http.HandlerFunc, http.HandlerFunc) {
-				return held(reached), noDeletion(t)
+				return blockingHandler(reached), noDeletion(t)
 			},
 			code:    "upstream_failed",
 			exit:    1,
@@ -137,7 +134,7 @@ func TestIssueDeleteJudgesACancelledCallByWhetherTheRequestLeft(t *testing.T) {
 
 			got := runInContext(t, ctx, server.env(), "issue", "delete", "DEV-7")
 
-			want := refusal{
+			want := faultDocument{
 				code:    tc.code,
 				details: []detail{{"request", tc.request(server.url)}},
 			}
@@ -181,7 +178,7 @@ func TestIssueDeleteReadsA5xxByWhoWroteIt(t *testing.T) {
 		{
 			name:     "YouTrack itself",
 			status:   http.StatusInternalServerError,
-			deletion: answer(http.StatusInternalServerError, failed),
+			deletion: respondWith(http.StatusInternalServerError, failed),
 			code:     "upstream_failed",
 			exit:     1,
 			details: []detail{
@@ -193,7 +190,7 @@ func TestIssueDeleteReadsA5xxByWhoWroteIt(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := deleting(t, answer(http.StatusOK, issueNamed("DEV-7")), tc.deletion)
+			server := deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), tc.deletion)
 
 			got := runWith(t, server.env(), "issue", "delete", "DEV-7")
 
@@ -216,7 +213,7 @@ func TestIssueDeleteReadsA5xxByWhoWroteIt(t *testing.T) {
 func TestIssueDeleteIsUncertainWhereTheAnswerBreaksOff(t *testing.T) {
 	t.Parallel()
 	const sent = "abc"
-	server := deleting(t, answer(http.StatusOK, issueNamed("DEV-7")), func(w http.ResponseWriter, _ *http.Request) {
+	server := deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Length", strconv.Itoa(len(sent)+7))
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, sent)
@@ -224,7 +221,7 @@ func TestIssueDeleteIsUncertainWhereTheAnswerBreaksOff(t *testing.T) {
 
 	got := runWith(t, server.env(), "issue", "delete", "DEV-7")
 
-	want := refusal{
+	want := faultDocument{
 		code: "write_uncertain",
 		details: []detail{
 			{"request", deletionRequest(server.url)},
@@ -239,10 +236,10 @@ func TestIssueDeleteIsUncertainWhereTheAnswerBreaksOff(t *testing.T) {
 // The border is the same for the write that carries a body as for the one that carries none, and it is
 // where the request left rather than what the error says. An update left whole may well have been carried
 // out; one that never left leaves the issue exactly as the read before it found it.
-func TestIssueUpdateJudgesALostAnswerByWhetherTheWriteLeft(t *testing.T) {
+func TestIssueUpdateClassifiesALostResponseByWhetherTheWriteWasSent(t *testing.T) {
 	t.Parallel()
-	project := projectToWrite(writableField{id: "180-15", name: "Type", valueType: "enum", canBeEmpty: true})
-	read := answer(http.StatusOK, issueToUpdate("DEV-7", project))
+	project := projectResponse(writableField{id: "180-15", name: "Type", valueType: "enum", canBeEmpty: true})
+	read := respondWith(http.StatusOK, issueToUpdate("DEV-7", project))
 
 	t.Run("the answer to the write never came", func(t *testing.T) {
 		t.Parallel()
@@ -279,7 +276,7 @@ func TestIssueUpdateJudgesALostAnswerByWhetherTheWriteLeft(t *testing.T) {
 // afterwards tells the two apart. A deletion that never left leaves the tree exactly as the read found it.
 func TestArticleDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 	t.Parallel()
-	read := answer(http.StatusOK, articleNamed("DEV-A-7"))
+	read := respondWith(http.StatusOK, articleNamed("DEV-A-7"))
 	tests := []struct {
 		name    string
 		server  func(t *testing.T) *upstream
@@ -502,7 +499,7 @@ func TestTimeUpdateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 // whole may have removed it.
 func TestTimeDeleteExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 	t.Parallel()
-	read := answer(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1"))
+	read := respondWith(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1"))
 	tests := []struct {
 		name    string
 		server  func(t *testing.T) *upstream
@@ -582,7 +579,7 @@ func TestTimeDeleteExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 // comment exactly as it was and costs the caller nothing but sending the call again.
 func TestCommentUpdateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 	t.Parallel()
-	read := answer(http.StatusOK, commentTakenBack(false))
+	read := respondWith(http.StatusOK, commentDeletedState(false))
 	tests := []struct {
 		name    string
 		server  func(t *testing.T) *upstream
@@ -724,7 +721,7 @@ func TestIssueDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 			name: "an issue the read does not find",
 			id:   "DEV-7",
 			server: func(t *testing.T) *upstream {
-				return deleting(t, answer(http.StatusNotFound, entityNotFound("DEV-7")), noDeletion(t))
+				return deleting(t, respondWith(http.StatusNotFound, entityNotFound("DEV-7")), noDeletion(t))
 			},
 			code: "not_found",
 			exit: 1,
@@ -733,9 +730,9 @@ func TestIssueDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 			name: "a readable id the deletion cannot be addressed by",
 			id:   "DEV-7",
 			server: func(t *testing.T) *upstream {
-				return deleting(t, answer(http.StatusOK, issueNamed("..")), noDeletion(t))
+				return deleting(t, respondWith(http.StatusOK, issueNamed("..")), noDeletion(t))
 			},
-			code: "upstream_lied",
+			code: "upstream_invalid",
 			exit: 1,
 		},
 		{
@@ -743,7 +740,7 @@ func TestIssueDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 			id:   "DEV-7",
 			server: func(t *testing.T) *upstream {
 				said := `{"error":"Forbidden","error_description":"Insufficient rights"}`
-				return deleting(t, answer(http.StatusOK, issueNamed("DEV-7")), answer(http.StatusForbidden, said))
+				return deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), respondWith(http.StatusForbidden, said))
 			},
 			code: "denied",
 			exit: 1,
@@ -753,7 +750,7 @@ func TestIssueDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 			id:   "DEV-7",
 			server: func(t *testing.T) *upstream {
 				said := `{"error":"bad_request","error_description":"Bad Request"}`
-				return deleting(t, answer(http.StatusOK, issueNamed("DEV-7")), answer(http.StatusBadRequest, said))
+				return deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), respondWith(http.StatusBadRequest, said))
 			},
 			code: "rejected",
 			exit: 1,
@@ -763,7 +760,7 @@ func TestIssueDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 			id:   "DEV-7",
 			server: func(t *testing.T) *upstream {
 				said := `{"error":"server_error","error_description":"java.lang.NullPointerException"}`
-				return deleting(t, answer(http.StatusOK, issueNamed("DEV-7")), answer(http.StatusInternalServerError, said))
+				return deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), respondWith(http.StatusInternalServerError, said))
 			},
 			code: "upstream_failed",
 			exit: 1,
@@ -772,16 +769,16 @@ func TestIssueDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 			name: "an answer to the deletion that carries a body",
 			id:   "DEV-7",
 			server: func(t *testing.T) *upstream {
-				return deleting(t, answer(http.StatusOK, issueNamed("DEV-7")), answer(http.StatusOK, `{"x":1}`))
+				return deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), respondWith(http.StatusOK, `{"x":1}`))
 			},
-			code: "upstream_lied",
+			code: "upstream_invalid",
 			exit: 2,
 		},
 		{
 			name: "an answer to the deletion that never came",
 			id:   "DEV-7",
 			server: func(t *testing.T) *upstream {
-				return deleting(t, answer(http.StatusOK, issueNamed("DEV-7")), breakOff)
+				return deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), breakOff)
 			},
 			code: "write_uncertain",
 			exit: 2,
@@ -804,7 +801,7 @@ func TestIssueDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 // request leaves asks the caller for nothing but the same call again.
 func TestAttachmentDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 	t.Parallel()
-	read := answer(http.StatusOK, attachmentOfDEV7())
+	read := respondWith(http.StatusOK, attachmentOfDEV7())
 	tests := []struct {
 		name    string
 		server  func(t *testing.T) *upstream
@@ -897,7 +894,7 @@ func TestTagDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 				// deletion has to dial the server that is no longer there.
 				server = serveWithoutKeepAlive(t, readThenDeletion(func(w http.ResponseWriter, r *http.Request) {
 					server.stopListening(t)
-					answer(http.StatusOK, tagsOfTwoOwners())(w, r)
+					respondWith(http.StatusOK, tagsOfTwoOwners())(w, r)
 				}, noDeletion(t)))
 				return server
 			},
@@ -927,7 +924,7 @@ func TestTagDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 // a second tagging reads the same whether the first went through or not.
 func TestTagAddExitsByWhetherTheTaggingMayHaveHappened(t *testing.T) {
 	t.Parallel()
-	owner := answer(http.StatusOK, issueNamed("DEV-7"))
+	owner := respondWith(http.StatusOK, issueNamed("DEV-7"))
 	tests := []struct {
 		name    string
 		server  func(t *testing.T) *upstream
@@ -937,7 +934,7 @@ func TestTagAddExitsByWhetherTheTaggingMayHaveHappened(t *testing.T) {
 	}{
 		{
 			name:    "the answer never came",
-			server:  func(t *testing.T) *upstream { return hangingATag(t, owner, shownTags(), breakOff) },
+			server:  func(t *testing.T) *upstream { return addingATag(t, owner, shownTags(), breakOff) },
 			code:    "write_uncertain",
 			exit:    2,
 			methods: []string{http.MethodGet, http.MethodGet, http.MethodPost},
@@ -945,7 +942,7 @@ func TestTagAddExitsByWhetherTheTaggingMayHaveHappened(t *testing.T) {
 		{
 			name: "a gateway answered a page under a 502",
 			server: func(t *testing.T) *upstream {
-				return hangingATag(t, owner, shownTags(), gateway(http.StatusBadGateway))
+				return addingATag(t, owner, shownTags(), gateway(http.StatusBadGateway))
 			},
 			code:    "write_uncertain",
 			exit:    2,
@@ -995,7 +992,7 @@ func TestTagAddExitsByWhetherTheTaggingMayHaveHappened(t *testing.T) {
 // between ytrack and the instance, which may have passed the removal on.
 func TestTagRemoveExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 	t.Parallel()
-	owner := answer(http.StatusOK, issueNamed("DEV-7"))
+	owner := respondWith(http.StatusOK, issueNamed("DEV-7"))
 	tests := []struct {
 		name    string
 		server  func(t *testing.T) *upstream

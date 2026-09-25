@@ -155,7 +155,7 @@ looked_in:
 ```
 
 Коды: `bad_usage`, `unknown_name`, `missing_required`, `not_found`, `denied`,
-`rejected`, `upstream_failed`, `upstream_lied`, `write_uncertain`.
+`rejected`, `upstream_failed`, `upstream_invalid`, `write_uncertain`.
 
 Коды завершения: `0` — успех, `1` — ошибка, `2` — `write_uncertain`: запись ушла
 на сервер, но неизвестно, применилась ли она. Повторять ли запрос, решает вызывающий,
@@ -196,7 +196,7 @@ make generate   # перегенерировать клиент по OpenAPI-с�
 make openapi    # обновить спеку с сервера
 ```
 
-Контрактные тесты идут против локального YouTrack — полигона с проектом `DEV`, на
+Контрактные тесты идут против локального YouTrack — дев-инстанса с проектом `DEV`, на
 котором заведены кастом-поля всех типов. Поднимается он из `dev/` одной командой, из
 зависимостей нужен только docker — см. [`dev/README.md`](dev/README.md).
 

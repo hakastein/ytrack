@@ -11,7 +11,7 @@ import (
 // An author with a whole tree of the catalogue under it, as the server would send one: the names a record of the
 // journal is read by — field, added, removed — are declared by other schemas too, and every schema below
 // is reachable from an activity by a path the specification itself draws.
-func sentAuthorHolding(held string) string {
+func sentAuthorWith(held string) string {
 	return `{"$type":"User","login":"admin","savedQueries":[{"$type":"SavedQuery","issues":[{"$type":"Issue",` +
 		held + `}]}]}`
 }
@@ -25,9 +25,6 @@ const sentProjectField = `"customFields":[{"$type":"IssueCustomField","projectCu
 // flag it is, while a record of the journal holds the values a change took away under that name.
 const sentAttachmentRemoved = `"attachments":[{"$type":"IssueAttachment","removed":false}]`
 
-// The rules of the table of categories are the record's own: they say what field, added and removed hold
-// on a record, and a name of the same spelling standing deeper in the expression belongs to the schema of its own
-// place. Both paths below are ones the specification draws, so the judgment of names lets them through.
 func TestActivityReadsTheNamesOfARecordAtTheRecordAndNowhereBelowIt(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -40,7 +37,7 @@ func TestActivityReadsTheNamesOfARecordAtTheRecordAndNowhereBelowIt(t *testing.T
 			name: "the field of a project's custom field, under the saved queries of the author",
 			activity: sentActivity{
 				kind: "IssueCreatedActivityItem", category: "IssueCreatedCategory", timestamp: middle,
-				author: sentAuthorHolding(sentProjectField),
+				author: sentAuthorWith(sentProjectField),
 			}.sent(),
 			expression: "author(savedQueries(issues(customFields(projectCustomField(field(name))))))",
 			want: `author: {savedQueries: [{issues: [{customFields: [{projectCustomField: ` +
@@ -51,7 +48,7 @@ func TestActivityReadsTheNamesOfARecordAtTheRecordAndNowhereBelowIt(t *testing.T
 			activity: sentActivity{
 				kind: "LinksActivityItem", category: "LinksCategory", timestamp: middle,
 				field: `{"$type":"LinkTypeFilterField","name":"Зависит от"}`, added: sentLinkedIssue,
-				author: sentAuthorHolding(sentAttachmentRemoved),
+				author: sentAuthorWith(sentAttachmentRemoved),
 			}.sent(),
 			expression: "author(savedQueries(issues(attachments(removed))))",
 			want:       `author: {savedQueries: [{issues: [{attachments: [{removed: false}]}]}]}`,
@@ -60,7 +57,7 @@ func TestActivityReadsTheNamesOfARecordAtTheRecordAndNowhereBelowIt(t *testing.T
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := journal(t, answer(http.StatusOK, `[`+tc.activity+`]`))
+			server := journal(t, respondWith(http.StatusOK, `[`+tc.activity+`]`))
 
 			got := runWith(t, server.env(), "activity", "list", journalIssue,
 				"--fields", tc.expression)
@@ -70,11 +67,9 @@ func TestActivityReadsTheNamesOfARecordAtTheRecordAndNowhereBelowIt(t *testing.T
 	}
 }
 
-// The names a caller is offered are the ones the place declares, so a caller near none of them is shown what
-// there is: the family of the root is ActivityItem with every subtype of it, and no name of a schema below.
 func TestActivityShowsTheNamesOfAnActivityToACallerNearNoneOfThem(t *testing.T) {
 	t.Parallel()
-	server := journal(t, answer(http.StatusOK, `[`+sentCreatedActivity(middle)+`]`))
+	server := journal(t, respondWith(http.StatusOK, `[`+sentCreatedActivity(middle)+`]`))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "timestamp,zzzzzz")
 

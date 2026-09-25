@@ -86,7 +86,7 @@ func TestFieldRefusesACallItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 		})
 	}
 }
@@ -107,7 +107,7 @@ func TestFieldRefusesAFlagGivenTwice(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 		})
 	}
 }
@@ -172,7 +172,7 @@ fields:
 
 // Nobody ever gave DEMO an order of its own, so every field of it carries ordinal 0 and the whole order
 // printed is the tie-break: the array the server sent, which is the order the fields were attached in.
-func TestFieldListPrintsTheFieldsOfOneOrdinalOfTheDevInstanceAsTheyArrived(t *testing.T) {
+func TestFieldListPrintsTheFieldsOfOneOrdinalOfTheDevInstanceAsReceived(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
@@ -203,7 +203,7 @@ func TestFieldListRefusesAProjectTheDevInstanceDoesNotHave(t *testing.T) {
 
 	got := runWith(t, dev.env(), "field", "list", "NOPE")
 
-	want := refusal{
+	want := faultDocument{
 		code: "not_found",
 		details: []detail{
 			{"request", fieldsRequest(dev.url, "NOPE", fieldListSent)},
@@ -222,7 +222,7 @@ func TestFieldListRefusesTheProjectTheLimitedUserCannotSee(t *testing.T) {
 
 	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}, "field", "list", "DEV")
 
-	want := refusal{
+	want := faultDocument{
 		code: "not_found",
 		details: []detail{
 			{"request", fieldsRequest(dev.url, "DEV", fieldListSent)},
@@ -243,7 +243,7 @@ func TestFieldListRefusesTheEmptyListTheMemberIsSent(t *testing.T) {
 
 	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).member}, "field", "list", "DEV")
 
-	want := refusal{
+	want := faultDocument{
 		code: "denied",
 		details: []detail{
 			{"request", fieldsRequest(dev.url, "DEV", fieldListSent)},
@@ -262,7 +262,7 @@ func TestFieldListRefusesANameTheSchemasOfTheDevInstanceDoNotDeclare(t *testing.
 
 	got := runWith(t, dev.env(), "field", "list", "DEV", "--fields", "field(name),bogus")
 
-	want := refusal{
+	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{
 			{"request", fieldsRequest(dev.url, "DEV", "field(name),bogus,ordinal")},
@@ -304,7 +304,7 @@ const shuffledFields = `[
 
 func TestFieldListPrintsTheKeysAsAskedAndTheRecordsByOrdinal(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, shuffledFields))
+	server := serve(t, respondWith(http.StatusOK, shuffledFields))
 
 	got := runWith(t, server.env(), "field", "list", "DEV")
 
@@ -339,7 +339,7 @@ func listedField(place int, name string) string {
 // caller sees: fields of one ordinal are printed in the order the server sent them in.
 func TestFieldListKeepsTheOrderTheServerSentFieldsOfOneOrdinalIn(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, unplacedFields()))
+	server := serve(t, respondWith(http.StatusOK, unplacedFields()))
 
 	got := runWith(t, server.env(), "field", "list", "DEV")
 
@@ -358,7 +358,7 @@ func TestFieldListKeepsTheOrderTheServerSentFieldsOfOneOrdinalIn(t *testing.T) {
 // The caller who asks for the ordinal gets it printed, and the request still names it once.
 func TestFieldListPrintsTheOrdinalOnlyWhenItIsAskedFor(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, shuffledFields))
+	server := serve(t, respondWith(http.StatusOK, shuffledFields))
 
 	got := runWith(t, server.env(), "field", "list", "DEV", "--fields", "field(name),ordinal")
 
@@ -386,12 +386,12 @@ func TestFieldListRefusesAnOrdinalItCannotOrderBy(t *testing.T) {
 			t.Parallel()
 			body := `[{"$type":"EnumProjectCustomField","canBeEmpty":true,"ordinal":` + tc.ordinal +
 				`,"field":{"$type":"CustomField","name":"A","localizedName":null,"fieldType":{"$type":"FieldType","valueType":"enum","isMultiValue":false}}}]`
-			server := serve(t, answer(http.StatusOK, body))
+			server := serve(t, respondWith(http.StatusOK, body))
 
 			got := runWith(t, server.env(), "field", "list", "DEV")
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", fieldsRequest(server.url, "DEV", fieldListSent)},
 					{"upstream_status", 200},
@@ -403,16 +403,16 @@ func TestFieldListRefusesAnOrdinalItCannotOrderBy(t *testing.T) {
 	}
 }
 
-func TestFieldListRefusesAnOrdinalThatDidNotArrive(t *testing.T) {
+func TestFieldListRefusesAnOrdinalMissingFromTheResponse(t *testing.T) {
 	t.Parallel()
 	body := `[{"$type":"EnumProjectCustomField","canBeEmpty":true,` +
 		`"field":{"$type":"CustomField","name":"A","localizedName":null,"fieldType":{"$type":"FieldType","valueType":"enum","isMultiValue":false}}}]`
-	server := serve(t, answer(http.StatusOK, body))
+	server := serve(t, respondWith(http.StatusOK, body))
 
 	got := runWith(t, server.env(), "field", "list", "DEV")
 
-	want := refusal{
-		code: "upstream_lied",
+	want := faultDocument{
+		code: "upstream_invalid",
 		details: []detail{
 			{"request", fieldsRequest(server.url, "DEV", fieldListSent)},
 			{"fields", fieldListSent},

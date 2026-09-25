@@ -12,7 +12,7 @@ import (
 // The project the scenarios of --clear stand on: a field that holds one value, one that holds several and two
 // the project lets no issue stand without.
 func projectToEmpty() string {
-	return projectToWrite(
+	return projectResponse(
 		writableField{id: "180-15", name: "Type", valueType: "enum"},
 		writableField{id: "180-18", name: "Клиент", valueType: "enum", isMultiValue: true},
 		writableField{id: "180-20", name: "Система", valueType: "enum", isMultiValue: true, canBeEmpty: true},
@@ -25,13 +25,11 @@ func projectToEmpty() string {
 // of the body is the one the server named rather than the one the table holds.
 func issueToEmpty() string {
 	return issueToUpdate("DEV-1", projectToEmpty(),
-		heldField{name: "Система", kind: "MultiEnumIssueCustomField", binding: "180-20"},
-		heldField{name: "Assignee", kind: "SingleUserIssueCustomField", binding: "180-21"})
+		currentField{name: "Система", kind: "MultiEnumIssueCustomField", binding: "180-20"},
+		currentField{name: "Assignee", kind: "SingleUserIssueCustomField", binding: "180-21"})
 }
 
-// sentProse is the description the body carried, as JSON: the prose, the null of a call that emptied it, and
-// nothing where the call said nothing about it.
-func sentProse(t *testing.T, body string) string {
+func sentClearDescription(t *testing.T, body string) string {
 	t.Helper()
 	var sent struct {
 		Description json.RawMessage `json:"description"`
@@ -61,61 +59,56 @@ func TestIssueUpdateRefusesAClearItCannotRead(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"issue", "update", "DEV-1"}, tc.argv...)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// An empty value is written the way the type holds one: null where the field holds one value, an empty
-// list where it holds several — a null there is answered Field value cannot be null — and null for the prose
-// of the issue, which is no custom field and goes by its own key.
-func TestIssueUpdateEmptiesEachPartTheWayItsTypeHoldsNothing(t *testing.T) {
+func TestIssueUpdateEmptiesEachPartTheWayItsTypeStoresNoValue(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
 		argv []string
 		// The description the answer brings back, as JSON; empty stands for the null of an issue with none.
-		prose  string
-		body   string
-		fields []arrivedField
+		description string
+		body        string
+		fields      []receivedField
 	}{
 		{
 			name:   "a field that holds one value",
 			argv:   []string{"--clear", "Assignee"},
 			body:   `{"customFields":[{"$type":"SingleUserIssueCustomField","name":"Assignee","value":null}]}`,
-			fields: []arrivedField{{name: "Assignee", valueType: "user", ordinal: "4", binding: "180-21"}},
+			fields: []receivedField{{name: "Assignee", valueType: "user", ordinal: "4", binding: "180-21"}},
 		},
 		{
 			name: "a field that holds several",
 			argv: []string{"--clear", "Система"},
 			body: `{"customFields":[{"$type":"MultiEnumIssueCustomField","name":"Система","value":[]}]}`,
-			fields: []arrivedField{{name: "Система", valueType: "enum", isMultiValue: true, ordinal: "3",
+			fields: []receivedField{{name: "Система", valueType: "enum", isMultiValue: true, ordinal: "3",
 				binding: "180-20", value: "[]"}},
 		},
 		{
-			// A field the answer carries nowhere is a field the issue holds nothing in, which is exactly what
-			// the call asked for; the same absence where the call filled the field is a mismatch.
 			name: "a field the answer does not carry at all",
 			argv: []string{"--clear", "Assignee"},
 			body: `{"customFields":[{"$type":"SingleUserIssueCustomField","name":"Assignee","value":null}]}`,
 		},
 		{
-			name:  "the prose of the issue, named in another letter case",
-			argv:  []string{"--clear", "DESCRIPTION"},
-			body:  `{"description":null}`,
-			prose: "null",
+			name:        "the prose of the issue, named in another letter case",
+			argv:        []string{"--clear", "DESCRIPTION"},
+			body:        `{"description":null}`,
+			description: "null",
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			prose := "null"
-			if tc.prose != "" {
-				prose = tc.prose
+			text := "null"
+			if tc.description != "" {
+				text = tc.description
 			}
-			written := filedIssueHolding("DEV-1", "x", prose, arrivedFields(tc.fields...))
-			server := updating(t, answer(http.StatusOK, issueToEmpty()), answer(http.StatusOK, written))
+			written := createdIssueWith("DEV-1", "x", text, receivedFields(tc.fields...))
+			server := updating(t, respondWith(http.StatusOK, issueToEmpty()), respondWith(http.StatusOK, written))
 
 			got := runWith(t, server.env(), append([]string{"issue", "update", "DEV-1"}, tc.argv...)...)
 
@@ -133,12 +126,12 @@ func TestIssueUpdateEmptiesEachPartTheWayItsTypeHoldsNothing(t *testing.T) {
 // this day.
 func TestIssueUpdateRefusesToEmptyEveryFieldTheProjectRequires(t *testing.T) {
 	t.Parallel()
-	server := updating(t, answer(http.StatusOK, issueToEmpty()), noUpdate(t))
+	server := updating(t, respondWith(http.StatusOK, issueToEmpty()), noUpdate(t))
 
 	got := runWith(t, server.env(), "issue", "update", "DEV-1",
 		"--clear", "Type", "--clear", "Клиент", "--clear", "Assignee")
 
-	want := refusal{
+	want := faultDocument{
 		code: "missing_required",
 		details: []detail{
 			{"request", issueRequest(server.url, "DEV-1", issueWriteFields)},
@@ -155,12 +148,12 @@ func TestIssueUpdateRefusesToEmptyEveryFieldTheProjectRequires(t *testing.T) {
 // every name is, so the two flags reach the same field whatever each of them was typed as.
 func TestIssueUpdateRefusesAFieldWrittenAndEmptiedAtOnce(t *testing.T) {
 	t.Parallel()
-	server := updating(t, answer(http.StatusOK, issueToEmpty()), noUpdate(t))
+	server := updating(t, respondWith(http.StatusOK, issueToEmpty()), noUpdate(t))
 
 	got := runWith(t, server.env(), "issue", "update", "DEV-1",
 		"--field", "Assignee=admin", "--clear", "исполнитель")
 
-	want := refusal{
+	want := faultDocument{
 		code: "bad_usage",
 		details: []detail{
 			{"request", issueRequest(server.url, "DEV-1", issueWriteFields)},
@@ -177,43 +170,43 @@ func TestIssueUpdateRefusesAFieldWrittenAndEmptiedAtOnce(t *testing.T) {
 // A part the call emptied comes back holding nothing, and a part that came back holding something is the
 // answer disagreeing with the write as much as a value that came back another. The write happened by then,
 // which is what the exit code of such a refusal says.
-func TestIssueUpdateRefusesAnAnswerThatStillHoldsWhatTheCallEmptied(t *testing.T) {
+func TestIssueUpdateRefusesAResponseThatStillHasWhatTheCallEmptied(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		argv     []string
-		prose    string
-		fields   []arrivedField
-		mismatch []any
+		name        string
+		argv        []string
+		description string
+		fields      []receivedField
+		mismatch    []any
 	}{
 		{
 			name: "a custom field that came back filled",
 			argv: []string{"--clear", "Assignee"},
-			fields: []arrivedField{{name: "Assignee", valueType: "user", ordinal: "4", binding: "180-21",
+			fields: []receivedField{{name: "Assignee", valueType: "user", ordinal: "4", binding: "180-21",
 				value: `{"$type":"User","login":"admin"}`}},
-			mismatch: []any{[]detail{{"field", "Assignee"}, {"written", nil}, {"arrived", "admin"}}},
+			mismatch: []any{[]detail{{"field", "Assignee"}, {"expected", nil}, {"actual", "admin"}}},
 		},
 		{
-			name:     "prose that came back written",
-			argv:     []string{"--clear", "description"},
-			prose:    `"первая"`,
-			mismatch: []any{[]detail{{"field", "description"}, {"written", nil}, {"arrived", "первая"}}},
+			name:        "prose that came back written",
+			argv:        []string{"--clear", "description"},
+			description: `"первая"`,
+			mismatch:    []any{[]detail{{"field", "description"}, {"expected", nil}, {"actual", "первая"}}},
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			prose := "null"
-			if tc.prose != "" {
-				prose = tc.prose
+			text := "null"
+			if tc.description != "" {
+				text = tc.description
 			}
-			written := filedIssueHolding("DEV-1", "x", prose, arrivedFields(tc.fields...))
-			server := updating(t, answer(http.StatusOK, issueToEmpty()), answer(http.StatusOK, written))
+			written := createdIssueWith("DEV-1", "x", text, receivedFields(tc.fields...))
+			server := updating(t, respondWith(http.StatusOK, issueToEmpty()), respondWith(http.StatusOK, written))
 
 			got := runWith(t, server.env(), append([]string{"issue", "update", "DEV-1"}, tc.argv...)...)
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", updateRequest(server.url, "DEV-1", askedIssueFields)},
 					{"issue", "DEV-1"},
@@ -225,10 +218,6 @@ func TestIssueUpdateRefusesAnAnswerThatStillHoldsWhatTheCallEmptied(t *testing.T
 	}
 }
 
-// Four parts of one issue of the polygon emptied by one call: a field that holds one user, one that holds
-// several, the prose of the issue and a field of text. Each goes out as its own type holds nothing, and what
-// the answer brings back holds nothing at all, which is why the block of custom fields prints none of the
-// three: a field an issue holds nothing in is left out of it.
 func TestIssueUpdateEmptiesThePartsOfAnIssueOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -251,11 +240,9 @@ func TestIssueUpdateEmptiesThePartsOfAnIssueOfTheDevInstance(t *testing.T) {
 	assert.Equal(t, "null", string(sent["Assignee"].Value))
 	assert.Equal(t, "[]", string(sent["Соисполнители"].Value))
 	assert.Equal(t, "null", string(sent["Примечание"].Value))
-	assert.Equal(t, "null", sentProse(t, lastAsk(dev)))
+	assert.Equal(t, "null", sentClearDescription(t, lastAsk(dev)))
 }
 
-// A field DEV requires is emptied by nobody, and the polygon is never asked: the read before the write is
-// the whole of what the refusal needs, and the write itself never goes out.
 func TestIssueUpdateRefusesToEmptyAFieldTheDevProjectRequires(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -264,7 +251,7 @@ func TestIssueUpdateRefusesToEmptyAFieldTheDevProjectRequires(t *testing.T) {
 
 	got := runWith(t, dev.env(), "issue", "update", readable, "--clear", "Type")
 
-	want := refusal{
+	want := faultDocument{
 		code: "missing_required",
 		details: []detail{
 			{"request", issueRequest(dev.url, readable, issueWriteFields)},

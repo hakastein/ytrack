@@ -50,32 +50,32 @@ func terminal(stdin *os.File) (console, *diag.Fault) {
 	return console{in: stdin, out: out}, nil
 }
 
-// askForTheAddress is the line typed after the first prompt, which the terminal echoes as any other.
-func askForTheAddress(ctx context.Context, tty console) (string, *diag.Fault) {
-	if fault := say(tty.out, addressPrompt); fault != nil {
+// promptAddress is the line typed after the first prompt, which the terminal echoes as any other.
+func promptAddress(ctx context.Context, tty console) (string, *diag.Fault) {
+	if fault := prompt(tty.out, addressPrompt); fault != nil {
 		return "", fault
 	}
-	return typedLine(ctx, func() ([]byte, error) { return readLine(tty.in) })
+	return readLineContext(ctx, func() ([]byte, error) { return readLine(tty.in) })
 }
 
-// askForTheToken is the line after the second prompt, which the terminal does not echo. ReadPassword takes the echo
+// promptToken is the line after the second prompt, which the terminal does not echo. ReadPassword takes the echo
 // off after the prompt is written and puts it back on its way out; the state taken before it is what puts the echo
 // back when the context is done instead and ReadPassword is left waiting.
-func askForTheToken(ctx context.Context, tty console) (string, *diag.Fault) {
+func promptToken(ctx context.Context, tty console) (string, *diag.Fault) {
 	descriptor := int(tty.in.Fd())
 	state, err := term.GetState(descriptor)
 	if err != nil {
 		return "", unreadable(err)
 	}
-	if fault := say(tty.out, tokenPrompt); fault != nil {
+	if fault := prompt(tty.out, tokenPrompt); fault != nil {
 		return "", fault
 	}
-	secret, fault := typedLine(ctx, func() ([]byte, error) { return term.ReadPassword(descriptor) })
+	secret, fault := readLineContext(ctx, func() ([]byte, error) { return term.ReadPassword(descriptor) })
 	if fault != nil {
 		_ = term.Restore(descriptor, state)
 	}
 	// The return key was not echoed either, so the line the prompt stands on is ended here.
-	if said := say(tty.out, "\n"); fault == nil {
+	if said := prompt(tty.out, "\n"); fault == nil {
 		fault = said
 	}
 	if fault != nil {
@@ -84,18 +84,18 @@ func askForTheToken(ctx context.Context, tty console) (string, *diag.Fault) {
 	return secret, nil
 }
 
-type answer struct {
+type readResult struct {
 	line []byte
 	err  error
 }
 
 // A read of a terminal returns for a line and for nothing else — not for a context that was cancelled — so it waits
 // on a goroutine of its own, which is what lets one interrupt end auth login rather than leave it asking.
-func typedLine(ctx context.Context, read func() ([]byte, error)) (string, *diag.Fault) {
-	answered := make(chan answer, 1)
+func readLineContext(ctx context.Context, read func() ([]byte, error)) (string, *diag.Fault) {
+	answered := make(chan readResult, 1)
 	go func() {
 		line, err := read()
-		answered <- answer{line: line, err: err}
+		answered <- readResult{line: line, err: err}
 	}()
 	select {
 	case <-ctx.Done():
@@ -129,7 +129,7 @@ func readLine(tty *os.File) ([]byte, error) {
 	}
 }
 
-func say(screen *os.File, words string) *diag.Fault {
+func prompt(screen *os.File, words string) *diag.Fault {
 	if _, err := io.WriteString(screen, words); err != nil {
 		return unwritable(err)
 	}

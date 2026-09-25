@@ -14,7 +14,7 @@ import (
 
 // version is the calendar version a release build stamps with -ldflags "-X main.version=…". go build cannot
 // take it off the tag: a tag of major 26 on a module path without /v26 is not a version of this module to Go.
-// Left empty, as by a plain go build, the version go build put into the stamp stands (ADR-0010).
+// Left empty, as by a plain go build, the version go build put into the stamp stands (ADR-0009).
 var version string
 
 func main() {

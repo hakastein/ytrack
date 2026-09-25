@@ -23,8 +23,8 @@ func tagDeletionRequest(address, id string) string {
 	return "DELETE " + address + tagDeletionPath(id)
 }
 
-// shownTag is one record of the catalogue the resolver reads, as the server sends it.
-func shownTag(id, name, owner string) string {
+// catalogueTag is one record of the catalogue the resolver reads, as the server sends it.
+func catalogueTag(id, name, owner string) string {
 	return `{"$type":"Tag","id":` + strconv.Quote(id) + `,"name":` + strconv.Quote(name) +
 		`,"owner":{"$type":"User","login":` + strconv.Quote(owner) + `}}`
 }
@@ -33,19 +33,15 @@ func tagCatalogue(tags ...string) string {
 	return "[" + strings.Join(tags, ",") + "]"
 }
 
-// The catalogue a token is shown where two users share names: case and CASE differ by letter alone, amb stands
-// twice under the very same name, and one tag is called 10-5 while another is kept under that id. Nothing here
-// is ytrack's invention — the polygon was measured answering one token with two tags named amb, one of them
-// the admin's shared with the other user.
 func tagsOfTwoOwners() string {
 	return tagCatalogue(
-		shownTag("10-5", "Ready", "admin"),
-		shownTag("10-8", "wayfinder:map", "admin"),
-		shownTag("10-19", "case", "dev.limited"),
-		shownTag("10-20", "CASE", "admin"),
-		shownTag("10-22", "amb", "admin"),
-		shownTag("10-23", "amb", "dev.limited"),
-		shownTag("10-77", "10-5", "admin"),
+		catalogueTag("10-5", "Ready", "admin"),
+		catalogueTag("10-8", "wayfinder:map", "admin"),
+		catalogueTag("10-19", "case", "dev.limited"),
+		catalogueTag("10-20", "CASE", "admin"),
+		catalogueTag("10-22", "amb", "admin"),
+		catalogueTag("10-23", "amb", "dev.limited"),
+		catalogueTag("10-77", "10-5", "admin"),
 	)
 }
 
@@ -53,7 +49,7 @@ func tagsOfTwoOwners() string {
 // deletion the DELETE that follows it.
 func resolvingTags(t *testing.T, catalogue string, deletion http.HandlerFunc) *upstream {
 	t.Helper()
-	return serve(t, readThenDeletion(answer(http.StatusOK, catalogue), deletion))
+	return serve(t, readThenDeletion(respondWith(http.StatusOK, catalogue), deletion))
 }
 
 // requireResolvedWithoutTheServer holds the whole point of the resolver: the name was matched here and never
@@ -98,7 +94,7 @@ func TestTagDeleteRefusesACallOfAnyOtherShape(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"tag", "delete"}, tc.argv...)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -193,7 +189,7 @@ func TestTagDeleteRefusesANameThatNamesNoOneTag(t *testing.T) {
 
 			got := runWith(t, server.env(), "tag", "delete", "--name", tc.written)
 
-			want := refusal{
+			want := faultDocument{
 				code:    "unknown_name",
 				details: append([]detail{{"request", tagsRequest(server.url, resolvedTagFields, "-1")}}, tc.details...),
 			}
@@ -243,12 +239,12 @@ func TestTagDeleteRefusesAnIDItCannotAddressTheDeletionBy(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := resolvingTags(t, tagCatalogue(shownTag(tc.id, "Ready", "admin")), noDeletion(t))
+			server := resolvingTags(t, tagCatalogue(catalogueTag(tc.id, "Ready", "admin")), noDeletion(t))
 
 			got := runWith(t, server.env(), "tag", "delete", "--name", "Ready")
 
 			found := requireRefusal(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 		})
 	}
@@ -277,7 +273,7 @@ func TestTagDeleteRefusesACatalogueItCannotTellTagsApartBy(t *testing.T) {
 			got := runWith(t, server.env(), "tag", "delete", "--name", "Ready")
 
 			found := requireRefusal(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 			assert.Empty(t, got.stdout)
 		})
@@ -299,20 +295,20 @@ func TestTagDeleteReadsWhatTheServerAnsweredTheDeletionWith(t *testing.T) {
 	}{
 		{
 			name:     "a token that may see the tag and not destroy it",
-			deletion: answer(http.StatusForbidden, `{"error":"Forbidden","error_description":"Insufficient rights"}`),
+			deletion: respondWith(http.StatusForbidden, `{"error":"Forbidden","error_description":"Insufficient rights"}`),
 			code:     "denied",
 			exit:     1,
 		},
 		{
 			name:     "a tag that went away between the two requests",
-			deletion: answer(http.StatusNotFound, `{"error":"Not Found","error_description":"Entity with id 10-5 not found"}`),
+			deletion: respondWith(http.StatusNotFound, `{"error":"Not Found","error_description":"Entity with id 10-5 not found"}`),
 			code:     "not_found",
 			exit:     1,
 		},
 		{
 			name:     "an answer carrying a body where the call is answered with none",
-			deletion: answer(http.StatusOK, `{"x":1}`),
-			code:     "upstream_lied",
+			deletion: respondWith(http.StatusOK, `{"x":1}`),
+			code:     "upstream_invalid",
 			exit:     2,
 		},
 	}
@@ -336,10 +332,10 @@ func TestTagDeleteReadsWhatTheServerAnsweredTheDeletionWith(t *testing.T) {
 // The catalogue is a request like any other, and one the server refuses leaves nothing to resolve against:
 // a name held to a catalogue that never arrived would name a tag ytrack has no word for, so nothing is sent
 // after it.
-func TestTagDeleteSendsNoDeletionWhereTheCatalogueDidNotArrive(t *testing.T) {
+func TestTagDeleteSendsNoDeletionWhereTheCatalogueWasNotReceived(t *testing.T) {
 	t.Parallel()
 	server := serve(t, readThenDeletion(
-		answer(http.StatusInternalServerError, `{"error":"Internal Server Error"}`), noDeletion(t)))
+		respondWith(http.StatusInternalServerError, `{"error":"Internal Server Error"}`), noDeletion(t)))
 
 	got := runWith(t, server.env(), "tag", "delete", "--name", "Ready")
 
@@ -349,10 +345,7 @@ func TestTagDeleteSendsNoDeletionWhereTheCatalogueDidNotArrive(t *testing.T) {
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 }
 
-// A name the polygon has no tag under is answered by the resolver and by nothing else: one request
-// goes out, the catalogue, and no deletion follows it. The name carries this test's own words, so no fixture
-// of the polygon can answer to it.
-func TestTagDeleteRefusesANameThePolygonHasNoTagUnder(t *testing.T) {
+func TestTagDeleteRefusesANameTheDevInstanceHasNoTagUnder(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 

@@ -13,7 +13,7 @@ const (
 	attributesKey           = "attributes"
 	workItemAttributeSchema = "WorkItemAttribute"
 	attributeFlag           = "--attribute"
-	valueKey                = "value"
+	attributeValueKey       = "value"
 )
 
 // A work item carries every attribute of its project, with a null value where it was given none; the ids are
@@ -22,15 +22,15 @@ func attributesAsked() []requestedField {
 	return []requestedField{
 		{name: idKey},
 		{name: nameKey},
-		{name: valueKey, children: []requestedField{{name: idKey}, {name: nameKey}}},
+		{name: attributeValueKey, children: []requestedField{{name: idKey}, {name: nameKey}}},
 	}
 }
 
 func eachAttributes(spec *schemas, at string, requested []requestedField, visit func(parents []string, field *requestedField)) {
-	positionsOf(spec, at, workItemAttributeSchema, requested, nil, visit)
+	fieldsOfType(spec, at, workItemAttributeSchema, requested, nil, visit)
 }
 
-func refuseAttributeNames(spec *schemas, at, expression string, requested []requestedField) *diag.Fault {
+func rejectAttributeNames(spec *schemas, at, expression string, requested []requestedField) *diag.Fault {
 	var fault *diag.Fault
 	eachAttributes(spec, at, requested, func(parents []string, field *requestedField) {
 		if field.children == nil || fault != nil {
@@ -45,27 +45,27 @@ func refuseAttributeNames(spec *schemas, at, expression string, requested []requ
 
 // attributes is the block the attributes of a work item are printed as: the name each goes by against the name
 // of the value it holds, in the order the server sent them.
-func (n nodes) attributes(value any) (*render.Node, *diag.Fault) {
-	arrived, isList := value.([]any)
+func (n converter) attributes(value any) (*render.Node, *diag.Fault) {
+	received, isList := value.([]any)
 	if !isList {
-		return nil, n.lied("the attributes of the work item arrived as something other than an array")
+		return nil, n.malformed("the attributes of the work item arrived as something other than an array")
 	}
-	pairs := make([]render.Pair, 0, len(arrived))
-	named := make(map[string]bool, len(arrived))
-	for _, item := range arrived {
+	pairs := make([]render.Pair, 0, len(received))
+	named := make(map[string]bool, len(received))
+	for _, item := range received {
 		name, isText := memberOf(item, nameKey).(string)
 		if !isText {
-			return nil, n.lied("an attribute of the work item arrived without a name")
+			return nil, n.malformed("an attribute of the work item arrived without a name")
 		}
 		if named[name] {
-			return nil, n.lied(fmt.Sprintf("two attributes of the work item are named %s", render.Quote(name)))
+			return nil, n.malformed(fmt.Sprintf("two attributes of the work item are named %s", render.Quote(name)))
 		}
 		named[name] = true
 		held := render.NewNull()
-		if value := memberOf(item, valueKey); value != nil {
+		if value := memberOf(item, attributeValueKey); value != nil {
 			valueName, isText := memberOf(value, nameKey).(string)
 			if !isText {
-				return nil, n.lied(fmt.Sprintf("the value of the attribute %s arrived without a name", render.Quote(name)))
+				return nil, n.malformed(fmt.Sprintf("the value of the attribute %s arrived without a name", render.Quote(name)))
 			}
 			held = render.NewString(valueName)
 		}
@@ -110,75 +110,75 @@ type projectAttribute struct {
 
 // An attribute as the read before the write resolved it: the id the body addresses it by, the name the project
 // gives it, which a disagreement is shown under, and the value, nil where the call takes the attribute away.
-type filedAttribute struct {
+type resolvedAttribute struct {
 	id    string
 	name  string
-	value *filedWorkItemType
+	value *resolvedWorkType
 }
 
 // What goes out for one attribute: its id and the id of its value, or an explicit null that takes it away.
-type attributeWritten struct {
-	ID    string             `json:"id"`
-	Value *addressedWorkItem `json:"value"`
+type attributeBody struct {
+	ID    string          `json:"id"`
+	Value *workItemIDBody `json:"value"`
 }
 
-func attributesWritten(filed []filedAttribute) []attributeWritten {
-	written := make([]attributeWritten, 0, len(filed))
+func attributeBodies(filed []resolvedAttribute) []attributeBody {
+	written := make([]attributeBody, 0, len(filed))
 	for _, attribute := range filed {
-		sent := attributeWritten{ID: attribute.id}
+		sent := attributeBody{ID: attribute.id}
 		if attribute.value != nil {
-			sent.Value = &addressedWorkItem{ID: attribute.value.id}
+			sent.Value = &workItemIDBody{ID: attribute.value.id}
 		}
 		written = append(written, sent)
 	}
 	return written
 }
 
-// resolvingAttributes resolves by the rule a type of work is resolved by, and refuses every name that answers to
+// resolveAttributes resolves by the rule a type of work is resolved by, and refuses every name that answers to
 // no one attribute or value at once, before anything is written.
-func (p projectWorkItemTypes) resolvingAttributes(set []namedValue, cleared []string) ([]filedAttribute, *diag.Fault) {
-	catalogue := make([]naming, 0, len(p.attributes))
+func (p projectWorkItemTypes) resolveAttributes(set []namedValue, cleared []string) ([]resolvedAttribute, *diag.Fault) {
+	catalogue := make([]fieldInfo, 0, len(p.attributes))
 	for _, attribute := range p.attributes {
-		catalogue = append(catalogue, naming{name: attribute.name})
+		catalogue = append(catalogue, fieldInfo{name: attribute.name})
 	}
-	var filed []filedAttribute
+	var filed []resolvedAttribute
 	var unknown []*render.Node
 	for _, written := range set {
-		at, found := resolvedAmong(written.name, catalogue)
+		at, found := matchName(written.name, catalogue)
 		if !found {
 			unknown = append(unknown, unknownAttribute(written.name, catalogue))
 			continue
 		}
 		attribute := p.attributes[at]
-		values := make([]naming, 0, len(attribute.values))
+		values := make([]fieldInfo, 0, len(attribute.values))
 		for _, value := range attribute.values {
-			values = append(values, naming{name: value.name})
+			values = append(values, fieldInfo{name: value.name})
 		}
-		place, found := resolvedAmong(written.value, values)
+		place, found := matchName(written.value, values)
 		if !found {
 			unknown = append(unknown, render.NewMap(
 				render.Pair{Key: "attribute", Value: render.NewString(attribute.name)},
-				render.Pair{Key: valueKey, Value: render.NewString(written.value)},
+				render.Pair{Key: attributeValueKey, Value: render.NewString(written.value)},
 				render.Pair{Key: "nearest", Value: render.NewList(names(nearestNamed(written.value, values))...)}))
 			continue
 		}
-		value := filedWorkItemType{id: attribute.values[place].id, written: written.value}
-		filed = append(filed, filedAttribute{id: attribute.id, name: attribute.name, value: &value})
+		value := resolvedWorkType{id: attribute.values[place].id, name: written.value}
+		filed = append(filed, resolvedAttribute{id: attribute.id, name: attribute.name, value: &value})
 	}
 	for _, name := range cleared {
-		at, found := resolvedAmong(name, catalogue)
+		at, found := matchName(name, catalogue)
 		if !found {
 			unknown = append(unknown, unknownAttribute(name, catalogue))
 			continue
 		}
-		if slices.ContainsFunc(filed, func(f filedAttribute) bool { return f.id == p.attributes[at].id }) {
+		if slices.ContainsFunc(filed, func(f resolvedAttribute) bool { return f.id == p.attributes[at].id }) {
 			return nil, attributeBothWays(p.attributes[at].name)
 		}
-		filed = append(filed, filedAttribute{id: p.attributes[at].id, name: p.attributes[at].name})
+		filed = append(filed, resolvedAttribute{id: p.attributes[at].id, name: p.attributes[at].name})
 	}
 	if len(unknown) > 0 {
 		message := "the names under unknown are not attributes of the work items of the project, or values they take"
-		return nil, unknownNames(p.arrived.response, render.Pair{Key: projectKey, Value: render.NewString(p.project)},
+		return nil, unknownNames(p.response.httpResponse, render.Pair{Key: projectKey, Value: render.NewString(p.project)},
 			"unknown", message, unknown)
 	}
 	return filed, nil
@@ -190,16 +190,16 @@ func attributeBothWays(name string) *diag.Fault {
 	return &diag.Fault{Code: diag.BadUsage, Message: message}
 }
 
-func unknownAttribute(name string, catalogue []naming) *render.Node {
+func unknownAttribute(name string, catalogue []fieldInfo) *render.Node {
 	return render.NewMap(
 		render.Pair{Key: "attribute", Value: render.NewString(name)},
 		render.Pair{Key: "nearest", Value: render.NewList(names(nearestNamed(name, catalogue))...)})
 }
 
-// resolvedAmong is the one entry of the catalogue a name answers to: letter case aside, and, where several
+// matchName is the one entry of the catalogue a name answers to: letter case aside, and, where several
 // answer, the one written byte for byte, so the name an entry is printed under stays its address.
-func resolvedAmong(name string, catalogue []naming) (int, bool) {
-	places := answering(name, catalogue)
+func matchName(name string, catalogue []fieldInfo) (int, bool) {
+	places := findMatches(name, catalogue)
 	if len(places) > 1 {
 		places = slices.DeleteFunc(places, func(at int) bool { return catalogue[at].name != name })
 	}
@@ -210,10 +210,10 @@ func resolvedAmong(name string, catalogue []naming) (int, bool) {
 }
 
 // The attributes of the project, read off the same settings as its types of work.
-func attributesOf(a answer, settings map[string]any) ([]projectAttribute, *diag.Fault) {
+func attributesOf(a decodedResponse, settings map[string]any) ([]projectAttribute, *diag.Fault) {
 	items, isList := settings[attributesKey].([]any)
 	if !isList {
-		return nil, shapeFailure(a.response, a.body, "the attributes of work items of the project are not a JSON array")
+		return nil, shapeFailure(a.httpResponse, a.body, "the attributes of work items of the project are not a JSON array")
 	}
 	attributes := make([]projectAttribute, 0, len(items))
 	for _, item := range items {
@@ -221,14 +221,14 @@ func attributesOf(a answer, settings map[string]any) ([]projectAttribute, *diag.
 		name, isNamed := memberOf(item, nameKey).(string)
 		values, isList := memberOf(item, "values").([]any)
 		if !isText || !isNamed || !isList {
-			return nil, shapeFailure(a.response, a.body, brokenAttribute)
+			return nil, shapeFailure(a.httpResponse, a.body, brokenAttribute)
 		}
 		attribute := projectAttribute{id: id, name: name}
 		for _, value := range values {
 			id, isText := memberOf(value, idKey).(string)
 			name, isNamed := memberOf(value, nameKey).(string)
 			if !isText || !isNamed {
-				return nil, shapeFailure(a.response, a.body, brokenAttribute)
+				return nil, shapeFailure(a.httpResponse, a.body, brokenAttribute)
 			}
 			attribute.values = append(attribute.values, workItemType{id: id, name: name})
 		}
@@ -241,17 +241,17 @@ const brokenAttribute = "an attribute of work items of the project, or a value o
 
 // attributeMismatches holds the attributes that went out against the ones that came back, by the id each went out
 // under; a value is shown by name, since a caller who wrote one has no id of theirs to read.
-func attributeMismatches(wrong []mismatch, filed []filedAttribute, value any) []mismatch {
-	arrived, _ := value.([]any)
+func attributeMismatches(wrong []mismatch, filed []resolvedAttribute, value any) []mismatch {
+	received, _ := value.([]any)
 	for _, attribute := range filed {
-		at := slices.IndexFunc(arrived, func(item any) bool { return memberOf(item, idKey) == attribute.id })
+		at := slices.IndexFunc(received, func(item any) bool { return memberOf(item, idKey) == attribute.id })
 		var kept any
 		if at >= 0 {
-			kept = memberOf(arrived[at], valueKey)
+			kept = memberOf(received[at], attributeValueKey)
 		}
 		if attribute.value == nil {
 			if kept != nil {
-				wrong = append(wrong, mismatch{field: attribute.name, written: render.NewNull(), arrived: asArrived(memberOf(kept, nameKey))})
+				wrong = append(wrong, mismatch{field: attribute.name, expected: render.NewNull(), actual: rawValueNode(memberOf(kept, nameKey))})
 			}
 			continue
 		}
@@ -259,9 +259,9 @@ func attributeMismatches(wrong []mismatch, filed []filedAttribute, value any) []
 			continue
 		}
 		wrong = append(wrong, mismatch{
-			field:   attribute.name,
-			written: render.NewString(attribute.value.written),
-			arrived: asArrived(memberOf(kept, nameKey)),
+			field:    attribute.name,
+			expected: render.NewString(attribute.value.name),
+			actual:   rawValueNode(memberOf(kept, nameKey)),
 		})
 	}
 	return wrong

@@ -53,7 +53,7 @@ func TestRunRefusesAnyCommand(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, run(t, tc.argv)))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, run(t, tc.argv)))
 		})
 	}
 }
@@ -88,7 +88,7 @@ func TestRunHelpIsNotACommand(t *testing.T) {
 	assert.NotEmpty(t, got.stdout)
 }
 
-type refusal struct {
+type faultDocument struct {
 	code string
 	// The keys after message, in the order printed.
 	details []detail
@@ -103,7 +103,7 @@ type detail struct {
 
 // requireRefusal is a refusal that leaves the instance as it was, which every refusal but a write's is: the
 // exit code is 1, and the caller may send the call again once they have fixed what it says.
-func requireRefusal(t *testing.T, got outcome) refusal {
+func requireRefusal(t *testing.T, got outcome) faultDocument {
 	t.Helper()
 	assert.Equal(t, 1, got.code)
 	return requireRefusalDocument(t, got)
@@ -111,14 +111,14 @@ func requireRefusal(t *testing.T, got outcome) refusal {
 
 // requireUncertainty is a refusal the caller cannot answer by sending the call again: the write may have
 // happened, or the answer that came back says it did, and the exit code is where that stands.
-func requireUncertainty(t *testing.T, got outcome) refusal {
+func requireUncertainty(t *testing.T, got outcome) faultDocument {
 	t.Helper()
 	assert.Equal(t, 2, got.code)
 	return requireRefusalDocument(t, got)
 }
 
 // requireRefusalDocument is the document a refusal printed, whatever exit code it came with.
-func requireRefusalDocument(t *testing.T, got outcome) refusal {
+func requireRefusalDocument(t *testing.T, got outcome) faultDocument {
 	t.Helper()
 	assert.Empty(t, got.stdout)
 
@@ -131,7 +131,7 @@ func requireRefusalDocument(t *testing.T, got outcome) refusal {
 	assert.Equal(t, yaml.DoubleQuotedStyle, code.Style)
 	assert.Equal(t, yaml.DoubleQuotedStyle, message.Style)
 	assert.NotEmpty(t, message.Value)
-	found := refusal{code: code.Value}
+	found := faultDocument{code: code.Value}
 	for _, pair := range pairs[2:] {
 		found.details = append(found.details, detail{key: pair[0].Value, value: requireValue(t, pair[1])})
 	}
@@ -140,7 +140,7 @@ func requireRefusalDocument(t *testing.T, got outcome) refusal {
 
 // detailNamed is what the refusal printed under that key, for a scenario that holds one key to something
 // while the rest of the document is the server's word and not worth writing out.
-func detailNamed(t *testing.T, found refusal, key string) any {
+func detailNamed(t *testing.T, found faultDocument, key string) any {
 	t.Helper()
 	for _, printed := range found.details {
 		if printed.key == key {

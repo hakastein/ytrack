@@ -15,12 +15,11 @@ import (
 
 const cassetteMode = recorder.ModeRecordOnly
 
-// A contract run without the polygon's tokens confirms nothing, so it fails.
-func devTokens(t *testing.T) polygonTokens {
+func devTokens(t *testing.T) devInstanceTokens {
 	t.Helper()
 	state := os.Getenv("YTRACK_DEV_STATE")
 	require.NotEmpty(t, state, "YTRACK_DEV_STATE is not set")
-	return polygonTokens{
+	return devInstanceTokens{
 		admin:   readToken(t, state, "admin-token"),
 		limited: readToken(t, state, "limited-token"),
 		member:  readToken(t, state, "member-token"),

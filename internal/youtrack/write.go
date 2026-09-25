@@ -33,34 +33,25 @@ const (
 	fieldBasedCondition = "FieldBasedCondition"
 )
 
-// CreateIssue is the call that files an issue in the project of that code, titled summary and, where
-// description is given, carrying that prose. Each of filled is one custom field of the new issue, written
-// Name=value. It prints the issue as it stands after the write, with the fields of expression, or with them
-// added to IssueShowFields when it starts with +; nil is the caller leaning on the default whole.
 func CreateIssue(code, summary string, description *string, filled []string, expression *string) (Call, *diag.Fault) {
 	code, fault := parseProjectCode(code)
 	if fault != nil {
 		return nil, fault
 	}
-	parts, fault := filedIssue(summary, description, filled)
+	parts, fault := parseIssueCreate(summary, description, filled)
 	if fault != nil {
 		return nil, fault
 	}
 	spec := loadSchemas()
-	requested, fault := issueFields(spec, expression, IssueShowFields, issueComments().commentsOfAWrite())
+	requested, fault := issueFields(spec, expression, IssueShowFields, issueCommentTarget().commentsOfAWrite())
 	if fault != nil {
 		return nil, fault
 	}
 	return func(ctx context.Context, c *Client) (*render.Node, *diag.Fault) {
-		return c.issueCreated(ctx, spec, code, parts, requested)
+		return c.createIssue(ctx, spec, code, parts, requested)
 	}, nil
 }
 
-// UpdateIssue is the call that writes the parts given into the issue of that id: the title where summary is
-// given, the prose where description is, one custom field per element of filled, written Name=value, and an
-// empty value into each part cleared names. A part the call does not give is left as the issue holds it. It
-// prints the issue as it stands after the write, with the fields of expression, or with them added to
-// IssueShowFields when it starts with +; nil is the caller leaning on the default whole.
 func UpdateIssue(id string, summary, description *string, filled, cleared []string, expression *string) (Call, *diag.Fault) {
 	id, fault := parseIssueID(id)
 	if fault != nil {
@@ -69,17 +60,17 @@ func UpdateIssue(id string, summary, description *string, filled, cleared []stri
 	if summary == nil && description == nil && len(filled) == 0 && len(cleared) == 0 {
 		return nil, &diag.Fault{Code: diag.BadUsage, Message: nothingToWrite}
 	}
-	parts, fault := rewrittenIssue(summary, description, filled, cleared)
+	parts, fault := parseIssueUpdate(summary, description, filled, cleared)
 	if fault != nil {
 		return nil, fault
 	}
 	spec := loadSchemas()
-	requested, fault := issueFields(spec, expression, IssueShowFields, issueComments().commentsOfAWrite())
+	requested, fault := issueFields(spec, expression, IssueShowFields, issueCommentTarget().commentsOfAWrite())
 	if fault != nil {
 		return nil, fault
 	}
 	return func(ctx context.Context, c *Client) (*render.Node, *diag.Fault) {
-		return c.issueUpdated(ctx, spec, id, parts, requested)
+		return c.updateIssue(ctx, spec, id, parts, requested)
 	}, nil
 }
 
@@ -87,148 +78,122 @@ func UpdateIssue(id string, summary, description *string, filled, cleared []stri
 const nothingToWrite = "the call writes nothing into the issue: an update is given --summary, --description, " +
 	"--field \"Name=value\" or --clear Name, and a part it is given none of is left as the issue holds it"
 
-const proseBothWays = "--description writes the prose of the issue and --clear description empties it, and the " +
+const descriptionBothWays = "--description writes the prose of the issue and --clear description empties it, and the " +
 	"call gives both"
 
-func (c *Client) issueCreated(ctx context.Context, spec *schemas, code string, parts writtenIssue, requested []requestedField) (*render.Node, *diag.Fault) {
-	project, fault := c.projectToWrite(ctx, spec, code)
+func (c *Client) createIssue(ctx context.Context, spec *schemas, code string, parts issueInput, requested []requestedField) (*render.Node, *diag.Fault) {
+	project, fault := c.readProjectMetadata(ctx, spec, code)
 	if fault != nil {
 		return nil, fault
 	}
 	// A new issue carries no field yet, so every class the body names comes from the table.
-	filed, fault := parts.filling(project, nil)
+	filed, fault := parts.resolve(project, nil)
 	if fault != nil {
 		return nil, fault
 	}
-	if hidden := filed.hidden(); len(hidden) > 0 {
-		return nil, project.refusing(diag.BadUsage, hiddenMessage, "invalid", invalidEntries(hidden))
+	if hidden := filed.hiddenFields(); len(hidden) > 0 {
+		return nil, project.fault(diag.BadUsage, hiddenMessage, "invalid", invalidEntries(hidden))
 	}
 	if missing := filed.missing(); len(missing) > 0 {
-		return nil, project.refusing(diag.MissingRequired, missingMessage, "missing", names(missing))
+		return nil, project.fault(diag.MissingRequired, missingMessage, "missing", names(missing))
 	}
 	if fault := c.resolveCustomFields(ctx, spec, requested); fault != nil {
 		return nil, fault
 	}
-	asked := asking(requested, filed.checked()...)
+	asked := withFields(requested, filed.verifyFields()...)
 	issueBlocks(spec, composedIssue(), asked)
-	body := filed.body()
-	return c.writing(ctx, spec, issueSchema, asked, func(ctx context.Context, fields string) (*http.Response, error) {
-		return c.createIssue(ctx, body, fields)
-	}, filed.confirmedBy, writtenNode(requested))
+	body := filed.createBody()
+	return c.write(ctx, spec, issueSchema, asked, func(ctx context.Context, fields string) (*http.Response, error) {
+		return c.apiCreateIssue(ctx, body, fields)
+	}, filed.verify, writeResultNode(requested))
 }
 
-// writtenNode is the document a write prints: the entity the answer carries, with the fields the caller asked
-// for. It is handed to the passage rather than run after it, so a refusal it raises is a refusal after the
-// write like any other.
-func writtenNode(requested []requestedField) func(answer) (*render.Node, *diag.Fault) {
-	return func(a answer) (*render.Node, *diag.Fault) {
+func writeResultNode(requested []requestedField) func(decodedResponse) (*render.Node, *diag.Fault) {
+	return func(a decodedResponse) (*render.Node, *diag.Fault) {
 		return objectNode(a, requested, a.objects[0], nil)
 	}
 }
 
-// deletion is the whole of what a delete of an owner does, and it is one for both kinds: a deletion is answered
-// with nothing, so what is printed is read before it goes. The server answers dev-7 and 3-26 for the same issue
-// and dev-A-7 and 177-58 for the same article, so the argument printed back would be neither checked nor the id
-// the entity goes by, and the read that settles it turns an entity that is not there into a not_found before
-// anything is destroyed. read asks for the one field printed; destroy goes to the readable id that read gave.
-func (c *Client) deletion(ctx context.Context, spec *schemas, kind ownerKind, schema string,
+func (c *Client) deleteOwner(ctx context.Context, spec *schemas, kind ownerKind, schema string,
 	read func(ctx context.Context, fields string) (*http.Response, error),
-	destroy func(ctx context.Context, at addressed) (*http.Response, error),
+	destroy func(ctx context.Context, at readableID) (*http.Response, error),
 ) (*render.Node, *diag.Fault) {
 	requested := []requestedField{{name: idReadableKey}}
-	answer, fault := c.passing(ctx, spec, schema, requested, read)
+	decoded, fault := c.request(ctx, spec, schema, requested, read)
 	if fault != nil {
 		return nil, fault
 	}
-	readable, fault := addressedIn(answer, answer.objects[0], kind, "a deletion")
+	readable, fault := readableIDAt(decoded, decoded.objects[0], kind, "a deletion")
 	if fault != nil {
 		return nil, fault
 	}
-	if fault := writingNothing(ctx, func(ctx context.Context) (*http.Response, error) {
+	if fault := writeEmpty(ctx, func(ctx context.Context) (*http.Response, error) {
 		return destroy(ctx, readable)
 	}); fault != nil {
 		return nil, fault
 	}
-	return objectNode(answer, requested, answer.objects[0], nil)
+	return objectNode(decoded, requested, decoded.objects[0], nil)
 }
 
-// An update reads the issue before it writes it, and that one read carries the whole of what the write needs:
-// the readable id it is addressed by, the project the names are resolved against and the class the server names
-// each field the issue already holds by.
-//
-// What the project requires is held against the fields the call empties and against nothing else: an issue
-// filed before its project required a field holds that field empty to this day — DEV-2 of the polygon is one —
-// so requiring it of a caller who never mentioned it would be a refusal ytrack invented.
-func (c *Client) issueUpdated(ctx context.Context, spec *schemas, id string, parts writtenIssue, requested []requestedField) (*render.Node, *diag.Fault) {
+func (c *Client) updateIssue(ctx context.Context, spec *schemas, id string, parts issueInput, requested []requestedField) (*render.Node, *diag.Fault) {
 	issue, fault := c.readIssueToWrite(ctx, spec, id)
 	if fault != nil {
 		return nil, fault
 	}
-	changed, fault := parts.filling(issue.project, issue.kinds)
+	changed, fault := parts.resolve(issue.project, issue.kinds)
 	if fault != nil {
 		return nil, fault
 	}
 	if emptied := changed.requiredEmptied(); len(emptied) > 0 {
-		return nil, issue.project.refusing(diag.MissingRequired, emptiedMessage, "missing", names(emptied))
+		return nil, issue.project.fault(diag.MissingRequired, emptiedMessage, "missing", names(emptied))
 	}
 	if fault := c.resolveCustomFields(ctx, spec, requested); fault != nil {
 		return nil, fault
 	}
-	asked := asking(requested, changed.checked()...)
+	asked := withFields(requested, changed.verifyFields()...)
 	issueBlocks(spec, composedIssue(), asked)
-	body := changed.changes()
-	return c.writing(ctx, spec, issueSchema, asked, func(ctx context.Context, fields string) (*http.Response, error) {
-		return c.updateIssue(ctx, issue.readable, body, fields)
-	}, changed.confirmedBy, writtenNode(requested))
+	body := changed.updateBody()
+	return c.write(ctx, spec, issueSchema, asked, func(ctx context.Context, fields string) (*http.Response, error) {
+		return c.apiUpdateIssue(ctx, issue.readable, body, fields)
+	}, changed.verify, writeResultNode(requested))
 }
 
-// What a creation of an article carries as the call wrote it: the project it is filed in, its title, the text
-// of it where the call writes one, and the article it is written under as the caller addressed it. A nil
-// content is the caller who wrote no flag for it, and the key is then absent from the body, which is a third
-// thing beside text and an explicit empty (ADR-0001).
-//
-// Nothing here builds a body: the parent is a readable id the server has not been asked about yet, and a body
-// carrying it would be a body no read stands behind. filedUnder is what turns these into the write that goes.
-type writtenArticle struct {
+type articleCreateInput struct {
 	project  string
 	summary  string
 	content  *string
 	parentID *string
 }
 
-// articleFiledUnder is a creation with its parent settled: every part of it is one the reads before the write
-// allowed, so the body, what the answer is read for and the check of it are built from these and from nothing
-// else. filedUnder is the one place that makes one, which is what holds the read before the write in place of
-// an order kept by hand.
-type articleFiledUnder struct {
+type articleCreate struct {
 	project string
 	summary string
 	content *string
 	// The article this one is written under, as the read before the write found it: the body carries the
 	// internal id that read gave rather than the argument. It is nil where the call names no parent.
-	parent *articleToWrite
+	parent *articleRef
 }
 
-// filedArticle is the whole of what a creation of an article writes, read off the flags it was given, with
+// parseArticleCreate is the whole of what a creation of an article writes, read off the flags it was given, with
 // each part held to what YouTrack would keep of it.
 //
 // An article keeps a carriage return where the description of an issue loses one, so the text of it is refused
 // for nothing but being empty; the title is one line here as it is there, and the runes YouTrack drops out of
 // the title of an issue it keeps in the title of an article.
-func filedArticle(code, summary string, content, parent *string) (writtenArticle, *diag.Fault) {
-	if fault := refuseRewritten("--"+summaryKey, summary, summaryOfAnArticle, articleTitleRewrites()); fault != nil {
-		return writtenArticle{}, fault
+func parseArticleCreate(code, summary string, content, parent *string) (articleCreateInput, *diag.Fault) {
+	if fault := rejectReplaced("--"+summaryKey, summary, summaryOfAnArticle, articleTitleRewrites()); fault != nil {
+		return articleCreateInput{}, fault
 	}
 	if content != nil {
-		if fault := refuseRewritten("--"+contentKey, *content, contentOfANewArticle, nil); fault != nil {
-			return writtenArticle{}, fault
+		if fault := rejectReplaced("--"+contentKey, *content, contentOfANewArticle, nil); fault != nil {
+			return articleCreateInput{}, fault
 		}
 	}
-	written := writtenArticle{project: code, summary: summary, content: content}
+	written := articleCreateInput{project: code, summary: summary, content: content}
 	if parent != nil {
 		id, fault := parseArticleID(*parent)
 		if fault != nil {
-			return writtenArticle{}, fault
+			return articleCreateInput{}, fault
 		}
 		written.parentID = &id
 	}
@@ -237,8 +202,8 @@ func filedArticle(code, summary string, content, parent *string) (writtenArticle
 
 // The title of an article is one line: YouTrack turns each line ending of it into a space and a CRLF into one
 // space rather than into two, and keeps the NEL and the separators an issue loses.
-func articleTitleRewrites() []rewrite {
-	return []rewrite{
+func articleTitleRewrites() []charReplacement {
+	return []charReplacement{
 		{rune: '\n', into: "a space"},
 		{rune: '\r', into: "a space"},
 	}
@@ -252,14 +217,7 @@ const (
 		"outright, and content the call does not write is left as the article holds it"
 )
 
-// What an update of an article writes as the call wrote it: the parts the call names and not one more, the
-// parent among them as the caller addressed it. A nil part is the caller who wrote no flag for it, which leaves
-// its key out of the body; an emptied part is a third thing beside text and no key at all, so it is said
-// outright (ADR-0001).
-//
-// Nothing here builds a body, for the reason writtenArticle carries: writtenUnder is what turns these into the
-// write that goes.
-type changedArticle struct {
+type articleUpdateInput struct {
 	summary       *string
 	content       *string
 	clearsContent bool
@@ -267,16 +225,13 @@ type changedArticle struct {
 	clearsParent  bool
 }
 
-// articleWrittenUnder is an update with its parent settled, and what articleFiledUnder is to a creation: the
-// body, what the answer is read for and the check of it are built from parts the reads before the write
-// allowed. writtenUnder is the one place that makes one.
-type articleWrittenUnder struct {
+type articleUpdate struct {
 	summary       *string
 	content       *string
 	clearsContent bool
 	// The article this one is moved under, as the read before the write found it: the body carries the internal
 	// id that read gave rather than the argument. It is nil where the call names no parent or takes it away.
-	parent       *articleToWrite
+	parent       *articleRef
 	clearsParent bool
 }
 
@@ -287,52 +242,52 @@ type clearablePart[W any] struct {
 	empty func(*W)
 }
 
-func clearableArticleParts() []clearablePart[changedArticle] {
-	return []clearablePart[changedArticle]{
-		{name: contentKey, empty: func(w *changedArticle) { w.clearsContent = true }},
-		{name: parentKey, empty: func(w *changedArticle) { w.clearsParent = true }},
+func clearableArticleParts() []clearablePart[articleUpdateInput] {
+	return []clearablePart[articleUpdateInput]{
+		{name: contentKey, empty: func(w *articleUpdateInput) { w.clearsContent = true }},
+		{name: parentKey, empty: func(w *articleUpdateInput) { w.clearsParent = true }},
 	}
 }
 
-// rewrittenArticle is the whole of what an update of an article writes, read off the flags it was given, with
+// parseArticleUpdate is the whole of what an update of an article writes, read off the flags it was given, with
 // each part held to what YouTrack would keep of it.
-func rewrittenArticle(summary, content, parent *string, cleared []string) (changedArticle, *diag.Fault) {
-	written := changedArticle{summary: summary, content: content}
-	if fault := written.emptying(cleared); fault != nil {
-		return changedArticle{}, fault
+func parseArticleUpdate(summary, content, parent *string, cleared []string) (articleUpdateInput, *diag.Fault) {
+	written := articleUpdateInput{summary: summary, content: content}
+	if fault := written.parseClear(cleared); fault != nil {
+		return articleUpdateInput{}, fault
 	}
 	if written.clearsContent && content != nil {
-		return changedArticle{}, &diag.Fault{Code: diag.BadUsage, Message: contentBothWays}
+		return articleUpdateInput{}, &diag.Fault{Code: diag.BadUsage, Message: contentBothWays}
 	}
 	if written.clearsParent && parent != nil {
-		return changedArticle{}, &diag.Fault{Code: diag.BadUsage, Message: parentBothWays}
+		return articleUpdateInput{}, &diag.Fault{Code: diag.BadUsage, Message: parentBothWays}
 	}
 	if parent != nil {
 		id, fault := parseArticleID(*parent)
 		if fault != nil {
-			return changedArticle{}, fault
+			return articleUpdateInput{}, fault
 		}
 		written.parentID = &id
 	}
 	if summary != nil {
-		if fault := refuseRewritten("--"+summaryKey, *summary, summaryOfAnArticle, articleTitleRewrites()); fault != nil {
-			return changedArticle{}, fault
+		if fault := rejectReplaced("--"+summaryKey, *summary, summaryOfAnArticle, articleTitleRewrites()); fault != nil {
+			return articleUpdateInput{}, fault
 		}
 	}
 	if content != nil {
-		if fault := refuseRewritten("--"+contentKey, *content, contentOfAnArticle, nil); fault != nil {
-			return changedArticle{}, fault
+		if fault := rejectReplaced("--"+contentKey, *content, contentOfAnArticle, nil); fault != nil {
+			return articleUpdateInput{}, fault
 		}
 	}
 	return written, nil
 }
 
-// emptying reads --clear: the parts of the article the call empties, matched without regard to letter case, the
+// parseClear reads --clear: the parts of the article the call empties, matched without regard to letter case, the
 // way every name a caller writes is matched.
-func (w *changedArticle) emptying(cleared []string) *diag.Fault {
+func (w *articleUpdateInput) parseClear(cleared []string) *diag.Fault {
 	parts := clearableArticleParts()
 	for _, name := range cleared {
-		at := emptying(parts, name)
+		at := clearablePartIndex(parts, name)
 		if at < 0 {
 			message := fmt.Sprintf("--clear %s names no part of an article a call may empty: it takes %s",
 				render.Quote(name), partsOf(parts))
@@ -345,7 +300,7 @@ func (w *changedArticle) emptying(cleared []string) *diag.Fault {
 
 // Where the name a caller wrote stands in the table of the entity, matched without regard to letter case, the
 // way every name a caller writes is matched.
-func emptying[W any](parts []clearablePart[W], name string) int {
+func clearablePartIndex[W any](parts []clearablePart[W], name string) int {
 	return slices.IndexFunc(parts, func(p clearablePart[W]) bool { return strings.EqualFold(name, p.name) })
 }
 
@@ -369,7 +324,7 @@ const parentBothWays = "--parent writes the article this one hangs from and --cl
 
 // The body of an update of an article: the parts the call writes and not one key more. The article is addressed
 // by the path, and a part the body says nothing about is a part the article keeps as it stands.
-type updatedArticle struct {
+type updateArticleBody struct {
 	Summary *string `json:"summary,omitempty"`
 	// Raw JSON rather than a string: the text, an explicit null and no key at all are three things, and a
 	// pointer tells only two of them apart.
@@ -380,27 +335,27 @@ type updatedArticle struct {
 }
 
 // Marshalling strings and structs of them cannot fail.
-func (w articleWrittenUnder) changes() []byte {
-	body, _ := json.Marshal(updatedArticle{Summary: w.summary, Content: w.text(), ParentArticle: w.hangsFrom()})
+func (w articleUpdate) body() []byte {
+	body, _ := json.Marshal(updateArticleBody{Summary: w.summary, Content: w.text(), ParentArticle: w.parentJSON()})
 	return body
 }
 
-// hangsFrom is the parent of the body: the internal id the read before the write gave, an explicit null where
+// parentJSON is the parent of the body: the internal id the read before the write gave, an explicit null where
 // the call takes the parent away, and nothing at all where it says neither.
-func (w articleWrittenUnder) hangsFrom() json.RawMessage {
+func (w articleUpdate) parentJSON() json.RawMessage {
 	switch {
 	case w.clearsParent:
 		return json.RawMessage("null")
 	case w.parent == nil:
 		return nil
 	}
-	encoded, _ := json.Marshal(addressedArticle{ID: w.parent.id})
+	encoded, _ := json.Marshal(articleIDBody{ID: w.parent.id})
 	return encoded
 }
 
 // text is the content of the body: the text where the call writes one, an explicit null where it empties one,
 // and nothing at all where it says neither.
-func (w articleWrittenUnder) text() json.RawMessage {
+func (w articleUpdate) text() json.RawMessage {
 	switch {
 	case w.clearsContent:
 		return json.RawMessage("null")
@@ -411,10 +366,10 @@ func (w articleWrittenUnder) text() json.RawMessage {
 	return encoded
 }
 
-// checked is what the answer to the write is read for beside what the caller asked to print: every part that
+// verifyFields is what the answer to the write is read for beside what the caller asked to print: every part that
 // went out, so the check has it to compare, and the readable id, so a refusal can name the article whatever the
 // caller asked for.
-func (w articleWrittenUnder) checked() []requestedField {
+func (w articleUpdate) verifyFields() []requestedField {
 	own := []requestedField{{name: idReadableKey}}
 	if w.summary != nil {
 		own = append(own, requestedField{name: summaryKey})
@@ -428,10 +383,10 @@ func (w articleWrittenUnder) checked() []requestedField {
 	return own
 }
 
-// confirmedBy holds the answer against what the write sent: a 200 says the server took the body, not that what
+// verify holds the answer against what the write sent: a 200 says the server took the body, not that what
 // it kept is what went out. A part the call never named is never held against anything — the article holds
 // what it held, and the answer is the only word there is on that.
-func (w articleWrittenUnder) confirmedBy(a answer) *diag.Fault {
+func (w articleUpdate) verify(a decodedResponse) *diag.Fault {
 	article := a.objects[0]
 	var wrong []mismatch
 	if w.summary != nil {
@@ -452,47 +407,47 @@ func (w articleWrittenUnder) confirmedBy(a answer) *diag.Fault {
 	if len(wrong) == 0 {
 		return nil
 	}
-	return rewrittenByTheServer(a, knownAs(articleOwner.String(), writtenID(a, idReadableKey)), wrong)
+	return mismatchFault(a, knownAs(articleOwner.String(), responseID(a, idReadableKey)), wrong)
 }
 
 // The body of a creation of an article. The project is addressed by the code the caller typed: unlike a
 // creation of an issue, nothing of the project is read first, since YouTrack answers a code it has none of
 // with a 404 of its own. No $type stands here — the server takes the article without one.
-type createdArticle struct {
+type createArticleBody struct {
 	Project articleProject `json:"project"`
 	Summary string         `json:"summary"`
 	Content *string        `json:"content,omitempty"`
 	// The parent is addressed by the internal id the read before the write gave: this member takes no other
 	// form, and a readable id under it is answered 400 Invalid structure of entity id.
-	ParentArticle *addressedArticle `json:"parentArticle,omitempty"`
+	ParentArticle *articleIDBody `json:"parentArticle,omitempty"`
 }
 
 type articleProject struct {
 	ShortName string `json:"shortName"`
 }
 
-type addressedArticle struct {
+type articleIDBody struct {
 	ID string `json:"id"`
 }
 
 // Marshalling strings and structs of them cannot fail.
-func (w articleFiledUnder) body() []byte {
-	filed := createdArticle{
+func (w articleCreate) body() []byte {
+	filed := createArticleBody{
 		Project: articleProject{ShortName: w.project},
 		Summary: w.summary,
 		Content: w.content,
 	}
 	if w.parent != nil {
-		filed.ParentArticle = &addressedArticle{ID: w.parent.id}
+		filed.ParentArticle = &articleIDBody{ID: w.parent.id}
 	}
 	body, _ := json.Marshal(filed)
 	return body
 }
 
-// checked is what the answer to the write is read for beside what the caller asked to print: every part that
+// verifyFields is what the answer to the write is read for beside what the caller asked to print: every part that
 // went out, so the check has it to compare, and the readable id, so a refusal can name the article that by then
 // exists whatever the caller asked for.
-func (w articleFiledUnder) checked() []requestedField {
+func (w articleCreate) verifyFields() []requestedField {
 	own := []requestedField{
 		{name: idReadableKey},
 		{name: summaryKey},
@@ -505,10 +460,10 @@ func (w articleFiledUnder) checked() []requestedField {
 	return own
 }
 
-// confirmedBy holds the answer against what the write sent: a 200 says the server took the body, not that what
+// verify holds the answer against what the write sent: a 200 says the server took the body, not that what
 // it kept is what went out, and printing the answer unchecked would hand a rewritten value back as the
 // caller's own.
-func (w articleFiledUnder) confirmedBy(a answer) *diag.Fault {
+func (w articleCreate) verify(a decodedResponse) *diag.Fault {
 	article := a.objects[0]
 	wrong := textMismatch(nil, summaryKey, w.summary, article[summaryKey])
 	if w.content != nil {
@@ -521,28 +476,28 @@ func (w articleFiledUnder) confirmedBy(a answer) *diag.Fault {
 	if len(wrong) == 0 {
 		return nil
 	}
-	return rewrittenByTheServer(a, knownAs(articleOwner.String(), writtenID(a, idReadableKey)), wrong)
+	return mismatchFault(a, knownAs(articleOwner.String(), responseID(a, idReadableKey)), wrong)
 }
 
 // The project is the one part held without regard to letter case: the server reads dev for DEV and answers
 // with the code as it keeps it, so anything but the same project under another case is a disagreement.
 func projectMismatch(wrong []mismatch, code string, value any) []mismatch {
-	arrived := memberOf(value, shortNameKey)
-	if kept, isText := arrived.(string); isText && strings.EqualFold(kept, code) {
+	received := memberOf(value, shortNameKey)
+	if kept, isText := received.(string); isText && strings.EqualFold(kept, code) {
 		return wrong
 	}
-	return append(wrong, mismatch{field: projectKey, written: render.NewString(code), arrived: asArrived(arrived)})
+	return append(wrong, mismatch{field: projectKey, expected: render.NewString(code), actual: rawValueNode(received)})
 }
 
 // The parent is held by the readable id the read before the write gave it, which is what stands between the
 // read and the write: a parent deleted in that moment leaves the article at the root of the tree under a 200,
 // and the answer is the only word there is on it.
 func parentMismatch(wrong []mismatch, readable string, value any) []mismatch {
-	arrived := memberOf(value, idReadableKey)
-	if kept, isText := arrived.(string); isText && kept == readable {
+	received := memberOf(value, idReadableKey)
+	if kept, isText := received.(string); isText && kept == readable {
 		return wrong
 	}
-	return append(wrong, mismatch{field: parentArticleKey, written: render.NewString(readable), arrived: asArrived(arrived)})
+	return append(wrong, mismatch{field: parentArticleKey, expected: render.NewString(readable), actual: rawValueNode(received)})
 }
 
 // A parent the call took away is an article the answer hangs from nothing at all. One still standing there is
@@ -551,8 +506,8 @@ func noParentMismatch(wrong []mismatch, value any) []mismatch {
 	if value == nil {
 		return wrong
 	}
-	arrived := asArrived(memberOf(value, idReadableKey))
-	return append(wrong, mismatch{field: parentArticleKey, written: render.NewNull(), arrived: arrived})
+	received := rawValueNode(memberOf(value, idReadableKey))
+	return append(wrong, mismatch{field: parentArticleKey, expected: render.NewNull(), actual: received})
 }
 
 // The one member of a nested object a check reads, and nothing where the answer carried no object there at all.
@@ -567,19 +522,19 @@ func memberOf(value any, name string) any {
 // The text of a comment as the call wrote it, and the whole of what a write of one carries: the body, what the
 // answer is read for and the check of it are built from it and from nothing else. Nothing is read before a
 // comment is written, so what the call wrote is already what the write goes out with.
-type commentWritten struct {
+type commentCreate struct {
 	text string
 }
 
-// commentText is the whole of what a comment writes, read off the flag it was given, with the text held to
+// parseCommentText is the whole of what a comment writes, read off the flag it was given, with the text held to
 // what YouTrack would keep of it — which is all of it. The server was measured to store thirty-two kinds of
 // text at both kinds of owner byte for byte, a lone carriage return and three hundred kilobytes among them, so
 // nothing is refused for being rewritten the way the title of an issue is.
-func commentText(text string) (commentWritten, *diag.Fault) {
-	if fault := refuseRewritten("--"+textKey, text, textOfAComment, nil); fault != nil {
-		return commentWritten{}, fault
+func parseCommentText(text string) (commentCreate, *diag.Fault) {
+	if fault := rejectReplaced("--"+textKey, text, textOfAComment, nil); fault != nil {
+		return commentCreate{}, fault
 	}
-	return commentWritten{text: text}, nil
+	return commentCreate{text: text}, nil
 }
 
 // An empty text is refused at both kinds of owner although only one of them refuses it: a caller names an owner
@@ -590,142 +545,136 @@ const textOfAComment = "is empty, and a comment is the text of it: YouTrack answ
 
 // The body of a comment: the text and nothing else. No $type stands here — the server takes the comment
 // without one — and no id either, since the owner is the path and the id is the server's to give.
-type createdComment struct {
+type commentBody struct {
 	Text string `json:"text"`
 }
 
 // Marshalling a string and a struct of one cannot fail.
-func (w commentWritten) body() []byte {
-	body, _ := json.Marshal(createdComment{Text: w.text})
+func (w commentCreate) body() []byte {
+	body, _ := json.Marshal(commentBody{Text: w.text})
 	return body
 }
 
-// checked is what the answer to the write is read for beside what the caller asked to print: the text that went
+// verifyFields is what the answer to the write is read for beside what the caller asked to print: the text that went
 // out, so the check has it to compare, and the id, so a refusal can name the comment that by then exists
 // whatever the caller asked for.
-func (w commentWritten) checked() []requestedField {
+func (w commentCreate) verifyFields() []requestedField {
 	return []requestedField{{name: idKey}, {name: textKey}}
 }
 
 // 200 говорит лишь, что сервер принял тело, а не что сохранил тот же текст.
-func (w commentWritten) confirms(a answer, named *render.Node) *diag.Fault {
+func (w commentCreate) verifyText(a decodedResponse, named *render.Node) *diag.Fault {
 	wrong := textMismatch(nil, textKey, w.text, a.objects[0][textKey])
 	if len(wrong) == 0 {
 		return nil
 	}
-	return rewrittenByTheServer(a, knownAs(commentKey, named), wrong)
+	return mismatchFault(a, knownAs(commentKey, named), wrong)
 }
 
-func (w commentWritten) confirmedBy(a answer) *diag.Fault {
-	return w.confirms(a, writtenID(a, idKey))
+func (w commentCreate) verify(a decodedResponse) *diag.Fault {
+	return w.verifyText(a, responseID(a, idKey))
 }
 
-// commentRewritten is what an update of a comment carries, and what commentWritten is to a creation: the text,
-// and beside it the comment the write goes to. The address is the caller's own, held to a form before anything
-// was sent, so it names the comment in a refusal whatever the answer turns out to hold.
-type commentRewritten struct {
-	commentWritten
+type commentUpdate struct {
+	commentCreate
 	at childID
 }
 
-// checked is what the answer to the write is read for beside what the caller asked to print: the text that went
+// verifyFields is what the answer to the write is read for beside what the caller asked to print: the text that went
 // out, and nothing else. The id is not asked for the way a creation asks for it — the comment was addressed by
 // an id the caller wrote, and that is what a refusal names it by.
-func (w commentRewritten) checked() []requestedField {
+func (w commentUpdate) verifyFields() []requestedField {
 	return []requestedField{{name: textKey}}
 }
 
 // Комментарий, удалённый между чтением и записью, приходит без текста — это тоже расхождение.
-func (w commentRewritten) confirmedBy(a answer) *diag.Fault {
-	return w.confirms(a, render.NewString(w.at.String()))
+func (w commentUpdate) verify(a decodedResponse) *diag.Fault {
+	return w.verifyText(a, render.NewString(w.at.String()))
 }
 
 // What a creation of a work item carries as the call wrote it, and the whole of what the write goes out with:
 // nothing of the issue is read first. A nil day or text is the caller who wrote no flag for it, and the
 // key is then absent from the body — YouTrack writes such a work item against today of its own and leaves the
 // text empty.
-type writtenWorkItem struct {
-	spent      writtenDuration
-	day        *writtenAgainst
+type workItemCreateInput struct {
+	spent      parsedDuration
+	day        *workDate
 	text       *string
 	attributes []namedValue
 }
 
 // How long a work item is, as the caller wrote it, which is what a refusal shows them, beside the minutes the
 // body carries: the ISO period and the minutes are one length said two ways.
-type writtenDuration struct {
-	written string
+type parsedDuration struct {
+	text    string
 	minutes int64
 }
 
 // The day a work item is written against: what the caller wrote and the millisecond the body carries for it.
-type writtenAgainst struct {
-	written string
-	noon    int64
+type workDate struct {
+	text string
+	noon int64
 }
 
-// A creation with its type of work settled, and what articleFiledUnder is to an article: the body, what the
-// answer is read for and the check of it are built from parts a read before the write allowed, and the type is
-// the only part there is such a read for. workItemFiled is the one place that makes one.
-type workItemFiledWithType struct {
-	written writtenWorkItem
+type workItemCreate struct {
+	input workItemCreateInput
 	// The type of work, as the read before the write resolved it, and nil where the call names none: the body
 	// then carries no type at all, and YouTrack writes the work item against none.
-	workType   *filedWorkItemType
-	attributes []filedAttribute
+	workType   *resolvedWorkType
+	attributes []resolvedAttribute
 }
 
 // The type of work a work item is written against: the id the body carries, since YouTrack answers a type given
 // by name with укажите ее ID, and the name the caller wrote, which is what a refusal about it shows them.
-type filedWorkItemType struct {
-	id      string
-	written string
+type resolvedWorkType struct {
+	id   string
+	name string
 }
 
 // The type of work, read off --type. An empty name answers to no type of any project, and finding that out
 // would cost the read before the write.
-func refuseWorkItemType(named *string) *diag.Fault {
+func rejectWorkItemType(named *string) *diag.Fault {
 	if named == nil || *named != "" {
 		return nil
 	}
-	return refusedValue("--"+typeKey, *named, "names no type of work: the types an issue may be written "+
+	return invalidValueFault("--"+typeKey, *named, "names no type of work: the types an issue may be written "+
 		"against are the settings of its project, printed by ytrack project show <code> under plugins")
 }
 
 // YouTrack keeps an empty text of a work item as an empty text, so the one thing refused of --text
 // here is what the encoder would rewrite: a byte that is no UTF-8 reaches the server as U+FFFD, and the check
 // of the write would then report ytrack's own rewriting as the server's, over a work item that exists.
-func refuseWorkItemText(text *string) *diag.Fault {
+func rejectWorkItemText(text *string) *diag.Fault {
 	if text == nil {
 		return nil
 	}
-	return refuseNoUTF8("--"+textKey, *text)
+	return rejectNoUTF8("--"+textKey, *text)
 }
 
-// filedWorkItem is the whole of what a creation writes, read off the argument and the flags it was given. The
+// parseWorkItemCreate is the whole of what a creation writes, read off the argument and the flags it was given. The
 // name of the type is read here as well, although what goes out for it is the id the read before the write
 // resolves: --type is read in one place, and an empty name costs no request to find out about.
-func filedWorkItem(spent string, day, text, named *string, attributes []string) (writtenWorkItem, *diag.Fault) {
-	length, fault := minutesSpent(spent)
+func parseWorkItemCreate(spent string, day, text, named *string, attributes []string) (workItemCreateInput, *diag.Fault) {
+	length, fault := parseDuration(spent)
 	if fault != nil {
-		return writtenWorkItem{}, fault
+		return workItemCreateInput{}, fault
 	}
-	if fault := refuseWorkItemText(text); fault != nil {
-		return writtenWorkItem{}, fault
+	if fault := rejectWorkItemText(text); fault != nil {
+		return workItemCreateInput{}, fault
 	}
-	written := writtenWorkItem{spent: length, text: text}
+	written := workItemCreateInput{spent: length, text: text}
 	if day != nil {
-		against, fault := dayWrittenAgainst(*day)
+		against, fault := parseWorkDate(*day)
 		if fault != nil {
-			return writtenWorkItem{}, fault
+			return workItemCreateInput{}, fault
 		}
 		written.day = &against
 	}
-	if fault := refuseWorkItemType(named); fault != nil {
-		return writtenWorkItem{}, fault
+	if fault := rejectWorkItemType(named); fault != nil {
+		return workItemCreateInput{}, fault
 	}
 	if written.attributes, fault = attributeValues(attributes); fault != nil {
-		return writtenWorkItem{}, fault
+		return workItemCreateInput{}, fault
 	}
 	return written, nil
 }
@@ -733,88 +682,88 @@ func filedWorkItem(spent string, day, text, named *string, attributes []string) 
 // How long the work item is, written as ytrack prints one. A day and a week are refused rather than converted:
 // P1D of YouTrack is the working day of the instance — eight hours on this one — so an ISO day would mean one
 // thing here and another anywhere else.
-func minutesSpent(text string) (writtenDuration, *diag.Fault) {
+func parseDuration(text string) (parsedDuration, *diag.Fault) {
 	minutes, read := periodMinutes(text)
 	switch {
 	case !read:
-		return writtenDuration{}, refusedValue("duration", text, "is no ISO 8601 period of hours and minutes, as "+
+		return parsedDuration{}, invalidValueFault("duration", text, "is no ISO 8601 period of hours and minutes, as "+
 			"in PT1H30M, PT90M or PT0M: ytrack writes a work item as the minutes it comes to, and neither a day "+
 			"nor a week is a fixed count of them — YouTrack reads P1D as the working day of the instance — while "+
 			"a second and a fraction are no part of what a work item holds")
 	case minutes > math.MaxInt32:
-		return writtenDuration{}, refusedValue("duration", text,
+		return parsedDuration{}, invalidValueFault("duration", text,
 			fmt.Sprintf("is longer than the %d minutes YouTrack keeps a work item for", math.MaxInt32))
 	}
-	return writtenDuration{written: text, minutes: minutes}, nil
+	return parsedDuration{text: text, minutes: minutes}, nil
 }
 
 // The day, read off --date: the calendar day, or midnight UTC of one, which is how ytrack prints the day of a
 // work item, so what time list printed goes back in as it came out. Any other moment is refused before the
 // write: YouTrack would file it under the calendar day of the time zone of whoever's token wrote it.
-func dayWrittenAgainst(text string) (writtenAgainst, *diag.Fault) {
+func parseWorkDate(text string) (workDate, *diag.Fault) {
 	if day, err := time.Parse(time.DateOnly, text); err == nil {
-		return writtenAgainst{written: text, noon: noonUTC(day)}, nil
+		return workDate{text: text, noon: noonUTC(day)}, nil
 	}
 	moment, err := time.Parse(time.RFC3339, text)
 	if err != nil {
-		return writtenAgainst{}, refusedValue(dateKey, text, "is neither a calendar day, as in 2026-09-01, nor "+
+		return workDate{}, invalidValueFault(dateKey, text, "is neither a calendar day, as in 2026-09-01, nor "+
 			"midnight UTC of one, as in 2026-09-01T00:00:00Z: a work item is written against a day, and "+
 			"YouTrack keeps no moment of it")
 	}
 	utc := moment.UTC()
 	midnight := time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC)
 	if !utc.Equal(midnight) {
-		return writtenAgainst{}, refusedValue(dateKey, text, "names a time of day, and a work item is written "+
+		return workDate{}, invalidValueFault(dateKey, text, "names a time of day, and a work item is written "+
 			"against a day: YouTrack would file the moment under the calendar day of the time zone of whoever "+
 			"wrote it, which is not the caller's to know")
 	}
 	if _, offset := moment.Zone(); offset != 0 {
-		return writtenAgainst{}, refusedValue(dateKey, text, "is midnight UTC written in an offset of its own, "+
+		return workDate{}, invalidValueFault(dateKey, text, "is midnight UTC written in an offset of its own, "+
 			"and a day goes in as the day it is written in: a calendar day, as in 2026-09-01, or midnight UTC "+
 			"of one with Z or +00:00 on it, as ytrack prints it")
 	}
-	return writtenAgainst{written: text, noon: noonUTC(midnight)}, nil
+	return workDate{text: text, noon: noonUTC(midnight)}, nil
 }
 
 // A value of a positional argument or of a flag, refused before anything is sent, with the value quoted: a byte
 // that cannot be printed stands escaped, as it does wherever a caller's string reaches a document.
-func refusedValue(named, value, because string) *diag.Fault {
+func invalidValueFault(named, value, because string) *diag.Fault {
 	return &diag.Fault{Code: diag.BadUsage, Message: fmt.Sprintf("%s %s %s", named, render.Quote(value), because)}
 }
 
 // The body of a work item: how long it is, and the type, the day and the text where the call names them. No
 // $type stands here — the server takes the work item without one — and no author either: YouTrack writes it
 // down as whoever the token belongs to, and naming anyone else would be ytrack deciding for the caller.
-type createdWorkItem struct {
-	Duration   writtenMinutes     `json:"duration"`
-	Type       *addressedWorkItem `json:"type,omitempty"`
-	Date       *int64             `json:"date,omitempty"`
-	Text       *string            `json:"text,omitempty"`
-	Attributes []attributeWritten `json:"attributes,omitempty"`
+type createWorkItemBody struct {
+	Duration   minutesBody     `json:"duration"`
+	Type       *workItemIDBody `json:"type,omitempty"`
+	Date       *int64          `json:"date,omitempty"`
+	Text       *string         `json:"text,omitempty"`
+	Attributes []attributeBody `json:"attributes,omitempty"`
 }
 
-type addressedWorkItem struct {
+type workItemIDBody struct {
 	ID string `json:"id"`
 }
 
-func (w workItemFiledWithType) body() []byte {
-	written := createdWorkItem{Duration: writtenMinutes{Minutes: w.written.spent.minutes}, Text: w.written.text,
-		Attributes: attributesWritten(w.attributes)}
+func (w workItemCreate) body() []byte {
+	written := createWorkItemBody{Duration: minutesBody{Minutes: w.input.spent.minutes}, Text: w.input.text,
+		Attributes: attributeBodies(w.attributes)}
 	if w.workType != nil {
-		written.Type = &addressedWorkItem{ID: w.workType.id}
+		written.Type = &workItemIDBody{ID: w.workType.id}
 	}
-	if w.written.day != nil {
-		written.Date = &w.written.day.noon
+	if w.input.day != nil {
+		written.Date = &w.input.day.noon
 	}
 	// Marshalling numbers, strings and a struct of them cannot fail.
 	body, _ := json.Marshal(written)
 	return body
 }
 
-// checked is what the answer to the write is read for beside what the caller asked to print: every part that
+// verifyFields is what the answer to the write is read for beside what the caller asked to print: every part that
 // went out, so the check has them to compare, and the pair a work item is addressed by, so a refusal names the
 // work item that by then exists whatever the caller asked for.
-func (w writtenWorkItem) checked() []requestedField {
+func (w workItemCreateInput) verifyFields() []requestedField {
 	return []requestedField{
 		{name: idKey},
 		{name: durationKey},
@@ -828,7 +777,7 @@ func (w writtenWorkItem) checked() []requestedField {
 // went out, and these went out only because the read before the write resolved them. The id is what a type went
 // out as and the name what a disagreement is shown in, so a creation and an update ask the same of it; the
 // attributes are a block ytrack composes itself, which asks the same two of each.
-func checkedWithSettings(own []requestedField, workType *filedWorkItemType, attributes []filedAttribute) []requestedField {
+func verifyFieldsWithSettings(own []requestedField, workType *resolvedWorkType, attributes []resolvedAttribute) []requestedField {
 	if workType != nil {
 		own = append(own, requestedField{name: typeKey, children: []requestedField{{name: idKey}, {name: nameKey}}})
 	}
@@ -841,29 +790,29 @@ func checkedWithSettings(own []requestedField, workType *filedWorkItemType, attr
 // The check both writes of a work item end in: the parts that went out held against what came back, the type
 // among them where one was resolved, and, where anything disagrees, a refusal naming the work item by identity —
 // the pair a creation reads off the answer and an update holds from before it was sent.
-func confirmedWorkItem(a answer, wrong []mismatch, workType *filedWorkItemType, attributes []filedAttribute, identity []render.Pair) *diag.Fault {
+func verifyWorkItem(a decodedResponse, wrong []mismatch, workType *resolvedWorkType, attributes []resolvedAttribute, identity []render.Pair) *diag.Fault {
 	if workType != nil {
-		wrong = workType.confirmedBy(wrong, a.objects[0][typeKey])
+		wrong = workType.verify(wrong, a.objects[0][typeKey])
 	}
 	wrong = attributeMismatches(wrong, attributes, a.objects[0][attributesKey])
 	if len(wrong) == 0 {
 		return nil
 	}
-	return rewrittenByTheServer(a, identity, wrong)
+	return mismatchFault(a, identity, wrong)
 }
 
-func (w workItemFiledWithType) checked() []requestedField {
-	return checkedWithSettings(w.written.checked(), w.workType, w.attributes)
+func (w workItemCreate) verifyFields() []requestedField {
+	return verifyFieldsWithSettings(w.input.verifyFields(), w.workType, w.attributes)
 }
 
-// mismatches holds the answer against what the write sent: a 200 says the server took the body, not that what
+// diff holds the answer against what the write sent: a 200 says the server took the body, not that what
 // it kept is what went out. The day is held to the calendar day of UTC rather than to the millisecond,
 // since the body carries noon and the server keeps midnight of the same day. What the call named nothing for is
 // held to nothing: the day YouTrack chose itself and the empty text it left are its answer, not a disagreement.
-func (w writtenWorkItem) mismatches(item map[string]any) []mismatch {
-	wrong := w.spent.confirmedBy(nil, item[durationKey])
+func (w workItemCreateInput) diff(item map[string]any) []mismatch {
+	wrong := w.spent.verify(nil, item[durationKey])
 	if w.day != nil {
-		wrong = w.day.confirmedBy(wrong, item[dateKey])
+		wrong = w.day.verify(wrong, item[dateKey])
 	}
 	if w.text != nil {
 		wrong = textMismatch(wrong, textKey, *w.text, item[textKey])
@@ -871,55 +820,55 @@ func (w writtenWorkItem) mismatches(item map[string]any) []mismatch {
 	return wrong
 }
 
-func (w workItemFiledWithType) confirmedBy(a answer) *diag.Fault {
-	return confirmedWorkItem(a, w.written.mismatches(a.objects[0]), w.workType, w.attributes, []render.Pair{
+func (w workItemCreate) verify(a decodedResponse) *diag.Fault {
+	return verifyWorkItem(a, w.input.diff(a.objects[0]), w.workType, w.attributes, []render.Pair{
 		{Key: issueOwner.String(), Value: owningIssue(a)},
-		{Key: idKey, Value: writtenID(a, idKey)},
+		{Key: idKey, Value: responseID(a, idKey)},
 	})
 }
 
 // The type is held by the id that went out, which is the whole of what a type of work is written by; the names
 // are what the disagreement is shown in, since a caller who wrote a name has no id of theirs to read.
-func (t filedWorkItemType) confirmedBy(wrong []mismatch, value any) []mismatch {
+func (t resolvedWorkType) verify(wrong []mismatch, value any) []mismatch {
 	if kept, isText := memberOf(value, idKey).(string); isText && kept == t.id {
 		return wrong
 	}
 	return append(wrong, mismatch{
-		field:   typeKey,
-		written: render.NewString(t.written),
-		arrived: asArrived(memberOf(value, nameKey)),
+		field:    typeKey,
+		expected: render.NewString(t.name),
+		actual:   rawValueNode(memberOf(value, nameKey)),
 	})
 }
 
 // A duration that arrived without the minutes it holds is as much a disagreement as one of another length: the
 // minutes are the whole of what says how long a work item is.
-func (d writtenDuration) confirmedBy(wrong []mismatch, value any) []mismatch {
+func (d parsedDuration) verify(wrong []mismatch, value any) []mismatch {
 	held, isObject := value.(map[string]any)
 	if isObject {
-		if minutes, isWhole := wholeNumber(held[minutesKey]); isWhole {
+		if minutes, isWhole := parseInt64(held[minutesKey]); isWhole {
 			if minutes == d.minutes {
 				return wrong
 			}
 			return append(wrong, mismatch{
-				field:   durationKey,
-				written: render.NewString(d.written),
-				arrived: render.NewString(duration(minutes)),
+				field:    durationKey,
+				expected: render.NewString(d.text),
+				actual:   render.NewString(duration(minutes)),
 			})
 		}
 	}
-	return append(wrong, mismatch{field: durationKey, written: render.NewString(d.written), arrived: render.NewNull()})
+	return append(wrong, mismatch{field: durationKey, expected: render.NewString(d.text), actual: render.NewNull()})
 }
 
-func (d writtenAgainst) confirmedBy(wrong []mismatch, value any) []mismatch {
-	at, isInstant := wholeNumber(value)
+func (d workDate) verify(wrong []mismatch, value any) []mismatch {
+	at, isInstant := parseInt64(value)
 	if isInstant && sameDayUTC(at, d.noon) {
 		return wrong
 	}
-	arrived := render.NewNull()
+	received := render.NewNull()
 	if isInstant {
-		arrived = render.NewString(momentText(at))
+		received = render.NewString(formatDateTime(at))
 	}
-	return append(wrong, mismatch{field: dateKey, written: render.NewString(d.written), arrived: arrived})
+	return append(wrong, mismatch{field: dateKey, expected: render.NewString(d.text), actual: received})
 }
 
 func sameDayUTC(a, b int64) bool {
@@ -928,7 +877,7 @@ func sameDayUTC(a, b int64) bool {
 
 // The issue a work item hangs from, as the answer names it: a work item carries no readable id, so a refusal
 // about one names the pair it is addressed by.
-func owningIssue(a answer) *render.Node {
+func owningIssue(a decodedResponse) *render.Node {
 	issue, isObject := a.objects[0][issueOwner.String()].(map[string]any)
 	if !isObject {
 		return render.NewNull()
@@ -943,9 +892,9 @@ func owningIssue(a answer) *render.Node {
 // What an update of a work item carries as the call wrote it: only the parts it named, so a part it named none
 // of keeps its key out of the body and is left as the work item holds it. A part under --clear goes out as
 // an explicit null instead, and so does an attribute --clear names.
-type changedWorkItem struct {
-	spent            *writtenDuration
-	day              *writtenAgainst
+type workItemUpdateInput struct {
+	spent            *parsedDuration
+	day              *workDate
 	text             *string
 	attributes       []namedValue
 	clearsType       bool
@@ -953,24 +902,21 @@ type changedWorkItem struct {
 	clearsAttributes []string
 }
 
-// An update with its type of work settled, and what workItemFiledWithType is to a creation. The pair the work
-// item is addressed by stands here as well: it is the caller's own, held to a form before anything was sent, so
-// a refusal names the work item whatever the answer turns out to hold.
-type workItemRewritten struct {
-	written changedWorkItem
-	issue   string
-	at      childID
+type workItemUpdate struct {
+	input workItemUpdateInput
+	issue string
+	at    childID
 	// The type of work, as the read before the write resolved it, and nil where the call names none.
-	workType   *filedWorkItemType
-	attributes []filedAttribute
+	workType   *resolvedWorkType
+	attributes []resolvedAttribute
 }
 
 // The parts of a work item --clear empties. Neither duration nor date is among them: YouTrack answers a null
 // under either with Field <name> cannot be null, so a call that asks is refused before anything is sent.
-func clearableWorkItemParts() []clearablePart[changedWorkItem] {
-	return []clearablePart[changedWorkItem]{
-		{name: typeKey, empty: func(w *changedWorkItem) { w.clearsType = true }},
-		{name: textKey, empty: func(w *changedWorkItem) { w.clearsText = true }},
+func clearableWorkItemParts() []clearablePart[workItemUpdateInput] {
+	return []clearablePart[workItemUpdateInput]{
+		{name: typeKey, empty: func(w *workItemUpdateInput) { w.clearsType = true }},
+		{name: textKey, empty: func(w *workItemUpdateInput) { w.clearsText = true }},
 	}
 }
 
@@ -978,60 +924,60 @@ func keptWorkItemParts() []string {
 	return []string{durationKey, dateKey}
 }
 
-// rewrittenWorkItem is the whole of what an update writes, read off the flags it was given, and it is where a
+// parseWorkItemUpdate is the whole of what an update writes, read off the flags it was given, and it is where a
 // call that writes nothing is refused: every part is read in one place, so what the flags come to is settled
 // here and nowhere above.
-func rewrittenWorkItem(spent, day, text, named *string, attributes, cleared []string) (changedWorkItem, *diag.Fault) {
+func parseWorkItemUpdate(spent, day, text, named *string, attributes, cleared []string) (workItemUpdateInput, *diag.Fault) {
 	if spent == nil && day == nil && text == nil && named == nil && len(attributes) == 0 && len(cleared) == 0 {
-		return changedWorkItem{}, &diag.Fault{Code: diag.BadUsage, Message: nothingToWriteIntoAWorkItem}
+		return workItemUpdateInput{}, &diag.Fault{Code: diag.BadUsage, Message: nothingToWriteIntoAWorkItem}
 	}
-	var written changedWorkItem
-	if fault := written.emptying(cleared); fault != nil {
-		return changedWorkItem{}, fault
+	var written workItemUpdateInput
+	if fault := written.parseClear(cleared); fault != nil {
+		return workItemUpdateInput{}, fault
 	}
 	if written.clearsType && named != nil {
-		return changedWorkItem{}, &diag.Fault{Code: diag.BadUsage, Message: typeBothWays}
+		return workItemUpdateInput{}, &diag.Fault{Code: diag.BadUsage, Message: typeBothWays}
 	}
 	if written.clearsText && text != nil {
-		return changedWorkItem{}, &diag.Fault{Code: diag.BadUsage, Message: textBothWays}
+		return workItemUpdateInput{}, &diag.Fault{Code: diag.BadUsage, Message: textBothWays}
 	}
-	if fault := refuseWorkItemText(text); fault != nil {
-		return changedWorkItem{}, fault
+	if fault := rejectWorkItemText(text); fault != nil {
+		return workItemUpdateInput{}, fault
 	}
 	written.text = text
 	if spent != nil {
-		length, fault := minutesSpent(*spent)
+		length, fault := parseDuration(*spent)
 		if fault != nil {
-			return changedWorkItem{}, fault
+			return workItemUpdateInput{}, fault
 		}
 		written.spent = &length
 	}
 	if day != nil {
-		against, fault := dayWrittenAgainst(*day)
+		against, fault := parseWorkDate(*day)
 		if fault != nil {
-			return changedWorkItem{}, fault
+			return workItemUpdateInput{}, fault
 		}
 		written.day = &against
 	}
-	if fault := refuseWorkItemType(named); fault != nil {
-		return changedWorkItem{}, fault
+	if fault := rejectWorkItemType(named); fault != nil {
+		return workItemUpdateInput{}, fault
 	}
 	var fault *diag.Fault
 	if written.attributes, fault = attributeValues(attributes); fault != nil {
-		return changedWorkItem{}, fault
+		return workItemUpdateInput{}, fault
 	}
 	for _, set := range written.attributes {
 		if slices.ContainsFunc(written.clearsAttributes, func(name string) bool { return strings.EqualFold(name, set.name) }) {
-			return changedWorkItem{}, attributeBothWays(set.name)
+			return workItemUpdateInput{}, attributeBothWays(set.name)
 		}
 	}
 	return written, nil
 }
 
-func (w *changedWorkItem) emptying(cleared []string) *diag.Fault {
+func (w *workItemUpdateInput) parseClear(cleared []string) *diag.Fault {
 	parts := clearableWorkItemParts()
 	for _, name := range cleared {
-		if at := emptying(parts, name); at >= 0 {
+		if at := clearablePartIndex(parts, name); at >= 0 {
 			parts[at].empty(w)
 			continue
 		}
@@ -1065,26 +1011,26 @@ const textBothWays = "--text writes the text of the work item and --clear text e
 
 // The body of an update of a work item: the parts the call writes and not one key more. The work item is
 // addressed by the path, and a part the body says nothing about is a part it keeps as it stands.
-type updatedWorkItem struct {
-	Duration *writtenMinutes `json:"duration,omitempty"`
+type updateWorkItemBody struct {
+	Duration *minutesBody `json:"duration,omitempty"`
 	// Raw JSON rather than an object: a type, an explicit null and no key at all are three things, and a pointer
 	// tells only two of them apart.
 	Type json.RawMessage `json:"type,omitempty"`
 	Date *int64          `json:"date,omitempty"`
 	// Raw JSON for the same reason, and the reason is sharper here: YouTrack keeps an empty text as an empty
 	// text, so only a null empties one.
-	Text       json.RawMessage    `json:"text,omitempty"`
-	Attributes []attributeWritten `json:"attributes,omitempty"`
+	Text       json.RawMessage `json:"text,omitempty"`
+	Attributes []attributeBody `json:"attributes,omitempty"`
 }
 
 // Marshalling numbers, strings and a struct of them cannot fail.
-func (w workItemRewritten) body() []byte {
-	changed := updatedWorkItem{Type: w.writtenType(), Text: w.written.writtenText(), Attributes: attributesWritten(w.attributes)}
-	if w.written.spent != nil {
-		changed.Duration = &writtenMinutes{Minutes: w.written.spent.minutes}
+func (w workItemUpdate) body() []byte {
+	changed := updateWorkItemBody{Type: w.typeJSON(), Text: w.input.textJSON(), Attributes: attributeBodies(w.attributes)}
+	if w.input.spent != nil {
+		changed.Duration = &minutesBody{Minutes: w.input.spent.minutes}
 	}
-	if w.written.day != nil {
-		changed.Date = &w.written.day.noon
+	if w.input.day != nil {
+		changed.Date = &w.input.day.noon
 	}
 	body, _ := json.Marshal(changed)
 	return body
@@ -1092,18 +1038,18 @@ func (w workItemRewritten) body() []byte {
 
 // The type of the body: the id the read before the write resolved, an explicit null where the call takes the
 // type away, and nothing at all where it says neither.
-func (w workItemRewritten) writtenType() json.RawMessage {
+func (w workItemUpdate) typeJSON() json.RawMessage {
 	switch {
-	case w.written.clearsType:
+	case w.input.clearsType:
 		return json.RawMessage("null")
 	case w.workType == nil:
 		return nil
 	}
-	encoded, _ := json.Marshal(addressedWorkItem{ID: w.workType.id})
+	encoded, _ := json.Marshal(workItemIDBody{ID: w.workType.id})
 	return encoded
 }
 
-func (w changedWorkItem) writtenText() json.RawMessage {
+func (w workItemUpdateInput) textJSON() json.RawMessage {
 	switch {
 	case w.clearsText:
 		return json.RawMessage("null")
@@ -1114,10 +1060,10 @@ func (w changedWorkItem) writtenText() json.RawMessage {
 	return encoded
 }
 
-// checked is what the answer to the write is read for beside what the caller asked to print: the parts that
+// verifyFields is what the answer to the write is read for beside what the caller asked to print: the parts that
 // went out, and nothing else. Neither the id nor the issue is asked for the way a creation asks for them — the
 // work item was addressed by a pair the caller wrote, and that is what a refusal names it by.
-func (w changedWorkItem) checked() []requestedField {
+func (w workItemUpdateInput) verifyFields() []requestedField {
 	var own []requestedField
 	if w.spent != nil {
 		own = append(own, requestedField{name: durationKey})
@@ -1134,27 +1080,27 @@ func (w changedWorkItem) checked() []requestedField {
 	return own
 }
 
-func (w workItemRewritten) checked() []requestedField {
-	return checkedWithSettings(w.written.checked(), w.workType, w.attributes)
+func (w workItemUpdate) verifyFields() []requestedField {
+	return verifyFieldsWithSettings(w.input.verifyFields(), w.workType, w.attributes)
 }
 
-func (w workItemRewritten) confirmedBy(a answer) *diag.Fault {
-	return confirmedWorkItem(a, w.written.mismatches(a.objects[0]), w.workType, w.attributes, []render.Pair{
+func (w workItemUpdate) verify(a decodedResponse) *diag.Fault {
+	return verifyWorkItem(a, w.input.diff(a.objects[0]), w.workType, w.attributes, []render.Pair{
 		{Key: issueOwner.String(), Value: render.NewString(w.issue)},
 		{Key: idKey, Value: render.NewString(w.at.String())},
 	})
 }
 
-// mismatches holds the answer against the parts the update sent and against those alone: what the call named
+// diff holds the answer against the parts the update sent and against those alone: what the call named
 // nothing for is the work item as it stood, and a workflow that moved it is the server's word, not a
 // disagreement with a write that said nothing about it.
-func (w changedWorkItem) mismatches(item map[string]any) []mismatch {
+func (w workItemUpdateInput) diff(item map[string]any) []mismatch {
 	var wrong []mismatch
 	if w.spent != nil {
-		wrong = w.spent.confirmedBy(wrong, item[durationKey])
+		wrong = w.spent.verify(wrong, item[durationKey])
 	}
 	if w.day != nil {
-		wrong = w.day.confirmedBy(wrong, item[dateKey])
+		wrong = w.day.verify(wrong, item[dateKey])
 	}
 	switch {
 	case w.text != nil:
@@ -1169,50 +1115,44 @@ func (w changedWorkItem) mismatches(item map[string]any) []mismatch {
 	return wrong
 }
 
-// What a write carries before any of it is held against a project: the text of the issue, each part held to
-// what YouTrack would keep of it, and the custom fields as the caller addressed them. A nil part is the caller
-// who wrote no flag for it: the key is then absent from the body, which is a third thing beside prose and an
-// explicit empty (ADR-0001). A creation always carries a title and an update carries the parts it is given.
-type writtenIssue struct {
-	summary     *string
-	description *string
-	named       []namedValue
-	// The parts --clear names: the prose of the issue, and the custom fields as the caller addressed them. An
-	// empty value is a third thing beside prose and no key at all, so it is said outright or not at all.
-	clearsProse bool
-	cleared     []string
+type issueInput struct {
+	summary           *string
+	description       *string
+	named             []namedValue
+	clearsDescription bool
+	cleared           []string
 }
 
-// filedIssue is the whole of what a creation writes, read off the flags it was given: a new issue is filed
+// parseIssueCreate is the whole of what a creation writes, read off the flags it was given: a new issue is filed
 // with a title and keeps nothing a call does not put there, so there is nothing for it to empty.
-func filedIssue(summary string, description *string, filled []string) (writtenIssue, *diag.Fault) {
-	if fault := refuseRewrittenText(&summary, description, descriptionOfANewIssue); fault != nil {
-		return writtenIssue{}, fault
+func parseIssueCreate(summary string, description *string, filled []string) (issueInput, *diag.Fault) {
+	if fault := rejectReplacedText(&summary, description, descriptionOfANewIssue); fault != nil {
+		return issueInput{}, fault
 	}
-	named, fault := namedValues(filled)
+	named, fault := parseFieldValues(filled)
 	if fault != nil {
-		return writtenIssue{}, fault
+		return issueInput{}, fault
 	}
-	return writtenIssue{summary: &summary, description: description, named: named}, nil
+	return issueInput{summary: &summary, description: description, named: named}, nil
 }
 
-// rewrittenIssue is the whole of what an update writes, read off the flags it was given.
-func rewrittenIssue(summary, description *string, filled, cleared []string) (writtenIssue, *diag.Fault) {
-	emptied, prose, fault := clearedFields(cleared)
+// parseIssueUpdate is the whole of what an update writes, read off the flags it was given.
+func parseIssueUpdate(summary, description *string, filled, cleared []string) (issueInput, *diag.Fault) {
+	emptied, clearsDescription, fault := clearedFields(cleared)
 	if fault != nil {
-		return writtenIssue{}, fault
+		return issueInput{}, fault
 	}
-	if prose && description != nil {
-		return writtenIssue{}, &diag.Fault{Code: diag.BadUsage, Message: proseBothWays}
+	if clearsDescription && description != nil {
+		return issueInput{}, &diag.Fault{Code: diag.BadUsage, Message: descriptionBothWays}
 	}
-	if fault := refuseRewrittenText(summary, description, descriptionOfAnIssue); fault != nil {
-		return writtenIssue{}, fault
+	if fault := rejectReplacedText(summary, description, descriptionOfAnIssue); fault != nil {
+		return issueInput{}, fault
 	}
-	named, fault := namedValues(filled)
+	named, fault := parseFieldValues(filled)
 	if fault != nil {
-		return writtenIssue{}, fault
+		return issueInput{}, fault
 	}
-	return writtenIssue{summary: summary, description: description, named: named, clearsProse: prose, cleared: emptied}, nil
+	return issueInput{summary: summary, description: description, named: named, clearsDescription: clearsDescription, cleared: emptied}, nil
 }
 
 // A custom field as the caller wrote it: the name they addressed it by and the value they gave it.
@@ -1221,10 +1161,10 @@ type namedValue struct {
 	value string
 }
 
-// namedValues reads --field. The split is at the first = of the flag, so a value carrying one of its own goes
+// parseFieldValues reads --field. The split is at the first = of the flag, so a value carrying one of its own goes
 // out whole, and the name is taken as it was typed: a project may well call a field something with a space at
 // the end of it.
-func namedValues(filled []string) ([]namedValue, *diag.Fault) {
+func parseFieldValues(filled []string) ([]namedValue, *diag.Fault) {
 	named := make([]namedValue, 0, len(filled))
 	for _, flag := range filled {
 		name, value, split := strings.Cut(flag, "=")
@@ -1237,7 +1177,7 @@ func namedValues(filled []string) ([]namedValue, *diag.Fault) {
 			message := fmt.Sprintf("--field %s names no custom field: the name stands before the =", render.Quote(flag))
 			return nil, &diag.Fault{Code: diag.BadUsage, Message: message}
 		}
-		if fault := refuseOwnName(flag, name); fault != nil {
+		if fault := rejectOwnName(flag, name); fault != nil {
 			return nil, fault
 		}
 		named = append(named, namedValue{name: name, value: value})
@@ -1245,12 +1185,9 @@ func namedValues(filled []string) ([]namedValue, *diag.Fault) {
 	return named, nil
 }
 
-// clearedFields reads --clear: the custom fields the call empties, and whether it empties the prose of the
-// issue, which is no custom field of it. The title is no part a call may empty at all — YouTrack answers a
-// write that empties it with Value for summary is required.
 func clearedFields(cleared []string) ([]string, bool, *diag.Fault) {
 	names := make([]string, 0, len(cleared))
-	prose := false
+	clearsDescription := false
 	for _, name := range cleared {
 		switch {
 		case name == "":
@@ -1261,17 +1198,15 @@ func clearedFields(cleared []string) ([]string, bool, *diag.Fault) {
 				"without: a title is written with --summary and cannot be taken away", render.Quote(name))
 			return nil, false, &diag.Fault{Code: diag.BadUsage, Message: message}
 		case strings.EqualFold(name, descriptionKey):
-			prose = true
+			clearsDescription = true
 		default:
 			names = append(names, name)
 		}
 	}
-	return names, prose, nil
+	return names, clearsDescription, nil
 }
 
-// The title and the prose of an issue are no custom fields of it, whatever any project may name a field of its
-// own: each goes by the flag it goes by wherever an issue is written.
-func refuseOwnName(flag, name string) *diag.Fault {
+func rejectOwnName(flag, name string) *diag.Fault {
 	for _, own := range []string{summaryKey, descriptionKey} {
 		if !strings.EqualFold(name, own) {
 			continue
@@ -1283,18 +1218,14 @@ func refuseOwnName(flag, name string) *diag.Fault {
 	return nil
 }
 
-// refuseRewrittenText refuses free text YouTrack would store as something other than what was written. The
-// server does it in ways that are measured and certain, so the refusal comes before the write rather than as a
-// mismatch over an issue that by then exists. emptyProse is why an empty description is refused, which is
-// what leaving the flag out would have done instead, and that differs between filing an issue and changing one.
-func refuseRewrittenText(summary, description *string, emptyProse string) *diag.Fault {
+func rejectReplacedText(summary, description *string, emptyDescription string) *diag.Fault {
 	if summary != nil {
-		if fault := refuseRewritten("--summary", *summary, summaryEmpty, summaryRewrites()); fault != nil {
+		if fault := rejectReplaced("--summary", *summary, summaryEmpty, summaryRewrites()); fault != nil {
 			return fault
 		}
 	}
 	if description != nil {
-		if fault := refuseRewritten("--description", *description, emptyProse, descriptionRewrites()); fault != nil {
+		if fault := rejectReplaced("--description", *description, emptyDescription, descriptionRewrites()); fault != nil {
 			return fault
 		}
 	}
@@ -1302,15 +1233,15 @@ func refuseRewrittenText(summary, description *string, emptyProse string) *diag.
 }
 
 // A rune YouTrack does not store as it arrived, against what it stores instead.
-type rewrite struct {
+type charReplacement struct {
 	rune rune
 	into string
 }
 
 // A title is one line: YouTrack turns each line ending of it into a space, a CRLF into two, and drops the NEL
 // outright.
-func summaryRewrites() []rewrite {
-	return []rewrite{
+func summaryRewrites() []charReplacement {
+	return []charReplacement{
 		{rune: '\n', into: "a space"},
 		{rune: '\r', into: "a space"},
 		{rune: 0x85, into: "nothing at all"},
@@ -1319,10 +1250,8 @@ func summaryRewrites() []rewrite {
 	}
 }
 
-// A description keeps every byte but the carriage return: a CRLF is stored as a line feed and a lone CR is
-// dropped, so the prose that comes back is shorter than the prose that went out.
-func descriptionRewrites() []rewrite {
-	return []rewrite{{rune: '\r', into: "nothing at all"}}
+func descriptionRewrites() []charReplacement {
+	return []charReplacement{{rune: '\r', into: "nothing at all"}}
 }
 
 const (
@@ -1333,14 +1262,14 @@ const (
 		"empties it outright, and a description the call does not write is left as the issue holds it"
 )
 
-func refuseRewritten(flag, text, empty string, rewrites []rewrite) *diag.Fault {
+func rejectReplaced(flag, text, empty string, replacements []charReplacement) *diag.Fault {
 	if text == "" {
 		return &diag.Fault{Code: diag.BadUsage, Message: flag + " " + empty}
 	}
-	if fault := refuseNoUTF8(flag, text); fault != nil {
+	if fault := rejectNoUTF8(flag, text); fault != nil {
 		return fault
 	}
-	for _, rewritten := range rewrites {
+	for _, rewritten := range replacements {
 		if strings.ContainsRune(text, rewritten.rune) {
 			return &diag.Fault{Code: diag.BadUsage, Message: rewrittenAs(flag, rewritten)}
 		}
@@ -1348,9 +1277,7 @@ func refuseRewritten(flag, text, empty string, rewrites []rewrite) *diag.Fault {
 	return nil
 }
 
-// Free text that is no UTF-8 is refused wherever a caller writes one, empty string or not: the text of a work
-// item is kept empty and refused for nothing else, so it stands here rather than under refuseRewritten.
-func refuseNoUTF8(flag, text string) *diag.Fault {
+func rejectNoUTF8(flag, text string) *diag.Fault {
 	if utf8.ValidString(text) {
 		return nil
 	}
@@ -1364,90 +1291,84 @@ func noUTF8(what string) string {
 		what, render.Quote(string(utf8.RuneError)))
 }
 
-func rewrittenAs(what string, rewritten rewrite) string {
+func rewrittenAs(what string, rewritten charReplacement) string {
 	return fmt.Sprintf("%s holds U+%04X, which YouTrack stores as %s", what, rewritten.rune, rewritten.into)
 }
 
 // The body of a creation. The project is addressed by the id the metadata gave rather than by the code the
 // caller typed: the code is how a human writes a project and the id is what the write is tied to.
-type createdIssue struct {
-	Project      addressedProject     `json:"project"`
-	Summary      string               `json:"summary"`
-	Description  *string              `json:"description,omitempty"`
-	CustomFields []writtenCustomField `json:"customFields,omitempty"`
+type createIssueBody struct {
+	Project      projectIDBody     `json:"project"`
+	Summary      string            `json:"summary"`
+	Description  *string           `json:"description,omitempty"`
+	CustomFields []customFieldBody `json:"customFields,omitempty"`
 }
 
-type addressedProject struct {
+type projectIDBody struct {
 	ID string `json:"id"`
 }
 
 // The body of an update: the parts the call writes and not one key more. The issue is addressed by the path,
 // and a part the body says nothing about is a part the issue keeps as it stands.
-type updatedIssue struct {
-	Summary *string `json:"summary,omitempty"`
-	// Raw JSON rather than a string: the prose, an explicit null and no key at all are three things, and a
-	// pointer tells only two of them apart.
-	Description  json.RawMessage      `json:"description,omitempty"`
-	CustomFields []writtenCustomField `json:"customFields,omitempty"`
+type updateIssueBody struct {
+	Summary      *string           `json:"summary,omitempty"`
+	Description  json.RawMessage   `json:"description,omitempty"`
+	CustomFields []customFieldBody `json:"customFields,omitempty"`
 }
 
 // One custom field of the body. The field is addressed by the name it goes by rather than by the id of its
 // binding: a localized name or one of another letter case answers 500 (ADR-0002). The $type is the one thing
 // the server takes no field without, although the specification marks all three read-only.
-type writtenCustomField struct {
+type customFieldBody struct {
 	Type  string `json:"$type"`
 	Name  string `json:"name"`
 	Value any    `json:"value"`
 }
 
-// A write held against the project it goes to: the text of the issue, and the custom fields it fills, each
-// standing where the project puts it. A creation and an update differ in the body they become and in nothing
-// above it: the same names are resolved against the same project and the same answer is held against the same
-// values.
-type write struct {
-	text    writtenIssue
-	fields  []writtenField
+type issueWrite struct {
+	text    issueInput
+	fields  []resolvedField
 	project projectMetadata
 }
 
 // A custom field a write fills: the field as the project has it, the values as the caller wrote them, the same
 // values as the body carries them, and the identities the answer is held against.
-type writtenField struct {
-	field   projectField
-	kind    fieldType
-	values  []string
-	sent    []any
-	checked []string
+type resolvedField struct {
+	field    projectField
+	kind     fieldType
+	values   []string
+	sent     []any
+	sentKeys []string
 	// Whether --clear named the field, which is the call writing an empty value into it rather than any value
 	// at all: values and checked are then empty, and the answer is held to holding nothing.
 	cleared bool
 }
 
 // Marshalling strings, maps of them and structs of both cannot fail.
-func (w write) body() []byte {
-	body, _ := json.Marshal(createdIssue{
-		Project:      addressedProject{ID: w.project.id},
+func (w issueWrite) createBody() []byte {
+	body, _ := json.Marshal(createIssueBody{
+		Project:      projectIDBody{ID: w.project.id},
 		Summary:      *w.text.summary,
 		Description:  w.text.description,
-		CustomFields: w.elements(),
+		CustomFields: w.bodies(),
 	})
 	return body
 }
 
-func (w write) changes() []byte {
-	body, _ := json.Marshal(updatedIssue{
+func (w issueWrite) updateBody() []byte {
+	body, _ := json.Marshal(updateIssueBody{
 		Summary:      w.text.summary,
-		Description:  w.text.prose(),
-		CustomFields: w.elements(),
+		Description:  w.text.descriptionJSON(),
+		CustomFields: w.bodies(),
 	})
 	return body
 }
 
-// prose is the description of the body: the text where the call writes one, an explicit null where it clears
+// descriptionJSON is the description of the body: the text where the call writes one, an explicit null where it clears
 // one, and nothing at all where it says neither.
-func (w writtenIssue) prose() json.RawMessage {
+func (w issueInput) descriptionJSON() json.RawMessage {
 	switch {
-	case w.clearsProse:
+	case w.clearsDescription:
 		return json.RawMessage("null")
 	case w.description == nil:
 		return nil
@@ -1456,18 +1377,15 @@ func (w writtenIssue) prose() json.RawMessage {
 	return encoded
 }
 
-func (w write) elements() []writtenCustomField {
-	fields := make([]writtenCustomField, 0, len(w.fields))
+func (w issueWrite) bodies() []customFieldBody {
+	fields := make([]customFieldBody, 0, len(w.fields))
 	for _, field := range w.fields {
-		fields = append(fields, field.element())
+		fields = append(fields, field.body())
 	}
 	return fields
 }
 
-// An empty value is written the way the type holds one: null where the field holds one value, and an empty
-// list where it holds several, which a null there is answered Field value cannot be null for. A field
-// that holds one value is given one value or emptied, so nothing to send is the emptying of it.
-func (f writtenField) element() writtenCustomField {
+func (f resolvedField) body() customFieldBody {
 	var value any
 	switch {
 	case f.kind.isMultiValue:
@@ -1475,18 +1393,18 @@ func (f writtenField) element() writtenCustomField {
 	case len(f.sent) > 0:
 		value = f.sent[0]
 	}
-	return writtenCustomField{Type: f.kind.sent, Name: f.field.naming.name, Value: value}
+	return customFieldBody{Type: f.kind.sent, Name: f.field.info.name, Value: value}
 }
 
-// checked is what the answer to the write is read for beside what the caller asked to print: every value that
+// verifyFields is what the answer to the write is read for beside what the caller asked to print: every value that
 // went out, so the check has it to compare, and the readable id, so a refusal can name the issue that by then
 // exists whatever the caller asked for.
-func (w write) checked() []requestedField {
+func (w issueWrite) verifyFields() []requestedField {
 	own := []requestedField{{name: idReadableKey}}
 	if w.text.summary != nil {
 		own = append(own, requestedField{name: summaryKey})
 	}
-	if w.text.description != nil || w.text.clearsProse {
+	if w.text.description != nil || w.text.clearsDescription {
 		own = append(own, requestedField{name: descriptionKey})
 	}
 	if len(w.fields) > 0 {
@@ -1495,10 +1413,10 @@ func (w write) checked() []requestedField {
 	return own
 }
 
-// confirmedBy holds the answer against what the write sent: a 200 says the server took the body, not that what
+// verify holds the answer against what the write sent: a 200 says the server took the body, not that what
 // it kept is what went out, and printing the answer unchecked would hand a rewritten value back as the
 // caller's own.
-func (w write) confirmedBy(a answer) *diag.Fault {
+func (w issueWrite) verify(a decodedResponse) *diag.Fault {
 	issue := a.objects[0]
 	var wrong []mismatch
 	if w.text.summary != nil {
@@ -1507,37 +1425,37 @@ func (w write) confirmedBy(a answer) *diag.Fault {
 	switch {
 	case w.text.description != nil:
 		wrong = textMismatch(wrong, descriptionKey, *w.text.description, issue[descriptionKey])
-	case w.text.clearsProse:
+	case w.text.clearsDescription:
 		wrong = emptyMismatch(wrong, descriptionKey, issue[descriptionKey])
 	}
-	wrong, fault := w.fieldsConfirmedBy(a, wrong)
+	wrong, fault := w.verifyCustomFields(a, wrong)
 	switch {
 	case fault != nil:
 		return fault
 	case len(wrong) == 0:
 		return nil
 	}
-	return rewrittenByTheServer(a, knownAs(issueOwner.String(), writtenID(a, idReadableKey)), wrong)
+	return mismatchFault(a, knownAs(issueOwner.String(), responseID(a, idReadableKey)), wrong)
 }
 
 // The custom fields come back as a block of their own, so they are read the way the document reads them and
 // held against what went out value by value. A field the answer does not carry at all is a field the write
 // did not reach, which is the same disagreement as a value that came back another.
-func (w write) fieldsConfirmedBy(a answer, wrong []mismatch) ([]mismatch, *diag.Fault) {
+func (w issueWrite) verifyCustomFields(a decodedResponse, wrong []mismatch) ([]mismatch, *diag.Fault) {
 	if len(w.fields) == 0 {
 		return wrong, nil
 	}
-	n := nodes{answer: a}
-	arrived, fault := n.readCustomFields(a.objects[0][customFieldsKey])
+	n := converter{response: a}
+	received, fault := n.readCustomFields(a.objects[0][customFieldsKey])
 	if fault != nil {
 		return nil, fault
 	}
-	held := make(map[string]issueCustomField, len(arrived))
-	for _, field := range arrived {
+	held := make(map[string]issueCustomField, len(received))
+	for _, field := range received {
 		held[field.name] = field
 	}
 	for _, written := range w.fields {
-		name := written.field.naming.name
+		name := written.field.info.name
 		field, onTheIssue := held[name]
 		if !onTheIssue {
 			// A field the answer carries nowhere is a field the issue holds nothing in, which is what a call
@@ -1545,17 +1463,17 @@ func (w write) fieldsConfirmedBy(a answer, wrong []mismatch) ([]mismatch, *diag.
 			if written.cleared {
 				continue
 			}
-			wrong = append(wrong, mismatch{field: name, written: written.node(), arrived: render.NewNull()})
+			wrong = append(wrong, mismatch{field: name, expected: written.node(), actual: render.NewNull()})
 			continue
 		}
-		texts, fault := n.identityTexts(field)
+		texts, fault := n.valueKeys(field)
 		if fault != nil {
 			return nil, fault
 		}
-		if sameValues(written.kind, written.checked, texts) {
+		if sameValues(written.kind, written.sentKeys, texts) {
 			continue
 		}
-		wrong = append(wrong, mismatch{field: name, written: written.node(), arrived: valueNode(texts, written.kind)})
+		wrong = append(wrong, mismatch{field: name, expected: written.node(), actual: valueNode(texts, written.kind)})
 	}
 	return wrong, nil
 }
@@ -1563,8 +1481,8 @@ func (w write) fieldsConfirmedBy(a answer, wrong []mismatch) ([]mismatch, *diag.
 // Two sets of values name the same thing where each names every one of the other: the server answers in the
 // order of the bundle rather than in the order the values were written and keeps one value of a value written
 // twice, so neither the order nor the count of them is held to anything.
-func sameValues(kind fieldType, sent, arrived []string) bool {
-	return covers(kind, sent, arrived) && covers(kind, arrived, sent)
+func sameValues(kind fieldType, sent, received []string) bool {
+	return covers(kind, sent, received) && covers(kind, received, sent)
 }
 
 func covers(kind fieldType, all, some []string) bool {
@@ -1576,7 +1494,7 @@ func covers(kind fieldType, all, some []string) bool {
 	return true
 }
 
-func (f writtenField) node() *render.Node {
+func (f resolvedField) node() *render.Node {
 	return valueNode(f.values, f.kind)
 }
 
@@ -1598,18 +1516,18 @@ func valueNode(values []string, kind fieldType) *render.Node {
 
 // A value the write sent against the value the answer brought back for it, each written as issue show prints it.
 type mismatch struct {
-	field   string
-	written *render.Node
-	arrived *render.Node
+	field    string
+	expected *render.Node
+	actual   *render.Node
 }
 
 // A name the answer carries as something other than text — a null, a number, or nothing at all — is a value
 // that is not what was written, whatever else it is.
 func textMismatch(wrong []mismatch, field, sent string, value any) []mismatch {
-	if arrived, isText := value.(string); isText && arrived == sent {
+	if received, isText := value.(string); isText && received == sent {
 		return wrong
 	}
-	return append(wrong, mismatch{field: field, written: render.NewString(sent), arrived: asArrived(value)})
+	return append(wrong, mismatch{field: field, expected: render.NewString(sent), actual: rawValueNode(value)})
 }
 
 // A part the call emptied is a part the answer holds nothing in. Anything still standing there is the write
@@ -1618,34 +1536,34 @@ func emptyMismatch(wrong []mismatch, field string, value any) []mismatch {
 	if value == nil {
 		return wrong
 	}
-	return append(wrong, mismatch{field: field, written: render.NewNull(), arrived: asArrived(value)})
+	return append(wrong, mismatch{field: field, expected: render.NewNull(), actual: rawValueNode(value)})
 }
 
 // Размер считается по потоку, поэтому файл, изменившийся при чтении, ошибкой не считается.
 func sizeMismatch(wrong []mismatch, sent int64, value any) []mismatch {
-	if arrived, isNumber := wholeNumber(value); isNumber && arrived == sent {
+	if received, isNumber := parseInt64(value); isNumber && received == sent {
 		return wrong
 	}
 	written := render.NewNumber(json.Number(strconv.FormatInt(sent, 10)))
-	return append(wrong, mismatch{field: sizeKey, written: written, arrived: asArrived(value)})
+	return append(wrong, mismatch{field: sizeKey, expected: written, actual: rawValueNode(value)})
 }
 
 // What the write left behind is the server's word by now, so the refusal names the entity it wrote and each
 // value both ways rather than sending anything else to find out. identity is how the entity is addressed:
 // what the answer brought back where the write is what brought it into being, what the caller wrote where it
 // stood there already, and both an owner and a child where one alone names nothing.
-func rewrittenByTheServer(a answer, identity []render.Pair, wrong []mismatch) *diag.Fault {
+func mismatchFault(a decodedResponse, identity []render.Pair, wrong []mismatch) *diag.Fault {
 	entries := make([]*render.Node, 0, len(wrong))
 	for _, m := range wrong {
 		entries = append(entries, render.NewMap(
 			render.Pair{Key: "field", Value: render.NewString(m.field)},
-			render.Pair{Key: "written", Value: m.written},
-			render.Pair{Key: "arrived", Value: m.arrived}))
+			render.Pair{Key: "expected", Value: m.expected},
+			render.Pair{Key: "actual", Value: m.actual}))
 	}
-	details := append([]render.Pair{requestDetail(a.response.Request.Method, a.response.Request.URL.Redacted())},
+	details := append([]render.Pair{requestDetail(a.httpResponse.Request.Method, a.httpResponse.Request.URL.Redacted())},
 		append(identity, render.Pair{Key: "mismatch", Value: render.NewList(entries...)})...)
 	message := "the write went through and the values under mismatch came back as something other than what was written"
-	return &diag.Fault{Code: diag.UpstreamLied, Message: message, Details: details}
+	return &diag.Fault{Code: diag.UpstreamInvalid, Message: message, Details: details}
 }
 
 // knownAs is the one key an entity with an address of its own is named by.
@@ -1653,7 +1571,7 @@ func knownAs(named string, id *render.Node) []render.Pair {
 	return []render.Pair{{Key: named, Value: id}}
 }
 
-func writtenID(a answer, name string) *render.Node {
+func responseID(a decodedResponse, name string) *render.Node {
 	id, isText := a.objects[0][name].(string)
 	if !isText {
 		return render.NewNull()
@@ -1665,10 +1583,10 @@ func writtenID(a answer, name string) *render.Node {
 // under, every custom field with what settles whether a write has to name it, and the answer it all arrived
 // in, which a refusal before the write names as the request that was sent.
 type projectMetadata struct {
-	id      string
-	code    string
-	fields  []projectField
-	arrived answer
+	id       string
+	code     string
+	fields   []projectField
+	response decodedResponse
 }
 
 // A custom field of a project as a write reads it: the naming every command resolves by, and beside it whether
@@ -1706,14 +1624,14 @@ func writeMetadataFields() []requestedField {
 				{name: "field", children: []requestedField{{name: idKey}}},
 				{name: "values", children: []requestedField{{name: nameKey}}},
 			}},
-			namingFields(),
+			fieldInfoFields(),
 		}},
 	}
 }
 
-func (c *Client) projectToWrite(ctx context.Context, spec *schemas, code string) (projectMetadata, *diag.Fault) {
-	a, fault := c.passing(ctx, spec, projectSchema, writeMetadataFields(), func(ctx context.Context, fields string) (*http.Response, error) {
-		return c.getProject(ctx, code, fields)
+func (c *Client) readProjectMetadata(ctx context.Context, spec *schemas, code string) (projectMetadata, *diag.Fault) {
+	a, fault := c.request(ctx, spec, projectSchema, writeMetadataFields(), func(ctx context.Context, fields string) (*http.Response, error) {
+		return c.apiGetProject(ctx, code, fields)
 	})
 	if fault != nil {
 		return projectMetadata{}, fault
@@ -1723,8 +1641,8 @@ func (c *Client) projectToWrite(ctx context.Context, spec *schemas, code string)
 
 // The issue an update writes, as the one read before it sees it: the id the write is addressed by, the project
 // its names are resolved against, and the class the server names each field the issue already holds by.
-type issueToWrite struct {
-	readable addressed
+type issueForUpdate struct {
+	readable readableID
 	project  projectMetadata
 	// The class of every custom field the issue carries, keyed by the binding that puts it there: the binding
 	// is the project's field, which is what an element of the body is written for.
@@ -1746,57 +1664,55 @@ func issueToWriteFields() []requestedField {
 	}
 }
 
-func (c *Client) readIssueToWrite(ctx context.Context, spec *schemas, id string) (issueToWrite, *diag.Fault) {
-	a, fault := c.passing(ctx, spec, issueSchema, issueToWriteFields(), func(ctx context.Context, fields string) (*http.Response, error) {
-		return c.getIssue(ctx, id, fields, nil)
+func (c *Client) readIssueToWrite(ctx context.Context, spec *schemas, id string) (issueForUpdate, *diag.Fault) {
+	a, fault := c.request(ctx, spec, issueSchema, issueToWriteFields(), func(ctx context.Context, fields string) (*http.Response, error) {
+		return c.apiGetIssue(ctx, id, fields, nil)
 	})
 	if fault != nil {
-		return issueToWrite{}, fault
+		return issueForUpdate{}, fault
 	}
-	readable, fault := addressedIn(a, a.objects[0], issueOwner, "an update")
+	readable, fault := readableIDAt(a, a.objects[0], issueOwner, "an update")
 	if fault != nil {
-		return issueToWrite{}, fault
+		return issueForUpdate{}, fault
 	}
 	held, isObject := a.objects[0]["project"].(map[string]any)
 	if !isObject {
-		return issueToWrite{}, shapeFailure(a.response, a.body, "the project of the issue is not a JSON object")
+		return issueForUpdate{}, shapeFailure(a.httpResponse, a.body, "the project of the issue is not a JSON object")
 	}
 	project, fault := readWriteMetadata(a, held)
 	if fault != nil {
-		return issueToWrite{}, fault
+		return issueForUpdate{}, fault
 	}
 	kinds, fault := readIssueKinds(a)
 	if fault != nil {
-		return issueToWrite{}, fault
+		return issueForUpdate{}, fault
 	}
-	return issueToWrite{readable: readable, project: project, kinds: kinds}, nil
+	return issueForUpdate{readable: readable, project: project, kinds: kinds}, nil
 }
 
-// The judgment of names says $type arrived, not that it is text, so what goes straight into the body is held
-// to its shape here.
-func readIssueKinds(a answer) (map[string]string, *diag.Fault) {
+func readIssueKinds(a decodedResponse) (map[string]string, *diag.Fault) {
 	items, isList := a.objects[0][customFieldsKey].([]any)
 	if !isList {
-		return nil, shapeFailure(a.response, a.body, "the custom fields of the issue are not a JSON array")
+		return nil, shapeFailure(a.httpResponse, a.body, "the custom fields of the issue are not a JSON array")
 	}
 	kinds := make(map[string]string, len(items))
 	for _, item := range items {
 		object, isObject := item.(map[string]any)
 		if !isObject {
-			return nil, shapeFailure(a.response, a.body, "a custom field of the issue is not a JSON object")
+			return nil, shapeFailure(a.httpResponse, a.body, "a custom field of the issue is not a JSON object")
 		}
 		name, isNamed := object[nameKey].(string)
 		kind, isText := object["$type"].(string)
 		if !isNamed || !isText {
-			return nil, shapeFailure(a.response, a.body, brokenIssueField)
+			return nil, shapeFailure(a.httpResponse, a.body, brokenIssueField)
 		}
 		place, isObject := object["projectCustomField"].(map[string]any)
 		if !isObject {
-			return nil, shapeFailure(a.response, a.body, brokenBinding(name))
+			return nil, shapeFailure(a.httpResponse, a.body, brokenBinding(name))
 		}
 		binding, isText := place[idKey].(string)
 		if !isText {
-			return nil, shapeFailure(a.response, a.body, brokenBinding(name))
+			return nil, shapeFailure(a.httpResponse, a.body, brokenBinding(name))
 		}
 		kinds[binding] = kind
 	}
@@ -1807,37 +1723,34 @@ const brokenIssueField = "the name or the class of a custom field of the issue i
 
 const brokenProject = "the id or the short name of the project is not text"
 
-// The judgment of names says a member arrived, not what it holds, so everything read out of the metadata is
-// held to its shape here. project is where it stood in the answer: the answer itself where a creation read it
-// off the project, and the project of the issue where an update read it off the issue.
-func readWriteMetadata(a answer, project map[string]any) (projectMetadata, *diag.Fault) {
+func readWriteMetadata(a decodedResponse, project map[string]any) (projectMetadata, *diag.Fault) {
 	id, isText := project[idKey].(string)
 	code, isName := project["shortName"].(string)
 	if !isText || !isName {
-		return projectMetadata{}, shapeFailure(a.response, a.body, brokenProject)
+		return projectMetadata{}, shapeFailure(a.httpResponse, a.body, brokenProject)
 	}
 	items, isList := project[customFieldsKey].([]any)
 	if !isList {
-		return projectMetadata{}, shapeFailure(a.response, a.body, "the custom fields of the project are not a JSON array")
+		return projectMetadata{}, shapeFailure(a.httpResponse, a.body, "the custom fields of the project are not a JSON array")
 	}
 	fields := make([]projectField, 0, len(items))
 	for _, item := range items {
 		object, isObject := item.(map[string]any)
 		if !isObject {
-			return projectMetadata{}, shapeFailure(a.response, a.body, brokenField)
+			return projectMetadata{}, shapeFailure(a.httpResponse, a.body, brokenField)
 		}
 		field, ok := readProjectField(object)
 		if !ok {
-			return projectMetadata{}, shapeFailure(a.response, a.body, brokenNaming)
+			return projectMetadata{}, shapeFailure(a.httpResponse, a.body, brokenFieldInfo)
 		}
 		fields = append(fields, field)
 	}
-	return projectMetadata{id: id, code: code, fields: fields, arrived: a}, nil
+	return projectMetadata{id: id, code: code, fields: fields, response: a}, nil
 }
 
 func readProjectField(object map[string]any) (projectField, bool) {
 	id, isText := object[idKey].(string)
-	named, isNamed := readNaming(object)
+	named, isNamed := readFieldInfo(object)
 	canBeEmpty, isFlag := object["canBeEmpty"].(bool)
 	if !isText || !isNamed || !isFlag {
 		return projectField{}, false
@@ -1852,7 +1765,7 @@ func readProjectField(object map[string]any) (projectField, bool) {
 	if !ok {
 		return projectField{}, false
 	}
-	field := customField{id: id, naming: named}
+	field := customField{id: id, info: named}
 	return projectField{customField: field, canBeEmpty: canBeEmpty, defaults: defaults, condition: shown}, true
 }
 
@@ -1914,28 +1827,28 @@ func readCondition(value any) (fieldCondition, bool) {
 	return fieldCondition{kind: kind, controls: controls, values: values, showForNullValue: shown, given: true}, true
 }
 
-// filling is the write with every name of it resolved against the project the issue is filed in, which is the
+// resolve is the write with every name of it resolved against the project the issue is filed in, which is the
 // whole of what a name is held against: nothing of a name ever reaches the server, since YouTrack answers an
 // unknown field name with a 500 (ADR-0002). named is the class the server itself gave each field the issue
 // already holds, by the id of its binding, and nothing at all where the issue does not exist yet.
-func (w writtenIssue) filling(project projectMetadata, named map[string]string) (write, *diag.Fault) {
-	fields, fault := project.filled(w.named, w.cleared, named)
+func (w issueInput) resolve(project projectMetadata, named map[string]string) (issueWrite, *diag.Fault) {
+	fields, fault := project.resolveFields(w.named, w.cleared, named)
 	if fault != nil {
-		return write{}, fault
+		return issueWrite{}, fault
 	}
-	return write{text: w, fields: fields, project: project}, nil
+	return issueWrite{text: w, fields: fields, project: project}, nil
 }
 
-// filled is the custom fields the call writes, in the order the project puts its fields in, so that a body
+// resolveFields is the custom fields the call writes, in the order the project puts its fields in, so that a body
 // says nothing about the order the flags were written in; the values of one field keep that order, since the
 // server keeps what it is given.
 //
 // Every name that resolves to no field of the project is refused at once, and so is every value the call
 // cannot send: a caller fixing one flag per attempt would read the project as many times over.
-func (p projectMetadata) filled(named []namedValue, cleared []string, kinds map[string]string) ([]writtenField, *diag.Fault) {
-	catalogue := make([]naming, 0, len(p.fields))
+func (p projectMetadata) resolveFields(named []namedValue, cleared []string, kinds map[string]string) ([]resolvedField, *diag.Fault) {
+	catalogue := make([]fieldInfo, 0, len(p.fields))
 	for _, field := range p.fields {
-		catalogue = append(catalogue, field.naming)
+		catalogue = append(catalogue, field.info)
 	}
 	given := make([][]string, len(p.fields))
 	emptied := make([]bool, len(p.fields))
@@ -1944,7 +1857,7 @@ func (p projectMetadata) filled(named []namedValue, cleared []string, kinds map[
 	// holds several values takes --field once per value, so a misspelling there would be listed once per value.
 	listed := make(map[string]bool, len(named)+len(cleared))
 	place := func(name string) (int, bool) {
-		places := answering(name, catalogue)
+		places := findMatches(name, catalogue)
 		switch {
 		case len(places) == 1:
 			return places[0], true
@@ -1952,7 +1865,7 @@ func (p projectMetadata) filled(named []namedValue, cleared []string, kinds map[
 		case len(places) == 0:
 			unknown = append(unknown, unknownEntry(name, nearestNamed(name, catalogue)))
 		default:
-			ambiguous = append(ambiguous, ambiguousEntry(name, canonical(standingAt(catalogue, places))))
+			ambiguous = append(ambiguous, ambiguousEntry(name, canonical(pick(catalogue, places))))
 		}
 		listed[name] = true
 		return 0, false
@@ -1969,24 +1882,24 @@ func (p projectMetadata) filled(named []namedValue, cleared []string, kinds map[
 	}
 	switch {
 	case len(unknown) > 0:
-		return nil, p.refusing(diag.UnknownName, unknownMessage, "unknown", unknown)
+		return nil, p.fault(diag.UnknownName, unknownMessage, "unknown", unknown)
 	case len(ambiguous) > 0:
-		return nil, p.refusing(diag.UnknownName, ambiguousMessage, "ambiguous", ambiguous)
+		return nil, p.fault(diag.UnknownName, ambiguousMessage, "ambiguous", ambiguous)
 	}
-	return p.sendable(given, emptied, kinds)
+	return p.encodeValues(given, emptied, kinds)
 }
 
-func (p projectMetadata) sendable(given [][]string, emptied []bool, kinds map[string]string) ([]writtenField, *diag.Fault) {
-	fields := make([]writtenField, 0, len(p.fields))
+func (p projectMetadata) encodeValues(given [][]string, emptied []bool, kinds map[string]string) ([]resolvedField, *diag.Fault) {
+	fields := make([]resolvedField, 0, len(p.fields))
 	var invalid []*render.Node
 	for at, values := range given {
 		if len(values) == 0 && !emptied[at] {
 			continue
 		}
 		field := p.fields[at]
-		kind, modelled := typeOf(field.naming)
+		kind, modelled := typeOf(field.info)
 		if !modelled {
-			return nil, unmodelledType(field.naming, p.arrived)
+			return nil, unmodelledType(field.info, p.response)
 		}
 		// The class of a field the issue already carries is copied off the server word for word: it knows of a
 		// StateMachineIssueCustomField, which no table of ytrack's can, and where it has said which class a
@@ -1994,10 +1907,10 @@ func (p projectMetadata) sendable(given [][]string, emptied []bool, kinds map[st
 		if sent, onTheIssue := kinds[field.id]; onTheIssue {
 			kind.sent = sent
 		}
-		written := writtenField{field: field, kind: kind, values: values, cleared: emptied[at]}
+		written := resolvedField{field: field, kind: kind, values: values, cleared: emptied[at]}
 		switch {
 		case emptied[at] && len(values) > 0:
-			invalid = append(invalid, invalidEntry(field.naming.name, values[0], writtenAndEmptied))
+			invalid = append(invalid, invalidEntry(field.info.name, values[0], setAndClearedMessage))
 			continue
 		case emptied[at]:
 			// An empty list rather than the nil one, which marshals as the null a multi-valued field is not
@@ -2007,22 +1920,22 @@ func (p projectMetadata) sendable(given [][]string, emptied []bool, kinds map[st
 			continue
 		case !kind.isMultiValue && len(values) > 1:
 			reason := fmt.Sprintf("the custom field holds one value by its type, and the call gives it %d", len(values))
-			invalid = append(invalid, invalidEntry(field.naming.name, values[1], reason))
+			invalid = append(invalid, invalidEntry(field.info.name, values[1], reason))
 			continue
 		}
 		for _, value := range values {
-			sent, reason := kind.writtenValue(value)
+			sent, reason := kind.encodeValue(value)
 			if reason != "" {
-				invalid = append(invalid, invalidEntry(field.naming.name, value, reason))
+				invalid = append(invalid, invalidEntry(field.info.name, value, reason))
 				continue
 			}
 			written.sent = append(written.sent, sent.body)
-			written.checked = append(written.checked, sent.identity)
+			written.sentKeys = append(written.sentKeys, sent.valueKey)
 		}
 		fields = append(fields, written)
 	}
 	if len(invalid) > 0 {
-		return nil, p.refusing(diag.BadUsage, invalidMessage, "invalid", invalid)
+		return nil, p.fault(diag.BadUsage, invalidMessage, "invalid", invalid)
 	}
 	return fields, nil
 }
@@ -2037,16 +1950,16 @@ func invalidEntry(field, value, reason string) *render.Node {
 // missing is every custom field the project requires of a new issue that the write does not fill, in the order
 // the project sends its fields in and all of them at once: the server names one field per attempt, so a caller
 // told by the server alone would learn the next one only by filing again.
-func (w write) missing() []string {
+func (w issueWrite) missing() []string {
 	var missing []string
 	for _, field := range w.project.fields {
-		if field.canBeEmpty || len(field.defaults) > 0 || w.fills(field) {
+		if field.canBeEmpty || len(field.defaults) > 0 || w.sets(field) {
 			continue
 		}
-		if _, hidden := w.hides(field); hidden {
+		if _, hidden := w.hiddenReason(field); hidden {
 			continue
 		}
-		missing = append(missing, field.naming.name)
+		missing = append(missing, field.info.name)
 	}
 	return missing
 }
@@ -2054,18 +1967,18 @@ func (w write) missing() []string {
 // requiredEmptied is every custom field the call empties that the project lets no issue stand without, in the
 // order the project puts its fields in and all of them at once, so that a caller is not answered one field per
 // attempt.
-func (w write) requiredEmptied() []string {
+func (w issueWrite) requiredEmptied() []string {
 	var required []string
 	for _, written := range w.fields {
 		if written.cleared && !written.field.canBeEmpty {
-			required = append(required, written.field.naming.name)
+			required = append(required, written.field.info.name)
 		}
 	}
 	return required
 }
 
-func (w write) fills(field projectField) bool {
-	return slices.ContainsFunc(w.fields, func(written writtenField) bool { return written.field.id == field.id })
+func (w issueWrite) sets(field projectField) bool {
+	return slices.ContainsFunc(w.fields, func(written resolvedField) bool { return written.field.id == field.id })
 }
 
 const (
@@ -2076,16 +1989,16 @@ const (
 	invalidMessage   = "the values under invalid are not values the fields they name can be given, and nothing was sent"
 	hiddenMessage    = "the custom fields under invalid do not stand on the issue the call would file, and " +
 		"nothing was sent"
-	writtenAndEmptied = "the call writes a value into the custom field and empties it both, and one write " +
+	setAndClearedMessage = "the call writes a value into the custom field and empties it both, and one write " +
 		"leaves it one way"
 )
 
 // A refusal the metadata of the project settled names that read as the request that was sent, since it is the
 // only one that went out, and the project the names were held against.
-func (p projectMetadata) refusing(code diag.Code, message, key string, entries []*render.Node) *diag.Fault {
-	a := p.arrived
+func (p projectMetadata) fault(code diag.Code, message, key string, entries []*render.Node) *diag.Fault {
+	a := p.response
 	details := []render.Pair{
-		requestDetail(a.response.Request.Method, a.response.Request.URL.Redacted()),
+		requestDetail(a.httpResponse.Request.Method, a.httpResponse.Request.URL.Redacted()),
 		{Key: "project", Value: render.NewString(p.code)},
 		{Key: key, Value: render.NewList(entries...)},
 	}
@@ -2108,26 +2021,16 @@ func invalidEntries(hidden []hiddenField) []*render.Node {
 	return entries
 }
 
-// hides is why the condition of the field keeps it off the issue this body files, and nothing where the field
-// stands on it. YouTrack throws a field its condition hides out of a creation under a 200 and says nothing of
-// it, so a field hidden here is neither sent nor required of the caller.
-//
-// It is held against the body alone, which is the whole of what a new issue holds. An update evaluates no
-// condition: the issue it writes holds values the read before it never asked for, and the server itself
-// refuses a write that would leave a field hidden.
-//
-// A condition of another kind, one watching a field of several values and one watching a field the project no
-// longer has are not evaluated: what they hide is then the server's to say.
-func (w write) hides(field projectField) (string, bool) {
+func (w issueWrite) hiddenReason(field projectField) (string, bool) {
 	c := field.condition
 	if !c.given || c.kind != fieldBasedCondition || c.controls == "" {
 		return "", false
 	}
 	watched, found := fieldByID(w.project.fields, c.controls)
-	if !found || watched.naming.isMultiValue {
+	if !found || watched.info.isMultiValue {
 		return "", false
 	}
-	held, filled := w.holds(watched)
+	held, filled := w.effectiveValue(watched)
 	switch {
 	case !filled:
 		if c.showForNullValue {
@@ -2136,19 +2039,19 @@ func (w write) hides(field projectField) (string, bool) {
 	case slices.ContainsFunc(c.values, func(name string) bool { return strings.EqualFold(name, held) }):
 		return "", false
 	}
-	return hiddenBy(watched.naming.name, c, held, filled), true
+	return hiddenBy(watched.info.name, c, held, filled), true
 }
 
-// hidden is every custom field the call fills that a condition keeps off the issue the body files, in the
+// hiddenFields is every custom field the call fills that a condition keeps off the issue the body files, in the
 // order the project puts its fields in and all of them at once.
-func (w write) hidden() []hiddenField {
+func (w issueWrite) hiddenFields() []hiddenField {
 	var hidden []hiddenField
 	for _, written := range w.fields {
-		reason, kept := w.hides(written.field)
+		reason, kept := w.hiddenReason(written.field)
 		if !kept || len(written.values) == 0 {
 			continue
 		}
-		hidden = append(hidden, hiddenField{name: written.field.naming.name, value: written.values[0], reason: reason})
+		hidden = append(hidden, hiddenField{name: written.field.info.name, value: written.values[0], reason: reason})
 	}
 	return hidden
 }
@@ -2160,20 +2063,18 @@ type hiddenField struct {
 	reason string
 }
 
-// What the issue this body files holds in the field: the value the call writes into it, and the value the
-// project fills it with unasked where the call writes none.
-func (w write) holds(field projectField) (string, bool) {
+func (w issueWrite) effectiveValue(field projectField) (string, bool) {
 	for _, written := range w.fields {
 		if written.field.id == field.id && len(written.values) > 0 {
 			return written.values[0], true
 		}
 	}
-	return field.filled()
+	return field.defaultValue()
 }
 
 // What a field holds on an issue the write does not name it on: the value the project fills it with unasked,
 // and nothing where the project fills it with none.
-func (f projectField) filled() (string, bool) {
+func (f projectField) defaultValue() (string, bool) {
 	if len(f.defaults) == 0 {
 		return "", false
 	}
@@ -2183,18 +2084,18 @@ func (f projectField) filled() (string, bool) {
 func hiddenBy(controls string, c fieldCondition, held string, filled bool) string {
 	return fmt.Sprintf("the project shows the custom field on an issue whose %s holds %s, the issue this call "+
 		"files holds %s in it, and YouTrack would file the issue without the value under a 200",
-		controls, c.shownAt(), heldValue(held, filled))
+		controls, c.visibleForValues(), describeValue(held, filled))
 }
 
-// shownAt is the values a condition shows its field at, read as a caller reads them: a condition with no value
+// visibleForValues is the values a condition shows its field at, read as a caller reads them: a condition with no value
 // to show its field at and no null to show it for hides it from every issue there is.
-func (c fieldCondition) shownAt() string {
+func (c fieldCondition) visibleForValues() string {
 	shown := make([]string, 0, len(c.values)+1)
 	for _, name := range c.values {
 		shown = append(shown, render.Quote(name))
 	}
 	if c.showForNullValue {
-		shown = append(shown, nothingHeld)
+		shown = append(shown, emptyValueText)
 	}
 	if len(shown) == 0 {
 		return "no value at all"
@@ -2202,14 +2103,14 @@ func (c fieldCondition) shownAt() string {
 	return strings.Join(shown, " or ")
 }
 
-func heldValue(held string, filled bool) string {
+func describeValue(held string, filled bool) string {
 	if !filled {
-		return nothingHeld
+		return emptyValueText
 	}
 	return render.Quote(held)
 }
 
-const nothingHeld = "nothing at all"
+const emptyValueText = "nothing at all"
 
 func fieldByID(fields []projectField, id string) (projectField, bool) {
 	for _, field := range fields {

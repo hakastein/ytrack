@@ -14,10 +14,9 @@ import (
 // The expression the list sends where the caller writes none.
 const attachmentFields = "id,name,size,mimeType,url"
 
-// The polygon's one attachment, which every contract scenario of this file only reads.
 const (
-	polygonAttachmentName = "заметка-полигона.txt"
-	polygonAttachmentSize = 75
+	devInstanceAttachmentName = "заметка-полигона.txt"
+	devInstanceAttachmentSize = 75
 )
 
 // The form of the internal id of an attachment, which is what a scenario against live data holds the id to:
@@ -80,7 +79,7 @@ func TestAttachmentRefusesACallThatNamesNoCommandOfIts(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -142,7 +141,7 @@ func TestAttachmentListRefusesALimitItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"attachment", "list", "DEV-1"}, tc.argv...)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -169,7 +168,7 @@ func TestAttachmentListPrintsTheRecordsAsTheyWereAskedFor(t *testing.T) {
 		`"url":"/api/files/12-2?sign=Ab-_9&updated=1","mimeType":"text/plain","id":"12-2"},` +
 		`{"size":0,"id":"12-3","mimeType":"application/octet-stream","$type":"IssueAttachment",` +
 		`"name":"пусто.bin","url":"/api/files/12-3?sign=x&updated=2"}]`
-	server := serve(t, answer(http.StatusOK, records))
+	server := serve(t, respondWith(http.StatusOK, records))
 
 	got := runWith(t, server.env(), "attachment", "list", "DEV-1")
 
@@ -190,7 +189,7 @@ func TestAttachmentListSendsTheLimitAsTop(t *testing.T) {
 	for _, limit := range []string{"1", "2147483647"} {
 		t.Run(limit, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, `[]`))
+			server := serve(t, respondWith(http.StatusOK, `[]`))
 
 			got := runWith(t, server.env(), "attachment", "list", "DEV-1", "--limit", limit)
 
@@ -228,7 +227,7 @@ func TestAttachmentListPrintsTheSameShapeForAnyNumberOfRecords(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, tc.body))
+			server := serve(t, respondWith(http.StatusOK, tc.body))
 
 			got := runWith(t, server.env(), "attachment", "list", "DEV-1")
 
@@ -266,7 +265,7 @@ func TestAttachmentListCountsTheAttachmentsWhenTheyFillTheLimit(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, countedBy(page, answer(http.StatusOK, tc.count)))
+			server := serve(t, countedBy(page, respondWith(http.StatusOK, tc.count)))
 
 			got := runWith(t, server.env(), "attachment", "list", "DEV-1", "--limit", "2")
 
@@ -280,15 +279,15 @@ func TestAttachmentListCountsTheAttachmentsWhenTheyFillTheLimit(t *testing.T) {
 
 // Fewer counted than arrived is no partial answer to print: the two passes saw different collections, and
 // what the first of them found is no longer what the owner holds.
-func TestAttachmentListRefusesACountBelowTheAttachmentsThatArrived(t *testing.T) {
+func TestAttachmentListRefusesACountBelowTheAttachmentsReceived(t *testing.T) {
 	t.Parallel()
 	const page = `[{"$type":"IssueAttachment","id":"12-2","name":"a.txt","size":1,"mimeType":"text/plain",` +
 		`"url":"/api/files/12-2?sign=s&updated=1"}]`
-	server := serve(t, countedBy(page, answer(http.StatusOK, `[]`)))
+	server := serve(t, countedBy(page, respondWith(http.StatusOK, `[]`)))
 
 	got := runWith(t, server.env(), "attachment", "list", "DEV-1", "--limit", "1")
 
-	want := refusal{
+	want := faultDocument{
 		code:    "upstream_failed",
 		details: []detail{{"total", 0}, {"returned", 1}},
 	}
@@ -306,12 +305,12 @@ func TestAttachmentListRefusesMoreAttachmentsThanTheLimit(t *testing.T) {
 		`"url":"/api/files/12-3?sign=s&updated=2"},` +
 		`{"$type":"IssueAttachment","id":"12-4","name":"c.txt","size":3,"mimeType":"text/plain",` +
 		`"url":"/api/files/12-4?sign=s&updated=3"}]`
-	server := serve(t, answer(http.StatusOK, page))
+	server := serve(t, respondWith(http.StatusOK, page))
 
 	got := runWith(t, server.env(), "attachment", "list", "DEV-1", "--limit", "2")
 
-	want := refusal{
-		code:    "upstream_lied",
+	want := faultDocument{
+		code:    "upstream_invalid",
 		details: []detail{{"limit", 2}, {"returned", 3}},
 	}
 	assert.Equal(t, want, requireRefusal(t, got))
@@ -342,7 +341,7 @@ func TestAttachmentListRefusesWhatTheServerAnswered(t *testing.T) {
 		{
 			name: "a page under a 200", status: http.StatusOK,
 			contentType: "text/html", body: "<html><body>Sign in</body></html>",
-			code: "upstream_lied",
+			code: "upstream_invalid",
 		},
 	}
 	for _, tc := range tests {
@@ -374,7 +373,7 @@ func TestAttachmentListReadsAnArticleThroughTheAPIOfArticles(t *testing.T) {
 	const records = `[{"$type":"ArticleAttachment","id":"522-4","name":"кот.png","size":70,` +
 		`"mimeType":"image/png","url":"/api/files/522-4?sign=z&updated=2",` +
 		`"thumbnailURL":"/api/files/211-3?sign=y&updated=2"}]`
-	server := serve(t, answer(http.StatusOK, records))
+	server := serve(t, respondWith(http.StatusOK, records))
 
 	got := runWith(t, server.env(), "attachment", "list", "DEV-A-7", "--fields", "+thumbnailURL")
 
@@ -390,13 +389,13 @@ func TestAttachmentListReadsAnArticleThroughTheAPIOfArticles(t *testing.T) {
 // The three things the help sells --fields +comment(id) as: the expression goes out as it was written,
 // a file that hangs from a comment stands in the list of the issue under the id of that comment, and one
 // attached to the issue itself carries comment: null.
-func TestAttachmentListNamesTheCommentAFileHangsFrom(t *testing.T) {
+func TestAttachmentListNamesTheCommentAFileBelongsTo(t *testing.T) {
 	t.Parallel()
 	const records = `[{"$type":"IssueAttachment","id":"12-2","name":"a.txt","size":1,"mimeType":"text/plain",` +
 		`"url":"/api/files/12-2?sign=s&updated=1","comment":null},` +
 		`{"$type":"IssueAttachment","id":"12-3","name":"b.txt","size":2,"mimeType":"text/plain",` +
 		`"url":"/api/files/12-3?sign=s&updated=2","comment":{"$type":"IssueComment","id":"7-12"}}]`
-	server := serve(t, answer(http.StatusOK, records))
+	server := serve(t, respondWith(http.StatusOK, records))
 
 	got := runWith(t, server.env(), "attachment", "list", "DEV-1", "--fields", "+comment(id)")
 
@@ -411,10 +410,7 @@ func TestAttachmentListNamesTheCommentAFileHangsFrom(t *testing.T) {
 		server.sentQueries())
 }
 
-// What the polygon holds against DEV-1, read by the command that is about attachments:
-// one record whose link is whole and signed, and the file behind that link is as long as the size printed
-// beside it. The command itself asks for the bytes of nothing.
-func TestAttachmentListReadsThePolygonAttachment(t *testing.T) {
+func TestAttachmentListReadsTheDevInstanceAttachment(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
@@ -427,8 +423,8 @@ func TestAttachmentListReadsThePolygonAttachment(t *testing.T) {
 	require.Len(t, printed.Attachments, 1)
 	file := printed.Attachments[0]
 	assert.Regexp(t, attachmentIDForm, file.ID)
-	assert.Equal(t, polygonAttachmentName, file.Name)
-	assert.Equal(t, polygonAttachmentSize, file.Size)
+	assert.Equal(t, devInstanceAttachmentName, file.Name)
+	assert.Equal(t, devInstanceAttachmentSize, file.Size)
 	assert.Equal(t, "text/plain", file.MimeType)
 	reference, whole := strings.CutPrefix(file.URL, dev.url)
 	require.True(t, whole, "%q does not begin with the address ytrack was given", file.URL)
@@ -444,10 +440,7 @@ func TestAttachmentListReadsThePolygonAttachment(t *testing.T) {
 	assert.Len(t, body, file.Size)
 }
 
-// The expression the help names is asked of the polygon itself: comment goes out under that name, the
-// server answers it, and the one file of DEV-1, which hangs from the issue and from no comment of it, prints
-// comment: null.
-func TestAttachmentListReadsTheCommentOfThePolygonAttachment(t *testing.T) {
+func TestAttachmentListReadsTheCommentOfTheDevInstanceAttachment(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
@@ -455,7 +448,7 @@ func TestAttachmentListReadsTheCommentOfThePolygonAttachment(t *testing.T) {
 
 	printed := requireAttachmentListing(t, got)
 	require.Len(t, printed.Attachments, 1)
-	assert.Equal(t, polygonAttachmentName, printed.Attachments[0].Name)
+	assert.Equal(t, devInstanceAttachmentName, printed.Attachments[0].Name)
 	assert.Nil(t, printed.Attachments[0].Comment, "the file hangs from a comment")
 	require.Len(t, dev.requests(), 1)
 	assert.Equal(t, []string{attachmentFields + ",comment(id)"}, dev.sentFields())
@@ -463,7 +456,7 @@ func TestAttachmentListReadsTheCommentOfThePolygonAttachment(t *testing.T) {
 
 // The second pass is what a page that fills the limit is counted by, live: one attachment counted out of
 // one is the whole of them, and truncated says so.
-func TestAttachmentListCountsThePolygonAttachmentsWhenTheyFillTheLimit(t *testing.T) {
+func TestAttachmentListCountsTheDevInstanceAttachmentsWhenTheyFillTheLimit(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
@@ -477,9 +470,7 @@ func TestAttachmentListCountsThePolygonAttachmentsWhenTheyFillTheLimit(t *testin
 	assert.Equal(t, []string{"/api/issues/DEV-1/attachments", "/api/issues/DEV-1/attachments"}, dev.sentPaths())
 }
 
-// An article of the polygon is asked of the API of articles, and one that carries no files prints
-// the key empty rather than nothing at all.
-func TestAttachmentListReadsAnArticleOfThePolygon(t *testing.T) {
+func TestAttachmentListReadsAnArticleOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
@@ -496,7 +487,7 @@ func TestAttachmentListRefusesAnIssueTheTokenIsNotAnsweredFor(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
-	t.Run("an issue the polygon has none of", func(t *testing.T) {
+	t.Run("an issue the dev instance has none of", func(t *testing.T) {
 		got := runWith(t, dev.env(), "attachment", "list", "DEV-99999")
 
 		found := requireRefusal(t, got)

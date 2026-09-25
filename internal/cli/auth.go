@@ -23,7 +23,7 @@ const (
 
 func newAuth(env []string, stdin *os.File, stdout io.Writer, renderer render.Renderer) *cobra.Command {
 	status := newCommand("status", func(cmd *cobra.Command, _ []string) *diag.Fault {
-		c, user, fault := ask(cmd.Context(), env, youtrack.CurrentUser)
+		c, user, fault := connectAndCall(cmd.Context(), env, youtrack.CurrentUser)
 		if fault != nil {
 			return fault
 		}
@@ -38,7 +38,7 @@ func newAuth(env []string, stdin *os.File, stdout io.Writer, renderer render.Ren
 
 	var loginGlobal bool
 	login := newCommand("login", func(cmd *cobra.Command, _ []string) *diag.Fault {
-		return keepALogin(cmd.Context(), env, stdin, stdout, renderer, loginGlobal)
+		return login(cmd.Context(), env, stdin, stdout, renderer, loginGlobal)
 	})
 	login.Args = cobra.ExactArgs(0)
 	login.Short = "Log in"
@@ -47,32 +47,29 @@ func newAuth(env []string, stdin *os.File, stdout io.Writer, renderer render.Ren
 
 	var logoutGlobal bool
 	logout := newCommand("logout", func(_ *cobra.Command, _ []string) *diag.Fault {
-		return takeOutLogin(env, stdout, renderer, logoutGlobal)
+		return logout(env, stdout, renderer, logoutGlobal)
 	})
 	logout.Args = cobra.ExactArgs(0)
 	logout.Short = "Log out"
 	logout.Long = "Log out of this directory. The token stays valid."
 	logout.Flags().BoolVar(&logoutGlobal, "global", false, "log out of the global login")
 
-	auth := newCommand("auth", refuseGroup)
+	auth := newCommand("auth", rejectGroup)
 	auth.Short = "Manage login"
 	auth.AddCommand(status, login, logout)
 	return auth
 }
 
-// keepALogin asks for an address and a token on the terminal and has the server say whose token it is before any of
+// login asks for an address and a token on the terminal and has the server say whose token it is before any of
 // it is written down: a token the server would refuse is better refused where it was typed than in some later
 // command far from the mistake.
-func keepALogin(ctx context.Context, env []string, stdin *os.File, stdout io.Writer, renderer render.Renderer, global bool) *diag.Fault {
-	// Nothing is asked until there is a terminal to ask on and a place the answer can be kept in. A file that
-	// cannot be read is no such place: judging it after the dialogue would throw away a token typed in full for a
-	// state of the file that was there before the first prompt.
+func login(ctx context.Context, env []string, stdin *os.File, stdout io.Writer, renderer render.Renderer, global bool) *diag.Fault {
 	tty, fault := terminal(stdin)
 	if fault != nil {
 		return fault
 	}
 	defer tty.Close()
-	path, kept, fault := loginPlace(env, global, "auth login keeps the login of the directory it was called in, and ")
+	path, kept, fault := loginTarget(env, global, "auth login keeps the login of the directory it was called in, and ")
 	if fault != nil {
 		return fault
 	}
@@ -80,22 +77,22 @@ func keepALogin(ctx context.Context, env []string, stdin *os.File, stdout io.Wri
 	if fault != nil {
 		return fault
 	}
-	spelled, fault := askForTheAddress(ctx, tty)
+	spelled, fault := promptAddress(ctx, tty)
 	if fault != nil {
 		return fault
 	}
-	address, reason := usableAddress(spelled, addressTyped)
+	address, reason := parseAddress(spelled, addressTyped)
 	if reason != "" {
 		return &diag.Fault{Code: diag.BadUsage, Message: reason}
 	}
-	secret, fault := askForTheToken(ctx, tty)
+	secret, fault := promptToken(ctx, tty)
 	if fault != nil {
 		return fault
 	}
 	if secret == "" {
 		return &diag.Fault{Code: diag.BadUsage, Message: noTokenTyped}
 	}
-	if reason := usableToken(secret, tokenTyped); reason != "" {
+	if reason := validateToken(secret, tokenTyped); reason != "" {
 		return &diag.Fault{Code: diag.BadUsage, Message: reason}
 	}
 	// The login is checked and nothing else, so this client reads no cache and leaves none behind.
@@ -105,20 +102,20 @@ func keepALogin(ctx context.Context, env []string, stdin *os.File, stdout io.Wri
 		return fault
 	}
 	// The records were read before the dialogue; a file changed since is written over, which no lock prevents.
-	if fault := saveRecords(path, putIn(records, kept, address, secret)); fault != nil {
+	if fault := saveRecords(path, upsertRecord(records, kept, address, secret)); fault != nil {
 		return fault
 	}
 	return printNode(stdout, renderer, render.NewMap(
 		// An address may carry a password, masked here as in the request of a refusal.
 		render.Pair{Key: "url", Value: render.NewString(address.Redacted())},
-		render.Pair{Key: "scope", Value: render.NewString(kept.spelled())},
+		render.Pair{Key: "scope", Value: render.NewString(kept.String())},
 		render.Pair{Key: "user", Value: user},
 	))
 }
 
-// takeOutLogin changes the file and nothing else, so it asks for no address and no token of its own.
-func takeOutLogin(env []string, stdout io.Writer, renderer render.Renderer, global bool) *diag.Fault {
-	path, kept, fault := loginPlace(env, global, "auth logout takes out the login of the directory it was called in, and ")
+// logout changes the file and nothing else, so it asks for no address and no token of its own.
+func logout(env []string, stdout io.Writer, renderer render.Renderer, global bool) *diag.Fault {
+	path, kept, fault := loginTarget(env, global, "auth logout takes out the login of the directory it was called in, and ")
 	if fault != nil {
 		return fault
 	}
@@ -126,9 +123,9 @@ func takeOutLogin(env []string, stdout io.Writer, renderer render.Renderer, glob
 	if fault != nil {
 		return fault
 	}
-	taken, rest, found := takeOut(records, kept)
+	taken, rest, found := removeRecord(records, kept)
 	if !found {
-		return noLoginHere(records, kept)
+		return noSavedLoginFault(records, kept)
 	}
 	if fault := saveRecords(path, rest); fault != nil {
 		return fault
@@ -136,44 +133,44 @@ func takeOutLogin(env []string, stdout io.Writer, renderer render.Renderer, glob
 	return printNode(stdout, renderer, render.NewMap(
 		// An address may carry a password, masked here as in the request of a refusal.
 		render.Pair{Key: "url", Value: render.NewString(taken.address.Redacted())},
-		render.Pair{Key: "scope", Value: render.NewString(kept.spelled())},
+		render.Pair{Key: "scope", Value: render.NewString(kept.String())},
 	))
 }
 
-// loginPlace is the file of login records and the one record of it a call is about: the record of the directory the
+// loginTarget is the file of login records and the one record of it a call is about: the record of the directory the
 // call was made in, or the record for everywhere. Both commands settle it before they act, and wanted is the half of
 // the refusal that says what the directory was needed for.
-func loginPlace(env []string, global bool, wanted string) (path string, kept scope, fault *diag.Fault) {
+func loginTarget(env []string, global bool, wanted string) (path string, kept scope, fault *diag.Fault) {
 	home := lookup(env, homeVariable)
 	if path = recordsPath(home); path == "" {
 		message := "the saved logins cannot be found: " + homeReason(home)
 		return "", scope{}, &diag.Fault{Code: diag.BadUsage, Message: message}
 	}
 	if global {
-		return path, everywhere(), nil
+		return path, globalScope(), nil
 	}
 	dir, reason := workingDirectory(env)
 	if reason != "" {
 		return "", scope{}, &diag.Fault{Code: diag.BadUsage, Message: wanted + reason}
 	}
-	return path, inDirectory(dir), nil
+	return path, dirScope(dir), nil
 }
 
 // A logout that changed nothing while a token still goes out from here would leave the caller sure they had
 // logged out, so the refusal names the login that stays in charge.
-func noLoginHere(records []record, kept scope) *diag.Fault {
-	if kept.isEverywhere() {
+func noSavedLoginFault(records []record, kept scope) *diag.Fault {
+	if kept.isGlobal() {
 		return &diag.Fault{Code: diag.BadUsage, Message: "no global login is saved"}
 	}
 	message := "no login is saved for " + render.Quote(kept.directory)
-	if chain := chainTo(records, kept.directory); len(chain) > 0 {
-		message += ", and the login that applies there is " + applying(chain[0])
+	if chain := recordsFor(records, kept.directory); len(chain) > 0 {
+		message += ", and the login that applies there is " + describeScope(chain[0])
 	}
 	return &diag.Fault{Code: diag.BadUsage, Message: message}
 }
 
-func applying(held record) string {
-	if held.scope.isEverywhere() {
+func describeScope(held record) string {
+	if held.scope.isGlobal() {
 		return "the global one"
 	}
 	return "the one saved for " + render.Quote(held.scope.directory)

@@ -10,10 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Every phrase the polygon has, written and read back on two issues of the contract test's own. The table
-// is the grammar of a link seen from outside: a phrase, the phrase the same link is read by from its other end,
-// and the suffix the server addresses that end's slot by. Nothing here is read off the code — the reverse
-// phrase is read off the partner and the suffix off the request that went out.
 func TestLinkOfTheDevInstanceWritesEveryPhraseAtTheEndItNames(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -46,13 +42,10 @@ func TestLinkOfTheDevInstanceWritesEveryPhraseAtTheEndItNames(t *testing.T) {
 			assert.Empty(t, got.stderr)
 			assert.Equal(t, []string{partner}, partnersUnder(t, got.stdout, tc.phrase))
 
-			// The write is addressed by the slot the read before it sent, and the suffix of that id is the end
-			// the phrase names: an id composed out of the type and a guess at the suffix would reach the other
-			// end of the same type under a 200.
-			slots := everySlotID(t, dev.answers()[read])
-			slot := path.Base(strings.TrimSuffix(dev.sentPaths()[read+2], "/issues"))
-			assert.Regexp(t, `^[0-9]+-[0-9]+`+tc.suffix+`$`, slot)
-			assert.Equal(t, slotOfThePhrase(t, dev.answers()[read], endOfTheSuffix(tc.suffix), tc.phrase), slot)
+			links := everyIssueLinkID(t, dev.answers()[read])
+			link := path.Base(strings.TrimSuffix(dev.sentPaths()[read+2], "/issues"))
+			assert.Regexp(t, `^[0-9]+-[0-9]+`+tc.suffix+`$`, link)
+			assert.Equal(t, issueLinkOfThePhrase(t, dev.answers()[read], endOfTheSuffix(tc.suffix), tc.phrase), link)
 
 			// The link stands on the partner under the phrase of the partner's own end, and a directed type is
 			// read by one phrase at each end, so the phrase the call was made with is nowhere on it.
@@ -65,9 +58,8 @@ func TestLinkOfTheDevInstanceWritesEveryPhraseAtTheEndItNames(t *testing.T) {
 					tc.phrase)
 			}
 
-			// The two documents the write and the read printed carry no id the server addresses a slot by.
-			requireNoSlotID(t, got.stdout, slots)
-			requireNoSlotID(t, other.stdout, slots)
+			requireNoIssueLinkID(t, got.stdout, links)
+			requireNoIssueLinkID(t, other.stdout, links)
 
 			taken := len(dev.requests())
 			away := runWith(t, dev.env(), "link", "remove", source, tc.phrase, partner)
@@ -77,8 +69,8 @@ func TestLinkOfTheDevInstanceWritesEveryPhraseAtTheEndItNames(t *testing.T) {
 				{"idReadable", source},
 				{"removed", []detail{{tc.phrase, []any{[]detail{{"idReadable", partner}}}}}},
 			}, requireDocument(t, away.stdout))
-			assert.Equal(t, slot, path.Base(path.Dir(path.Dir(dev.sentPaths()[taken+2]))))
-			requireNoSlotID(t, away.stdout, slots)
+			assert.Equal(t, link, path.Base(path.Dir(path.Dir(dev.sentPaths()[taken+2]))))
+			requireNoIssueLinkID(t, away.stdout, links)
 
 			// One link is one link from either end: taking it away from the end the phrase names leaves neither
 			// issue holding half of it.
@@ -94,9 +86,6 @@ func TestLinkOfTheDevInstanceWritesEveryPhraseAtTheEndItNames(t *testing.T) {
 	}
 }
 
-// A refusal about a write names what went out word for word, and the address of a write carries the id of
-// a slot and the internal id of the partner. Both stay there: the keys that name what the caller fixes are the
-// readable ids and the phrase, which mean the same on any instance.
 func TestLinkRemoveKeepsTheSlotIDToTheEvidenceOfWhatWentOut(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -110,11 +99,11 @@ func TestLinkRemoveKeepsTheSlotIDToTheEvidenceOfWhatWentOut(t *testing.T) {
 	assert.Equal(t, "not_found", found.code)
 	assert.Equal(t, []detail{{"issue", source}, {"phrase", "depends on"}, {"partner", partner}}, found.details[1:4])
 
-	slot := slotOfThePhrase(t, dev.answers()[read], "INWARD", "depends on")
+	link := issueLinkOfThePhrase(t, dev.answers()[read], "INWARD", "depends on")
 	internal := internalIDOf(t, dev.answers()[read+1])
 	sent, isText := detailNamed(t, found, "request").(string)
 	require.True(t, isText, "stderr: %q", got.stderr)
-	assert.Contains(t, sent, "/links/"+slot+"/issues/"+internal)
+	assert.Contains(t, sent, "/links/"+link+"/issues/"+internal)
 	assert.Contains(t, detailNamed(t, found, "upstream_message"), internal)
 
 	// Every other key of the refusal is the caller's own words back: nothing that names something names it by an
@@ -125,22 +114,19 @@ func TestLinkRemoveKeepsTheSlotIDToTheEvidenceOfWhatWentOut(t *testing.T) {
 		}
 		text, isText := printed.value.(string)
 		require.True(t, isText, "%s: %v", printed.key, printed.value)
-		assert.NotContains(t, text, slot, printed.key)
+		assert.NotContains(t, text, link, printed.key)
 		assert.NotContains(t, text, internal, printed.key)
 	}
 }
 
-// requireNoSlotID holds a document to the rule the slot exists behind: the phrase stands where the id of a slot
-// would, and an id of this instance in stdout would be an address a caller could not carry anywhere.
-func requireNoSlotID(t *testing.T, stdout string, slots []string) {
+func requireNoIssueLinkID(t *testing.T, stdout string, links []string) {
 	t.Helper()
-	for _, slot := range slots {
-		assert.NotContains(t, stdout, slot)
+	for _, link := range links {
+		assert.NotContains(t, stdout, link)
 	}
 }
 
-// everySlotID is the id the answer to a read addresses each slot of the issue by.
-func everySlotID(t *testing.T, body []byte) []string {
+func everyIssueLinkID(t *testing.T, body []byte) []string {
 	t.Helper()
 	var read struct {
 		Links []struct {
@@ -149,8 +135,8 @@ func everySlotID(t *testing.T, body []byte) []string {
 	}
 	require.NoError(t, json.Unmarshal(body, &read), "the answer read: %s", body)
 	ids := make([]string, 0, len(read.Links))
-	for _, slot := range read.Links {
-		ids = append(ids, slot.ID)
+	for _, link := range read.Links {
+		ids = append(ids, link.ID)
 	}
 	require.NotEmpty(t, ids, "the answer holds no slot: %s", body)
 	return ids
@@ -168,8 +154,6 @@ func internalIDOf(t *testing.T, body []byte) string {
 	return read.ID
 }
 
-// The suffix of a slot id stands for the end of the link the issue is at: none for a link read the same from
-// either end, an s where the issue is the source and a t where it is the target.
 func endOfTheSuffix(suffix string) string {
 	switch suffix {
 	case "s":

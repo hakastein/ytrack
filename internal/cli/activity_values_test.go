@@ -83,7 +83,7 @@ func TestActivityPrintsTheValuesOfAChangeAlwaysAsAList(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := journal(t, answer(http.StatusOK, `[`+tc.activity+`]`))
+			server := journal(t, respondWith(http.StatusOK, `[`+tc.activity+`]`))
 
 			got := runWith(t, server.env(), "activity", "list", journalIssue,
 				"--fields", "added(id,idReadable),removed(id,idReadable)")
@@ -134,7 +134,7 @@ func TestActivityPrintsTheValuesOfACustomFieldByTheTypeOfTheField(t *testing.T) 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := journal(t, answer(http.StatusOK, `[`+sentFieldChange(tc.valueType, tc.added, "")+`]`))
+			server := journal(t, respondWith(http.StatusOK, `[`+sentFieldChange(tc.valueType, tc.added, "")+`]`))
 
 			got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "+added")
 
@@ -168,7 +168,7 @@ func TestActivityPrintsAValueByTheNamesAskedOfIt(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := journal(t, answer(http.StatusOK, `[`+comment+`]`))
+			server := journal(t, respondWith(http.StatusOK, `[`+comment+`]`))
 
 			got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", tc.fields)
 
@@ -193,7 +193,7 @@ func TestActivityLeavesOutOfAValueANameOnlyAnotherTypeDeclares(t *testing.T) {
 		kind: "CommentActivityItem", category: "CommentsCategory", timestamp: oldest,
 		added: `[{"$type":"IssueComment"}]`,
 	}.sent()
-	server := journal(t, answer(http.StatusOK, `[`+assigned+`,`+sentLinkActivity(middle)+`,`+commented+`]`))
+	server := journal(t, respondWith(http.StatusOK, `[`+assigned+`,`+sentLinkActivity(middle)+`,`+commented+`]`))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "category,added(login,idReadable)")
 
@@ -204,10 +204,6 @@ func TestActivityLeavesOutOfAValueANameOnlyAnotherTypeDeclares(t *testing.T) {
 	assert.Equal(t, outcome{stdout: want}, got)
 }
 
-// A name no type that may stand under added declares is a name to fix, and it is refused before any request:
-// the judgment of the answer reads only the values that arrived, and a misspelling over a journal that holds
-// none would read as values that carry nothing. What may stand there is every type a record of the journal
-// declares there and every value of a bundle.
 func TestActivityRefusesANameNoTypeOfAValueDeclares(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -234,7 +230,7 @@ func TestActivityRefusesANameNoTypeOfAValueDeclares(t *testing.T) {
 
 			got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", tc.fields)
 
-			want := refusal{
+			want := faultDocument{
 				code:    "unknown_name",
 				details: []detail{{"fields", tc.fields}, {"unknown", tc.unknown}},
 			}
@@ -248,7 +244,7 @@ func TestActivityRefusesANameNoTypeOfAValueDeclares(t *testing.T) {
 // name of a value of a bundle on a journal of links alone, the hash of a commit on a journal of comments.
 func TestActivityTakesANameAnyTypeOfAValueDeclares(t *testing.T) {
 	t.Parallel()
-	server := journal(t, answer(http.StatusOK, `[`+sentLinkActivity(middle)+`]`))
+	server := journal(t, respondWith(http.StatusOK, `[`+sentLinkActivity(middle)+`]`))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue,
 		"--fields", "added(idReadable,localizedName,version),removed(text)")
@@ -265,7 +261,7 @@ func TestActivityPrintsTheDurationOfAWorkItemAsAPeriod(t *testing.T) {
 		field: `{"$type":"WorkItemFilterField","name":"работа"}`,
 		added: `{"$type":"DurationValue","id":"120","minutes":120}`, removed: `{"$type":"DurationValue","id":"90","minutes":90}`,
 	}.sent()
-	server := journal(t, answer(http.StatusOK, `[`+changed+`]`))
+	server := journal(t, respondWith(http.StatusOK, `[`+changed+`]`))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "added,removed")
 
@@ -273,19 +269,16 @@ func TestActivityPrintsTheDurationOfAWorkItemAsAPeriod(t *testing.T) {
 	assert.Contains(t, activitySent(t, server).Get("fields"), "added(minutes)")
 }
 
-// A record is one line, so a text is written on it as a double-quoted item of the list, which carries every text
-// a description of the polygon holds: trailing spaces, a line of three dashes, a rune outside the basic plane, a
-// line separator, no line ending at the end.
-func TestActivityPrintsTheProseOfAnEditOnTheOneLineOfTheRecord(t *testing.T) {
+func TestActivityPrintsTheTextOfAnEditOnTheOneLineOfTheRecord(t *testing.T) {
 	t.Parallel()
-	for _, tc := range proseCases() {
+	for _, tc := range textCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			edit := sentActivity{
 				kind: "TextMarkupActivityItem", category: "DescriptionCategory", timestamp: middle,
 				added: sentJSON(t, tc.text), removed: "null",
 			}.sent()
-			server := journal(t, answer(http.StatusOK, `[`+edit+`]`))
+			server := journal(t, respondWith(http.StatusOK, `[`+edit+`]`))
 
 			got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "added,removed")
 
@@ -303,7 +296,7 @@ func TestActivityPrintsTheProseOfAnEditOnTheOneLineOfTheRecord(t *testing.T) {
 
 // What a change of a custom field holds is the type of the field's to say, so a value of the other shape is the
 // server answering something other than the journal it was asked for, and nothing of it is printed.
-func TestActivityRefusesValuesTheFieldOfTheChangeDoesNotStandFor(t *testing.T) {
+func TestActivityRefusesValuesTheFieldOfTheChangeDoesNotReferTo(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name     string
@@ -353,12 +346,12 @@ func TestActivityRefusesValuesTheFieldOfTheChangeDoesNotStandFor(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := journal(t, answer(http.StatusOK, `[`+tc.activity+`]`))
+			server := journal(t, respondWith(http.StatusOK, `[`+tc.activity+`]`))
 
 			got := runWith(t, server.env(), "activity", "list", journalIssue)
 
 			found := requireRefusal(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Empty(t, got.stdout)
 		})
 	}
@@ -377,7 +370,7 @@ const capturedFieldActivities = `[` +
 
 func TestActivityPrintsTheChangesOfCustomFieldsOfALiveInstance(t *testing.T) {
 	t.Parallel()
-	server := journal(t, answer(http.StatusOK, capturedFieldActivities))
+	server := journal(t, respondWith(http.StatusOK, capturedFieldActivities))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue, "--category", "CustomFieldCategory")
 

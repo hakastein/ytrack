@@ -21,12 +21,12 @@ func everyCategory() []any {
 
 // unknownCategories is the refusal a journal is stopped by before it reaches the network, with one entry per
 // name that resolved to nothing, in the order those names were written.
-func unknownCategories(entries ...[]detail) refusal {
+func unknownCategories(entries ...[]detail) faultDocument {
 	unknown := []any{}
 	for _, entry := range entries {
 		unknown = append(unknown, entry)
 	}
-	return refusal{
+	return faultDocument{
 		code:    "unknown_name",
 		details: []detail{{"unknown", unknown}},
 	}
@@ -56,7 +56,7 @@ func TestActivityRefusesANameOfNoCategoryBeforeItAsksForAnything(t *testing.T) {
 	tests := []struct {
 		name  string
 		flags []string
-		want  refusal
+		want  faultDocument
 	}{
 		{
 			name:  "a category a letter short",
@@ -88,7 +88,7 @@ func TestActivityRefusesANameOfNoCategoryBeforeItAsksForAnything(t *testing.T) {
 		{
 			name:  "a category of nothing at all",
 			flags: []string{"--category", ""},
-			want:  refusal{code: "bad_usage"},
+			want:  faultDocument{code: "bad_usage"},
 		},
 	}
 	for _, tc := range tests {
@@ -109,7 +109,7 @@ func TestActivityRefusesANameOfNoCategoryBeforeItAsksForAnything(t *testing.T) {
 // they were written.
 func TestActivityAsksForEachCategoryOnceInTheOrderOfTheList(t *testing.T) {
 	t.Parallel()
-	server := journal(t, answer(http.StatusOK, noActivities))
+	server := journal(t, respondWith(http.StatusOK, noActivities))
 
 	got := runWith(t, server.env(), "activity", "list", journalIssue,
 		"--category", "linkscategory", "--category", "LINKSCATEGORY", "--category", "CommentsCategory")
@@ -119,9 +119,6 @@ func TestActivityAsksForEachCategoryOnceInTheOrderOfTheList(t *testing.T) {
 	assert.Equal(t, 1, sentTo(server, activitiesPath))
 }
 
-// Every record is judged before any of them is printed, and the category is what the row of the table is found
-// by: an activity that names none, or that names one in a shape it cannot be read out of, leaves nothing to
-// judge the rest of the record against. The names asked for all arrived, so the judgment of names passes each.
 func TestActivityRefusesAnActivityItCannotReadTheCategoryOf(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -132,14 +129,14 @@ func TestActivityRefusesAnActivityItCannotReadTheCategoryOf(t *testing.T) {
 			name: "a category that arrived as a list of one",
 			activity: sentActivity{
 				kind: "LinksActivityItem", timestamp: middle,
-				categoryHeld: `[{"$type":"ActivityCategory","id":"LinksCategory"}]`,
+				categoryRaw: `[{"$type":"ActivityCategory","id":"LinksCategory"}]`,
 			},
 		},
 		{
 			name: "a category whose identifier arrived as a number",
 			activity: sentActivity{
 				kind: "LinksActivityItem", timestamp: middle,
-				categoryHeld: `{"$type":"ActivityCategory","id":163}`,
+				categoryRaw: `{"$type":"ActivityCategory","id":163}`,
 			},
 		},
 		{
@@ -153,12 +150,12 @@ func TestActivityRefusesAnActivityItCannotReadTheCategoryOf(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := journal(t, answer(http.StatusOK, `[`+tc.activity.sent()+`]`))
+			server := journal(t, respondWith(http.StatusOK, `[`+tc.activity.sent()+`]`))
 
 			got := runWith(t, server.env(), "activity", "list", journalIssue)
 
 			found := requireRefusal(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Empty(t, got.stdout)
 		})
 	}

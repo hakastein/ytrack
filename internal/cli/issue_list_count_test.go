@@ -11,7 +11,7 @@ import (
 )
 
 // The body that asks the counter the selection of the contract scenarios.
-const countedPolygonIssues = `{"query":"` + polygonIssues + `"}`
+const countedDevInstanceIssues = `{"query":"` + devInstanceIssues + `"}`
 
 // inTurn answers each request with the next of the handlers and every request past the last of them with that
 // last one, so a scenario holds what the second answer changes as well as that there was no third.
@@ -44,7 +44,7 @@ func countedAt(server *upstream) []int {
 func TestIssueListAsksTheCounterAgainWhereItWasStillCounting(t *testing.T) {
 	t.Parallel()
 	calls := &countCalls{}
-	server := searching(t, countedIssues(`[`+listedDEV1()+`]`, calls.answering(inTurn(counting("-1"), counting("7")))))
+	server := searching(t, countedIssues(`[`+listedDEV1()+`]`, calls.recordingHandler(inTurn(countHandler("-1"), countHandler("7")))))
 
 	got := runWith(t, server.env(), "issue", "list", "--query", "project: DEV", "--limit", "1")
 
@@ -62,7 +62,7 @@ func TestIssueListPrintsNoTotalWhereTheCounterWasStillCountingTwice(t *testing.T
 	t.Parallel()
 	// A third question would be answered a number, which is what a repeat that asked until it got one would print.
 	server := searching(t, countedIssues(`[`+listedDEV1()+`,`+listedDEV2()+`,`+listedDEV3()+`]`,
-		inTurn(counting("-1"), counting("-1"), counting("7"))))
+		inTurn(countHandler("-1"), countHandler("-1"), countHandler("7"))))
 
 	got := runWith(t, server.env(), "issue", "list", "--query", "", "--limit", "3")
 
@@ -82,13 +82,13 @@ func TestIssueListRefusesWhereTheRepeatOfTheCountFails(t *testing.T) {
 		name  string
 		count http.HandlerFunc
 	}{
-		{name: "a server that failed", count: answer(http.StatusInternalServerError, said)},
+		{name: "a server that failed", count: respondWith(http.StatusInternalServerError, said)},
 		{name: "an answer that breaks off", count: breakOff},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := searching(t, countedIssues(`[`+listedDEV1()+`]`, inTurn(counting("-1"), tc.count)))
+			server := searching(t, countedIssues(`[`+listedDEV1()+`]`, inTurn(countHandler("-1"), tc.count)))
 
 			got := runWith(t, server.env(), "issue", "list", "--query", "a", "--limit", "1")
 
@@ -99,19 +99,17 @@ func TestIssueListRefusesWhereTheRepeatOfTheCountFails(t *testing.T) {
 	}
 }
 
-// A page that fills the limit is counted against the selection it came from, whatever the polygon holds beyond
-// the three issues the search names.
 func TestIssueListCountsTheIssuesOfTheDevInstanceBeyondTheLimit(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
-	got := runWith(t, dev.env(), "issue", "list", "--query", polygonIssues, "--limit", "2")
+	got := runWith(t, dev.env(), "issue", "list", "--query", devInstanceIssues, "--limit", "2")
 
 	printed := requireIssueListing(t, got)
 	assert.Equal(t, 3, *printed.Total)
 	assert.Equal(t, 2, printed.Returned)
 	assert.True(t, *printed.Truncated)
-	requireMarkedUpFirst(t, dev, polygonIssues)
+	requireMarkedUpFirst(t, dev, devInstanceIssues)
 	// Whether the counter of the instance answers -1 is a matter of what it has counted lately, so the repeat is
 	// held to the answer that was recorded: it is there where the first answer carried no number, and nowhere else.
 	counted := countedAt(dev)
@@ -120,7 +118,7 @@ func TestIssueListCountsTheIssuesOfTheDevInstanceBeyondTheLimit(t *testing.T) {
 	stillCounted := bytes.Contains(firstAnswer, []byte(`"count":-1`))
 	assert.Equal(t, stillCounted, len(counted) == 2, "the first answer of the counter: %s", firstAnswer)
 	for _, at := range counted {
-		assert.Equal(t, countedPolygonIssues, dev.asks()[at])
+		assert.Equal(t, countedDevInstanceIssues, dev.asks()[at])
 	}
 }
 
@@ -130,9 +128,9 @@ func TestIssueListCountsTheIssuesOfTheDevInstanceThatFillTheLimit(t *testing.T) 
 	t.Parallel()
 	dev := devInstance(t)
 
-	got := runWith(t, dev.env(), "issue", "list", "--query", polygonIssues, "--limit", "3")
+	got := runWith(t, dev.env(), "issue", "list", "--query", devInstanceIssues, "--limit", "3")
 
-	requireIssuesOfThePolygon(t, got, "DEV-1", "DEV-2", "DEV-3")
-	requireMarkedUpFirst(t, dev, polygonIssues)
+	requireIssuesOfTheDevInstance(t, got, "DEV-1", "DEV-2", "DEV-3")
+	requireMarkedUpFirst(t, dev, devInstanceIssues)
 	assert.NotEmpty(t, countedAt(dev))
 }

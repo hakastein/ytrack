@@ -30,8 +30,6 @@ const (
 	addPartnerFields = "id,idReadable"
 )
 
-// What the write itself asks for: the partner, the slot of the partner the issue now stands in, and inside it
-// the issue with the whole of its own links, each of them counted.
 func addWriteFields(partner string) string {
 	return "id,links(direction,linkType(id),issues(id,links(direction," +
 		"linkType(id,sourceToTarget,targetToSource),issuesSize,issues(id," + partner + "))))"
@@ -46,12 +44,10 @@ type phrase struct {
 	raw string
 }
 
-func said(text string) phrase {
+func phraseOf(text string) phrase {
 	return phrase{text: text, given: true}
 }
 
-// sentAs is a name of an end the server sent as that JSON, which is how a scenario sends one that is neither
-// text nor the absence of text.
 func sentAs(json string) phrase {
 	return phrase{raw: json}
 }
@@ -84,73 +80,65 @@ func (k linkKind) sent() string {
 		`,"localizedTargetToSource":` + k.localizedTargetToSource.sent() + `}`
 }
 
-// The five types of the polygon with the translations it gives their ends. Copy is the one the
-// instance has no translation for, and it sends null at one end and an empty string at the other; the
-// undirected type leaves the name of its second end empty as well.
 func devLinkKinds() []linkKind {
 	return []linkKind{
-		{id: "163-0", sourceToTarget: said("relates to"), targetToSource: said(""),
-			localizedSourceToTarget: said("связана с"), localizedTargetToSource: said("")},
-		{id: "163-1", sourceToTarget: said("is required for"), targetToSource: said("depends on"),
-			localizedSourceToTarget: said("обязательна для"), localizedTargetToSource: said("зависит от")},
-		{id: "163-2", sourceToTarget: said("is duplicated by"), targetToSource: said("duplicates"),
-			localizedSourceToTarget: said("дублирована"), localizedTargetToSource: said("дублирует")},
-		{id: "163-3", sourceToTarget: said("parent for"), targetToSource: said("subtask of"),
-			localizedSourceToTarget: said("родитель для"), localizedTargetToSource: said("подзадача для")},
-		{id: "163-4", sourceToTarget: said("Скопирована в"), targetToSource: said("Копия"),
-			localizedSourceToTarget: phrase{}, localizedTargetToSource: said("")},
+		{id: "163-0", sourceToTarget: phraseOf("relates to"), targetToSource: phraseOf(""),
+			localizedSourceToTarget: phraseOf("связана с"), localizedTargetToSource: phraseOf("")},
+		{id: "163-1", sourceToTarget: phraseOf("is required for"), targetToSource: phraseOf("depends on"),
+			localizedSourceToTarget: phraseOf("обязательна для"), localizedTargetToSource: phraseOf("зависит от")},
+		{id: "163-2", sourceToTarget: phraseOf("is duplicated by"), targetToSource: phraseOf("duplicates"),
+			localizedSourceToTarget: phraseOf("дублирована"), localizedTargetToSource: phraseOf("дублирует")},
+		{id: "163-3", sourceToTarget: phraseOf("parent for"), targetToSource: phraseOf("subtask of"),
+			localizedSourceToTarget: phraseOf("родитель для"), localizedTargetToSource: phraseOf("подзадача для")},
+		{id: "163-4", sourceToTarget: phraseOf("Скопирована в"), targetToSource: phraseOf("Копия"),
+			localizedSourceToTarget: phrase{}, localizedTargetToSource: phraseOf("")},
 	}
 }
 
-// One slot of the catalogue: the id the server addresses it by, the end the issue stands at and the type.
-type catalogueSlot struct {
+type catalogueLink struct {
 	id        string
 	direction string
 	kind      linkKind
 }
 
-func (s catalogueSlot) sent() string {
+func (s catalogueLink) sent() string {
 	return `{"$type":"IssueLink","id":` + strconv.Quote(s.id) +
 		`,"direction":` + strconv.Quote(s.direction) + `,"linkType":` + s.kind.sent() + `}`
 }
 
-// The nine slots every issue of the polygon carries, addressed the way the server addresses them: digits and a
-// dash for either end of an undirected type, an s for the source of a directed one and a t for its target.
-func devLinkSlots() []catalogueSlot {
+func devIssueLinks() []catalogueLink {
 	kinds := devLinkKinds()
-	slots := []catalogueSlot{{id: kinds[0].id, direction: "BOTH", kind: kinds[0]}}
+	links := []catalogueLink{{id: kinds[0].id, direction: "BOTH", kind: kinds[0]}}
 	for _, kind := range kinds[1:] {
-		slots = append(slots,
-			catalogueSlot{id: kind.id + "s", direction: "OUTWARD", kind: kind},
-			catalogueSlot{id: kind.id + "t", direction: "INWARD", kind: kind})
+		links = append(links,
+			catalogueLink{id: kind.id + "s", direction: "OUTWARD", kind: kind},
+			catalogueLink{id: kind.id + "t", direction: "INWARD", kind: kind})
 	}
-	return slots
+	return links
 }
 
-// devLinkSlot is the slot of the polygon that goes by that phrase, which is what a scenario names the answer
-// to its write after.
-func devLinkSlot(t *testing.T, id string) catalogueSlot {
+func devIssueLink(t *testing.T, id string) catalogueLink {
 	t.Helper()
-	for _, slot := range devLinkSlots() {
-		if slot.id == id {
-			return slot
+	for _, link := range devIssueLinks() {
+		if link.id == id {
+			return link
 		}
 	}
-	require.Fail(t, "the polygon has no slot "+id)
-	return catalogueSlot{}
+	require.Fail(t, "the dev instance has no slot "+id)
+	return catalogueLink{}
 }
 
-func slotsOf(id, readable string, slots ...catalogueSlot) string {
-	sent := make([]string, 0, len(slots))
-	for _, slot := range slots {
-		sent = append(sent, slot.sent())
+func issueLinksOf(id, readable string, links ...catalogueLink) string {
+	sent := make([]string, 0, len(links))
+	for _, link := range links {
+		sent = append(sent, link.sent())
 	}
 	return `{"$type":"Issue","id":` + strconv.Quote(id) + `,"idReadable":` + strconv.Quote(readable) +
 		`,"links":[` + strings.Join(sent, ",") + `]}`
 }
 
-func polygonCatalogue() string {
-	return slotsOf(addedSourceID, addedSource, devLinkSlots()...)
+func devInstanceCatalogue() string {
+	return issueLinksOf(addedSourceID, addedSource, devIssueLinks()...)
 }
 
 // What the read of the issue at the other end brings: the two ids and nothing else.
@@ -158,17 +146,13 @@ func addressedIssue(id, readable string) string {
 	return `{"$type":"Issue","id":` + strconv.Quote(id) + `,"idReadable":` + strconv.Quote(readable) + `}`
 }
 
-// A slot of the partner in the answer to a write: the end and the type, which together say which link it is,
-// and the issues at its other end.
-func partnerSlot(direction, kind string, issues ...string) string {
+func partnerIssueLink(direction, kind string, issues ...string) string {
 	return `{"$type":"IssueLink","direction":` + strconv.Quote(direction) +
 		`,"linkType":{"$type":"IssueLinkType","id":` + strconv.Quote(kind) + `}` +
 		`,"issues":[` + strings.Join(issues, ",") + `]}`
 }
 
-// A slot of the issue nested in that answer: the document is printed off it, so it carries the phrases of its
-// type and the count the server says it holds beside the issues themselves.
-func sourceSlot(direction string, kind linkKind, issues ...string) string {
+func sourceIssueLink(direction string, kind linkKind, issues ...string) string {
 	return `{"$type":"IssueLink","direction":` + strconv.Quote(direction) +
 		`,"linkType":{"$type":"IssueLinkType","id":` + strconv.Quote(kind.id) +
 		`,"sourceToTarget":` + kind.sourceToTarget.sent() +
@@ -182,14 +166,13 @@ func linkedRecord(id, readable, summary string) string {
 		`,"summary":` + strconv.Quote(summary) + `}`
 }
 
-// The issue the call named first, as the answer to the write nests it under a slot of the partner.
-func sourceUnder(slots ...string) string {
-	return `{"$type":"Issue","id":"` + addedSourceID + `","links":[` + strings.Join(slots, ",") + `]}`
+func sourceUnder(links ...string) string {
+	return `{"$type":"Issue","id":"` + addedSourceID + `","links":[` + strings.Join(links, ",") + `]}`
 }
 
 // The issue the write answers with, which is the partner it linked.
-func writeAnswer(slots ...string) string {
-	return `{"$type":"Issue","id":"` + addedPartnerID + `","links":[` + strings.Join(slots, ",") + `]}`
+func writeAnswer(links ...string) string {
+	return `{"$type":"Issue","id":"` + addedPartnerID + `","links":[` + strings.Join(links, ",") + `]}`
 }
 
 // The link an issue stands at the source of is the one its partner stands at the target of; an undirected type
@@ -206,11 +189,11 @@ func theOtherEnd(direction string) string {
 
 // A write that went through as it was asked to: the partner holds the issue at the end opposite the phrase,
 // and the issue holds the partner at the end of the phrase.
-func linkWritten(slot catalogueSlot, held ...string) string {
+func linkWritten(link catalogueLink, held ...string) string {
 	if len(held) == 0 {
-		held = []string{sourceSlot(slot.direction, slot.kind, linkedRecord(addedPartnerID, addedPartner, "X"))}
+		held = []string{sourceIssueLink(link.direction, link.kind, linkedRecord(addedPartnerID, addedPartner, "X"))}
 	}
-	return writeAnswer(partnerSlot(theOtherEnd(slot.direction), slot.kind.id, sourceUnder(held...)))
+	return writeAnswer(partnerIssueLink(theOtherEnd(link.direction), link.kind.id, sourceUnder(held...)))
 }
 
 // linking is the server of a link add: each read answered by the id it goes out to, the write by the handler
@@ -222,21 +205,19 @@ func linking(t *testing.T, catalogue, partner string, write http.HandlerFunc) *u
 		case r.Method == http.MethodPost:
 			write(w, r)
 		case path.Base(r.URL.Path) == addedSource:
-			answer(http.StatusOK, catalogue)(w, r)
+			respondWith(http.StatusOK, catalogue)(w, r)
 		case path.Base(r.URL.Path) == addedPartner:
-			answer(http.StatusOK, partner)(w, r)
+			respondWith(http.StatusOK, partner)(w, r)
 		default:
 			assert.Fail(t, "a request reached the server", "%s %s", r.Method, r.URL)
 		}
 	})
 }
 
-// linkingThePolygon is that server with the catalogue of the polygon and an answer to the write that stands up
-// to the check of both its ends.
-func linkingThePolygon(t *testing.T, slot catalogueSlot) *upstream {
+func linkingTheDevInstance(t *testing.T, link catalogueLink) *upstream {
 	t.Helper()
-	return linking(t, polygonCatalogue(), addressedIssue(addedPartnerID, addedPartner),
-		answer(http.StatusOK, linkWritten(slot)))
+	return linking(t, devInstanceCatalogue(), addressedIssue(addedPartnerID, addedPartner),
+		respondWith(http.StatusOK, linkWritten(link)))
 }
 
 // Every way of writing link add that names no one link, refused before any request: the arity, the form of
@@ -262,7 +243,7 @@ func TestLinkAddRefusesACallThatNamesNoOneLink(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -280,31 +261,28 @@ func TestLinkAddHelpNamesTheDefaultAndWhereThePhrasesComeFrom(t *testing.T) {
 	assert.Contains(t, got.stdout, linkListPartner)
 }
 
-// A phrase is resolved against the slots of the issue itself: in any letter case, against the phrase link
-// list prints and against the name the instance translates that end by. Neither the phrase nor any form of it
-// reaches YouTrack — what goes out is the id the server gave the slot and the internal id of the partner.
 func TestLinkAddResolvesThePhraseAgainstTheSlotsOfTheIssue(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name   string
 		phrase string
-		slot   string
+		link   string
 	}{
-		{name: "the phrase itself", phrase: "depends on", slot: "163-1t"},
-		{name: "the phrase in title case", phrase: "Depends On", slot: "163-1t"},
-		{name: "the phrase in upper case", phrase: "DEPENDS ON", slot: "163-1t"},
-		{name: "the translation of that end", phrase: "зависит от", slot: "163-1t"},
-		{name: "the translation in upper case", phrase: "ЗАВИСИТ ОТ", slot: "163-1t"},
-		{name: "a type the instance translates at neither end", phrase: "скопирована в", slot: "163-4s"},
-		{name: "the other end of that type", phrase: "КОПИЯ", slot: "163-4t"},
-		{name: "the translation of an undirected type", phrase: "связана с", slot: "163-0"},
-		{name: "the phrase of that same type", phrase: "relates to", slot: "163-0"},
+		{name: "the phrase itself", phrase: "depends on", link: "163-1t"},
+		{name: "the phrase in title case", phrase: "Depends On", link: "163-1t"},
+		{name: "the phrase in upper case", phrase: "DEPENDS ON", link: "163-1t"},
+		{name: "the translation of that end", phrase: "зависит от", link: "163-1t"},
+		{name: "the translation in upper case", phrase: "ЗАВИСИТ ОТ", link: "163-1t"},
+		{name: "a type the instance translates at neither end", phrase: "скопирована в", link: "163-4s"},
+		{name: "the other end of that type", phrase: "КОПИЯ", link: "163-4t"},
+		{name: "the translation of an undirected type", phrase: "связана с", link: "163-0"},
+		{name: "the phrase of that same type", phrase: "relates to", link: "163-0"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			slot := devLinkSlot(t, tc.slot)
-			server := linkingThePolygon(t, slot)
+			link := devIssueLink(t, tc.link)
+			server := linkingTheDevInstance(t, link)
 
 			got := runWith(t, server.env(), "link", "add", addedSource, tc.phrase, addedPartner)
 
@@ -312,7 +290,7 @@ func TestLinkAddResolvesThePhraseAgainstTheSlotsOfTheIssue(t *testing.T) {
 			assert.Equal(t, []string{
 				"/api/issues/" + addedSource,
 				"/api/issues/" + addedPartner,
-				"/api/issues/" + addedSource + "/links/" + tc.slot + "/issues",
+				"/api/issues/" + addedSource + "/links/" + tc.link + "/issues",
 			}, server.sentPaths())
 			assert.Equal(t, []string{"", "", `{"id":"` + addedPartnerID + `"}`}, server.asks())
 			for _, written := range []string{tc.phrase, strings.ToLower(tc.phrase)} {
@@ -329,15 +307,12 @@ func TestLinkAddResolvesThePhraseAgainstTheSlotsOfTheIssue(t *testing.T) {
 	}
 }
 
-// Which slot a phrase names is settled by the end it is the name of, not by where the slot stands in the
-// answer and not by anything composed out of the id of the type: the two ends of one type go out to two ids
-// neither of which can be derived from it.
 func TestLinkAddWritesToTheEndThePhraseNames(t *testing.T) {
 	t.Parallel()
-	kind := linkKind{id: "9-9", sourceToTarget: said("is required for"), targetToSource: said("depends on"),
-		localizedSourceToTarget: said("обязательна для"), localizedTargetToSource: said("зависит от")}
+	kind := linkKind{id: "9-9", sourceToTarget: phraseOf("is required for"), targetToSource: phraseOf("depends on"),
+		localizedSourceToTarget: phraseOf("обязательна для"), localizedTargetToSource: phraseOf("зависит от")}
 	// The end the issue stands at the target of arrives first, before the one it stands at the source of.
-	slots := []catalogueSlot{
+	links := []catalogueLink{
 		{id: "42-1t", direction: "INWARD", kind: kind},
 		{id: "42-1s", direction: "OUTWARD", kind: kind},
 	}
@@ -352,14 +327,14 @@ func TestLinkAddWritesToTheEndThePhraseNames(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			slot := slots[tc.at]
-			server := linking(t, slotsOf(addedSourceID, addedSource, slots...),
-				addressedIssue(addedPartnerID, addedPartner), answer(http.StatusOK, linkWritten(slot)))
+			link := links[tc.at]
+			server := linking(t, issueLinksOf(addedSourceID, addedSource, links...),
+				addressedIssue(addedPartnerID, addedPartner), respondWith(http.StatusOK, linkWritten(link)))
 
 			got := runWith(t, server.env(), "link", "add", addedSource, tc.phrase, addedPartner)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			assert.Equal(t, "/api/issues/"+addedSource+"/links/"+slot.id+"/issues", server.sentPaths()[2])
+			assert.Equal(t, "/api/issues/"+addedSource+"/links/"+link.id+"/issues", server.sentPaths()[2])
 			assert.Equal(t, tc.phrase, keysOf(nodeAt(t, requireMapping(t, "stdout", got.stdout), "links"))[0])
 		})
 	}
@@ -370,14 +345,14 @@ func TestLinkAddWritesToTheEndThePhraseNames(t *testing.T) {
 // touched among them, because a write is answered with the state it left behind.
 func TestLinkAddPrintsTheIssueTheWriteLeftBehind(t *testing.T) {
 	t.Parallel()
-	depend := devLinkSlot(t, "163-1t")
-	subtask := devLinkSlot(t, "163-3t")
+	depend := devIssueLink(t, "163-1t")
+	subtask := devIssueLink(t, "163-3t")
 	held := []string{
-		sourceSlot(depend.direction, depend.kind, linkedRecord(addedPartnerID, addedPartner, "Блокирующая задача")),
-		sourceSlot(subtask.direction, subtask.kind, linkedRecord(addedOtherID, addedOtherIssue, "Родительская задача")),
+		sourceIssueLink(depend.direction, depend.kind, linkedRecord(addedPartnerID, addedPartner, "Блокирующая задача")),
+		sourceIssueLink(subtask.direction, subtask.kind, linkedRecord(addedOtherID, addedOtherIssue, "Родительская задача")),
 	}
-	server := linking(t, polygonCatalogue(), addressedIssue(addedPartnerID, addedPartner),
-		answer(http.StatusOK, linkWritten(depend, held...)))
+	server := linking(t, devInstanceCatalogue(), addressedIssue(addedPartnerID, addedPartner),
+		respondWith(http.StatusOK, linkWritten(depend, held...)))
 
 	got := runWith(t, server.env(), "link", "add", addedSource, "depends on", addedPartner)
 
@@ -400,9 +375,9 @@ func TestLinkAddPrintsTheIssueTheWriteLeftBehind(t *testing.T) {
 // An answer that does not hold the link the write asked for at both of its ends is the server saying one
 // thing and having done another. The write went through whatever the answer says, so the refusal comes with
 // the exit code of a call that changed the instance without printing what it left behind.
-func TestLinkAddRefusesAnAnswerThatDoesNotHoldTheLink(t *testing.T) {
+func TestLinkAddRefusesAResponseWithoutTheLink(t *testing.T) {
 	t.Parallel()
-	slot := devLinkSlot(t, "163-1t")
+	link := devIssueLink(t, "163-1t")
 	record := linkedRecord(addedPartnerID, addedPartner, "Блокирующая задача")
 	tests := []struct {
 		name    string
@@ -411,35 +386,35 @@ func TestLinkAddRefusesAnAnswerThatDoesNotHoldTheLink(t *testing.T) {
 		{
 			// The same end at both sides: the link would run the way the caller asked it not to.
 			name: "the issue at the end the phrase names rather than the one opposite it",
-			written: writeAnswer(partnerSlot(slot.direction, slot.kind.id,
-				sourceUnder(sourceSlot(slot.direction, slot.kind, record)))),
+			written: writeAnswer(partnerIssueLink(link.direction, link.kind.id,
+				sourceUnder(sourceIssueLink(link.direction, link.kind, record)))),
 		},
 		{
 			name: "the issue holding the partner at no end at all",
-			written: writeAnswer(partnerSlot(theOtherEnd(slot.direction), slot.kind.id,
-				sourceUnder(sourceSlot(theOtherEnd(slot.direction), slot.kind, record)))),
+			written: writeAnswer(partnerIssueLink(theOtherEnd(link.direction), link.kind.id,
+				sourceUnder(sourceIssueLink(theOtherEnd(link.direction), link.kind, record)))),
 		},
 		{
 			// The end is the one the phrase names and the type is another the issue has at that same end: the
 			// link that came back is printed under a phrase the call never wrote.
 			name: "the issue holding the partner under a type other than the one the phrase names",
-			written: writeAnswer(partnerSlot(theOtherEnd(slot.direction), slot.kind.id,
-				sourceUnder(sourceSlot(slot.direction, devLinkKinds()[4], record)))),
+			written: writeAnswer(partnerIssueLink(theOtherEnd(link.direction), link.kind.id,
+				sourceUnder(sourceIssueLink(link.direction, devLinkKinds()[4], record)))),
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := linking(t, polygonCatalogue(), addressedIssue(addedPartnerID, addedPartner),
-				answer(http.StatusOK, tc.written))
+			server := linking(t, devInstanceCatalogue(), addressedIssue(addedPartnerID, addedPartner),
+				respondWith(http.StatusOK, tc.written))
 
 			got := runWith(t, server.env(), "link", "add", addedSource, "depends on", addedPartner)
 
 			found := requireUncertainty(t, got)
-			assert.Equal(t, refusal{
-				code: "upstream_lied",
+			assert.Equal(t, faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
-					{"request", "POST " + server.url + "/api/issues/" + addedSource + "/links/" + slot.id +
+					{"request", "POST " + server.url + "/api/issues/" + addedSource + "/links/" + link.id +
 						"/issues?fields=" + addWriteFields(linkListPartner)},
 					{"issue", addedSource},
 					{"phrase", "depends on"},
@@ -454,7 +429,7 @@ func TestLinkAddRefusesAnAnswerThatDoesNotHoldTheLink(t *testing.T) {
 // it carries holds links at all.
 func TestLinkAddRefusesAnAnswerAboutSomethingElse(t *testing.T) {
 	t.Parallel()
-	slot := devLinkSlot(t, "163-1t")
+	link := devIssueLink(t, "163-1t")
 	record := linkedRecord(addedPartnerID, addedPartner, "Блокирующая задача")
 	tests := []struct {
 		name    string
@@ -463,25 +438,25 @@ func TestLinkAddRefusesAnAnswerAboutSomethingElse(t *testing.T) {
 		{
 			name: "an issue other than the partner",
 			written: `{"$type":"Issue","id":"3-99","links":[` +
-				partnerSlot(theOtherEnd(slot.direction), slot.kind.id,
-					sourceUnder(sourceSlot(slot.direction, slot.kind, record))) + `]}`,
+				partnerIssueLink(theOtherEnd(link.direction), link.kind.id,
+					sourceUnder(sourceIssueLink(link.direction, link.kind, record))) + `]}`,
 		},
 		{
 			name: "an issue with no links at all",
-			written: writeAnswer(partnerSlot(theOtherEnd(slot.direction), slot.kind.id,
+			written: writeAnswer(partnerIssueLink(theOtherEnd(link.direction), link.kind.id,
 				`{"$type":"Issue","id":"`+addedSourceID+`"}`)),
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := linking(t, polygonCatalogue(), addressedIssue(addedPartnerID, addedPartner),
-				answer(http.StatusOK, tc.written))
+			server := linking(t, devInstanceCatalogue(), addressedIssue(addedPartnerID, addedPartner),
+				respondWith(http.StatusOK, tc.written))
 
 			got := runWith(t, server.env(), "link", "add", addedSource, "depends on", addedPartner)
 
 			found := requireUncertainty(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Equal(t, []detail{{"issue", addedSource}, {"phrase", "depends on"}, {"partner", addedPartner}},
 				found.details[1:4])
 		})
@@ -492,11 +467,11 @@ func TestLinkAddRefusesAnAnswerAboutSomethingElse(t *testing.T) {
 // that issue nearest what they wrote and nothing goes out but the read that settled them.
 func TestLinkAddRefusesAPhraseNoLinkOfTheIssueGoesBy(t *testing.T) {
 	t.Parallel()
-	server := linking(t, polygonCatalogue(), addressedIssue(addedPartnerID, addedPartner), noLinkWritten(t))
+	server := linking(t, devInstanceCatalogue(), addressedIssue(addedPartnerID, addedPartner), noLinkWritten(t))
 
 	got := runWith(t, server.env(), "link", "add", addedSource, "depnds on", addedPartner)
 
-	assert.Equal(t, refusal{
+	assert.Equal(t, faultDocument{
 		code: "unknown_name",
 		details: []detail{
 			{"request", issueRequest(server.url, addedSource, addSourceFields)},
@@ -531,10 +506,10 @@ func TestLinkAddRefusesAnIssueTheServerDoesNotHave(t *testing.T) {
 				case r.Method == http.MethodPost:
 					assert.Fail(t, "a write reached the server", "%s %s", r.Method, r.URL)
 				case path.Base(r.URL.Path) == tc.missing:
-					answer(http.StatusNotFound, `{"error":"Not Found","error_description":"Entity with id `+
+					respondWith(http.StatusNotFound, `{"error":"Not Found","error_description":"Entity with id `+
 						tc.missing+` not found"}`)(w, r)
 				default:
-					answer(http.StatusOK, polygonCatalogue())(w, r)
+					respondWith(http.StatusOK, devInstanceCatalogue())(w, r)
 				}
 			})
 
@@ -562,7 +537,7 @@ func TestLinkAddCarriesWhatTheServerSaidAboutTheWrite(t *testing.T) {
 	}{
 		{
 			name: "a write the server refused",
-			write: answer(http.StatusBadRequest,
+			write: respondWith(http.StatusBadRequest,
 				`{"error":"invalid_properties","error_description":`+strconv.Quote(cycle)+`}`),
 			code: "rejected",
 			exit: 1,
@@ -573,7 +548,7 @@ func TestLinkAddCarriesWhatTheServerSaidAboutTheWrite(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := linking(t, polygonCatalogue(), addressedIssue(addedPartnerID, addedPartner), tc.write)
+			server := linking(t, devInstanceCatalogue(), addressedIssue(addedPartnerID, addedPartner), tc.write)
 
 			got := runWith(t, server.env(), "link", "add", addedSource, "depends on", addedPartner)
 
@@ -593,8 +568,8 @@ func TestLinkAddCarriesWhatTheServerSaidAboutTheWrite(t *testing.T) {
 // the names ytrack fills in for a block of an issue go out beside what the caller wrote and reach no document.
 func TestLinkAddPrintsAPartnerByWhatWasAskedOfIt(t *testing.T) {
 	t.Parallel()
-	slot := devLinkSlot(t, "163-1t")
-	state := arrivedField{name: "State", valueType: "state", ordinal: "1", binding: "180-1",
+	link := devIssueLink(t, "163-1t")
+	state := receivedField{name: "State", valueType: "state", ordinal: "1", binding: "180-1",
 		value: bundleElement("Новая")}
 	tests := []struct {
 		name       string
@@ -615,7 +590,7 @@ func TestLinkAddPrintsAPartnerByWhatWasAskedOfIt(t *testing.T) {
 			name:       "a block of the partner added to the default",
 			expression: "+customFields",
 			record: `{"$type":"Issue","id":"` + addedPartnerID + `","idReadable":"` + addedPartner +
-				`","summary":"X","customFields":` + arrivedFields(state) + `}`,
+				`","summary":"X","customFields":` + receivedFields(state) + `}`,
 			asked:   linkListPartner + "," + customFieldsFields,
 			printed: []detail{{"idReadable", addedPartner}, {"summary", "X"}, {"customFields", []detail{{"State", "Новая"}}}},
 		},
@@ -623,8 +598,8 @@ func TestLinkAddPrintsAPartnerByWhatWasAskedOfIt(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := linking(t, polygonCatalogue(), addressedIssue(addedPartnerID, addedPartner),
-				answer(http.StatusOK, linkWritten(slot, sourceSlot(slot.direction, slot.kind, tc.record))))
+			server := linking(t, devInstanceCatalogue(), addressedIssue(addedPartnerID, addedPartner),
+				respondWith(http.StatusOK, linkWritten(link, sourceIssueLink(link.direction, link.kind, tc.record))))
 
 			got := runWith(t, server.env(), "link", "add", addedSource, "depends on", addedPartner,
 				"--fields", tc.expression)
@@ -644,9 +619,6 @@ func noLinkWritten(t *testing.T) http.HandlerFunc {
 	}
 }
 
-// The links of two issues of the contract test's own, written and read back on the polygon: the phrase
-// goes out as the id the server addresses the slot by, the end it names is the end the link is written at, and
-// writing the same link twice leaves one link behind.
 func TestLinkAddLinksTwoIssuesOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -664,11 +636,9 @@ func TestLinkAddLinksTwoIssuesOfTheDevInstance(t *testing.T) {
 	assert.Equal(t, partner,
 		nodeAt(t, requireMapping(t, "stdout", got.stdout), "links", "depends on", "idReadable").Value)
 
-	// The slot the write went out to is the one the read before it sent, at the end the phrase names, and its
-	// id says which end that is.
-	slot := path.Base(strings.TrimSuffix(dev.sentPaths()[sent+2], "/issues"))
-	assert.Regexp(t, `^[0-9]+-[0-9]+t$`, slot)
-	assert.Equal(t, slotOfThePhrase(t, dev.answers()[sent], "INWARD", "depends on"), slot)
+	link := path.Base(strings.TrimSuffix(dev.sentPaths()[sent+2], "/issues"))
+	assert.Regexp(t, `^[0-9]+-[0-9]+t$`, link)
+	assert.Equal(t, issueLinkOfThePhrase(t, dev.answers()[sent], "INWARD", "depends on"), link)
 
 	// The other end of the link stands on the partner under the phrase of that end, and the phrase of this one
 	// is nowhere on it.
@@ -683,7 +653,7 @@ func TestLinkAddLinksTwoIssuesOfTheDevInstance(t *testing.T) {
 	sent = len(dev.requests())
 	again := runWith(t, dev.env(), "link", "add", source, "ЗАВИСИТ ОТ", partner)
 	require.Equal(t, 0, again.code, "stderr: %s", again.stderr)
-	assert.Equal(t, slot, path.Base(strings.TrimSuffix(dev.sentPaths()[sent+2], "/issues")))
+	assert.Equal(t, link, path.Base(strings.TrimSuffix(dev.sentPaths()[sent+2], "/issues")))
 
 	held := runWith(t, dev.env(), "link", "list", source)
 	require.Equal(t, 0, held.code, "stderr: %s", held.stderr)
@@ -691,9 +661,6 @@ func TestLinkAddLinksTwoIssuesOfTheDevInstance(t *testing.T) {
 		requireDocument(t, held.stdout)[:3])
 }
 
-// aContractIssue files one issue of the contract test's own in DEV, by the title that names the scenario, and
-// takes it away again once the scenario is through. DEV requires four custom fields of a new issue, and the
-// link fixtures of the polygon are read by these tests and never written.
 func aContractIssue(t *testing.T, dev *upstream, role string) string {
 	t.Helper()
 	title := "ytrack contract " + t.Name() + " " + role
@@ -711,9 +678,7 @@ func aContractIssue(t *testing.T, dev *upstream, role string) string {
 	return readable
 }
 
-// slotOfThePhrase is the id the answer to a read addresses the slot of that end and that phrase by, which is
-// what the path of the write is held against: a segment equal to it was read off the issue, not composed.
-func slotOfThePhrase(t *testing.T, body []byte, direction, phrase string) string {
+func issueLinkOfThePhrase(t *testing.T, body []byte, direction, phrase string) string {
 	t.Helper()
 	var read struct {
 		Links []struct {
@@ -726,13 +691,13 @@ func slotOfThePhrase(t *testing.T, body []byte, direction, phrase string) string
 		} `json:"links"`
 	}
 	require.NoError(t, json.Unmarshal(body, &read), "the answer read: %s", body)
-	for _, slot := range read.Links {
-		named := slot.LinkType.SourceToTarget
-		if slot.Direction == "INWARD" {
-			named = slot.LinkType.TargetToSource
+	for _, link := range read.Links {
+		named := link.LinkType.SourceToTarget
+		if link.Direction == "INWARD" {
+			named = link.LinkType.TargetToSource
 		}
-		if slot.Direction == direction && named == phrase {
-			return slot.ID
+		if link.Direction == direction && named == phrase {
+			return link.ID
 		}
 	}
 	require.Fail(t, "the issue holds no slot of that phrase", "%s %s: %s", direction, phrase, body)

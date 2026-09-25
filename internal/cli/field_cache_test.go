@@ -70,15 +70,15 @@ type instance struct {
 	fields   map[string]string
 }
 
-// holdsTypeAlone is the project of every scenario before it changes: one enum field, addressed by 180-1.
-func holdsTypeAlone() *instance {
+// typeOnlyInstance is the project of every scenario before it changes: one enum field, addressed by 180-1.
+func typeOnlyInstance() *instance {
 	return &instance{
 		metadata: projectMetadata(projectField("180-1", "Type", "Тип")),
 		fields:   map[string]string{"180-1": oneField("Type", "Тип", false)},
 	}
 }
 
-func (i *instance) holds(metadata string, fields map[string]string) {
+func (i *instance) setMetadata(metadata string, fields map[string]string) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	i.metadata, i.fields = metadata, fields
@@ -90,15 +90,15 @@ func (i *instance) handle(w http.ResponseWriter, r *http.Request) {
 	i.mu.Unlock()
 	id, isOneField := strings.CutPrefix(r.URL.Path, metadataPath+"/customFields/")
 	if !isOneField {
-		answer(http.StatusOK, metadata)(w, r)
+		respondWith(http.StatusOK, metadata)(w, r)
 		return
 	}
 	held, there := fields[id]
 	if !there {
-		answer(http.StatusNotFound, `{"error":"Not Found","error_description":"Entity with id `+id+` not found"}`)(w, r)
+		respondWith(http.StatusNotFound, `{"error":"Not Found","error_description":"Entity with id `+id+` not found"}`)(w, r)
 		return
 	}
-	answer(http.StatusOK, held)(w, r)
+	respondWith(http.StatusOK, held)(w, r)
 }
 
 // The runs of a cache scenario share a home directory: what one leaves there is what the next reads.
@@ -114,7 +114,7 @@ func aProject(t *testing.T, held *instance) (*upstream, string) {
 
 func TestFieldShowTakesTheMetadataTheRunBeforeLeftOnDisk(t *testing.T) {
 	t.Parallel()
-	server, home := aProject(t, holdsTypeAlone())
+	server, home := aProject(t, typeOnlyInstance())
 
 	first := runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
 	second := runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
@@ -128,10 +128,10 @@ func TestFieldShowTakesTheMetadataTheRunBeforeLeftOnDisk(t *testing.T) {
 // resolve is a reason to read the metadata again rather than a refusal.
 func TestFieldShowReadsTheMetadataAgainForAFieldAddedSinceTheCacheWasWritten(t *testing.T) {
 	t.Parallel()
-	held := holdsTypeAlone()
+	held := typeOnlyInstance()
 	server, home := aProject(t, held)
 	runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
-	held.holds(
+	held.setMetadata(
 		projectMetadata(projectField("180-1", "Type", "Тип"), projectField("180-2", "Срок", "")),
 		map[string]string{"180-1": oneField("Type", "Тип", false), "180-2": oneField("Срок", "", true)},
 	)
@@ -146,12 +146,12 @@ func TestFieldShowReadsTheMetadataAgainForAFieldAddedSinceTheCacheWasWritten(t *
 // names is the one that read it.
 func TestFieldShowRefusesAnUnknownNameOnlyAfterReadingTheMetadataAgain(t *testing.T) {
 	t.Parallel()
-	server, home := aProject(t, holdsTypeAlone())
+	server, home := aProject(t, typeOnlyInstance())
 	runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
 
 	got := runWith(t, atHome(server, home), "field", "show", "DEV", "Нет")
 
-	want := refusal{
+	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{
 			{"request", metadataRequest(server.url, "DEV")},
@@ -199,9 +199,6 @@ func TestFieldShowLeavesTheCacheWarmAfterARefusal(t *testing.T) {
 	}
 }
 
-// An id of a shape no path holds is written to the cache like any other metadata, since the cache judges
-// nothing: what keeps the run that reads it back from choosing an endpoint of its own is the same check the
-// fresh path makes, made again over the disk.
 func TestFieldShowRefusesAnIdItCannotAddressOverTheCacheAsWell(t *testing.T) {
 	t.Parallel()
 	metadata := projectMetadata(projectField("..", "Type", "Тип"))
@@ -210,8 +207,8 @@ func TestFieldShowRefusesAnIdItCannotAddressOverTheCacheAsWell(t *testing.T) {
 	first := runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
 	second := runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
 
-	want := refusal{
-		code: "upstream_lied",
+	want := faultDocument{
+		code: "upstream_invalid",
 		details: []detail{
 			{"request", metadataRequest(server.url, "DEV")},
 			{"upstream_status", 200},
@@ -225,7 +222,7 @@ func TestFieldShowRefusesAnIdItCannotAddressOverTheCacheAsWell(t *testing.T) {
 
 // The id the cache holds addresses nothing once the field is gone, and a 404 over a cached id says the cache is
 // behind rather than that the caller named something the project never had.
-func TestFieldShowRefusesAFieldTakenAwaySinceTheCacheWasWrittenByName(t *testing.T) {
+func TestFieldShowRefusesAFieldRemovedSinceTheCacheWasWrittenByName(t *testing.T) {
 	t.Parallel()
 	held := &instance{
 		metadata: projectMetadata(projectField("180-1", "Type", "Тип"), projectField("180-2", "Priority", "Приоритет")),
@@ -233,14 +230,14 @@ func TestFieldShowRefusesAFieldTakenAwaySinceTheCacheWasWrittenByName(t *testing
 	}
 	server, home := aProject(t, held)
 	runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
-	held.holds(
+	held.setMetadata(
 		projectMetadata(projectField("180-2", "Priority", "Приоритет")),
 		map[string]string{"180-2": oneField("Priority", "Приоритет", false)},
 	)
 
 	got := runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
 
-	want := refusal{
+	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{
 			{"request", metadataRequest(server.url, "DEV")},
@@ -256,10 +253,10 @@ func TestFieldShowRefusesAFieldTakenAwaySinceTheCacheWasWrittenByName(t *testing
 // wrong question; the answer says so, and the right question is asked over metadata read again.
 func TestFieldShowAsksAgainForAFieldThatChangedTypeSinceTheCacheWasWritten(t *testing.T) {
 	t.Parallel()
-	held := holdsTypeAlone()
+	held := typeOnlyInstance()
 	server, home := aProject(t, held)
 	runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
-	held.holds(projectMetadata(typeAsAUser), map[string]string{"180-1": typeAsAUserAnswered})
+	held.setMetadata(projectMetadata(typeAsAUser), map[string]string{"180-1": typeAsAUserAnswered})
 
 	got := runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
 
@@ -306,11 +303,11 @@ func TestFieldShowKeepsTheMetadataOfOneProjectOutOfAnothers(t *testing.T) {
 			return
 		}
 		if !isOneField {
-			answer(http.StatusOK, project.metadata)(w, r)
+			respondWith(http.StatusOK, project.metadata)(w, r)
 			return
 		}
 		assert.Equal(t, project.id, id)
-		answer(http.StatusOK, project.field)(w, r)
+		respondWith(http.StatusOK, project.field)(w, r)
 	})
 	home := t.TempDir()
 	runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
@@ -350,19 +347,19 @@ canBeEmpty: false
 // A key the type the server named declares and did not send is a lie, and a lie about the field a cached id
 // addresses says the question was built from metadata that is behind — so it is asked again over metadata read
 // anew rather than handed to the caller.
-func TestFieldShowAsksAgainWhenTheAnswerToACachedRequestLies(t *testing.T) {
+func TestFieldShowAsksAgainWhenTheResponseToACachedRequestIsInvalid(t *testing.T) {
 	t.Parallel()
-	held := holdsTypeAlone()
+	held := typeOnlyInstance()
 	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/customFields/") && !strings.Contains(r.URL.Query().Get("fields"), "bundle") {
-			answer(http.StatusOK, typeAsAGroupAnswered)(w, r)
+			respondWith(http.StatusOK, typeAsAGroupAnswered)(w, r)
 			return
 		}
 		held.handle(w, r)
 	})
 	home := t.TempDir()
 	runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
-	held.holds(projectMetadata(typeAsAGroup), map[string]string{"180-1": typeWithoutTheBundle})
+	held.setMetadata(projectMetadata(typeAsAGroup), map[string]string{"180-1": typeWithoutTheBundle})
 
 	got := runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
 
@@ -391,15 +388,12 @@ bundle:
 `
 )
 
-// Where the values of a field live is the one thing that cannot be guessed, so a cached type the catalogue has
-// no row for is nothing to build a request from — and nothing to refuse over either: the metadata is read again
-// and the type judged off what arrived.
 func TestFieldShowReadsTheMetadataAgainForACachedTypeOutsideTheCatalogue(t *testing.T) {
 	t.Parallel()
 	held := &instance{metadata: projectMetadata(stateOfMany), fields: map[string]string{}}
 	server, home := aProject(t, held)
 	require.Equal(t, 1, runWith(t, atHome(server, home), "field", "show", "DEV", "State").code)
-	held.holds(projectMetadata(stateOfOne), map[string]string{"180-1": stateOfOneAnswered})
+	held.setMetadata(projectMetadata(stateOfOne), map[string]string{"180-1": stateOfOneAnswered})
 
 	got := runWith(t, atHome(server, home), "field", "show", "DEV", "State")
 
@@ -433,7 +427,7 @@ func TestFieldShowKeepsTheMetadataOfOneIdentityOutOfAnothers(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			held := holdsTypeAlone()
+			held := typeOnlyInstance()
 			first, second := serve(t, held.handle), serve(t, held.handle)
 			home := t.TempDir()
 			runWith(t, atHome(first, home), "field", "show", "DEV", "Type")
@@ -462,7 +456,7 @@ func TestFieldShowKeepsNoCacheWithoutAnAbsoluteHome(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server, _ := aProject(t, holdsTypeAlone())
+			server, _ := aProject(t, typeOnlyInstance())
 			env := append(server.env(), tc.home...)
 
 			first := runWith(t, env, "field", "show", "DEV", "Type")
@@ -478,7 +472,7 @@ func TestFieldShowKeepsNoCacheWithoutAnAbsoluteHome(t *testing.T) {
 // The cache is an answer a token was given, so it goes where only its owner reads it and holds no token itself.
 func TestFieldShowWritesTheCacheUnderOneDirectoryOfItsOwn(t *testing.T) {
 	t.Parallel()
-	server, home := aProject(t, holdsTypeAlone())
+	server, home := aProject(t, typeOnlyInstance())
 
 	got := runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
 
@@ -543,7 +537,7 @@ func TestFieldShowSaysNothingOfACacheItCannotWrite(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server, home := aProject(t, holdsTypeAlone())
+			server, home := aProject(t, typeOnlyInstance())
 			tc.prepare(t, home)
 
 			first := runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
@@ -560,7 +554,7 @@ func TestFieldShowSaysNothingOfACacheItCannotWrite(t *testing.T) {
 // never guessed at, whatever is left of the file.
 func TestFieldShowReadsTheMetadataAgainWhenTheCacheDoesNotReadBack(t *testing.T) {
 	t.Parallel()
-	server, home := aProject(t, holdsTypeAlone())
+	server, home := aProject(t, typeOnlyInstance())
 	runWith(t, atHome(server, home), "field", "show", "DEV", "Type")
 	require.NoError(t, filepath.WalkDir(home, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {

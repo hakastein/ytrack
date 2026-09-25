@@ -40,8 +40,6 @@ bundle:
     - {name: "Инцидент", archived: false}
 `
 
-// The two requests field show sends. The id of the second is held to its form rather than written out: the
-// polygon hands out new ids every time it is seeded.
 func requireTheTwoRequests(t *testing.T, u *upstream, project string) {
 	t.Helper()
 	paths := u.sentPaths()
@@ -85,7 +83,7 @@ func serveTheProject(t *testing.T, metadata string, field http.HandlerFunc) *ups
 			field(w, r)
 			return
 		}
-		answer(http.StatusOK, metadata)(w, r)
+		respondWith(http.StatusOK, metadata)(w, r)
 	})
 }
 
@@ -132,7 +130,7 @@ func TestFieldShowRefusesACallItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 		})
 	}
 }
@@ -241,7 +239,7 @@ func TestFieldShowRefusesAFieldASecondProjectOfTheDevInstanceDoesNotHave(t *test
 	got := runWith(t, dev.env(), "field", "show", "DEMO", "Причина отклонения")
 
 	// DEV has the field and DEMO names nothing near it, so every name DEMO does have is offered instead.
-	want := refusal{
+	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{
 			{"request", metadataRequest(dev.url, "DEMO")},
@@ -260,7 +258,7 @@ func TestFieldShowRefusesANameOneFieldOfTheDevInstanceIsNear(t *testing.T) {
 
 	got := runWith(t, dev.env(), "field", "show", "DEV", "Типп")
 
-	want := refusal{
+	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{
 			{"request", metadataRequest(dev.url, "DEV")},
@@ -308,7 +306,7 @@ func TestFieldShowOffersFiveOfTheNearestNamesAtMost(t *testing.T) {
 
 			got := runWith(t, server.env(), "field", "show", "DEV", "Type")
 
-			want := refusal{
+			want := faultDocument{
 				code: "unknown_name",
 				details: []detail{
 					{"request", metadataRequest(server.url, "DEV")},
@@ -328,7 +326,7 @@ func TestFieldShowRefusesTheProjectTheLimitedUserCannotSee(t *testing.T) {
 
 	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}, "field", "show", "DEV", "Type")
 
-	want := refusal{
+	want := faultDocument{
 		code: "not_found",
 		details: []detail{
 			{"request", metadataRequest(dev.url, "DEV")},
@@ -349,7 +347,7 @@ func TestFieldShowRefusesTheEmptyMetadataTheMemberIsSent(t *testing.T) {
 
 	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).member}, "field", "show", "DEV", "Type")
 
-	want := refusal{
+	want := faultDocument{
 		code: "denied",
 		details: []detail{
 			{"request", metadataRequest(dev.url, "DEV")},
@@ -371,7 +369,7 @@ func TestFieldShowTakesANameOverTheTranslationOfAnotherField(t *testing.T) {
 		t.Run(asked, func(t *testing.T) {
 			t.Parallel()
 			metadata := projectMetadata(projectField("180-1", "Срок", ""), projectField("180-2", "Due Date", "Срок"))
-			server := serveTheProject(t, metadata, answer(http.StatusOK, oneField("Срок", "", true)))
+			server := serveTheProject(t, metadata, respondWith(http.StatusOK, oneField("Срок", "", true)))
 
 			got := runWith(t, server.env(), "field", "show", "DEV", asked)
 
@@ -420,7 +418,7 @@ func TestFieldShowRefusesANameMoreThanOneFieldAnswersTo(t *testing.T) {
 
 			got := runWith(t, server.env(), "field", "show", "DEV", tc.asked)
 
-			want := refusal{
+			want := faultDocument{
 				code: "unknown_name",
 				details: []detail{
 					{"request", metadataRequest(server.url, "DEV")},
@@ -442,7 +440,7 @@ func TestFieldShowTakesANameWithALeadingDashAfterTheDoubleDash(t *testing.T) {
 
 	got := runWith(t, server.env(), "field", "show", "DEV", "--", "-x")
 
-	want := refusal{
+	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{
 			{"request", metadataRequest(server.url, "DEV")},
@@ -463,8 +461,8 @@ func TestFieldShowRefusesAnIdItCannotAddress(t *testing.T) {
 
 	got := runWith(t, server.env(), "field", "show", "DEV", "Type")
 
-	want := refusal{
-		code: "upstream_lied",
+	want := faultDocument{
+		code: "upstream_invalid",
 		details: []detail{
 			{"request", metadataRequest(server.url, "DEV")},
 			{"upstream_status", 200},
@@ -516,8 +514,8 @@ func TestFieldShowRefusesMetadataOfAShapeItCannotRead(t *testing.T) {
 
 			got := runWith(t, server.env(), "field", "show", "DEV", "Type")
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", metadataRequest(server.url, "DEV")},
 					{"upstream_status", 200},
@@ -530,19 +528,17 @@ func TestFieldShowRefusesMetadataOfAShapeItCannotRead(t *testing.T) {
 	}
 }
 
-// The answer to the second request is read as a naming too, to be held against the one the name resolved to,
-// so its shape is judged there and not only in the metadata.
 func TestFieldShowRefusesAFieldOfAShapeItCannotCompare(t *testing.T) {
 	t.Parallel()
 	const field = `{"$type":"EnumProjectCustomField","field":[],"canBeEmpty":false,` +
 		`"bundle":{"$type":"EnumBundle","values":[]}}`
 	metadata := projectMetadata(projectField("180-1", "Type", "Тип"))
-	server := serveTheProject(t, metadata, answer(http.StatusOK, field))
+	server := serveTheProject(t, metadata, respondWith(http.StatusOK, field))
 
 	got := runWith(t, server.env(), "field", "show", "DEV", "Type")
 
-	want := refusal{
-		code: "upstream_lied",
+	want := faultDocument{
+		code: "upstream_invalid",
 		details: []detail{
 			{"request", fieldRequest(server.url, "DEV", "180-1", fieldShowDefault(bundleValues))},
 			{"upstream_status", 200},
@@ -557,11 +553,11 @@ func TestFieldShowRefusesAFieldGoneBetweenTheTwoRequests(t *testing.T) {
 	t.Parallel()
 	const gone = `{"error":"Not Found","error_description":"Entity with id 180-1 not found"}`
 	metadata := projectMetadata(projectField("180-1", "Type", "Тип"))
-	server := serveTheProject(t, metadata, answer(http.StatusNotFound, gone))
+	server := serveTheProject(t, metadata, respondWith(http.StatusNotFound, gone))
 
 	got := runWith(t, server.env(), "field", "show", "DEV", "Type")
 
-	want := refusal{
+	want := faultDocument{
 		code: "not_found",
 		details: []detail{
 			{"request", fieldRequest(server.url, "DEV", "180-1", fieldShowDefault(bundleValues))},
@@ -590,11 +586,11 @@ func TestFieldShowRefusesAFieldRenamedBetweenTheTwoRequests(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			metadata := projectMetadata(projectField("180-1", "Type", "Тип"))
-			server := serveTheProject(t, metadata, answer(http.StatusOK, tc.field))
+			server := serveTheProject(t, metadata, respondWith(http.StatusOK, tc.field))
 
 			got := runWith(t, server.env(), "field", "show", "DEV", "Type")
 
-			want := refusal{
+			want := faultDocument{
 				code: "upstream_failed",
 				details: []detail{
 					{"request", fieldRequest(server.url, "DEV", "180-1", fieldShowDefault(bundleValues))},
@@ -615,7 +611,7 @@ func TestFieldShowRefusesAFieldRenamedBetweenTheTwoRequests(t *testing.T) {
 func TestFieldShowSendsTheNamingBesideWhatTheCallerAsksFor(t *testing.T) {
 	t.Parallel()
 	metadata := projectMetadata(projectField("180-1", "Type", "Тип"))
-	server := serveTheProject(t, metadata, answer(http.StatusOK, oneField("Type", "Тип", false)))
+	server := serveTheProject(t, metadata, respondWith(http.StatusOK, oneField("Type", "Тип", false)))
 
 	got := runWith(t, server.env(), "field", "show", "DEV", "Type", "--fields", "field(name)")
 

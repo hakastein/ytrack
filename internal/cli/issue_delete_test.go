@@ -51,8 +51,8 @@ func noDeletion(t *testing.T) http.HandlerFunc {
 }
 
 // The refusal an issue no token of the caller's may read becomes: the read answers 404 and nothing follows it.
-func noIssueToDelete(address, id string) refusal {
-	return refusal{
+func noIssueToDelete(address, id string) faultDocument {
+	return faultDocument{
 		code: "not_found",
 		details: []detail{
 			{"request", issueRequest(address, id, deletedFields)},
@@ -91,7 +91,7 @@ func TestIssueDeleteRefusesBeforeAnyRequest(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -114,7 +114,7 @@ func TestIssueDeleteHelpOffersNoConfirmation(t *testing.T) {
 // the id that came back, and that id is the document.
 func TestIssueDeleteReadsTheIDAndDeletesByIt(t *testing.T) {
 	t.Parallel()
-	server := deleting(t, answer(http.StatusOK, issueNamed("DEV-7")), deletionDone())
+	server := deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), deletionDone())
 
 	got := runWith(t, server.env(), "issue", "delete", "dev-7")
 
@@ -135,7 +135,7 @@ func TestIssueDeleteReadsTheIDAndDeletesByIt(t *testing.T) {
 // would be answered 404 as well, and this way the caller hears it before anything is destroyed.
 func TestIssueDeleteRefusesAnIssueTheReadDoesNotFind(t *testing.T) {
 	t.Parallel()
-	server := deleting(t, answer(http.StatusNotFound, entityNotFound("dev-7")), noDeletion(t))
+	server := deleting(t, respondWith(http.StatusNotFound, entityNotFound("dev-7")), noDeletion(t))
 
 	got := runWith(t, server.env(), "issue", "delete", "dev-7")
 
@@ -175,11 +175,11 @@ func TestIssueDeleteRefusesWhatTheServerRefused(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := `{"error":` + strconv.Quote(tc.upstreamError) + `,"error_description":` + strconv.Quote(tc.upstreamMessage) + `}`
-			server := deleting(t, answer(http.StatusOK, issueNamed("DEV-7")), answer(tc.status, body))
+			server := deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), respondWith(tc.status, body))
 
 			got := runWith(t, server.env(), "issue", "delete", "DEV-7")
 
-			want := refusal{
+			want := faultDocument{
 				code: tc.code,
 				details: append([]detail{
 					{"request", "DELETE " + server.url + "/api/issues/DEV-7"},
@@ -210,7 +210,7 @@ func TestIssueDeleteRefusesA200ThatCarriesABody(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := deleting(t, answer(http.StatusOK, issueNamed("DEV-7")), func(w http.ResponseWriter, _ *http.Request) {
+			server := deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", tc.contentType)
 				w.WriteHeader(http.StatusOK)
 				_, _ = io.WriteString(w, tc.body)
@@ -218,8 +218,8 @@ func TestIssueDeleteRefusesA200ThatCarriesABody(t *testing.T) {
 
 			got := runWith(t, server.env(), "issue", "delete", "DEV-7")
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", "DELETE " + server.url + "/api/issues/DEV-7"},
 					{"upstream_status", 200},
@@ -237,24 +237,24 @@ func TestIssueDeleteRefusesA200ThatCarriesABody(t *testing.T) {
 func TestIssueDeleteRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		arrived string
+		name     string
+		received string
 	}{
-		{name: "two dots", arrived: `".."`},
-		{name: "a path after the id", arrived: `"DEV-7/.."`},
-		{name: "the id of an article", arrived: `"DEV-A-7"`},
-		{name: "a number", arrived: "7"},
+		{name: "two dots", received: `".."`},
+		{name: "a path after the id", received: `"DEV-7/.."`},
+		{name: "the id of an article", received: `"DEV-A-7"`},
+		{name: "a number", received: "7"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			body := `{"$type":"Issue","idReadable":` + tc.arrived + `}`
-			server := deleting(t, answer(http.StatusOK, body), noDeletion(t))
+			body := `{"$type":"Issue","idReadable":` + tc.received + `}`
+			server := deleting(t, respondWith(http.StatusOK, body), noDeletion(t))
 
 			got := runWith(t, server.env(), "issue", "delete", "dev-7")
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", issueRequest(server.url, "dev-7", deletedFields)},
 					{"upstream_status", 200},
@@ -267,7 +267,6 @@ func TestIssueDeleteRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 	}
 }
 
-// The polygon has no such issue, and the read says so before a deletion is sent to a number nobody used.
 func TestIssueDeleteRefusesAnIssueTheDevInstanceDoesNotHave(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

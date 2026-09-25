@@ -17,23 +17,21 @@ const listedDEV = `{"name":"DEVELOPMENT","$type":"Project","shortName":"DEV"}`
 
 const printedListedDEV = `  - {shortName: "DEV", name: "DEVELOPMENT"}` + "\n"
 
-// listing is the document project list prints, read back.
-type listing struct {
+// listDocument is the document project list prints, read back.
+type listDocument struct {
 	Total     int              `yaml:"total"`
 	Returned  int              `yaml:"returned"`
 	Truncated bool             `yaml:"truncated"`
 	Projects  []map[string]any `yaml:"projects"`
 }
 
-// requireListing reads back what project list printed and holds the counts to the records, which is as far as a
-// test of the polygon can hold them.
-func requireListing(t *testing.T, got outcome) listing {
+func requireListing(t *testing.T, got outcome) listDocument {
 	t.Helper()
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
 	decoder := yaml.NewDecoder(strings.NewReader(got.stdout))
 	decoder.KnownFields(true)
-	var printed listing
+	var printed listDocument
 	require.NoError(t, decoder.Decode(&printed), "stdout: %s", got.stdout)
 	assert.Len(t, printed.Projects, printed.Returned)
 	assert.Equal(t, printed.Total > printed.Returned, printed.Truncated)
@@ -52,7 +50,7 @@ func countedBy(records string, count http.HandlerFunc) http.HandlerFunc {
 			count(w, r)
 			return
 		}
-		answer(http.StatusOK, records)(w, r)
+		respondWith(http.StatusOK, records)(w, r)
 	}
 }
 
@@ -70,7 +68,7 @@ func TestProjectListTakesNoArgument(t *testing.T) {
 
 	got := runWith(t, server.env(), "project", "list", "DEV")
 
-	assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 }
 
 func TestProjectListRefusesALimitItCannotSend(t *testing.T) {
@@ -91,7 +89,7 @@ func TestProjectListRefusesALimitItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), "project", "list", "--limit", tc.limit)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 		})
 	}
 }
@@ -102,7 +100,7 @@ func TestProjectListRefusesALimitGivenTwice(t *testing.T) {
 
 	got := runWith(t, server.env(), "project", "list", "--limit", "1", "--limit", "2")
 
-	assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 }
 
 func TestProjectListRefusesFieldsThatDoNotParse(t *testing.T) {
@@ -111,12 +109,12 @@ func TestProjectListRefusesFieldsThatDoNotParse(t *testing.T) {
 
 	got := runWith(t, server.env(), "project", "list", "--fields", "a,,b")
 
-	assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 }
 
 func TestProjectListAddsFieldsToTheDefaultOfTheList(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, `[{"id":"0-1","shortName":"DEV","name":"DEVELOPMENT","$type":"Project"}]`))
+	server := serve(t, respondWith(http.StatusOK, `[{"id":"0-1","shortName":"DEV","name":"DEVELOPMENT","$type":"Project"}]`))
 
 	got := runWith(t, server.env(), "project", "list", "--fields", "+id")
 
@@ -137,7 +135,7 @@ func TestProjectListHelpNamesTheDefaults(t *testing.T) {
 
 func TestProjectListPrintsAnArchivedProjectAndCountsIt(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, `[{"archived":false,"name":"DEVELOPMENT","shortName":"DEV","$type":"Project"},{"archived":true,"name":"Old","shortName":"OLD","$type":"Project"}]`))
+	server := serve(t, respondWith(http.StatusOK, `[{"archived":false,"name":"DEVELOPMENT","shortName":"DEV","$type":"Project"},{"archived":true,"name":"Old","shortName":"OLD","$type":"Project"}]`))
 
 	got := runWith(t, server.env(), "project", "list", "--fields", "+archived")
 
@@ -156,7 +154,7 @@ func TestProjectListSendsTheLimitAsTop(t *testing.T) {
 	for _, limit := range []string{"1", "2147483647"} {
 		t.Run(limit, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, `[]`))
+			server := serve(t, respondWith(http.StatusOK, `[]`))
 
 			got := runWith(t, server.env(), "project", "list", "--limit", limit)
 
@@ -187,7 +185,7 @@ func TestProjectListCountsTheProjectsWhenTheyFillTheLimit(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, countedBy(`[`+listedDEV+`]`, answer(http.StatusOK, tc.count)))
+			server := serve(t, countedBy(`[`+listedDEV+`]`, respondWith(http.StatusOK, tc.count)))
 
 			got := runWith(t, server.env(), "project", "list", "--limit", "1")
 
@@ -199,25 +197,25 @@ func TestProjectListCountsTheProjectsWhenTheyFillTheLimit(t *testing.T) {
 
 func TestProjectListRefusesMoreProjectsThanTheLimit(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, `[`+listedDEV+`,{"shortName":"OLD","name":"Old","$type":"Project"}]`))
+	server := serve(t, respondWith(http.StatusOK, `[`+listedDEV+`,{"shortName":"OLD","name":"Old","$type":"Project"}]`))
 
 	got := runWith(t, server.env(), "project", "list", "--limit", "1")
 
-	want := refusal{
-		code:    "upstream_lied",
+	want := faultDocument{
+		code:    "upstream_invalid",
 		details: []detail{{"limit", 1}, {"returned", 2}},
 	}
 	assert.Equal(t, want, requireRefusal(t, got))
 	assert.Len(t, server.requests(), 1)
 }
 
-func TestProjectListRefusesACountBelowTheProjectsThatArrived(t *testing.T) {
+func TestProjectListRefusesACountBelowTheProjectsReceived(t *testing.T) {
 	t.Parallel()
-	server := serve(t, countedBy(`[`+listedDEV+`]`, answer(http.StatusOK, `[]`)))
+	server := serve(t, countedBy(`[`+listedDEV+`]`, respondWith(http.StatusOK, `[]`)))
 
 	got := runWith(t, server.env(), "project", "list", "--limit", "1")
 
-	want := refusal{
+	want := faultDocument{
 		code:    "upstream_failed",
 		details: []detail{{"total", 0}, {"returned", 1}},
 	}
@@ -236,7 +234,7 @@ func TestProjectListRefusesACountWhoseAnswerBreaksOff(t *testing.T) {
 
 	got := runWith(t, server.env(), "project", "list", "--limit", "1")
 
-	want := refusal{code: "upstream_failed", details: []detail{{"request", listRequest(server.url, "id", "-1")}}}
+	want := faultDocument{code: "upstream_failed", details: []detail{{"request", listRequest(server.url, "id", "-1")}}}
 	assert.Equal(t, want, requireRefusal(t, got))
 	// net/http repeats on its own a request whose reused connection breaks.
 	assert.Len(t, server.requests(), 2)
@@ -256,12 +254,12 @@ func TestProjectListRefusesAnAnswerOfAnotherShape(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, tc.body))
+			server := serve(t, respondWith(http.StatusOK, tc.body))
 
 			got := runWith(t, server.env(), "project", "list")
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", listRequest(server.url, "shortName,name", "50")},
 					{"upstream_status", 200},
@@ -288,7 +286,7 @@ func TestProjectListRefusesAFieldAProjectDidNotBring(t *testing.T) {
 		{
 			name:    "a field of one project of several",
 			limit:   "50",
-			handler: answer(http.StatusOK, `[`+listedDEV+`,{"shortName":"OLD","$type":"Project"}]`),
+			handler: respondWith(http.StatusOK, `[`+listedDEV+`,{"shortName":"OLD","$type":"Project"}]`),
 			fields:  "shortName,name",
 			top:     "50",
 			missing: []any{missingEntry("name", "Project")},
@@ -296,7 +294,7 @@ func TestProjectListRefusesAFieldAProjectDidNotBring(t *testing.T) {
 		{
 			name:    "a field every project lacks",
 			limit:   "50",
-			handler: answer(http.StatusOK, `[{"shortName":"DEV","$type":"Project"},{"shortName":"OLD","$type":"Project"}]`),
+			handler: respondWith(http.StatusOK, `[{"shortName":"DEV","$type":"Project"},{"shortName":"OLD","$type":"Project"}]`),
 			fields:  "shortName,name",
 			top:     "50",
 			missing: []any{missingEntry("name", "Project")},
@@ -304,7 +302,7 @@ func TestProjectListRefusesAFieldAProjectDidNotBring(t *testing.T) {
 		{
 			name:    "every field of a record of a schema that may not stand in the list",
 			limit:   "50",
-			handler: answer(http.StatusOK, `[`+listedDEV+`,{"login":"admin","$type":"User"}]`),
+			handler: respondWith(http.StatusOK, `[`+listedDEV+`,{"login":"admin","$type":"User"}]`),
 			fields:  "shortName,name",
 			top:     "50",
 			missing: []any{missingEntry("shortName", "User"), missingEntry("name", "User")},
@@ -312,7 +310,7 @@ func TestProjectListRefusesAFieldAProjectDidNotBring(t *testing.T) {
 		{
 			name:    "the id of a project counted",
 			limit:   "1",
-			handler: countedBy(`[`+listedDEV+`]`, answer(http.StatusOK, `[{"id":"0-0","$type":"Project"},{"$type":"Project"}]`)),
+			handler: countedBy(`[`+listedDEV+`]`, respondWith(http.StatusOK, `[{"id":"0-0","$type":"Project"},{"$type":"Project"}]`)),
 			fields:  "id",
 			top:     "-1",
 			missing: []any{missingEntry("id", "Project")},
@@ -325,8 +323,8 @@ func TestProjectListRefusesAFieldAProjectDidNotBring(t *testing.T) {
 
 			got := runWith(t, server.env(), "project", "list", "--limit", tc.limit)
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", listRequest(server.url, tc.fields, tc.top)},
 					{"fields", tc.fields},
@@ -363,7 +361,6 @@ func TestProjectListCountsTheProjectsOfTheDevInstanceBeyondTheLimit(t *testing.T
 	printed := requireListing(t, got)
 	assert.Equal(t, 1, printed.Returned)
 	assert.True(t, printed.Truncated)
-	// DEV and DEMO are the polygon's own; how many other projects it holds is not.
 	assert.GreaterOrEqual(t, printed.Total, 2)
 	assert.Equal(t, countingQueries("1"), dev.sentQueries())
 }
@@ -431,7 +428,7 @@ func TestProjectListRefusesANameTheSchemasOfTheDevInstanceDoNotDeclare(t *testin
 	got := runWith(t, dev.env(), "project", "list", "--fields", "shortName,bogus")
 
 	// Every project lacks the name, and the name is listed once.
-	want := refusal{
+	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{
 			{"request", listRequest(dev.url, "shortName,bogus", "50")},

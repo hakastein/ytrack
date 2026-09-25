@@ -3,7 +3,7 @@
  * вложение, комментарий, дерево статей, история правок и проект с выключенным учётом времени.
  */
 
-export type ProseFeature = [name: string, pattern: RegExp];
+export type TextFeature = [name: string, pattern: RegExp];
 
 /** По типу поля: имя значения бандла или группы, логин, строка, число; дата и дата-время — момент в мс, period — минуты */
 export type FieldValue = { field: string; value: string | number | string[] };
@@ -13,7 +13,7 @@ export type Issue = {
   state: string;
   description?: string;
   /** Черты, которые описание обязано нести: сидирование проверяет их до первой записи */
-  prose?: ProseFeature[];
+  textFeatures?: TextFeature[];
   /** Значения полей сверх `COMMON_VALUES` и `State` */
   values?: FieldValue[];
 };
@@ -40,7 +40,7 @@ const emptyThenLeadingSpace = "\n Описание с ведущим пробе�
 const inProgress: Issue = {
   summary: "Задача в работе", state: "In Progress",
   description: ["Описание с враждебной прозой.", trailingSpaces, dashes, tildes, outsideBmp].join("\n"),
-  prose: [
+  textFeatures: [
     ["строка с хвостовыми пробелами посреди текста", / +\n/],
     ["строка ровно ---", /^---$/m],
     ["строка ровно ~~~", /^~~~$/m],
@@ -51,17 +51,17 @@ const inProgress: Issue = {
 const rejected: Issue = { summary: "Отклонённая задача", state: "Отклонена" };
 const blocker: Issue = {
   summary: "Блокирующая задача", state: "Новая", description: emptyFirstLine,
-  prose: [["пустая первая строка", /^\n/]],
+  textFeatures: [["пустая первая строка", /^\n/]],
 };
 const parent: Issue = {
   summary: "Родительская задача", state: "Новая", description: leadingSpace,
-  prose: [["ведущий пробел в первой строке", /^ /]],
+  textFeatures: [["ведущий пробел в первой строке", /^ /]],
 };
 // В `Duplicate` задачу переводит воркфлоу Duplicates, когда у неё появляется связь
 // `duplicates`, а создать её сразу в `Duplicate` он не даёт
 const duplicate: Issue = {
   summary: "Дубль задачи в работе", state: "Новая", description: emptyThenLeadingSpace,
-  prose: [["пустая первая строка, за ней ведущий пробел", /^\n /]],
+  textFeatures: [["пустая первая строка, за ней ведущий пробел", /^\n /]],
 };
 const copy: Issue = { summary: "Копия задачи в работе", state: "Новая" };
 

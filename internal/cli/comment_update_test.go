@@ -13,11 +13,11 @@ import (
 )
 
 // The one field the read before a write of a comment of an issue asks for, and the whole of what it is sent for.
-const takenBackFields = "deleted"
+const commentDeletedFields = "deleted"
 
 // The two requests a write of a comment of an issue goes out as, which are the ones a refusal about it names.
 func commentReadRequest(address, owner, comment string) string {
-	return "GET " + address + "/api/issues/" + owner + "/comments/" + comment + "?fields=" + takenBackFields
+	return "GET " + address + "/api/issues/" + owner + "/comments/" + comment + "?fields=" + commentDeletedFields
 }
 
 func commentWriteRequest(address, owner, comment, fields string) string {
@@ -26,7 +26,7 @@ func commentWriteRequest(address, owner, comment, fields string) string {
 
 // What the read before the write answers: whether the comment was taken back by whoever wrote it, and nothing
 // else, since nothing else was asked for.
-func commentTakenBack(gone bool) string {
+func commentDeletedState(gone bool) string {
 	return `{"$type":"IssueComment","deleted":` + strconv.FormatBool(gone) + `}`
 }
 
@@ -192,9 +192,9 @@ func TestCommentUpdateHelpNamesWhereTheIDComesFrom(t *testing.T) {
 // most argv carries.
 func TestCommentUpdateReadsAnIssueCommentBeforeWritingIt(t *testing.T) {
 	t.Parallel()
-	text := filling(hostileComment, 131_071)
-	server := updatingAComment(t, answer(http.StatusOK, commentTakenBack(false)),
-		answer(http.StatusOK, writtenComment("7-12", text)))
+	text := textOfSize(hostileComment, 131_071)
+	server := updatingAComment(t, respondWith(http.StatusOK, commentDeletedState(false)),
+		respondWith(http.StatusOK, createdComment("7-12", text)))
 
 	got := runWith(t, server.env(), "comment", "update", "dev-7", "7-12", "--text", text)
 
@@ -202,7 +202,7 @@ func TestCommentUpdateReadsAnIssueCommentBeforeWritingIt(t *testing.T) {
 	assert.Empty(t, got.stderr)
 	assert.Equal(t, []string{"/api/issues/dev-7/comments/7-12", "/api/issues/dev-7/comments/7-12"},
 		server.sentPaths())
-	assert.Equal(t, []string{takenBackFields, writtenCommentFields}, server.sentFields())
+	assert.Equal(t, []string{commentDeletedFields, writtenCommentFields}, server.sentFields())
 	assert.Equal(t, map[string]any{"text": text}, sentText(t, server))
 
 	mapping := requireMapping(t, "stdout", got.stdout)
@@ -216,7 +216,7 @@ func TestCommentUpdateReadsAnIssueCommentBeforeWritingIt(t *testing.T) {
 // whole command: one POST to the knowledge base and not a request near the issues.
 func TestCommentUpdateWritesOnAnArticleInOneRequest(t *testing.T) {
 	t.Parallel()
-	server := commenting(t, answer(http.StatusOK, writtenArticleComment("8-5", "x")))
+	server := commenting(t, respondWith(http.StatusOK, writtenArticleComment("8-5", "x")))
 
 	got := runWith(t, server.env(), "comment", "update", "DEV-A-3", "8-5", "--text", "x")
 
@@ -229,13 +229,13 @@ func TestCommentUpdateWritesOnAnArticleInOneRequest(t *testing.T) {
 // A comment of an issue its author took back still answers a write with a 200 and changes the text where
 // nothing prints it, so the read before the write is what stands between the caller and a write into the
 // invisible. Nothing is sent after it, and the refusal names the comment the caller addressed.
-func TestCommentUpdateRefusesACommentTakenBack(t *testing.T) {
+func TestCommentUpdateRefusesADeletedComment(t *testing.T) {
 	t.Parallel()
-	server := updatingAComment(t, answer(http.StatusOK, commentTakenBack(true)), noUpdate(t))
+	server := updatingAComment(t, respondWith(http.StatusOK, commentDeletedState(true)), noUpdate(t))
 
 	got := runWith(t, server.env(), "comment", "update", "DEV-7", "7-12", "--text", "x")
 
-	want := refusal{
+	want := faultDocument{
 		code: "bad_usage",
 		details: []detail{
 			{"request", commentReadRequest(server.url, "DEV-7", "7-12")},
@@ -260,12 +260,12 @@ func TestCommentUpdateRefusesAReadThatSaysNothingOfDeleted(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := updatingAComment(t, answer(http.StatusOK, tc.read), noUpdate(t))
+			server := updatingAComment(t, respondWith(http.StatusOK, tc.read), noUpdate(t))
 
 			got := runWith(t, server.env(), "comment", "update", "DEV-7", "7-12", "--text", "x")
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", commentReadRequest(server.url, "DEV-7", "7-12")},
 					{"upstream_status", 200},
@@ -295,7 +295,7 @@ func TestCommentUpdateRefusesWhatTheServerRefused(t *testing.T) {
 		{
 			name: "a comment the read does not find",
 			server: func(t *testing.T) *upstream {
-				return updatingAComment(t, answer(http.StatusNotFound, entityNotFound("7-12")), noUpdate(t))
+				return updatingAComment(t, respondWith(http.StatusNotFound, entityNotFound("7-12")), noUpdate(t))
 			},
 			argv:    []string{"comment", "update", "DEV-7", "7-12", "--text", "x"},
 			code:    "not_found",
@@ -304,7 +304,7 @@ func TestCommentUpdateRefusesWhatTheServerRefused(t *testing.T) {
 		{
 			name: "a comment of an article the server has none of",
 			server: func(t *testing.T) *upstream {
-				return commenting(t, answer(http.StatusNotFound, entityNotFound("8-5")))
+				return commenting(t, respondWith(http.StatusNotFound, entityNotFound("8-5")))
 			},
 			argv:    []string{"comment", "update", "DEV-A-3", "8-5", "--text", "x"},
 			code:    "not_found",
@@ -313,8 +313,8 @@ func TestCommentUpdateRefusesWhatTheServerRefused(t *testing.T) {
 		{
 			name: "a token that may read the comment and not write it",
 			server: func(t *testing.T) *upstream {
-				return updatingAComment(t, answer(http.StatusOK, commentTakenBack(false)),
-					answer(http.StatusForbidden, said("Forbidden", "HTTP 403 Forbidden")))
+				return updatingAComment(t, respondWith(http.StatusOK, commentDeletedState(false)),
+					respondWith(http.StatusForbidden, said("Forbidden", "HTTP 403 Forbidden")))
 			},
 			argv:    []string{"comment", "update", "DEV-7", "7-12", "--text", "x"},
 			code:    "denied",
@@ -323,8 +323,8 @@ func TestCommentUpdateRefusesWhatTheServerRefused(t *testing.T) {
 		{
 			name: "a body the server disagreed with",
 			server: func(t *testing.T) *upstream {
-				return updatingAComment(t, answer(http.StatusOK, commentTakenBack(false)),
-					answer(http.StatusBadRequest, said("bad_request", "Comment can't be empty.")))
+				return updatingAComment(t, respondWith(http.StatusOK, commentDeletedState(false)),
+					respondWith(http.StatusBadRequest, said("bad_request", "Comment can't be empty.")))
 			},
 			argv:    []string{"comment", "update", "DEV-7", "7-12", "--text", "x"},
 			code:    "rejected",
@@ -351,47 +351,47 @@ func TestCommentUpdateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 	takenBackMeanwhile := `{"$type":"IssueComment","id":"7-12","author":{"$type":"User","login":"admin"},` +
 		`"created":1789035410875,"updated":1789035999000,"text":null,"deleted":true}`
 	tests := []struct {
-		name    string
-		asked   []string
-		fields  string
-		written string
-		arrived any
+		name     string
+		asked    []string
+		fields   string
+		written  string
+		received any
 	}{
 		{
-			name:    "a comment taken back between the read and the write",
-			fields:  writtenCommentFields,
-			written: takenBackMeanwhile,
-			arrived: nil,
+			name:     "a comment taken back between the read and the write",
+			fields:   writtenCommentFields,
+			written:  takenBackMeanwhile,
+			received: nil,
 		},
 		{
-			name:    "an answer standing under another id than the write was addressed by",
-			fields:  writtenCommentFields,
-			written: writtenComment("7-99", "другое"),
-			arrived: "другое",
+			name:     "an answer standing under another id than the write was addressed by",
+			fields:   writtenCommentFields,
+			written:  createdComment("7-99", "другое"),
+			received: "другое",
 		},
 		{
-			name:    "an answer carrying no id, which no expression of the caller's asks for",
-			asked:   []string{"--fields", "author(login)"},
-			fields:  "author(login),text",
-			written: `{"$type":"IssueComment","author":{"$type":"User","login":"admin"},"text":"другое"}`,
-			arrived: "другое",
+			name:     "an answer carrying no id, which no expression of the caller's asks for",
+			asked:    []string{"--fields", "author(login)"},
+			fields:   "author(login),text",
+			written:  `{"$type":"IssueComment","author":{"$type":"User","login":"admin"},"text":"другое"}`,
+			received: "другое",
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := updatingAComment(t, answer(http.StatusOK, commentTakenBack(false)),
-				answer(http.StatusOK, tc.written))
+			server := updatingAComment(t, respondWith(http.StatusOK, commentDeletedState(false)),
+				respondWith(http.StatusOK, tc.written))
 
 			argv := append([]string{"comment", "update", "DEV-7", "7-12", "--text", "первая"}, tc.asked...)
 			got := runWith(t, server.env(), argv...)
 
-			want := refusal{
-				code: "upstream_lied",
+			want := faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", commentWriteRequest(server.url, "DEV-7", "7-12", tc.fields)},
 					{"comment", "7-12"},
-					{"mismatch", []any{[]detail{{"field", "text"}, {"written", "первая"}, {"arrived", tc.arrived}}}},
+					{"mismatch", []any{[]detail{{"field", "text"}, {"expected", "первая"}, {"actual", tc.received}}}},
 				},
 			}
 			assert.Equal(t, want, requireUncertainty(t, got))
@@ -400,7 +400,7 @@ func TestCommentUpdateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 	}
 }
 
-func TestCommentUpdateJudgesTheAnswerAtTheSchemaOfTheOwner(t *testing.T) {
+func TestCommentUpdateChecksTheResponseAgainstTheSchemaOfTheOwner(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
@@ -411,7 +411,7 @@ func TestCommentUpdateJudgesTheAnswerAtTheSchemaOfTheOwner(t *testing.T) {
 		{
 			name: "a flag only a comment of an issue carries, asked of an article",
 			server: func(t *testing.T) *upstream {
-				return commenting(t, answer(http.StatusOK, writtenArticleComment("8-5", "первая")))
+				return commenting(t, respondWith(http.StatusOK, writtenArticleComment("8-5", "первая")))
 			},
 			argv:    []string{"comment", "update", "DEV-A-3", "8-5", "--text", "первая", "--fields", "+deleted"},
 			unknown: unknownEntry("deleted", articleCommentNames()...),
@@ -419,8 +419,8 @@ func TestCommentUpdateJudgesTheAnswerAtTheSchemaOfTheOwner(t *testing.T) {
 		{
 			name: "the owner of a comment of an article, asked of an issue",
 			server: func(t *testing.T) *upstream {
-				return updatingAComment(t, answer(http.StatusOK, commentTakenBack(false)),
-					answer(http.StatusOK, writtenComment("7-12", "первая")))
+				return updatingAComment(t, respondWith(http.StatusOK, commentDeletedState(false)),
+					respondWith(http.StatusOK, createdComment("7-12", "первая")))
 			},
 			argv: []string{"comment", "update", "DEV-7", "7-12", "--text", "первая",
 				"--fields", "+article(idReadable)"},
@@ -446,15 +446,15 @@ func TestCommentUpdateJudgesTheAnswerAtTheSchemaOfTheOwner(t *testing.T) {
 // stands in no document of a comment, and a caller who wants it there asks for it.
 func TestCommentUpdateChecksMoreThanItPrints(t *testing.T) {
 	t.Parallel()
-	server := updatingAComment(t, answer(http.StatusOK, commentTakenBack(false)),
-		answer(http.StatusOK, writtenComment("7-12", "первая")))
+	server := updatingAComment(t, respondWith(http.StatusOK, commentDeletedState(false)),
+		respondWith(http.StatusOK, createdComment("7-12", "первая")))
 
 	got := runWith(t, server.env(), "comment", "update", "DEV-7", "7-12", "--text", "первая",
 		"--fields", "author(login)")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Equal(t, "author:\n  login: \"admin\"\n", got.stdout)
-	assert.Equal(t, []string{takenBackFields, "author(login),text"}, server.sentFields())
+	assert.Equal(t, []string{commentDeletedFields, "author(login),text"}, server.sentFields())
 }
 
 // commentedArticle is the fixture of a contract test that needs an article of its own to write comments on: it
@@ -467,8 +467,6 @@ func commentedArticle(t *testing.T, dev *upstream, role string) string {
 	return article
 }
 
-// commentOn writes one comment on an owner of the polygon and gives back the id the server put it under, which
-// is the only way a test learns an id: a refused creation eats one, so no id is ever counted on beforehand.
 func commentOn(t *testing.T, dev *upstream, owner, text string) string {
 	t.Helper()
 	got := runWith(t, dev.env(), "comment", "create", owner, "--text", text)
@@ -478,8 +476,6 @@ func commentOn(t *testing.T, dev *upstream, owner, text string) string {
 	return id
 }
 
-// textOfTheComment is the text the polygon holds under that comment of that owner, read back through the show
-// of the owner, which is where comments are read from at all.
 func textOfTheComment(t *testing.T, dev *upstream, show []string, comment string) string {
 	t.Helper()
 	got := runWith(t, dev.env(), show...)
@@ -494,9 +490,6 @@ func textOfTheComment(t *testing.T, dev *upstream, show []string, comment string
 	return ""
 }
 
-// A comment of an issue of the polygon written afresh, carriage returns and trailing spaces and all: the
-// text comes back byte for byte, the moment of the write stands under updated, and the moment the comment was
-// first written stands untouched.
 func TestCommentUpdateWritesOnAnIssueOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -516,8 +509,6 @@ func TestCommentUpdateWritesOnAnIssueOfTheDevInstance(t *testing.T) {
 	assert.Equal(t, text, nodeAt(t, mapping, "text").Value)
 }
 
-// The same on an article of the polygon, with a line separator in the text: an article has no comment
-// taken back to ask about, so the write is the whole call, and the polygon keeps the separator as it went out.
 func TestCommentUpdateWritesOnAnArticleOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -576,8 +567,6 @@ func TestCommentUpdateRefusesACommentOfAnotherOwner(t *testing.T) {
 		textOfTheComment(t, dev, []string{"article", "show", article, "--fields", "idReadable"}, articleComment))
 }
 
-// The polygon matches the id of a comment exactly: a leading zero in the number names no comment at all,
-// which is why the form lets one through rather than reading the number and deciding for the server.
 func TestCommentUpdateRefusesAnIDWithALeadingZero(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

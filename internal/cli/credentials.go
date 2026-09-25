@@ -53,26 +53,26 @@ func connect(env []string) (connection, *diag.Fault) {
 	case raw != "" && token != "":
 		return fromEnvironmentVariables(env, raw, token)
 	case raw != "":
-		return connection{}, halfSet(urlVariable, tokenVariable)
+		return connection{}, partialEnvFault(urlVariable, tokenVariable)
 	case token != "":
-		return connection{}, halfSet(tokenVariable, urlVariable)
+		return connection{}, partialEnvFault(tokenVariable, urlVariable)
 	}
 	return fromSavedLogin(env)
 }
 
 // One variable set and not the other is refused rather than filled in from the settings: an address alone would
 // otherwise be dropped without a word and the call would go to the instance the caller had just overridden.
-func halfSet(set, unset string) *diag.Fault {
+func partialEnvFault(set, unset string) *diag.Fault {
 	message := fmt.Sprintf("%s is set and %s is not, and an address and a token are taken together: set both to work from the environment, or neither to work from the settings", set, unset)
 	return &diag.Fault{Code: diag.BadUsage, Message: message}
 }
 
 func fromEnvironmentVariables(env []string, raw, token string) (connection, *diag.Fault) {
-	address, reason := usableAddress(raw, urlVariable)
+	address, reason := parseAddress(raw, urlVariable)
 	if reason != "" {
 		return connection{}, &diag.Fault{Code: diag.BadUsage, Message: reason}
 	}
-	if reason := usableToken(token, tokenVariable); reason != "" {
+	if reason := validateToken(token, tokenVariable); reason != "" {
 		return connection{}, &diag.Fault{Code: diag.BadUsage, Message: reason}
 	}
 	return connection{
@@ -82,24 +82,22 @@ func fromEnvironmentVariables(env []string, raw, token string) (connection, *dia
 	}, nil
 }
 
-// fromSavedLogin is the nearest record that applies in the directory the call was made in, address and token
-// together; both were judged when the file was read.
 func fromSavedLogin(env []string) (connection, *diag.Fault) {
 	home := lookup(env, homeVariable)
 	path := recordsPath(home)
 	if path == "" {
-		return connection{}, absent(noLoginFound + ", and the saved logins were not read: " + homeReason(home))
+		return connection{}, noLoginFoundFault(noLoginFound + ", and the saved logins were not read: " + homeReason(home))
 	}
 	records, fault := readRecords(path)
 	if fault != nil {
 		return connection{}, fault
 	}
-	chain, fault := heldHere(records, env)
+	chain, fault := recordsForWorkingDir(records, env)
 	if fault != nil {
 		return connection{}, fault
 	}
 	if len(chain) == 0 {
-		return connection{}, absent(noLoginFound, string(fromSettings))
+		return connection{}, noLoginFoundFault(noLoginFound, string(fromSettings))
 	}
 	held := chain[0]
 	return connection{
@@ -109,9 +107,9 @@ func fromSavedLogin(env []string) (connection, *diag.Fault) {
 	}, nil
 }
 
-// refused is what the server said with the origin of the login added: the server knows nothing about it, and with
+// withOrigin is what the server said with the origin of the login added: the server knows nothing about it, and with
 // two sources and a record per directory the caller is not to hold in mind which one answered either.
-func (c connection) refused(fault *diag.Fault) *diag.Fault {
+func (c connection) withOrigin(fault *diag.Fault) *diag.Fault {
 	// Every other code is about what was asked for, not about who asked.
 	if fault.Code != diag.Denied {
 		return fault
@@ -120,10 +118,10 @@ func (c connection) refused(fault *diag.Fault) *diag.Fault {
 	return fault
 }
 
-// absent names every place a login could have come from, in the order they were looked at. Where the settings were
+// noLoginFoundFault names every place a login could have come from, in the order they were looked at. Where the settings were
 // not read at all the message says why, so that a caller who has a saved login does not go looking for the mistake
 // there.
-func absent(message string, lookedIn ...string) *diag.Fault {
+func noLoginFoundFault(message string, lookedIn ...string) *diag.Fault {
 	places := []*render.Node{render.NewString(urlVariable), render.NewString(tokenVariable)}
 	for _, place := range lookedIn {
 		places = append(places, render.NewString(place))
@@ -145,9 +143,9 @@ func urlReason(err error) string {
 	return err.Error()
 }
 
-// usableAddress is raw in the one spelling ytrack uses, or the reason the place named by source cannot reach an
+// parseAddress is raw in the one spelling ytrack uses, or the reason the place named by source cannot reach an
 // instance with it.
-func usableAddress(raw, source string) (*url.URL, string) {
+func parseAddress(raw, source string) (*url.URL, string) {
 	address, err := url.Parse(raw)
 	if err != nil {
 		// url.Error prints the address it was given, and a password in it is no more for printing than a token.
@@ -168,10 +166,10 @@ func usableAddress(raw, source string) (*url.URL, string) {
 	return canonical(address), ""
 }
 
-// usableToken is the reason the place named by source holds a token no request can carry, or "" when it holds one
+// validateToken is the reason the place named by source holds a token no request can carry, or "" when it holds one
 // that can. net/http refuses a header with a control character other than a tab, and its refusal arrives as a
 // transport failure, which tells the caller to run the command again — which will not help.
-func usableToken(token, source string) string {
+func validateToken(token, source string) string {
 	if strings.ContainsFunc(token, func(r rune) bool { return (r < ' ' && r != '\t') || r == 0x7f }) {
 		return source + " holds a control character, such as a line ending, and a request header cannot carry one"
 	}

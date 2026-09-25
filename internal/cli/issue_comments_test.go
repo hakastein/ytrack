@@ -18,7 +18,7 @@ const commentFields = "comments(id,author(login),created,text,deleted)"
 const commentIDForm = `^[0-9]+-[0-9]+$`
 
 // A comment of the server, with $type on every object as the server sends it.
-func arrivedComment(id string, created int64, login, text string) map[string]any {
+func receivedComment(id string, created int64, login, text string) map[string]any {
 	return map[string]any{
 		"$type":   "IssueComment",
 		"id":      id,
@@ -31,7 +31,7 @@ func arrivedComment(id string, created int64, login, text string) map[string]any
 
 // A comment whose author took it back: YouTrack keeps it in the list and takes its text away.
 func deletedComment(id string, created int64) map[string]any {
-	comment := arrivedComment(id, created, "admin", "")
+	comment := receivedComment(id, created, "admin", "")
 	comment["text"] = nil
 	comment["deleted"] = true
 	return comment
@@ -49,11 +49,11 @@ func commentDetails(id, created, login, text string) []detail {
 
 func issueWithComments(t *testing.T, comments ...map[string]any) string {
 	t.Helper()
-	arrived := make([]any, 0, len(comments))
+	received := make([]any, 0, len(comments))
 	for _, comment := range comments {
-		arrived = append(arrived, comment)
+		received = append(received, comment)
 	}
-	return issueHolding(t, map[string]any{"comments": arrived})
+	return issueWith(t, map[string]any{"comments": received})
 }
 
 func TestIssueShowRefusesACommentsFlagThatIsNeitherAllNorACount(t *testing.T) {
@@ -76,7 +76,7 @@ func TestIssueShowRefusesACommentsFlagThatIsNeitherAllNorACount(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"issue", "show", "DEV-1"}, tc.argv...)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -101,7 +101,7 @@ func TestIssueShowRefusesCommentsAskedForInTheExpression(t *testing.T) {
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--fields", tc.expression)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -128,13 +128,13 @@ func TestIssueShowPrintsTheCommentsAskedForOldestFirst(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := issueWithComments(t,
-				arrivedComment("7-3", 1789035410875, "admin", "третий"),
-				arrivedComment("7-1", 1789035410000, "admin", "первый"),
+				receivedComment("7-3", 1789035410875, "admin", "третий"),
+				receivedComment("7-1", 1789035410000, "admin", "первый"),
 				deletedComment("7-4", 1789035411000),
-				arrivedComment("7-5", 1789035412000, "admin", "пятый"),
-				arrivedComment("7-2", 1789035410500, "dev.member", "второй"),
+				receivedComment("7-5", 1789035412000, "admin", "пятый"),
+				receivedComment("7-2", 1789035410500, "dev.member", "второй"),
 			)
-			server := serve(t, answer(http.StatusOK, body))
+			server := serve(t, respondWith(http.StatusOK, body))
 
 			argv := append([]string{"issue", "show", "DEV-1", "--fields", "idReadable"}, tc.argv...)
 			got := runWith(t, server.env(), argv...)
@@ -151,7 +151,7 @@ func TestIssueShowPrintsTheCommentsAskedForOldestFirst(t *testing.T) {
 // while an issue that has none prints the key empty.
 func TestIssueShowAsksForNoCommentsAtZero(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, `{"$type":"Issue","idReadable":"DEV-1"}`))
+	server := serve(t, respondWith(http.StatusOK, `{"$type":"Issue","idReadable":"DEV-1"}`))
 
 	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--fields", "idReadable", "--comments=0")
 
@@ -161,26 +161,24 @@ func TestIssueShowAsksForNoCommentsAtZero(t *testing.T) {
 
 func TestIssueShowPrintsTheIssueWithNoCommentsAsAnEmptyList(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, issueWithComments(t)))
+	server := serve(t, respondWith(http.StatusOK, issueWithComments(t)))
 
 	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--fields", "idReadable")
 
 	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-1\"\ncomments: []\n"}, got)
 }
 
-// The text of a comment is prose like a description, and the record carrying it is a block mapping: the
-// author stands under a key of its own and the moment it was written is an instant.
-func TestIssueShowPrintsTheProseOfACommentAsItArrived(t *testing.T) {
+func TestIssueShowPrintsTheTextOfACommentAsReceived(t *testing.T) {
 	t.Parallel()
-	tests := []proseCase{
+	tests := []textCase{
 		{name: "an empty line before a line beginning with a space", text: "\n первая"},
 		{name: "a line separator", text: "первая\xe2\x80\xa8вторая", quoted: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			body := issueWithComments(t, arrivedComment("7-1", 1789035410875, "admin", tc.text))
-			server := serve(t, answer(http.StatusOK, body))
+			body := issueWithComments(t, receivedComment("7-1", 1789035410875, "admin", tc.text))
+			server := serve(t, respondWith(http.StatusOK, body))
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--fields", "idReadable")
 
@@ -218,12 +216,12 @@ func TestIssueShowRefusesCommentsTheServerShapedOtherwise(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := `{"$type":"Issue","idReadable":"DEV-1","comments":` + tc.comments + `}`
-			server := serve(t, answer(http.StatusOK, body))
+			server := serve(t, respondWith(http.StatusOK, body))
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--fields", "idReadable")
 
-			assert.Equal(t, refusal{
-				code: "upstream_lied",
+			assert.Equal(t, faultDocument{
+				code: "upstream_invalid",
 				details: []detail{
 					{"request", issueRequest(server.url, "DEV-1", "idReadable,"+commentFields)},
 					{"upstream_status", 200},
@@ -234,7 +232,6 @@ func TestIssueShowRefusesCommentsTheServerShapedOtherwise(t *testing.T) {
 	}
 }
 
-// The one comment of DEV-1, held against the body the polygon sent rather than against a copy of the fixture.
 func TestIssueShowPrintsTheCommentOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -313,7 +310,6 @@ func TestIssueShowPrintsTheCommentsOfTheDevInstanceOldestFirst(t *testing.T) {
 			for i, want := range tc.printed {
 				record, areDetails := comments[i].([]detail)
 				require.True(t, areDetails)
-				// The moment each was written is the moment the polygon was installed, so only its form stands.
 				assert.Regexp(t, instantForm, record[2].value)
 				record[2].value = ""
 				assert.Equal(t, want, record)

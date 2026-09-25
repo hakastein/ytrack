@@ -13,26 +13,25 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// The selection of six fixtures the scenarios of links run, which reaches every slot the polygon binds.
-const polygonLinked = "issue id: DEV-1, DEV-2, DEV-3, DEV-4, DEV-5, DEV-6 sort by: {issue id} asc"
+const devInstanceLinked = "issue id: DEV-1, DEV-2, DEV-3, DEV-4, DEV-5, DEV-6 sort by: {issue id} asc"
 
 // A record the scenario writes the whole of: the keys of the default with a block of custom fields of its own
 // and whatever else it asks for.
-func listedRecord(id string, fields []arrivedField, keys ...string) string {
+func listedRecord(id string, fields []receivedField, keys ...string) string {
 	members := []string{
 		`"$type":"Issue"`,
 		`"idReadable":` + strconv.Quote(id),
 		`"summary":"summary of ` + id + `"`,
 		`"created":1789035410875`,
-		`"customFields":` + arrivedFields(fields...),
+		`"customFields":` + receivedFields(fields...),
 	}
 	return "{" + strings.Join(append(members, keys...), ",") + "}"
 }
 
 // The two custom fields of the default as the server sends them, which is the block every record carries where
 // a scenario is about something else.
-func namedFieldsOfTheDefault() []arrivedField {
-	return []arrivedField{
+func namedFieldsOfTheDefault() []receivedField {
+	return []receivedField{
 		{name: namedState, valueType: "state", ordinal: "8", binding: "180-14", value: bundleElement("In Progress")},
 		{name: namedType, valueType: "enum", ordinal: "1", binding: "180-15", value: bundleElement("Task")},
 	}
@@ -77,7 +76,7 @@ func TestIssueListRefusesABlockOfARecordWrittenInAShapeItDoesNotTake(t *testing.
 
 			got := runWith(t, server.env(), "issue", "list", "--query", "", "--fields", tc.expression)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -87,19 +86,19 @@ func TestIssueListRefusesABlockOfARecordWrittenInAShapeItDoesNotTake(t *testing.
 // them, whatever order the server sent them in; a selection crosses projects, so two records need not agree.
 func TestIssueListPrintsTheCustomFieldsOfEachRecordInTheOrderOfItsProject(t *testing.T) {
 	t.Parallel()
-	development := []arrivedField{
+	development := []receivedField{
 		{name: namedState, valueType: "state", ordinal: "8", binding: "180-14", value: bundleElement("In Progress")},
 		{name: "Оценка (Back)", valueType: "period", ordinal: "2", binding: "180-16",
 			value: `{"$type":"PeriodValue","minutes":90,"presentation":"1ч 30м"}`},
 		{name: namedType, valueType: "enum", ordinal: "1", binding: "180-15", value: bundleElement("Task")},
 	}
 	// Two bindings of one place, told apart by the number of the binding and not by the text of it.
-	operations := []arrivedField{
+	operations := []receivedField{
 		{name: `a: b #c "d"`, valueType: "enum", ordinal: "5", binding: "190-10", value: bundleElement("Medium")},
 		{name: "Priority", valueType: "enum", ordinal: "5", binding: "190-9", value: bundleElement("High")},
 	}
 	body := `[` + listedRecord("DEV-1", development) + `,` + listedRecord("OPS-1", operations) + `]`
-	server := searching(t, answer(http.StatusOK, body))
+	server := searching(t, respondWith(http.StatusOK, body))
 
 	got := runWith(t, server.env(), "issue", "list", "--query", "", "--fields", "+customFields")
 
@@ -115,13 +114,9 @@ func TestIssueListPrintsTheCustomFieldsOfEachRecordInTheOrderOfItsProject(t *tes
 	assert.Empty(t, server.sentQueries()[1]["customFields"])
 }
 
-// A record is one line, and a literal block stands on lines of its own, so prose inside a record is written by
-// the writer of double-quoted strings, which carries the text without losing a byte of it.
-func TestIssueListPrintsTheProseOfARecordAsAStringOnItsLine(t *testing.T) {
+func TestIssueListPrintsTheTextOfARecordAsAStringOnItsLine(t *testing.T) {
 	t.Parallel()
-	// The description of DEV-5 of the polygon, with a line of three dashes and a line separator added: both are
-	// text a literal block would have to lay out and a quoted string carries as it is.
-	const prose = "\n Первая строка после пустой\n---\nстрока с\xe2\x80\xa8разделителем"
+	const text = "\n Первая строка после пустой\n---\nстрока с\xe2\x80\xa8разделителем"
 	tests := []struct {
 		name       string
 		expression string
@@ -131,15 +126,15 @@ func TestIssueListPrintsTheProseOfARecordAsAStringOnItsLine(t *testing.T) {
 		{
 			name:       "the description of an issue",
 			expression: "+description",
-			body: listedRecord("DEV-1", namedFieldsOfTheDefault(), `"description":`+strconv.Quote(prose)) +
+			body: listedRecord("DEV-1", namedFieldsOfTheDefault(), `"description":`+strconv.Quote(text)) +
 				`,` + listedRecord("DEV-2", namedFieldsOfTheDefault(), `"description":null`),
 			path: []string{"description"},
 		},
 		{
 			name:       "the text of a custom field",
 			expression: "+customFields",
-			body: listedRecord("DEV-1", []arrivedField{{name: "Описание", valueType: "text",
-				value: `{"$type":"TextFieldValue","text":` + strconv.Quote(prose) + `}`}}) +
+			body: listedRecord("DEV-1", []receivedField{{name: "Описание", valueType: "text",
+				value: `{"$type":"TextFieldValue","text":` + strconv.Quote(text) + `}`}}) +
 				`,` + listedRecord("DEV-2", nil),
 			path: []string{"customFields", "Описание"},
 		},
@@ -147,29 +142,27 @@ func TestIssueListPrintsTheProseOfARecordAsAStringOnItsLine(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := searching(t, answer(http.StatusOK, `[`+tc.body+`]`))
+			server := searching(t, respondWith(http.StatusOK, `[`+tc.body+`]`))
 
 			got := runWith(t, server.env(), "issue", "list", "--query", "", "--fields", tc.expression)
 
 			requireRecordsOnLines(t, got, 2)
 			printed := nodeAt(t, records(t, got)[0], tc.path...)
-			assert.Equal(t, prose, printed.Value, "stdout: %q", got.stdout)
+			assert.Equal(t, text, printed.Value, "stdout: %q", got.stdout)
 			assert.Equal(t, yaml.DoubleQuotedStyle, printed.Style, "stdout: %q", got.stdout)
 		})
 	}
 }
 
-// The links of an issue stand inside its record under the phrase each of them goes by, and a slot holding no
-// issue is no link: a record whose issue has none prints the block empty rather than a key for every slot.
 func TestIssueListPrintsTheLinksOfARecord(t *testing.T) {
 	t.Parallel()
-	linked := arrivedLinks(slices.Concat(emptySlots(), []arrivedLink{{
+	linked := receivedLinks(slices.Concat(emptyIssueLinks(), []receivedLink{{
 		direction: "INWARD", sourceToTarget: "is required for", targetToSource: "depends on",
 		issues: []string{partnerIssue("DEV-3", "Блокирующая задача")},
 	}})...)
 	body := `[` + listedRecord("DEV-1", namedFieldsOfTheDefault(), `"links":`+linked) + `,` +
-		listedRecord("DEV-2", namedFieldsOfTheDefault(), `"links":`+arrivedLinks(emptySlots()...)) + `]`
-	server := searching(t, answer(http.StatusOK, body))
+		listedRecord("DEV-2", namedFieldsOfTheDefault(), `"links":`+receivedLinks(emptyIssueLinks()...)) + `]`
+	server := searching(t, respondWith(http.StatusOK, body))
 
 	got := runWith(t, server.env(), "issue", "list", "--query", "", "--fields", "+links(issues(idReadable))")
 
@@ -190,15 +183,15 @@ func TestIssueListPrintsTheLinksOfARecord(t *testing.T) {
 func TestIssueListPrintsTheNamedCustomFieldsOfTheDefault(t *testing.T) {
 	t.Parallel()
 	// The server answers Type before State, which is the order of the prototypes rather than of the names.
-	development := []arrivedField{
+	development := []receivedField{
 		{name: namedType, valueType: "enum", ordinal: "1", binding: "180-15", value: bundleElement("Task")},
 		{name: namedState, valueType: "state", ordinal: "8", binding: "180-14", value: bundleElement("In Progress")},
 	}
-	documentation := []arrivedField{
+	documentation := []receivedField{
 		{name: namedState, valueType: "state", ordinal: "3", binding: "190-14", value: bundleElement("To do")},
 	}
 	body := `[` + listedRecord("DEV-1", development) + `,` + listedRecord("DOCS-1", documentation) + `]`
-	server := searching(t, answer(http.StatusOK, body))
+	server := searching(t, respondWith(http.StatusOK, body))
 
 	got := runWith(t, server.env(), "issue", "list", "--query", "")
 
@@ -217,14 +210,14 @@ func TestIssueListPrintsTheNamedCustomFieldsOfTheDefault(t *testing.T) {
 func TestIssueListPicksOutTheNamesOfTheDefaultWhereALinkAsksForCustomFieldsToo(t *testing.T) {
 	t.Parallel()
 	whole := append(namedFieldsOfTheDefault(),
-		arrivedField{name: "Priority", valueType: "enum", ordinal: "2", binding: "180-16", value: bundleElement("Medium")})
-	partner := `{"$type":"Issue","idReadable":"DEV-3","customFields":` + arrivedFields(whole...) + `}`
-	linked := arrivedLinks(arrivedLink{
+		receivedField{name: "Priority", valueType: "enum", ordinal: "2", binding: "180-16", value: bundleElement("Medium")})
+	partner := `{"$type":"Issue","idReadable":"DEV-3","customFields":` + receivedFields(whole...) + `}`
+	linked := receivedLinks(receivedLink{
 		direction: "INWARD", sourceToTarget: "is required for", targetToSource: "depends on",
 		issues: []string{partner},
 	})
 	body := `[` + listedRecord("DEV-1", whole, `"links":`+linked) + `]`
-	server := searching(t, answer(http.StatusOK, body))
+	server := searching(t, respondWith(http.StatusOK, body))
 
 	got := runWith(t, server.env(), "issue", "list", "--query", "", "--fields", "+links(issues(customFields))")
 
@@ -242,7 +235,7 @@ func TestIssueListPrintsTheLinksOfTheDevInstanceInOneRequest(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
-	got := runWith(t, dev.env(), "issue", "list", "--query", polygonLinked, "--limit", "10",
+	got := runWith(t, dev.env(), "issue", "list", "--query", devInstanceLinked, "--limit", "10",
 		"--fields", "+links(issues(idReadable))")
 
 	assert.Empty(t, got.stderr)
@@ -267,8 +260,8 @@ func TestIssueListPrintsTheLinksOfTheDevInstanceInOneRequest(t *testing.T) {
 // printed under.
 func partnersOf(t *testing.T, record *yaml.Node, phrase string) []string {
 	t.Helper()
-	slot := nodeAt(t, record, "links")
-	for pair := range slices.Chunk(slot.Content, 2) {
+	link := nodeAt(t, record, "links")
+	for pair := range slices.Chunk(link.Content, 2) {
 		if pair[0].Value != phrase {
 			continue
 		}
@@ -304,9 +297,7 @@ func TestIssueListPrintsTheCustomFieldsOfTheDevInstanceWhole(t *testing.T) {
 	assert.NotContains(t, got.stdout, "$type")
 }
 
-// The prose of the polygon is held against the body the server sent rather than against a copy of the fixture,
-// and inside a record every one of those descriptions is a double-quoted string on the line of its record.
-func TestIssueListPrintsTheProseOfTheDevInstanceAsAStringOnItsLine(t *testing.T) {
+func TestIssueListPrintsTheTextOfTheDevInstanceAsAStringOnItsLine(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 	const query = "issue id: DEV-1, DEV-3, DEV-4, DEV-5 sort by: {issue id} asc"
@@ -408,7 +399,7 @@ func selectingNamedFields(t *testing.T, catalogue string, page http.HandlerFunc)
 	t.Helper()
 	return searching(t, func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, cataloguePath) {
-			answer(http.StatusOK, catalogue)(w, r)
+			respondWith(http.StatusOK, catalogue)(w, r)
 			return
 		}
 		page(w, r)
@@ -418,12 +409,12 @@ func selectingNamedFields(t *testing.T, catalogue string, page http.HandlerFunc)
 // A name of the default reached the expression without the caller writing it, so it is held against nothing
 // even where a name of theirs stands beside it: an instance whose catalogue has neither State nor Type
 // answers the selection all the same, and the refusal the two would earn is one no caller could fix.
-func TestIssueListHoldsAgainstTheCatalogueOnlyTheNamesTheCallerWrote(t *testing.T) {
+func TestIssueListChecksAgainstTheCatalogueOnlyTheNamesTheCallerWrote(t *testing.T) {
 	t.Parallel()
-	arrived := append(namedFieldsOfTheDefault(), arrivedField{name: "Priority", valueType: "enum",
+	received := append(namedFieldsOfTheDefault(), receivedField{name: "Priority", valueType: "enum",
 		ordinal: "2", binding: "180-16", value: bundleElement("High")})
 	server := selectingNamedFields(t, catalogueOf(cataloguedField{name: "Priority", translate: "Приоритет"}),
-		answer(http.StatusOK, `[`+listedRecord("DEV-1", arrived)+`]`))
+		respondWith(http.StatusOK, `[`+listedRecord("DEV-1", received)+`]`))
 
 	got := runWith(t, server.env(), "issue", "list", "--query", "x", "--fields", "+customFields(Priority)")
 
@@ -440,16 +431,16 @@ func TestIssueListHoldsAgainstTheCatalogueOnlyTheNamesTheCallerWrote(t *testing.
 // asked for would arrive and go unprinted, and the key it was asked under is the one the instance keeps.
 func TestIssueListPrintsAFieldOfTheDefaultTheInstanceSpellsAnotherWay(t *testing.T) {
 	t.Parallel()
-	typeOfTheIssue := arrivedField{name: namedType, valueType: "enum", ordinal: "1", binding: "180-15",
+	typeOfTheIssue := receivedField{name: namedType, valueType: "enum", ordinal: "1", binding: "180-15",
 		value: bundleElement("Task")}
 	tests := []struct {
-		name    string
-		arrived []arrivedField
-		printed []string
+		name     string
+		received []receivedField
+		printed  []string
 	}{
 		{
 			name: "the name of a field in another letter case",
-			arrived: []arrivedField{
+			received: []receivedField{
 				{name: "state", valueType: "state", ordinal: "8", binding: "180-14",
 					value: bundleElement("In Progress")},
 				typeOfTheIssue,
@@ -458,7 +449,7 @@ func TestIssueListPrintsAFieldOfTheDefaultTheInstanceSpellsAnotherWay(t *testing
 		},
 		{
 			name: "the name of the default as the name a project gave the field",
-			arrived: []arrivedField{
+			received: []receivedField{
 				{name: "Состояние", translate: namedState, valueType: "state", ordinal: "8", binding: "180-14",
 					value: bundleElement("In Progress")},
 				typeOfTheIssue,
@@ -469,7 +460,7 @@ func TestIssueListPrintsAFieldOfTheDefaultTheInstanceSpellsAnotherWay(t *testing
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := searching(t, answer(http.StatusOK, `[`+listedRecord("DEV-1", tc.arrived)+`]`))
+			server := searching(t, respondWith(http.StatusOK, `[`+listedRecord("DEV-1", tc.received)+`]`))
 
 			got := runWith(t, server.env(), "issue", "list", "--query", "")
 
@@ -486,9 +477,9 @@ func TestIssueListPrintsAFieldOfTheDefaultTheInstanceSpellsAnotherWay(t *testing
 // carries — beside the two of the default, which never reached the catalogue at all.
 func TestIssueListPrintsACustomFieldNamedOnTopOfTheDefault(t *testing.T) {
 	t.Parallel()
-	arrived := append(namedFieldsOfTheDefault(), arrivedField{name: "Priority", translate: "Приоритет",
+	received := append(namedFieldsOfTheDefault(), receivedField{name: "Priority", translate: "Приоритет",
 		valueType: "enum", ordinal: "2", binding: "180-16", value: bundleElement("Critical")})
-	server := selectingNamedFields(t, devCatalogue(), answer(http.StatusOK, `[`+listedRecord("DEV-1", arrived)+`]`))
+	server := selectingNamedFields(t, devCatalogue(), respondWith(http.StatusOK, `[`+listedRecord("DEV-1", received)+`]`))
 
 	got := runWith(t, server.env(), "issue", "list", "--query", "", "--fields", `+customFields("приоритет")`)
 
@@ -500,8 +491,6 @@ func TestIssueListPrintsACustomFieldNamedOnTopOfTheDefault(t *testing.T) {
 	assert.Equal(t, "Critical", nodeAt(t, record, "customFields", "Priority").Value)
 }
 
-// The same way round on the polygon: the name is written as the project translates it, the catalogue is read
-// once between the markup and the selection, and the record carries what the instance calls the field.
 func TestIssueListPrintsACustomFieldNamedOnTopOfTheDevInstanceDefault(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

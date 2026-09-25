@@ -16,12 +16,12 @@ func issueInProgress() string {
 	return `{"summary":"[bug] fix login","$type":"Issue","id":"3-19",` +
 		`"tags":[{"name":"история-полигона","$type":"IssueTag"}],"reporter":{"$type":"User","login":"admin"},` +
 		`"created":1789035410875,"updated":1787942509046,"resolved":null,"idReadable":"DEV-1",` +
-		`"customFields":` + arrivedFields(
-		arrivedField{name: "State", valueType: "state", ordinal: "8", binding: "180-14",
+		`"customFields":` + receivedFields(
+		receivedField{name: "State", valueType: "state", ordinal: "8", binding: "180-14",
 			value: bundleElement("In Progress")},
-		arrivedField{name: "Type", valueType: "enum", ordinal: "1", binding: "180-15",
+		receivedField{name: "Type", valueType: "enum", ordinal: "1", binding: "180-15",
 			value: bundleElement("Task")},
-	) + `,"links":` + arrivedLinks(arrivedLink{
+	) + `,"links":` + receivedLinks(receivedLink{
 		direction: "INWARD", sourceToTarget: "parent for", targetToSource: "subtask of",
 		issues: []string{partnerIssue("DEV-4", "Родительская задача")},
 	}) + `,"description":"Шаги:\n1. открыть\n2. войти","comments":[]}`
@@ -69,8 +69,8 @@ func issueRequest(address, id, fields string) string {
 }
 
 // The whole refusal a 404 for an issue becomes, with what the server said about it word for word.
-func noSuchIssue(address, id string) refusal {
-	return refusal{
+func noSuchIssue(address, id string) faultDocument {
+	return faultDocument{
 		code: "not_found",
 		details: []detail{
 			{"request", issueRequest(address, id, sentIssueFields)},
@@ -97,7 +97,7 @@ func TestIssueRefusesACallThatNamesNoCommandOfIts(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -122,7 +122,7 @@ func TestIssueShowTakesExactlyOneID(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -154,7 +154,7 @@ func TestIssueShowRefusesAnArgumentThatIsNoReadableID(t *testing.T) {
 
 			got := runWith(t, server.env(), "issue", "show", tc.id)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -178,7 +178,7 @@ func TestIssueShowRefusesANumberWithoutACode(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -203,7 +203,7 @@ func TestIssueShowRefusesTheInternalIDTheServerResolves(t *testing.T) {
 
 			got := runWith(t, server.env(), "issue", "show", tc.id)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -223,7 +223,7 @@ func TestIssueShowHelpNamesTheDefaultFields(t *testing.T) {
 // server sent them, $type and an id nobody asked for are left out, and a summary is printed as it arrived.
 func TestIssueShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, issueInProgress()))
+	server := serve(t, respondWith(http.StatusOK, issueInProgress()))
 
 	got := runWith(t, server.env(), "issue", "show", "DEV-1")
 
@@ -255,7 +255,7 @@ func TestIssueShowSendsEveryIDTheFormAllows(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, issueInProgress()))
+			server := serve(t, respondWith(http.StatusOK, issueInProgress()))
 
 			got := runWith(t, server.env(), "issue", "show", tc.id)
 
@@ -268,9 +268,6 @@ func TestIssueShowSendsEveryIDTheFormAllows(t *testing.T) {
 	}
 }
 
-// A named field that arrived empty is printed all the same: DEV-1 carries no tag and is unresolved, and
-// tags: [] and resolved: null say so. The two instants are held to their form alone: they are the moment the
-// polygon was installed, not a fixture.
 func TestIssueShowPrintsAnIssueOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

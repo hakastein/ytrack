@@ -14,25 +14,21 @@ import (
 
 // A text a literal block has to carry, or, where quoted is set, one it cannot: the round-trip is what the
 // scenario holds, so the value that comes back has to be the value that went out either way.
-type proseCase struct {
+type textCase struct {
 	name   string
 	text   string
 	quoted bool
 }
 
-func (c proseCase) style() yaml.Style {
+func (c textCase) style() yaml.Style {
 	if c.quoted {
 		return yaml.DoubleQuotedStyle
 	}
 	return yaml.LiteralStyle
 }
 
-// The twelve texts ADR-0003 measured, the ones the polygon wrote to the server and read back byte for byte,
-// and the traps of the emitter's own rules: the indentation indicator is wrong on any table
-// missing an empty line before an indented one, and the chomping indicator on any missing the ends.
-// Hostile runes stand as bytes, since a typed \uXXXX reaches a Go literal as the rune itself.
-func proseCases() []proseCase {
-	return []proseCase{
+func textCases() []textCase {
+	return []textCase{
 		{name: "trailing spaces in a line", text: "первая   \nвторая"},
 		{name: "a line of spaces alone", text: "первая\n   \nвторая"},
 		{name: "a line of three dashes", text: "первая\n---\nвторая"},
@@ -75,14 +71,12 @@ func proseCases() []proseCase {
 	}
 }
 
-// Prose comes back as it went out, and a literal block carries every text but the ten holding a rune it
-// cannot: those go to the writer of double-quoted strings, which loses nothing either.
-func TestIssueShowPrintsProseAsALiteralBlockWhereverItCanCarryIt(t *testing.T) {
+func TestIssueShowPrintsTextAsALiteralBlockWhereverItCan(t *testing.T) {
 	t.Parallel()
-	for _, tc := range proseCases() {
+	for _, tc := range textCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serve(t, answer(http.StatusOK, issueHolding(t, map[string]any{"description": tc.text})))
+			server := serve(t, respondWith(http.StatusOK, issueWith(t, map[string]any{"description": tc.text})))
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "idReadable,description")
 
@@ -95,21 +89,19 @@ func TestIssueShowPrintsProseAsALiteralBlockWhereverItCanCarryIt(t *testing.T) {
 	}
 }
 
-// The same texts where the prose stands deeper: under a nested mapping, and inside a record of a list,
-// which is written as a block mapping because a literal block stands on lines of its own.
-func TestIssueShowPrintsProseUnderANestedKeyAndInsideARecord(t *testing.T) {
+func TestIssueShowPrintsTextUnderANestedKeyAndInsideARecord(t *testing.T) {
 	t.Parallel()
 	positions := []struct {
 		name   string
 		fields string
-		holds  func(text string) map[string]any
+		wrap   func(text string) map[string]any
 		path   []string
 		record bool
 	}{
 		{
 			name:   "a nested mapping",
 			fields: "project(description)",
-			holds: func(text string) map[string]any {
+			wrap: func(text string) map[string]any {
 				return map[string]any{"project": map[string]any{"$type": "Project", "description": text}}
 			},
 			path: []string{"project", "description"},
@@ -117,7 +109,7 @@ func TestIssueShowPrintsProseUnderANestedKeyAndInsideARecord(t *testing.T) {
 		{
 			name:   "a record of a list",
 			fields: "pinnedComments(id,text)",
-			holds: func(text string) map[string]any {
+			wrap: func(text string) map[string]any {
 				comment := map[string]any{"$type": "IssueComment", "id": "3-19", "text": text}
 				return map[string]any{"pinnedComments": []any{comment}}
 			},
@@ -128,10 +120,10 @@ func TestIssueShowPrintsProseUnderANestedKeyAndInsideARecord(t *testing.T) {
 	for _, position := range positions {
 		t.Run(position.name, func(t *testing.T) {
 			t.Parallel()
-			for _, tc := range proseCases() {
+			for _, tc := range textCases() {
 				t.Run(tc.name, func(t *testing.T) {
 					t.Parallel()
-					server := serve(t, answer(http.StatusOK, issueHolding(t, position.holds(tc.text))))
+					server := serve(t, respondWith(http.StatusOK, issueWith(t, position.wrap(tc.text))))
 
 					got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", position.fields)
 
@@ -154,17 +146,14 @@ func TestIssueShowPrintsProseUnderANestedKeyAndInsideARecord(t *testing.T) {
 // A description that was asked for and is empty is printed empty, as every named field is.
 func TestIssueShowPrintsADescriptionThatIsNotThereAsNull(t *testing.T) {
 	t.Parallel()
-	server := serve(t, answer(http.StatusOK, `{"$type":"Issue","idReadable":"DEV-1","description":null}`))
+	server := serve(t, respondWith(http.StatusOK, `{"$type":"Issue","idReadable":"DEV-1","description":null}`))
 
 	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "idReadable,description")
 
 	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-1\"\ndescription: null\n"}, got)
 }
 
-// The prose of the polygon is held against the body the server sent, not against a copy of the fixture, and
-// each guard says what that fixture still carries: a description that lost it would pass the comparison and
-// prove nothing.
-func TestIssueShowPrintsTheProseOfTheDevInstanceAsTheServerSentIt(t *testing.T) {
+func TestIssueShowPrintsTheTextOfTheDevInstanceAsTheServerSentIt(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		id    string
@@ -228,9 +217,9 @@ func TestIssueShowPrintsTheEmptyDescriptionOfTheDevInstanceAsNull(t *testing.T) 
 	assert.Equal(t, []detail{{"idReadable", "DEV-2"}, {"description", nil}}, requireDocument(t, got.stdout))
 }
 
-// issueHolding is the answer for an issue carrying keys, encoded the way the server encodes it: a control
+// issueWith is the answer for an issue carrying keys, encoded the way the server encodes it: a control
 // character arrives escaped rather than raw, and a character outside the basic plane as a surrogate pair.
-func issueHolding(t *testing.T, keys map[string]any) string {
+func issueWith(t *testing.T, keys map[string]any) string {
 	t.Helper()
 	object := map[string]any{"$type": "Issue", "idReadable": "DEV-1"}
 	for key, value := range keys {

@@ -40,7 +40,6 @@ func catalogueOf(fields ...cataloguedField) string {
 	return "[" + strings.Join(sent, ",") + "]"
 }
 
-// The catalogue of the polygon, cut down to the fields the scenarios here name.
 func devCatalogue() string {
 	return catalogueOf(
 		cataloguedField{name: "Priority", translate: "Приоритет"},
@@ -56,7 +55,7 @@ func serveNamedFields(t *testing.T, catalogue string, issue http.HandlerFunc) *u
 	t.Helper()
 	return serve(t, func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, cataloguePath) {
-			answer(http.StatusOK, catalogue)(w, r)
+			respondWith(http.StatusOK, catalogue)(w, r)
 			return
 		}
 		issue(w, r)
@@ -71,7 +70,7 @@ func catalogueRequest(address string) string {
 // showNamedFields is the block one answer prints for the names of an expression.
 func showNamedFields(t *testing.T, expression, body string) (outcome, []detail) {
 	t.Helper()
-	server := serveNamedFields(t, devCatalogue(), answer(http.StatusOK, body))
+	server := serveNamedFields(t, devCatalogue(), respondWith(http.StatusOK, body))
 
 	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", expression)
 
@@ -109,7 +108,7 @@ func TestIssueShowRefusesAnExpressionNoCustomFieldNameFits(t *testing.T) {
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--fields", tc.expression)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -120,7 +119,7 @@ func TestIssueShowRefusesAnExpressionNoCustomFieldNameFits(t *testing.T) {
 func TestIssueShowSendsEveryNamedCustomFieldAsAParameter(t *testing.T) {
 	t.Parallel()
 	expression := `customFields("Модуль системы",state,"Статус разработки")`
-	server := serveNamedFields(t, devCatalogue(), answer(http.StatusOK, issueWithFields()))
+	server := serveNamedFields(t, devCatalogue(), respondWith(http.StatusOK, issueWithFields()))
 
 	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", expression)
 
@@ -135,11 +134,11 @@ func TestIssueShowSendsEveryNamedCustomFieldAsAParameter(t *testing.T) {
 
 // A name that holds a quote or a backslash carries it behind a backslash, and the name the server is sent is
 // the name itself.
-func TestIssueShowSendsANamedCustomFieldWhoseNameHoldsAQuote(t *testing.T) {
+func TestIssueShowSendsANamedCustomFieldWhoseNameContainsAQuote(t *testing.T) {
 	t.Parallel()
 	quoted := `a: b #c "d"`
 	catalogue := catalogueOf(cataloguedField{name: quoted})
-	server := serveNamedFields(t, catalogue, answer(http.StatusOK, issueWithFields()))
+	server := serveNamedFields(t, catalogue, respondWith(http.StatusOK, issueWithFields()))
 
 	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0",
 		"--fields", `customFields("a: b #c \"d\"")`)
@@ -154,8 +153,8 @@ func TestIssueShowSendsANamedCustomFieldWhoseNameHoldsAQuote(t *testing.T) {
 func TestIssueShowPrintsNamedCustomFieldsInTheOrderTheyWereNamed(t *testing.T) {
 	t.Parallel()
 	body := issueWithFields(
-		arrivedField{name: "Type", valueType: "enum", ordinal: "1", binding: "180-15", value: bundleElement("Task")},
-		arrivedField{name: "State", valueType: "state", ordinal: "8", binding: "180-14", value: bundleElement("In Progress")},
+		receivedField{name: "Type", valueType: "enum", ordinal: "1", binding: "180-15", value: bundleElement("Task")},
+		receivedField{name: "State", valueType: "state", ordinal: "8", binding: "180-14", value: bundleElement("In Progress")},
 	)
 
 	got, block := showNamedFields(t, "customFields(State,Type)", body)
@@ -166,30 +165,30 @@ func TestIssueShowPrintsNamedCustomFieldsInTheOrderTheyWereNamed(t *testing.T) {
 // A field the caller named is printed however empty it is: null where its type holds one value, an empty list
 // where it holds more than one. A field the issue does not hold at all gets no key, since null would say the
 // issue has the field and holds nothing in it.
-func TestIssueShowPrintsANamedCustomFieldTheIssueHoldsNothingIn(t *testing.T) {
+func TestIssueShowPrintsANamedCustomFieldTheIssueLeavesEmpty(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name       string
 		expression string
-		arrived    []arrivedField
+		received   []receivedField
 		printed    []detail
 	}{
 		{
 			name:       "one value and none of it",
 			expression: "customFields(State)",
-			arrived:    []arrivedField{{name: "State", valueType: "state", value: "null"}},
+			received:   []receivedField{{name: "State", valueType: "state", value: "null"}},
 			printed:    []detail{{"State", nil}},
 		},
 		{
 			name:       "more than one value and none of them",
 			expression: `customFields("Модуль системы")`,
-			arrived:    []arrivedField{{name: "Модуль системы", valueType: "enum", isMultiValue: true, value: "[]"}},
+			received:   []receivedField{{name: "Модуль системы", valueType: "enum", isMultiValue: true, value: "[]"}},
 			printed:    []detail{{"Модуль системы", []any{}}},
 		},
 		{
 			name:       "a field the issue does not hold",
 			expression: "customFields(State,Type)",
-			arrived: []arrivedField{{
+			received: []receivedField{{
 				name: "State", valueType: "state", value: bundleElement("In Progress"),
 			}},
 			printed: []detail{{"State", "In Progress"}},
@@ -197,13 +196,13 @@ func TestIssueShowPrintsANamedCustomFieldTheIssueHoldsNothingIn(t *testing.T) {
 		{
 			name:       "not one of the fields named",
 			expression: "customFields(State,Type)",
-			arrived:    nil,
+			received:   nil,
 			printed:    []detail{},
 		},
 		{
 			name:       "a field nobody named",
 			expression: "customFields(State)",
-			arrived: []arrivedField{
+			received: []receivedField{
 				{name: "State", valueType: "state", value: bundleElement("In Progress")},
 				{name: "Type", valueType: "enum", binding: "180-15", value: bundleElement("Task")},
 			},
@@ -214,7 +213,7 @@ func TestIssueShowPrintsANamedCustomFieldTheIssueHoldsNothingIn(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, block := showNamedFields(t, tc.expression, issueWithFields(tc.arrived...))
+			got, block := showNamedFields(t, tc.expression, issueWithFields(tc.received...))
 
 			assert.Equal(t, tc.printed, block, "stdout: %q", got.stdout)
 		})
@@ -256,13 +255,13 @@ func TestIssueShowResolvesANameAgainstBothNamesAFieldAnswersTo(t *testing.T) {
 			printed:    []detail{{"State", "In Progress"}},
 		},
 	}
-	arrived := issueWithFields(arrivedField{
+	received := issueWithFields(receivedField{
 		name: "State", valueType: "state", value: bundleElement("In Progress"),
 	})
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := serveNamedFields(t, devCatalogue(), answer(http.StatusOK, arrived))
+			server := serveNamedFields(t, devCatalogue(), respondWith(http.StatusOK, received))
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", tc.expression)
 
@@ -275,22 +274,18 @@ func TestIssueShowResolvesANameAgainstBothNamesAFieldAnswersTo(t *testing.T) {
 	}
 }
 
-// The name of a field answers before the translation of another one does, so a name standing on both sides of
-// the catalogue is neither ambiguous nor the other field: what the instance calls a field of its own wins over
-// what a project calls some other field. The catalogues differ instance by instance — one may translate
-// State as Статус — so the collision is a catalogue away rather than a shape the polygon cannot take.
 func TestIssueShowResolvesANameToTheFieldItNamesRatherThanTheOneItTranslates(t *testing.T) {
 	t.Parallel()
 	catalogue := catalogueOf(
 		cataloguedField{name: "Состояние"},
 		cataloguedField{name: "State", translate: "Состояние"},
 	)
-	arrived := issueWithFields(
-		arrivedField{name: "Состояние", valueType: "state", value: bundleElement("Новая")},
-		arrivedField{name: "State", valueType: "state", ordinal: "8", binding: "180-14",
+	received := issueWithFields(
+		receivedField{name: "Состояние", valueType: "state", value: bundleElement("Новая")},
+		receivedField{name: "State", valueType: "state", ordinal: "8", binding: "180-14",
 			value: bundleElement("In Progress")},
 	)
-	server := serveNamedFields(t, catalogue, answer(http.StatusOK, arrived))
+	server := serveNamedFields(t, catalogue, respondWith(http.StatusOK, received))
 
 	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0",
 		"--fields", `customFields("Состояние")`)
@@ -313,7 +308,7 @@ func TestIssueShowRefusesANameNoCustomFieldOfTheInstanceAnswersTo(t *testing.T) 
 	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0",
 		"--fields", `customFields("Статус разрабтки",Stat)`)
 
-	assert.Equal(t, refusal{
+	assert.Equal(t, faultDocument{
 		code: "unknown_name",
 		details: []detail{
 			{"request", catalogueRequest(server.url)},
@@ -358,7 +353,7 @@ func TestIssueShowSuggestsTheNamesNearestAMisspeltCustomField(t *testing.T) {
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", expression)
 
-			assert.Equal(t, refusal{
+			assert.Equal(t, faultDocument{
 				code: "unknown_name",
 				details: []detail{
 					{"request", catalogueRequest(server.url)},
@@ -384,7 +379,7 @@ func TestIssueShowRefusesANameMoreThanOneCustomFieldAnswersTo(t *testing.T) {
 
 	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", `customFields("Оценка")`)
 
-	assert.Equal(t, refusal{
+	assert.Equal(t, faultDocument{
 		code: "unknown_name",
 		details: []detail{
 			{"request", catalogueRequest(server.url)},
@@ -405,12 +400,12 @@ func TestIssueShowRefusesTheNamesTheCatalogueIsClosedTo(t *testing.T) {
 	body := `{"error":"Forbidden","error_description":"HTTP 403 Forbidden"}`
 	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
 		require.True(t, strings.HasPrefix(r.URL.Path, cataloguePath), "the issue was asked for")
-		answer(http.StatusForbidden, body)(w, r)
+		respondWith(http.StatusForbidden, body)(w, r)
 	})
 
 	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "customFields(State)")
 
-	assert.Equal(t, refusal{
+	assert.Equal(t, faultDocument{
 		code: "denied",
 		details: []detail{
 			{"request", catalogueRequest(server.url)},
@@ -439,7 +434,7 @@ func TestIssueShowReadsNoCatalogueWhereNoCustomFieldWasNamed(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := issueInProgress()
-			server := serve(t, answer(http.StatusOK, body))
+			server := serve(t, respondWith(http.StatusOK, body))
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0", "--fields", tc.expression)
 
@@ -455,21 +450,21 @@ func TestIssueShowReadsNoCatalogueWhereNoCustomFieldWasNamed(t *testing.T) {
 // before printing. A legal expression stays legal whatever the server's parameter can reach.
 func TestIssueShowSendsNoNamesWhereAnotherIssueCarriesCustomFieldsToo(t *testing.T) {
 	t.Parallel()
-	body := `{"$type":"Issue","customFields":` + arrivedFields(
-		arrivedField{name: "State", valueType: "state", ordinal: "8", binding: "180-14",
+	body := `{"$type":"Issue","customFields":` + receivedFields(
+		receivedField{name: "State", valueType: "state", ordinal: "8", binding: "180-14",
 			value: bundleElement("In Progress")},
-		arrivedField{name: "Type", valueType: "enum", ordinal: "1", binding: "180-15",
+		receivedField{name: "Type", valueType: "enum", ordinal: "1", binding: "180-15",
 			value: bundleElement("Task")},
-	) + `,"links":` + arrivedLinks(arrivedLink{
+	) + `,"links":` + receivedLinks(receivedLink{
 		direction: "OUTWARD", sourceToTarget: "relates to", targetToSource: "relates to",
-		issues: []string{`{"$type":"Issue","customFields":` + arrivedFields(
-			arrivedField{name: "State", valueType: "state", ordinal: "8", binding: "180-14",
+		issues: []string{`{"$type":"Issue","customFields":` + receivedFields(
+			receivedField{name: "State", valueType: "state", ordinal: "8", binding: "180-14",
 				value: bundleElement("Open")},
-			arrivedField{name: "Type", valueType: "enum", ordinal: "1", binding: "180-15",
+			receivedField{name: "Type", valueType: "enum", ordinal: "1", binding: "180-15",
 				value: bundleElement("Bug")},
 		) + `}`},
 	}) + `}`
-	server := serveNamedFields(t, devCatalogue(), answer(http.StatusOK, body))
+	server := serveNamedFields(t, devCatalogue(), respondWith(http.StatusOK, body))
 
 	got := runWith(t, server.env(), "issue", "show", "DEV-1", "--comments=0",
 		"--fields", "customFields(State),links(issues(customFields))")
@@ -486,9 +481,6 @@ func TestIssueShowSendsNoNamesWhereAnotherIssueCarriesCustomFieldsToo(t *testing
 	}, requireDocument(t, got.stdout))
 }
 
-// The names of the polygon, resolved against the catalogue of the instance and printed in the order they were
-// asked in. A member of the project is answered the same document as the admin: the catalogue of the instance
-// is open to every reader of it, while the fields of a project are not.
 func TestIssueShowPrintsTheNamedCustomFieldsOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -521,7 +513,7 @@ func TestIssueShowPrintsTheNamedCustomFieldsOfTheDevInstance(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			for _, who := range polygonReaders() {
+			for _, who := range devInstanceReaders() {
 				t.Run(who.name, func(t *testing.T) {
 					t.Parallel()
 					dev := devInstance(t)
@@ -543,7 +535,7 @@ func TestIssueShowPrintsTheNamedCustomFieldsOfTheDevInstance(t *testing.T) {
 // issue is never asked for.
 func TestIssueShowRefusesANameTheDevInstanceHasNoCustomFieldFor(t *testing.T) {
 	t.Parallel()
-	for _, who := range polygonReaders() {
+	for _, who := range devInstanceReaders() {
 		t.Run(who.name, func(t *testing.T) {
 			t.Parallel()
 			dev := devInstance(t)
@@ -566,9 +558,7 @@ func TestIssueShowRefusesANameTheDevInstanceHasNoCustomFieldFor(t *testing.T) {
 	}
 }
 
-// The two tokens of the polygon that read issues at all: what they are answered about custom fields is the
-// same document.
-func polygonReaders() []struct {
+func devInstanceReaders() []struct {
 	name  string
 	token func(t *testing.T) string
 } {

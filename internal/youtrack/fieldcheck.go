@@ -10,54 +10,48 @@ import (
 	"github.com/hakastein/ytrack/internal/render"
 )
 
-// A place is where values stand in the answer: its root, or a field asked of the values at the place
-// above. Every item of a list stands at the place of the list.
-type place struct {
-	above *place
-	field requestedField
-	below []*place
+type fieldNode struct {
+	parent   *fieldNode
+	field    requestedField
+	children []*fieldNode
 	// Each $type the server named on the objects that stood here, once.
 	named []string
 }
 
-// An absence is a name asked of a value that lacks it.
-type absence struct {
-	at   *place
+type missingField struct {
+	at   *fieldNode
 	name string
 	// The $type named on the object; typed is false where the object named none or a scalar stood there.
 	named  string
 	typed  bool
 	scalar bool
 	// ytrack asked for the name itself, so no caller can be told to fix it.
-	mine bool
+	internal bool
 }
 
-// A family is the schemas an object at a place may be of, with every name they declare.
-type family struct {
+type schemaSet struct {
 	schemas []string
 	names   []string
-	// A schema of the family above declares the field a scalar or an object of no schema, where the server
-	// sends scalars: a custom field's value is one.
 	untyped bool
 }
 
-type judgment struct {
-	schemas  *schemas
-	families map[*place]family
+type schemaResolver struct {
+	schemas    *schemas
+	schemaSets map[*fieldNode]schemaSet
 }
 
-// judge refuses the names absent from the answer, unless the $type the server named shows a name to
+// checkMissingFields refuses the names absent from the answer, unless the $type the server named shows a name to
 // belong to another schema of its place.
-func judge(spec *schemas, response *http.Response, answerSchema string, requested []requestedField, tree any) *diag.Fault {
-	root, absences := survey(requested, tree)
+func checkMissingFields(spec *schemas, response *http.Response, responseSchema string, requested []requestedField, tree any) *diag.Fault {
+	root, absences := findMissingFields(requested, tree)
 	if len(absences) == 0 {
 		return nil
 	}
-	j := newJudgment(spec, answerSchema, root)
+	j := newSchemaResolver(spec, responseSchema, root)
 	var missing, unknown []*render.Node
 	listed := map[string]bool{}
 	for _, a := range absences {
-		code := j.verdict(a)
+		code := j.classify(a)
 		if code == "" {
 			continue
 		}
@@ -66,21 +60,21 @@ func judge(spec *schemas, response *http.Response, answerSchema string, requeste
 			continue
 		}
 		listed[string(code)+" "+field] = true
-		if code == diag.UpstreamLied {
+		if code == diag.UpstreamInvalid {
 			missing = append(missing, missingEntry(field, a))
 		} else {
-			unknown = append(unknown, unknownEntry(field, nearestNames(a.name, j.families[a.at].names)))
+			unknown = append(unknown, unknownEntry(field, nearestNames(a.name, j.schemaSets[a.at].names)))
 		}
 	}
 	details := []render.Pair{
 		requestDetail(response.Request.Method, response.Request.URL.Redacted()),
-		{Key: "fields", Value: render.NewString(walk(requested))},
+		{Key: "fields", Value: render.NewString(formatFields(requested))},
 	}
 	// A field the server did not send stays unsent whatever name is fixed.
 	if len(missing) > 0 {
 		message := "the fields under missing were asked for and did not arrive: the caller's rights may hide them"
 		details = append(details, render.Pair{Key: "missing", Value: render.NewList(missing...)})
-		return &diag.Fault{Code: diag.UpstreamLied, Message: message, Details: details}
+		return &diag.Fault{Code: diag.UpstreamInvalid, Message: message, Details: details}
 	}
 	if len(unknown) > 0 {
 		message := "the names under unknown are not declared where they were asked for"
@@ -90,37 +84,35 @@ func judge(spec *schemas, response *http.Response, answerSchema string, requeste
 	return nil
 }
 
-// survey walks the whole answer before any name is judged, since the family of a place is read off every $type
-// named there, and returns the root of the places with each absence once, in the order found.
-func survey(requested []requestedField, tree any) (*place, []absence) {
-	s := surveyor{found: map[absence]bool{}}
-	root := newPlace(nil, requestedField{children: requested})
+func findMissingFields(requested []requestedField, tree any) (*fieldNode, []missingField) {
+	s := missingFieldCollector{found: map[missingField]bool{}}
+	root := newFieldNode(nil, requestedField{children: requested})
 	s.visit(root, tree)
 	return root, s.absences
 }
 
-type surveyor struct {
-	absences []absence
-	found    map[absence]bool
+type missingFieldCollector struct {
+	absences []missingField
+	found    map[missingField]bool
 }
 
-func newPlace(above *place, field requestedField) *place {
-	p := &place{above: above, field: field}
+func newFieldNode(parent *fieldNode, field requestedField) *fieldNode {
+	p := &fieldNode{parent: parent, field: field}
 	for _, child := range field.children {
-		p.below = append(p.below, newPlace(p, child))
+		p.children = append(p.children, newFieldNode(p, child))
 	}
 	return p
 }
 
-func (p *place) path() []string {
-	if p.above == nil {
+func (p *fieldNode) path() []string {
+	if p.parent == nil {
 		return nil
 	}
-	return append(p.above.path(), p.field.name)
+	return append(p.parent.path(), p.field.name)
 }
 
 // visit walks the fields asked of p over the value standing there and stops where it is null or [].
-func (s *surveyor) visit(p *place, value any) {
+func (s *missingFieldCollector) visit(p *fieldNode, value any) {
 	switch value := value.(type) {
 	case nil:
 	case []any:
@@ -133,58 +125,50 @@ func (s *surveyor) visit(p *place, value any) {
 			p.named = append(p.named, named)
 		}
 		for i, field := range p.field.children {
-			child, arrived := value[field.name]
+			child, ok := value[field.name]
 			switch {
-			case !arrived:
-				s.absent(absence{at: p, name: field.name, named: named, typed: typed, mine: ytrackOwn(field)})
-			// Below a name ytrack normalizes, the server sends subtypes the specification declares nowhere —
-			// LinkTypeFilterField, WorkItemFilterField — and the catalogue would read a member they lack as a
-			// member withheld. What stands there is judged by the rule that prints it, and no name of the
-			// caller's stands there at all: one written under such a name is refused before any request.
+			case !ok:
+				s.add(missingField{at: p, name: field.name, named: named, typed: typed, internal: fromDefault(field)})
 			case field.children != nil && !field.normalized:
-				s.visit(p.below[i], child)
+				s.visit(p.children[i], child)
 			}
 		}
 	default:
 		for _, field := range p.field.children {
-			s.absent(absence{at: p, name: field.name, scalar: true, mine: ytrackOwn(field)})
+			s.add(missingField{at: p, name: field.name, scalar: true, internal: fromDefault(field)})
 		}
 	}
 }
 
-// Objects that lack a name alike get one verdict, so the absence is kept once however many of them lack it.
-func (s *surveyor) absent(a absence) {
+func (s *missingFieldCollector) add(a missingField) {
 	if !s.found[a] {
 		s.found[a] = true
 		s.absences = append(s.absences, a)
 	}
 }
 
-// newJudgment gives each place of a finished survey its family, once, from the root down.
-func newJudgment(schemas *schemas, answerSchema string, root *place) judgment {
-	j := judgment{schemas: schemas, families: map[*place]family{}}
-	top := schemas.subtree(answerSchema)
-	j.settle(root, family{schemas: top, names: schemas.names(top)})
+func newSchemaResolver(schemas *schemas, responseSchema string, root *fieldNode) schemaResolver {
+	j := schemaResolver{schemas: schemas, schemaSets: map[*fieldNode]schemaSet{}}
+	top := schemas.subtree(responseSchema)
+	j.assignSchemas(root, schemaSet{schemas: top, names: schemas.names(top)})
 	return j
 }
 
-func (j judgment) settle(p *place, f family) {
-	j.families[p] = f
-	for _, below := range p.below {
-		j.settle(below, j.familyBelow(f, below))
+func (j schemaResolver) assignSchemas(p *fieldNode, f schemaSet) {
+	j.schemaSets[p] = f
+	for _, child := range p.children {
+		j.assignSchemas(child, j.childSchemas(f, child))
 	}
 }
 
-// familyBelow is what the family above declares the field of p to hold and, where a schema of it declares no
-// schema for the field or none declares the field, the hierarchies of what the server named at p.
-func (j judgment) familyBelow(above family, p *place) family {
+func (j schemaResolver) childSchemas(parentSet schemaSet, p *fieldNode) schemaSet {
 	var schemas []string
 	untyped := false
-	for _, owner := range above.schemas {
-		held, declared := j.schemas.declaration(owner, p.field.name)
+	for _, owner := range parentSet.schemas {
+		decl, declared := j.schemas.declaration(owner, p.field.name)
 		switch {
-		case held.schema != "":
-			schemas = append(schemas, j.schemas.subtree(held.schema)...)
+		case decl.schema != "":
+			schemas = append(schemas, j.schemas.subtree(decl.schema)...)
 		case declared:
 			untyped = true
 		}
@@ -192,37 +176,33 @@ func (j judgment) familyBelow(above family, p *place) family {
 	if untyped || schemas == nil {
 		schemas = append(schemas, j.schemas.hierarchies(p.named)...)
 	}
-	for _, standing := range p.field.standing {
-		schemas = append(schemas, j.schemas.subtree(standing)...)
+	for _, schema := range p.field.extraSchemas {
+		schemas = append(schemas, j.schemas.subtree(schema)...)
 	}
-	return family{schemas: schemas, names: j.schemas.names(schemas), untyped: untyped}
+	return schemaSet{schemas: schemas, names: j.schemas.names(schemas), untyped: untyped}
 }
 
-// verdict is the code an absence is refused with, or "" when the name belongs to another schema that may stand
-// at its place and not to what stands there.
-func (j judgment) verdict(a absence) diag.Code {
-	f := j.families[a.at]
+func (j schemaResolver) classify(a missingField) diag.Code {
+	f := j.schemaSets[a.at]
 	member := slices.Contains(f.schemas, a.named)
 	switch {
 	case member && j.declares(a.named, a.name):
-		return diag.UpstreamLied
+		return diag.UpstreamInvalid
 	case !slices.Contains(f.names, a.name):
 		// unknown_name hands the caller a name of theirs to fix, and a name of ytrack's own is none: the
 		// specification declares neither styleRanges nor the members of a range, and the request asks for
 		// them all the same.
-		if a.mine {
-			return diag.UpstreamLied
+		if a.internal {
+			return diag.UpstreamInvalid
 		}
 		return diag.UnknownName
-	// Nothing but a schema of the family that lacks the name, or a scalar where scalars may stand, shows the
-	// name not to apply: a schema that may not stand at the place vouches for nothing.
 	case member, a.scalar && f.untyped:
 		return ""
 	}
-	return diag.UpstreamLied
+	return diag.UpstreamInvalid
 }
 
-func (j judgment) declares(schema, name string) bool {
+func (j schemaResolver) declares(schema, name string) bool {
 	_, ok := j.schemas.declaration(schema, name)
 	return ok
 }
@@ -232,7 +212,7 @@ func fieldPath(parents []string, name string) string {
 	return strings.Join(append(slices.Clip(parents), name), "(") + strings.Repeat(")", len(parents))
 }
 
-func missingEntry(field string, a absence) *render.Node {
+func missingEntry(field string, a missingField) *render.Node {
 	schema := render.NewNull()
 	if a.typed {
 		schema = render.NewString(a.named)
@@ -261,9 +241,6 @@ type suggestion struct {
 	also []string
 }
 
-// nearest is up to five of among within two edits of the name asked for, letter case aside, nearest first and
-// ties by name; where none is that near, fallback, since a caller nowhere near a name needs to see what there
-// is. The names of fields= are ASCII and the name a project gives a field is prose, so the edits are runes.
 func nearest(asked string, among []suggestion, fallback []string) []string {
 	type candidate struct {
 		name     string
@@ -303,8 +280,6 @@ func nearestNames(asked string, names []string) []string {
 	return nearest(asked, among, names)
 }
 
-// distance is the Levenshtein distance in runes: the names of fields= are ASCII, the names a project gives a
-// custom field are prose.
 func distance(a, b []rune) int {
 	previous, current := make([]int, len(b)+1), make([]int, len(b)+1)
 	for j := range previous {

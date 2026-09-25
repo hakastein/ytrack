@@ -32,7 +32,6 @@ func attachmentOf(id, name, readable string) string {
 		`,"issue":{"$type":"Issue","idReadable":` + strconv.Quote(readable) + `}}`
 }
 
-// An attachment as the polygon would answer for one: a file of DEV-7.
 func attachmentOfDEV7() string {
 	return attachmentOf("12-5", "a.txt", "DEV-7")
 }
@@ -59,7 +58,7 @@ func TestAttachmentDeleteRefusesACallOfAnyOtherShape(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"attachment", "delete"}, tc.argv...)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -104,7 +103,7 @@ func TestAttachmentDeleteRefusesAnInternalIDForItsOwner(t *testing.T) {
 
 	got := runWith(t, server.env(), "attachment", "delete", "3-19", "12-2")
 
-	assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 	assert.Empty(t, server.requests())
 }
 
@@ -128,7 +127,7 @@ func TestAttachmentDeleteHelpAsksNothingAndNamesWhereTheIDComesFrom(t *testing.T
 // read answered — the argument was never checked, and dev-7 and DEV-7 reach the same issue.
 func TestAttachmentDeletePrintsWhatTheReadBeforeItFound(t *testing.T) {
 	t.Parallel()
-	server := deleting(t, answer(http.StatusOK, attachmentOfDEV7()), deletionDone())
+	server := deleting(t, respondWith(http.StatusOK, attachmentOfDEV7()), deletionDone())
 
 	got := runWith(t, server.env(), "attachment", "delete", "dev-7", "12-5")
 
@@ -161,7 +160,7 @@ func TestAttachmentDeleteReadsTheStatusOfEachRequest(t *testing.T) {
 	}{
 		{
 			name:     "an attachment the owner has none of",
-			read:     answer(http.StatusNotFound, entityNotFound("12-5")),
+			read:     respondWith(http.StatusNotFound, entityNotFound("12-5")),
 			deletion: noDeletion,
 			code:     "not_found",
 			exit:     1,
@@ -172,8 +171,8 @@ func TestAttachmentDeleteReadsTheStatusOfEachRequest(t *testing.T) {
 		},
 		{
 			name:     "an attachment taken away between the read and the deletion",
-			read:     answer(http.StatusOK, attachmentOfDEV7()),
-			deletion: func(*testing.T) http.HandlerFunc { return answer(http.StatusNotFound, entityNotFound("12-5")) },
+			read:     respondWith(http.StatusOK, attachmentOfDEV7()),
+			deletion: func(*testing.T) http.HandlerFunc { return respondWith(http.StatusNotFound, entityNotFound("12-5")) },
 			code:     "not_found",
 			exit:     1,
 			request:  func(address string) string { return attachmentDeletionRequest(address, "issues", "DEV-7", "12-5") },
@@ -181,10 +180,10 @@ func TestAttachmentDeleteReadsTheStatusOfEachRequest(t *testing.T) {
 		},
 		{
 			name: "a token that may read the attachment and not take it away",
-			read: answer(http.StatusOK, attachmentOfDEV7()),
+			read: respondWith(http.StatusOK, attachmentOfDEV7()),
 			deletion: func(*testing.T) http.HandlerFunc {
 				said := `{"error":"Forbidden","error_description":"Insufficient rights"}`
-				return answer(http.StatusForbidden, said)
+				return respondWith(http.StatusForbidden, said)
 			},
 			code:    "denied",
 			exit:    1,
@@ -223,29 +222,29 @@ func TestAttachmentDeleteRefusesAnAnswerItCannotBeAddressedBy(t *testing.T) {
 	}{
 		{
 			name:     "another attachment than the one asked for",
-			read:     answer(http.StatusOK, attachmentOf("12-6", "a.txt", "DEV-7")),
+			read:     respondWith(http.StatusOK, attachmentOf("12-6", "a.txt", "DEV-7")),
 			deletion: noDeletion,
 			exit:     1,
 			methods:  []string{http.MethodGet},
 		},
 		{
 			name:     "an owner no request can be addressed by",
-			read:     answer(http.StatusOK, attachmentOf("12-5", "a.txt", "..")),
+			read:     respondWith(http.StatusOK, attachmentOf("12-5", "a.txt", "..")),
 			deletion: noDeletion,
 			exit:     1,
 			methods:  []string{http.MethodGet},
 		},
 		{
 			name:     "an owner that arrived as no object at all",
-			read:     answer(http.StatusOK, `{"$type":"IssueAttachment","id":"12-5","name":"a.txt","issue":null}`),
+			read:     respondWith(http.StatusOK, `{"$type":"IssueAttachment","id":"12-5","name":"a.txt","issue":null}`),
 			deletion: noDeletion,
 			exit:     1,
 			methods:  []string{http.MethodGet},
 		},
 		{
 			name:     "a deletion answered with a body",
-			read:     answer(http.StatusOK, attachmentOfDEV7()),
-			deletion: func(*testing.T) http.HandlerFunc { return answer(http.StatusOK, `{"x":1}`) },
+			read:     respondWith(http.StatusOK, attachmentOfDEV7()),
+			deletion: func(*testing.T) http.HandlerFunc { return respondWith(http.StatusOK, `{"x":1}`) },
 			exit:     2,
 			methods:  []string{http.MethodGet, http.MethodDelete},
 		},
@@ -258,7 +257,7 @@ func TestAttachmentDeleteRefusesAnAnswerItCannotBeAddressedBy(t *testing.T) {
 			got := runWith(t, server.env(), "attachment", "delete", "DEV-7", "12-5")
 
 			refused := requireRefusalDocument(t, got)
-			assert.Equal(t, "upstream_lied", refused.code)
+			assert.Equal(t, "upstream_invalid", refused.code)
 			assert.Equal(t, tc.exit, got.code)
 			assert.Equal(t, tc.methods, sentMethods(server))
 		})
@@ -271,7 +270,7 @@ func TestAttachmentDeleteTakesAFileOffAnArticleThroughItsOwnAPI(t *testing.T) {
 	t.Parallel()
 	const answered = `{"$type":"ArticleAttachment","id":"522-4","name":"кот.png",` +
 		`"article":{"$type":"Article","idReadable":"DEV-A-7"}}`
-	server := deleting(t, answer(http.StatusOK, answered), deletionDone())
+	server := deleting(t, respondWith(http.StatusOK, answered), deletionDone())
 
 	got := runWith(t, server.env(), "attachment", "delete", "DEV-A-7", "522-4")
 
@@ -283,10 +282,6 @@ func TestAttachmentDeleteTakesAFileOffAnArticleThroughItsOwnAPI(t *testing.T) {
 	assert.NotContains(t, strings.Join(server.sentPaths(), " "), "/api/issues")
 }
 
-// The whole of a deletion against the polygon: the server keeps an attachment to the
-// owner it hangs from, so an id named under another owner is answered 404 there and the read stops the call
-// before it. What is taken away goes for good — the signed link that was printed for it stops working, and a
-// second call about the same id finds nothing.
 func TestAttachmentDeleteTakesFilesOffThePolygon(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -378,7 +373,7 @@ func anIssueOfItsOwn(t *testing.T, dev *upstream, called string) string {
 // files, so the id and the signed link it is held to afterwards are the ones a caller would have.
 func attachedTo(t *testing.T, dev *upstream, owner, name string, content []byte) printedAttachment {
 	t.Helper()
-	got := runWith(t, dev.env(), "attachment", "create", owner, fileHolding(t, name, content))
+	got := runWith(t, dev.env(), "attachment", "create", owner, fileWith(t, name, content))
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	return requireAttachmentPrinted(t, got.stdout)
 }

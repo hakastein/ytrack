@@ -28,9 +28,9 @@ func taggingRequest(address, collection, readable, fields string) string {
 	return "POST " + address + tagsOfOwnerPath(collection, readable) + "?fields=" + fields
 }
 
-// hangingATag is the server of a tagging: owner answers the read that settles the readable id, catalogue the
+// addingATag is the server of a tagging: owner answers the read that settles the readable id, catalogue the
 // read that resolves the name, and tagging the POST that follows the two.
-func hangingATag(t *testing.T, owner, catalogue, tagging http.HandlerFunc) *upstream {
+func addingATag(t *testing.T, owner, catalogue, tagging http.HandlerFunc) *upstream {
 	t.Helper()
 	return serve(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -44,10 +44,8 @@ func hangingATag(t *testing.T, owner, catalogue, tagging http.HandlerFunc) *upst
 	})
 }
 
-// The polygon was measured answering one token with two tags named amb, so the catalogue a scenario resolves
-// against is the same one the deletion is resolved against.
 func shownTags() http.HandlerFunc {
-	return answer(http.StatusOK, tagsOfTwoOwners())
+	return respondWith(http.StatusOK, tagsOfTwoOwners())
 }
 
 // noTagging stands for the write a refusal before it must not send.
@@ -84,7 +82,7 @@ func TestTagAddRefusesACallOfAnyOtherShape(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"tag", "add"}, tc.argv...)...)
 
-			assert.Equal(t, refusal{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -124,8 +122,8 @@ func TestTagAddReadsTheOwnerThenResolvesTheNameThenWrites(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := hangingATag(t, answer(http.StatusOK, tc.owner), shownTags(),
-				answer(http.StatusOK, shownTag("10-5", "Ready", "admin")))
+			server := addingATag(t, respondWith(http.StatusOK, tc.owner), shownTags(),
+				respondWith(http.StatusOK, catalogueTag("10-5", "Ready", "admin")))
 
 			got := runWith(t, server.env(), "tag", "add", tc.written, "--name", "ready")
 
@@ -155,8 +153,8 @@ func TestTagAddReadsTheOwnerThenResolvesTheNameThenWrites(t *testing.T) {
 // the document the caller keeps is about the moment the tag went on.
 func TestTagAddPrintsTheTagTheWriteAnsweredWith(t *testing.T) {
 	t.Parallel()
-	server := hangingATag(t, answer(http.StatusOK, issueNamed("DEV-7")), shownTags(),
-		answer(http.StatusOK, shownTag("10-5", "Готово", "dev.limited")))
+	server := addingATag(t, respondWith(http.StatusOK, issueNamed("DEV-7")), shownTags(),
+		respondWith(http.StatusOK, catalogueTag("10-5", "Готово", "dev.limited")))
 
 	got := runWith(t, server.env(), "tag", "add", "DEV-7", "--name", "ready")
 
@@ -170,19 +168,19 @@ func TestTagAddPrintsTheTagTheWriteAnsweredWith(t *testing.T) {
 // call: the owner by the id the read gave and the tag by the name that was written.
 func TestTagAddRefusesATagOtherThanTheOneResolved(t *testing.T) {
 	t.Parallel()
-	server := hangingATag(t, answer(http.StatusOK, issueNamed("DEV-7")), shownTags(),
-		answer(http.StatusOK, shownTag("10-6", "Ready", "admin")))
+	server := addingATag(t, respondWith(http.StatusOK, issueNamed("DEV-7")), shownTags(),
+		respondWith(http.StatusOK, catalogueTag("10-6", "Ready", "admin")))
 
 	got := runWith(t, server.env(), "tag", "add", "DEV-7", "--name", "ready")
 
 	found := requireUncertainty(t, got)
-	assert.Equal(t, "upstream_lied", found.code)
+	assert.Equal(t, "upstream_invalid", found.code)
 	assert.Equal(t, []detail{
 		{"request", taggingRequest(server.url, "issues", "DEV-7", resolvedTagFields)},
 		{"issue", "DEV-7"},
 		{"tag", "ready"},
 		{"upstream_status", 200},
-		{"upstream_body", shownTag("10-6", "Ready", "admin")},
+		{"upstream_body", catalogueTag("10-6", "Ready", "admin")},
 	}, found.details)
 }
 
@@ -223,8 +221,8 @@ func TestTagAddReadsWhatTheServerAnsweredTheWriteWith(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := hangingATag(t, answer(http.StatusOK, issueNamed("DEV-7")), shownTags(),
-				answer(tc.status, tc.said))
+			server := addingATag(t, respondWith(http.StatusOK, issueNamed("DEV-7")), shownTags(),
+				respondWith(tc.status, tc.said))
 
 			got := runWith(t, server.env(), "tag", "add", "DEV-7", "--name", "ready")
 
@@ -253,7 +251,7 @@ func TestTagAddSendsNoWriteWhereAReadBeforeItRefused(t *testing.T) {
 	}{
 		{
 			name:    "an owner the read does not find",
-			owner:   answer(http.StatusNotFound, entityNotFound("DEV-7")),
+			owner:   respondWith(http.StatusNotFound, entityNotFound("DEV-7")),
 			written: "ready",
 			code:    "not_found",
 			methods: []string{http.MethodGet},
@@ -261,7 +259,7 @@ func TestTagAddSendsNoWriteWhereAReadBeforeItRefused(t *testing.T) {
 		},
 		{
 			name:    "a name no tag the token is shown carries",
-			owner:   answer(http.StatusOK, issueNamed("DEV-7")),
+			owner:   respondWith(http.StatusOK, issueNamed("DEV-7")),
 			written: "redy",
 			code:    "unknown_name",
 			methods: []string{http.MethodGet, http.MethodGet},
@@ -271,7 +269,7 @@ func TestTagAddSendsNoWriteWhereAReadBeforeItRefused(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := hangingATag(t, tc.owner, shownTags(), noTagging(t))
+			server := addingATag(t, tc.owner, shownTags(), noTagging(t))
 
 			got := runWith(t, server.env(), "tag", "add", "DEV-7", "--name", tc.written)
 
@@ -282,10 +280,6 @@ func TestTagAddSendsNoWriteWhereAReadBeforeItRefused(t *testing.T) {
 	}
 }
 
-// A tag of this scenario's own hung on an issue and on an article of its own, against the
-// polygon: the owner carries it afterwards, and hanging it a second time is answered as the first call was and
-// leaves it carried once. Nothing of the polygon's own is touched — the tag, the issue and the article are all
-// made here and taken away again.
 func TestTagAddHangsATagOnAnIssueAndAnArticleOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -293,8 +287,8 @@ func TestTagAddHangsATagOnAnIssueAndAnArticleOfTheDevInstance(t *testing.T) {
 	made := runWith(t, dev.env(), "tag", "create", "--name", name)
 	require.Equal(t, 0, made.code, "stderr: %s", made.stderr)
 	t.Cleanup(func() { removeTag(t, dev.env(), name, "admin") })
-	issue := taggedIssue(t, dev)
-	article := taggedArticle(t, dev)
+	issue := issueToTag(t, dev)
+	article := articleToTag(t, dev)
 
 	hung := runWith(t, dev.env(), "tag", "add", issue, "--name", name)
 
@@ -313,12 +307,10 @@ func TestTagAddHangsATagOnAnIssueAndAnArticleOfTheDevInstance(t *testing.T) {
 	assert.Equal(t, []string{name}, tagsOfTheArticle(t, dev, article))
 }
 
-// A name the polygon has no tag under is answered by the resolver: the owner was read and the catalogue
-// after it, and nothing was written. The name carries this test's own words, so no fixture can answer to it.
 func TestTagAddRefusesANameThePolygonHasNoTagUnder(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
-	issue := taggedIssue(t, dev)
+	issue := issueToTag(t, dev)
 	before := len(dev.requests())
 
 	got := runWith(t, dev.env(), "tag", "add", issue, "--name", contractTagName(t)+" nope")
@@ -338,7 +330,7 @@ func TestTagAddRefusesAnOwnerTheTokenCannotReachOnTheDevInstance(t *testing.T) {
 	made := runWith(t, limited, "tag", "create", "--name", name)
 	require.Equal(t, 0, made.code, "stderr: %s", made.stderr)
 	t.Cleanup(func() { removeTag(t, limited, name, "dev.limited") })
-	issue := taggedIssue(t, dev)
+	issue := issueToTag(t, dev)
 
 	for _, tc := range []struct {
 		name  string
@@ -358,9 +350,9 @@ func TestTagAddRefusesAnOwnerTheTokenCannotReachOnTheDevInstance(t *testing.T) {
 	}
 }
 
-// taggedIssue is the fixture of a contract test that needs an issue of its own to hang tags on: it is filed by
+// issueToTag is the fixture of a contract test that needs an issue of its own to hang tags on: it is filed by
 // the command that files issues, with the custom fields DEV requires, and taken away again afterwards.
-func taggedIssue(t *testing.T, dev *upstream) string {
+func issueToTag(t *testing.T, dev *upstream) string {
 	t.Helper()
 	argv := append([]string{"issue", "create", "DEV", "--summary", contractTagName(t)}, devRequired()...)
 	got := runWith(t, dev.env(), argv...)
@@ -372,16 +364,14 @@ func taggedIssue(t *testing.T, dev *upstream) string {
 	return readable
 }
 
-// taggedArticle is the same fixture for the knowledge base.
-func taggedArticle(t *testing.T, dev *upstream) string {
+// articleToTag is the same fixture for the knowledge base.
+func articleToTag(t *testing.T, dev *upstream) string {
 	t.Helper()
 	article := fileArticle(t, dev, contractTagName(t))
 	t.Cleanup(func() { removeArticle(t, dev, article) })
 	return article
 }
 
-// tagsOfTheIssue is the names of the tags the polygon holds on that issue, read back by the show of it, which
-// is where the tags of an owner are read at all.
 func tagsOfTheIssue(t *testing.T, dev *upstream, readable string) []string {
 	t.Helper()
 	return tagNamesOf(t, runWith(t, dev.env(), "issue", "show", readable, "--comments=0", "--fields", "tags(name)"))

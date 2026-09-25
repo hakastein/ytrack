@@ -23,14 +23,12 @@ func groupsRequest(address string) string {
 	return "GET " + address + "/api/groups?fields=" + shownGroupFields + "&$top=-1"
 }
 
-// The group of the polygon every user of it stands in, which is the one a scenario shares a tag with when it
-// wants another token to be shown it.
 const everyoneRegistered = "Зарегистрированные пользователи"
 
 // One record of the catalogue of groups, as the server sends it. The class differs from group to group — a team
 // of a project, a group of Hub and the two built-in ones are four schemas — and every one of them is a
 // UserGroup, which is what the catalogue is read as.
-func shownGroup(id, name, kind string) string {
+func catalogueGroup(id, name, kind string) string {
 	return `{"$type":` + strconv.Quote(kind) + `,"id":` + strconv.Quote(id) + `,"name":` + strconv.Quote(name) + `}`
 }
 
@@ -43,9 +41,9 @@ func everyGroupName() []any {
 // a comma — an instance may keep such, and a flag reading commas would resolve none of them.
 func groupsOfTheInstance() string {
 	return "[" + strings.Join([]string{
-		shownGroup("6-1", "DEVELOPMENT Team", "ProjectTeam"),
-		shownGroup("6-0", "Все пользователи", "AllUsersGroup"),
-		shownGroup("101-0", `ООО "РОМАШКА", Москва`, "NestedGroup"),
+		catalogueGroup("6-1", "DEVELOPMENT Team", "ProjectTeam"),
+		catalogueGroup("6-0", "Все пользователи", "AllUsersGroup"),
+		catalogueGroup("101-0", `ООО "РОМАШКА", Москва`, "NestedGroup"),
 	}, ",") + "]"
 }
 
@@ -61,7 +59,7 @@ type sharedGroup struct {
 func sharedSetOf(kind string, groups []sharedGroup) string {
 	items := make([]string, 0, len(groups))
 	for _, group := range groups {
-		items = append(items, shownGroup(group.id, group.name, "NestedGroup"))
+		items = append(items, catalogueGroup(group.id, group.name, "NestedGroup"))
 	}
 	return `{"$type":` + strconv.Quote(kind) + `,"permittedGroups":[` + strings.Join(items, ",") +
 		`],"permittedUsers":[]}`
@@ -73,7 +71,7 @@ func sharingOf(groups []sharedGroup) string {
 }
 
 // The set of those who may hang the tag, which is a class of its own on the server.
-func taggingOf(groups []sharedGroup) string {
+func taggableBy(groups []sharedGroup) string {
 	return sharedSetOf("TagSharingSettings", groups)
 }
 
@@ -82,7 +80,7 @@ func taggingOf(groups []sharedGroup) string {
 func sharedTag(name string, read, update []sharedGroup) string {
 	return `{"$type":"Tag","name":` + asJSON(name) + `,"owner":{"$type":"User","login":"admin"},` +
 		`"readSharingSettings":` + sharingOf(read) + `,"updateSharingSettings":` + sharingOf(update) +
-		`,"tagSharingSettings":` + taggingOf(nil) + `}`
+		`,"tagSharingSettings":` + taggableBy(nil) + `}`
 }
 
 // sharingATag is the server of a creation that names a group: the catalogue answers the read of the groups, and
@@ -94,7 +92,7 @@ func sharingATag(t *testing.T, catalogue string, creation http.HandlerFunc) *ups
 			creation(w, r)
 			return
 		}
-		answer(http.StatusOK, catalogue)(w, r)
+		respondWith(http.StatusOK, catalogue)(w, r)
 	})
 }
 
@@ -159,7 +157,7 @@ func TestTagCreateRefusesAGroupOfNoName(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"tag", "create", "--name", "карта"}, tc.argv...)...)
 
-			want := refusal{code: "bad_usage"}
+			want := faultDocument{code: "bad_usage"}
 			assert.Equal(t, want, requireRefusal(t, got))
 			assert.Empty(t, server.requests())
 		})
@@ -185,7 +183,7 @@ func TestTagCreateHelpNamesTheSharingFlags(t *testing.T) {
 func TestTagCreateWritesTheNamedGroupsAsTheTwoSets(t *testing.T) {
 	t.Parallel()
 	const name = "карта"
-	server := sharingATag(t, groupsOfTheInstance(), answer(http.StatusOK, sharedTag(name,
+	server := sharingATag(t, groupsOfTheInstance(), respondWith(http.StatusOK, sharedTag(name,
 		[]sharedGroup{{id: "6-1", name: "DEVELOPMENT Team"}, {id: "101-0", name: `ООО "РОМАШКА", Москва`}},
 		[]sharedGroup{{id: "6-0", name: "Все пользователи"}})))
 
@@ -214,7 +212,7 @@ func TestTagCreateWritesTheNamedGroupsAsTheTwoSets(t *testing.T) {
 // so that is what the answer is held to, while the caller's own tree is the whole of what is printed.
 func TestTagCreateAsksForTheIDsItChecksAndPrintsTheNames(t *testing.T) {
 	t.Parallel()
-	server := sharingATag(t, groupsOfTheInstance(), answer(http.StatusOK, sharedTag("карта",
+	server := sharingATag(t, groupsOfTheInstance(), respondWith(http.StatusOK, sharedTag("карта",
 		[]sharedGroup{{id: "6-1", name: "DEVELOPMENT Team"}}, nil)))
 
 	got := runWith(t, server.env(), "tag", "create", "--name", "карта", "--visible-for", "DEVELOPMENT Team")
@@ -241,7 +239,7 @@ func TestTagCreateRefusesEveryGroupItCannotResolveAtOnce(t *testing.T) {
 	got := runWith(t, server.env(), "tag", "create", "--name", "карта",
 		"--visible-for", "Нет", "--updateable-by", "Тоже")
 
-	want := refusal{
+	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{
 			{"request", groupsRequest(server.url)},
@@ -265,7 +263,7 @@ func TestTagCreateRefusesAGroupNameMoreThanOneGroupAnswersTo(t *testing.T) {
 
 	got := runWith(t, server.env(), "tag", "create", "--name", "карта", "--visible-for", "КОМАНДА")
 
-	want := refusal{
+	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{
 			{"request", groupsRequest(server.url)},
@@ -284,10 +282,10 @@ func TestTagCreateRefusesAGroupNameMoreThanOneGroupAnswersTo(t *testing.T) {
 // are what a name near nothing at all is answered with.
 func groupsNamedAlike() string {
 	return "[" + strings.Join([]string{
-		shownGroup("6-1", "DEVELOPMENT Team", "ProjectTeam"),
-		shownGroup("6-0", "Все пользователи", "AllUsersGroup"),
-		shownGroup("7-1", "Команда", "NestedGroup"),
-		shownGroup("7-2", "команда", "ProjectTeam"),
+		catalogueGroup("6-1", "DEVELOPMENT Team", "ProjectTeam"),
+		catalogueGroup("6-0", "Все пользователи", "AllUsersGroup"),
+		catalogueGroup("7-1", "Команда", "NestedGroup"),
+		catalogueGroup("7-2", "команда", "ProjectTeam"),
 	}, ",") + "]"
 }
 
@@ -307,7 +305,7 @@ func TestTagCreateResolvesAGroupNameTwoGroupsAnswerToByWritingItExactly(t *testi
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := sharingATag(t, groupsNamedAlike(), answer(http.StatusOK, sharedTag("карта",
+			server := sharingATag(t, groupsNamedAlike(), respondWith(http.StatusOK, sharedTag("карта",
 				[]sharedGroup{{id: tc.id, name: tc.written}}, nil)))
 
 			got := runWith(t, server.env(), "tag", "create", "--name", "карта", "--visible-for", tc.written)
@@ -332,7 +330,7 @@ func TestTagCreateRefusesTheUnknownGroupsAndTheAmbiguousOnesTogether(t *testing.
 	got := runWith(t, server.env(), "tag", "create", "--name", "карта",
 		"--visible-for", "Нет", "--updateable-by", "КОМАНДА")
 
-	want := refusal{
+	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{
 			{"request", groupsRequest(server.url)},
@@ -365,13 +363,13 @@ func TestTagCreateRefusesAGroupIDItCannotShareTheTagBy(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			catalogue := "[" + shownGroup(tc.id, "Команда", "NestedGroup") + "]"
+			catalogue := "[" + catalogueGroup(tc.id, "Команда", "NestedGroup") + "]"
 			server := sharingATag(t, catalogue, noCreation(t))
 
 			got := runWith(t, server.env(), "tag", "create", "--name", "карта", "--visible-for", "Команда")
 
 			found := requireRefusal(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 			assert.Empty(t, got.stdout)
 		})
@@ -398,7 +396,7 @@ func TestTagCreateRefusesACatalogueOfGroupsItCannotRead(t *testing.T) {
 			got := runWith(t, server.env(), "tag", "create", "--name", "карта", "--visible-for", "Команда")
 
 			found := requireRefusal(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 			assert.Empty(t, got.stdout)
 		})
@@ -411,9 +409,9 @@ func TestTagCreateRefusesACatalogueOfGroupsItCannotRead(t *testing.T) {
 func TestTagCreateNamesTheBrokenIDBeforeTheNamesItCouldNotResolve(t *testing.T) {
 	t.Parallel()
 	catalogue := "[" + strings.Join([]string{
-		shownGroup("6", "Своя", "NestedGroup"),
-		shownGroup("7-1", "Команда", "NestedGroup"),
-		shownGroup("7-2", "команда", "ProjectTeam"),
+		catalogueGroup("6", "Своя", "NestedGroup"),
+		catalogueGroup("7-1", "Команда", "NestedGroup"),
+		catalogueGroup("7-2", "команда", "ProjectTeam"),
 	}, ",") + "]"
 	server := sharingATag(t, catalogue, noCreation(t))
 
@@ -421,14 +419,14 @@ func TestTagCreateNamesTheBrokenIDBeforeTheNamesItCouldNotResolve(t *testing.T) 
 		"--visible-for", "Своя", "--updateable-by", "Нет", "--taggable-by", "КОМАНДА")
 
 	found := requireRefusal(t, got)
-	assert.Equal(t, "upstream_lied", found.code)
+	assert.Equal(t, "upstream_invalid", found.code)
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 }
 
 // A 200 says the server took the body, not that the set it kept is the set that went out. The order is the
 // server's own, so the two are held together as sets — the very same ids the other way round are the write
 // having come out as it went — and a group missing or added is a refusal over a tag that by then exists.
-func TestTagCreateHoldsTheSetsItWroteAgainstTheOnesThatCameBack(t *testing.T) {
+func TestTagCreateChecksTheSetsItWroteAgainstTheOnesThatCameBack(t *testing.T) {
 	t.Parallel()
 	const name = "карта"
 	tests := []struct {
@@ -445,8 +443,8 @@ func TestTagCreateHoldsTheSetsItWroteAgainstTheOnesThatCameBack(t *testing.T) {
 			kept: []sharedGroup{{id: "6-1", name: "DEVELOPMENT Team"}},
 			mismatch: []any{[]detail{
 				{"field", "readSharingSettings.permittedGroups"},
-				{"written", []any{"6-1", "101-0"}},
-				{"arrived", []any{"6-1"}},
+				{"expected", []any{"6-1", "101-0"}},
+				{"actual", []any{"6-1"}},
 			}},
 		},
 		{
@@ -458,8 +456,8 @@ func TestTagCreateHoldsTheSetsItWroteAgainstTheOnesThatCameBack(t *testing.T) {
 			},
 			mismatch: []any{[]detail{
 				{"field", "readSharingSettings.permittedGroups"},
-				{"written", []any{"6-1", "101-0"}},
-				{"arrived", []any{"6-1", "101-0", "6-0"}},
+				{"expected", []any{"6-1", "101-0"}},
+				{"actual", []any{"6-1", "101-0", "6-0"}},
 			}},
 		},
 	}
@@ -467,7 +465,7 @@ func TestTagCreateHoldsTheSetsItWroteAgainstTheOnesThatCameBack(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := sharingATag(t, groupsOfTheInstance(),
-				answer(http.StatusOK, sharedTag(name, tc.kept, nil)))
+				respondWith(http.StatusOK, sharedTag(name, tc.kept, nil)))
 
 			got := runWith(t, server.env(), "tag", "create", "--name", name,
 				"--visible-for", "DEVELOPMENT Team", "--visible-for", `ООО "РОМАШКА", Москва`)
@@ -477,7 +475,7 @@ func TestTagCreateHoldsTheSetsItWroteAgainstTheOnesThatCameBack(t *testing.T) {
 				return
 			}
 			found := requireUncertainty(t, got)
-			assert.Equal(t, "upstream_lied", found.code)
+			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Equal(t, tc.mismatch, detailNamed(t, found, "mismatch"))
 			assert.Equal(t, name, detailNamed(t, found, "tag"))
 			assert.Empty(t, got.stdout)
@@ -488,9 +486,9 @@ func TestTagCreateHoldsTheSetsItWroteAgainstTheOnesThatCameBack(t *testing.T) {
 // A set the call never named is never held against anything: the tag YouTrack shares as it pleases is not
 // a set that was written, so a creation naming only the readers is answered by a tag anyone may change without
 // a word of complaint.
-func TestTagCreateHoldsOnlyTheSetsItWrote(t *testing.T) {
+func TestTagCreateChecksOnlyTheSetsItWrote(t *testing.T) {
 	t.Parallel()
-	server := sharingATag(t, groupsOfTheInstance(), answer(http.StatusOK, sharedTag("карта",
+	server := sharingATag(t, groupsOfTheInstance(), respondWith(http.StatusOK, sharedTag("карта",
 		[]sharedGroup{{id: "6-1", name: "DEVELOPMENT Team"}},
 		[]sharedGroup{{id: "6-0", name: "Все пользователи"}})))
 
@@ -509,7 +507,7 @@ func TestTagCreateSendsNoWriteWhereTheGroupsWereRefused(t *testing.T) {
 		if !assert.Equal(t, http.MethodGet, r.Method, "a creation reached the server") {
 			return
 		}
-		answer(http.StatusForbidden, `{"error":"Forbidden","error_description":"HTTP 403 Forbidden"}`)(w, r)
+		respondWith(http.StatusForbidden, `{"error":"Forbidden","error_description":"HTTP 403 Forbidden"}`)(w, r)
 	})
 
 	got := runWith(t, server.env(), "tag", "create", "--name", "карта", "--visible-for", everyoneRegistered)
@@ -521,9 +519,6 @@ func TestTagCreateSendsNoWriteWhereTheGroupsWereRefused(t *testing.T) {
 	assert.Empty(t, got.stdout)
 }
 
-// The polygon takes the set although the specification marks it read-only: the body in the journal
-// is what says so, and the tag comes back shared with the group that was named. A token that stands in that
-// group is shown the tag afterwards, owned by whoever made it.
 func TestTagCreateSharesATagOfThePolygonWithAGroup(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -566,9 +561,7 @@ func TestTagCreateSharesWithSeveralGroupsWhereVisibleForNamesOne(t *testing.T) {
 	assert.Contains(t, []any{"DEVELOPMENT Team", "Все пользователи"}, shown["name"])
 }
 
-// The limited token of the polygon may not read the groups at all, so the flag is out of its reach: the
-// refusal is the one the reading earned, one request went out and no tag was made.
-func TestTagCreateRefusesTheLimitedTokenTheGroupsOfThePolygon(t *testing.T) {
+func TestTagCreateRefusesTheLimitedTokenTheGroupsOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 	limited := []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}
@@ -582,9 +575,7 @@ func TestTagCreateRefusesTheLimitedTokenTheGroupsOfThePolygon(t *testing.T) {
 	assert.Equal(t, []string{"/api/groups"}, dev.sentPaths())
 }
 
-// A name the polygon has no group under is answered by the reading of the groups and by nothing else: one
-// request goes out and no write follows it.
-func TestTagCreateRefusesAGroupThePolygonHasNone(t *testing.T) {
+func TestTagCreateRefusesAGroupTheDevInstanceHasNone(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
