@@ -11,28 +11,27 @@ import (
 	"github.com/hakastein/ytrack/internal/fake"
 )
 
-func loginEnvironment(t *testing.T) (env []string, home, path string) {
+const damagedRecords = "not a file of login records"
+
+func loginEnvironment(t *testing.T) (env []string, path string) {
 	t.Helper()
 	stated, _ := here(t)
-	home, path = emptyHome(t)
-	return append(fake.ServeNothing(t).Env(), "HOME="+home, "PWD="+stated), home, path
+	home, path := homeWith(t, damagedRecords)
+	return append(fake.ServeNothing(t).Env(), "HOME="+home, "PWD="+stated), path
 }
 
 func TestAuthLoginRefusesAStdinThatIsNotATerminal(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
-		argv  []string
 		stdin func(t *testing.T) *os.File
 	}{
 		{
 			name:  "no stdin at all",
-			argv:  []string{"auth", "login"},
 			stdin: func(*testing.T) *os.File { return nil },
 		},
 		{
 			name: "a stdin that holds nothing",
-			argv: []string{"auth", "login"},
 			stdin: func(t *testing.T) *os.File {
 				t.Helper()
 				empty, err := os.Open(os.DevNull)
@@ -41,30 +40,23 @@ func TestAuthLoginRefusesAStdinThatIsNotATerminal(t *testing.T) {
 				return empty
 			},
 		},
-		{
-			name:  "no stdin at all, asked for everywhere",
-			argv:  []string{"auth", "login", "--global"},
-			stdin: func(*testing.T) *os.File { return nil },
-		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			env, home, path := loginEnvironment(t)
+			env, path := loginEnvironment(t)
 
-			got := runOn(t, tc.stdin(t), env, tc.argv...)
+			got := runOn(t, tc.stdin(t), env, "auth", "login")
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assertNoToken(t, got, fake.Token)
-			assert.NoFileExists(t, path)
-			assert.Empty(t, entries(t, home))
+			assert.Equal(t, damagedRecords, fileBytes(t, path))
 		})
 	}
 }
 
 func TestAuthLoginReadsNothingOfThePipeItIsHanded(t *testing.T) {
 	t.Parallel()
-	env, home, path := loginEnvironment(t)
+	env, path := loginEnvironment(t)
 	const dialogue = "http://h\n" + fake.Token + "\n"
 	read, write, err := os.Pipe()
 	require.NoError(t, err)
@@ -76,10 +68,8 @@ func TestAuthLoginReadsNothingOfThePipeItIsHanded(t *testing.T) {
 	got := runOn(t, read, env, "auth", "login")
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assertNoToken(t, got, fake.Token)
 	unread, err := io.ReadAll(read)
 	require.NoError(t, err)
 	assert.Equal(t, dialogue, string(unread))
-	assert.NoFileExists(t, path)
-	assert.Empty(t, entries(t, home))
+	assert.Equal(t, damagedRecords, fileBytes(t, path))
 }

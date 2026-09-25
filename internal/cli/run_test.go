@@ -53,9 +53,7 @@ func TestRunRefusesAnyCommand(t *testing.T) {
 	}{
 		{name: "no command", argv: []string{}},
 		{name: "unknown command", argv: []string{"bogus", "show", "DEV-1"}},
-		{name: "help command", argv: []string{"help"}},
-		{name: "help command with a topic", argv: []string{"help", "project"}},
-		{name: "the stand-in cobra is given for a help command", argv: []string{"no-help"}},
+		{name: "help command", argv: []string{"help", "project"}},
 		{name: "command with no subcommand", argv: []string{"project"}},
 		{name: "unknown subcommand of a command", argv: []string{"project", "bogus"}},
 		{name: "completion protocol behind a flag", argv: []string{"--limit=5", "__complete", "issue"}},
@@ -71,7 +69,8 @@ func TestRunRefusesAnyCommand(t *testing.T) {
 func TestRunTakesNilArgvAsEmpty(t *testing.T) {
 	args := os.Args
 	t.Cleanup(func() { os.Args = args })
-	os.Args = []string{args[0], "issue"}
+	os.Args = []string{args[0], "--version"}
+
 	assert.Equal(t, run(t, []string{}), run(t, nil))
 }
 

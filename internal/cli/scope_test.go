@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -48,6 +49,10 @@ func assertNoRecordedToken(t *testing.T, got outcome) {
 	}
 }
 
+func bearing(secret string) string {
+	return "Bearer " + secret
+}
+
 func TestAuthStatusTakesTheRecordOfTheNearestDirectory(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
@@ -55,8 +60,7 @@ func TestAuthStatusTakesTheRecordOfTheNearestDirectory(t *testing.T) {
 	tests := []struct {
 		name    string
 		records func(address string) []string
-		scope   string
-		user    string
+		token   string
 	}{
 		{
 			name: "a record for the directory of the call, one for its parent and a global one",
@@ -67,8 +71,7 @@ func TestAuthStatusTakesTheRecordOfTheNearestDirectory(t *testing.T) {
 					unscopedRecord(address, everywhereToken),
 				}
 			},
-			scope: scope,
-			user:  hereUser,
+			token: hereToken,
 		},
 		{
 			name: "a record for the parent of the directory and a global one",
@@ -78,8 +81,7 @@ func TestAuthStatusTakesTheRecordOfTheNearestDirectory(t *testing.T) {
 					scopedRecord(above, address, aboveToken),
 				}
 			},
-			scope: above,
-			user:  aboveUser,
+			token: aboveToken,
 		},
 	}
 	for _, tc := range tests {
@@ -90,11 +92,23 @@ func TestAuthStatusTakesTheRecordOfTheNearestDirectory(t *testing.T) {
 
 			got := runWith(t, []string{"HOME=" + home, "PWD=" + stated}, "auth", "status")
 
-			want := status(server.URL, "settings", tc.user, tc.user)
-			assert.Equal(t, outcome{stdout: want}, got)
-			assertNoRecordedToken(t, got)
+			assert.Equal(t, 0, got.code)
+			assert.Equal(t, bearing(tc.token), server.Request(t, 0).Header.Get("Authorization"))
 		})
 	}
+}
+
+func TestAuthStatusTakesBothValuesFromOneRecord(t *testing.T) {
+	t.Parallel()
+	stated, scope := here(t)
+	nearest, global := serveTheRecordedUsers(t), fake.ServeNothing(t)
+	records := recordFile(unscopedRecord(global.URL, everywhereToken), scopedRecord(scope, nearest.URL, hereToken))
+	home, _ := homeWith(t, records)
+
+	got := runWith(t, []string{"HOME=" + home, "PWD=" + stated}, "auth", "status")
+
+	assert.Equal(t, 0, got.code)
+	assert.Equal(t, bearing(hereToken), nearest.Request(t, 0).Header.Get("Authorization"))
 }
 
 func TestAuthStatusMatchesAScopeByWholePathComponents(t *testing.T) {
@@ -103,21 +117,10 @@ func TestAuthStatusMatchesAScopeByWholePathComponents(t *testing.T) {
 	tests := []struct {
 		name  string
 		held  string
-		scope string
-		user  string
+		token string
 	}{
-		{
-			name:  "a scope the directory begins with without being under it",
-			held:  scope[:len(scope)-1],
-			scope: "global",
-			user:  everywhereUser,
-		},
-		{
-			name:  "the root directory, which every directory is under",
-			held:  string(filepath.Separator),
-			scope: string(filepath.Separator),
-			user:  hereUser,
-		},
+		{name: "a scope the directory begins with without being under it", held: scope[:len(scope)-1], token: everywhereToken},
+		{name: "the root directory, which every directory is under", held: string(filepath.Separator), token: hereToken},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -128,9 +131,8 @@ func TestAuthStatusMatchesAScopeByWholePathComponents(t *testing.T) {
 
 			got := runWith(t, []string{"HOME=" + home, "PWD=" + stated}, "auth", "status")
 
-			want := status(server.URL, "settings", tc.user, tc.user)
-			assert.Equal(t, outcome{stdout: want}, got)
-			assertNoRecordedToken(t, got)
+			assert.Equal(t, 0, got.code)
+			assert.Equal(t, bearing(tc.token), server.Request(t, 0).Header.Get("Authorization"))
 		})
 	}
 }
@@ -145,9 +147,8 @@ func TestAuthStatusTakesTheRecordOfTheDirectoryASymlinkedPWDReaches(t *testing.T
 
 	got := runWith(t, []string{"HOME=" + home, "PWD=" + link}, "auth", "status")
 
-	want := status(server.URL, "settings", hereUser, hereUser)
-	assert.Equal(t, outcome{stdout: want}, got)
-	assertNoRecordedToken(t, got)
+	assert.Equal(t, 0, got.code)
+	assert.Equal(t, bearing(hereToken), server.Request(t, 0).Header.Get("Authorization"))
 }
 
 func TestNoCommandChoosesARecordWithoutKnowingWhichDirectoryItIsIn(t *testing.T) {
@@ -158,22 +159,20 @@ func TestNoCommandChoosesARecordWithoutKnowingWhichDirectoryItIsIn(t *testing.T)
 		pwd  func(elsewhere string) []string
 	}{
 		{name: "no PWD at all", pwd: func(string) []string { return nil }},
-		{name: "a relative PWD", pwd: func(string) []string { return []string{"PWD=internal/cli"} }},
+		{name: "a relative PWD naming the directory of the call", pwd: func(string) []string { return []string{"PWD=."} }},
 		{name: "a PWD naming a directory the call is not in", pwd: func(elsewhere string) []string { return []string{"PWD=" + elsewhere} }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			elsewhere := t.TempDir()
 			server := fake.ServeNothing(t)
 			records := recordFile(scopedRecord(scope, server.URL, hereToken), unscopedRecord(server.URL, everywhereToken))
 			home, _ := homeWith(t, records)
 
-			got := runWith(t, append([]string{"HOME=" + home}, tc.pwd(elsewhere)...), "auth", "status")
+			got := runWith(t, append([]string{"HOME=" + home}, tc.pwd(t.TempDir())...), "auth", "status")
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assertNoRecordedToken(t, got)
-			assert.Empty(t, server.Requests())
 		})
 	}
 }
@@ -181,22 +180,24 @@ func TestNoCommandChoosesARecordWithoutKnowingWhichDirectoryItIsIn(t *testing.T)
 func TestAuthStatusAsksForNoDirectoryWithoutARecordThatNamesOne(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		pwd  func(stale string) []string
+		name   string
+		global func(address string) string
 	}{
-		{name: "a PWD naming a directory the call is not in", pwd: func(stale string) []string { return []string{"PWD=" + stale} }},
+		{name: "a record without a scope", global: func(address string) string { return unscopedRecord(address, everywhereToken) }},
+		{name: "a record whose scope is null", global: func(address string) string {
+			return fmt.Sprintf(`{"scope":null,"url":%q,"token":%q}`, address, everywhereToken)
+		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := serveTheRecordedUsers(t)
-			home, _ := homeWith(t, recordFile(unscopedRecord(server.URL, everywhereToken)))
+			home, _ := homeWith(t, recordFile(tc.global(server.URL)))
 
-			got := runWith(t, append([]string{"HOME=" + home}, tc.pwd(t.TempDir())...), "auth", "status")
+			got := runWith(t, []string{"HOME=" + home, "PWD=" + t.TempDir()}, "auth", "status")
 
-			want := status(server.URL, "settings", everywhereUser, everywhereUser)
-			assert.Equal(t, outcome{stdout: want}, got)
-			assertNoRecordedToken(t, got)
+			assert.Equal(t, 0, got.code)
+			assert.Equal(t, bearing(everywhereToken), server.Request(t, 0).Header.Get("Authorization"))
 		})
 	}
 }

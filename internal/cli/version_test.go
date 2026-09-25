@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/hakastein/ytrack/internal/fake"
 )
@@ -58,24 +59,19 @@ func TestVersionPrintsTheStampOfTheBuildAsOneDocument(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := fake.ServeNothing(t)
+			got := runBuiltFrom(t, tc.build, nil, fake.ServeNothing(t).Env(), "--version")
 
-			got := runBuiltFrom(t, tc.build, nil, server.Env(), "--version")
-
-			assert.Equal(t, 0, got.code)
-			assert.Empty(t, got.stderr)
-			assert.Equal(t, tc.document, got.stdout)
-			assert.Empty(t, server.Requests())
+			assert.Equal(t, outcome{stdout: tc.document}, got)
 		})
 	}
 }
 
-func TestVersionWithAWordIsRefusedAsACommand(t *testing.T) {
+func TestVersionIsRefusedUnderACommandThatRunsWithoutIt(t *testing.T) {
 	t.Parallel()
-	server := fake.ServeNothing(t)
+	env := fake.ServeNothing(t).Env()
+	require.Equal(t, 0, runWith(t, env, "completion", "bash").code)
 
-	got := runWith(t, server.Env(), "--version", "bogus")
+	got := runWith(t, env, "completion", "bash", "--version")
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
 }

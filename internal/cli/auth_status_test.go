@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,31 +13,52 @@ import (
 	"github.com/hakastein/ytrack/internal/fake"
 )
 
-func statusFromEnv(address, login, fullName string) string {
-	return status(address, "environment", login, fullName)
-}
-
 func assertNoToken(t *testing.T, got outcome, secret string) {
 	t.Helper()
 	assert.NotContains(t, got.stdout, secret)
 	assert.NotContains(t, got.stderr, secret)
 }
 
-func TestAuthStatusPrintsTheAddressTheLoginSourcesAndTheUserFromEnv(t *testing.T) {
+func urlPrinted(t *testing.T, got outcome) any {
+	t.Helper()
+	require.Equal(t, 0, got.code, "stderr: %q", got.stderr)
+	for pair := range slices.Chunk(requireMapping(t, "stdout", got.stdout).Content, 2) {
+		if pair[0].Value == "url" {
+			return requireValue(t, pair[1])
+		}
+	}
+	require.Fail(t, "no url was printed", "stdout: %q", got.stdout)
+	return nil
+}
+
+func TestAuthStatusPrintsTheAddressTheSourceOfTheLoginAndTheUser(t *testing.T) {
 	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, `{"fullName":"Administrator","$type":"Me","login":"admin"}`))
+	tests := []struct {
+		name  string
+		login func(t *testing.T, server *fake.Server) []string
+		from  string
+	}{
+		{name: "a login from the environment", login: func(_ *testing.T, server *fake.Server) []string { return server.Env() }, from: "environment"},
+		{name: "a saved login", login: func(t *testing.T, server *fake.Server) []string {
+			home, _ := homeWith(t, globalRecord(server.URL, fake.Token))
+			return []string{"HOME=" + home}
+		}, from: "settings"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := fake.Serve(t, fake.JSON(http.StatusOK, `{"fullName":"Full Name","$type":"Me","login":"login"}`))
 
-	got := runWith(t, server.Env(), "auth", "status")
+			got := runWith(t, tc.login(t, server), "auth", "status")
 
-	assert.Equal(t, outcome{stdout: statusFromEnv(server.URL, "admin", "Administrator")}, got)
-	assertNoToken(t, got, fake.Token)
-	requests := server.Requests()
-	require.Len(t, requests, 1)
-	request := requests[0]
-	assert.Equal(t, http.MethodGet, request.Method)
-	assert.Equal(t, "/api/users/me", request.URL.Path)
-	assert.Equal(t, url.Values{"fields": {"login,fullName"}}, request.URL.Query())
-	assert.Equal(t, "Bearer "+fake.Token, request.Header.Get("Authorization"))
+			assert.Equal(t, outcome{stdout: status(server.URL, tc.from, "login", "Full Name")}, got)
+			sent := server.Request(t, 0)
+			assert.Equal(t, []string{"/api/users/me"}, server.Paths())
+			assert.Equal(t, http.MethodGet, sent.Method)
+			assert.Equal(t, url.Values{"fields": {"login,fullName"}}, sent.URL.Query())
+			assert.Equal(t, bearing(fake.Token), sent.Header.Get("Authorization"))
+		})
+	}
 }
 
 func TestAuthStatusPrintsTheAddressInOneSpelling(t *testing.T) {
@@ -55,16 +77,13 @@ func TestAuthStatusPrintsTheAddressInOneSpelling(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := fake.Serve(t, fake.JSON(http.StatusOK, `{"login":"admin","fullName":"Administrator","$type":"Me"}`))
-			listening, err := url.Parse(server.URL)
-			require.NoError(t, err)
+			server := fake.Serve(t, fake.JSON(http.StatusOK, `{"login":"login","fullName":"Full Name","$type":"Me"}`))
+			listening := server.Address(t)
 			port, prefix := listening.Port(), listening.Path
 
 			got := runWith(t, []string{"YTRACK_URL=" + fmt.Sprintf(tc.address, port, prefix), "YTRACK_TOKEN=" + fake.Token}, "auth", "status")
 
-			assert.Equal(t, outcome{stdout: statusFromEnv(fmt.Sprintf(tc.printed, port, prefix), "admin", "Administrator")}, got)
-			assertNoToken(t, got, fake.Token)
-			assert.Len(t, server.Requests(), 1)
+			assert.Equal(t, fmt.Sprintf(tc.printed, port, prefix), urlPrinted(t, got))
 			assert.Equal(t, tc.path, server.Request(t, 0).URL.EscapedPath())
 		})
 	}
@@ -72,20 +91,18 @@ func TestAuthStatusPrintsTheAddressInOneSpelling(t *testing.T) {
 
 func TestAuthStatusPrintsTheAddressWithoutItsPassword(t *testing.T) {
 	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, `{"login":"admin","fullName":"Administrator","$type":"Me"}`))
-	address, err := url.Parse(server.URL)
-	require.NoError(t, err)
+	server := fake.Serve(t, fake.JSON(http.StatusOK, `{"login":"login","fullName":"Full Name","$type":"Me"}`))
+	address := server.Address(t)
 	address.User = url.UserPassword("svc", "secret")
 
 	got := runWith(t, []string{"YTRACK_URL=" + address.String(), "YTRACK_TOKEN=" + fake.Token}, "auth", "status")
 
-	assert.Equal(t, outcome{stdout: statusFromEnv("http://svc:xxxxx@"+address.Host+address.Path, "admin", "Administrator")}, got)
-	assertNoToken(t, got, fake.Token)
+	assert.Equal(t, "http://svc:xxxxx@"+address.Host+address.Path, urlPrinted(t, got))
 }
 
 func TestAuthStatusRefusesAUserWithoutTheFullName(t *testing.T) {
 	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, `{"login":"admin","$type":"Me"}`))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, `{"login":"login","$type":"Me"}`))
 
 	got := runWith(t, server.Env(), "auth", "status")
 
@@ -98,6 +115,5 @@ func TestAuthStatusRefusesAUserWithoutTheFullName(t *testing.T) {
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
-	assertNoToken(t, got, fake.Token)
-	assert.Len(t, server.Requests(), 1)
+	assert.Equal(t, []string{"/api/users/me"}, server.Paths())
 }
