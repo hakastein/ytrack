@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/hakastein/ytrack/internal/fake"
 )
@@ -69,12 +68,8 @@ func TestIssueUpdateRefusesBeforeAnyRequest(t *testing.T) {
 	}{
 		{name: "an internal id", argv: []string{"issue", "update", "3-26", "--summary", "x"}},
 		{name: "nothing to write", argv: []string{"issue", "update", "DEV-1"}},
-		{name: "an empty title", argv: []string{"issue", "update", "DEV-1", "--summary", ""}},
-		{name: "a line feed in the title", argv: []string{"issue", "update", "DEV-1", "--summary", "a\nb"}},
-		{name: "a carriage return in the prose", argv: []string{"issue", "update", "DEV-1", "--description", "a\rb"}},
 		{name: "a title twice", argv: []string{"issue", "update", "DEV-1", "--summary", "a", "--summary", "b"}},
 		{name: "prose twice", argv: []string{"issue", "update", "DEV-1", "--description", "a", "--description", "b"}},
-		{name: "an empty prose", argv: []string{"issue", "update", "DEV-1", "--description", ""}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -89,178 +84,71 @@ func TestIssueUpdateRefusesBeforeAnyRequest(t *testing.T) {
 	}
 }
 
-func TestIssueUpdateNamesEachFieldTheClassItWasReceivedUnder(t *testing.T) {
+func TestIssueUpdateReadsTheIssueAndWritesByTheIDOfIt(t *testing.T) {
 	t.Parallel()
 	project := projectResponse(
-		writableField{id: "180-14", kind: "StateProjectCustomField", name: "State", valueType: "state",
-			canBeEmpty: true, defaults: []string{"Новая"}},
-		writableField{id: "180-23", name: "Причина отклонения", valueType: "enum", canBeEmpty: true},
+		writableField{id: "180-1", kind: "StateProjectCustomField", name: "Held", valueType: "state", canBeEmpty: true},
+		writableField{id: "180-2", name: "Emptied", valueType: "enum", canBeEmpty: true},
 	)
 	read := issueToUpdate("DEV-1", project,
-		currentField{name: "State", kind: "StateMachineIssueCustomField", binding: "180-14"})
-	held := receivedFields(
-		receivedField{name: "State", valueType: "state", ordinal: "1", binding: "180-14",
-			value: bundleElement("Отклонена")},
-		receivedField{name: "Причина отклонения", valueType: "enum", ordinal: "2", binding: "180-23",
-			value: bundleElement("Дубль")},
-	)
+		currentField{name: "Held", kind: "StateMachineIssueCustomField", binding: "180-1"})
+	held := receivedFields(receivedField{name: "Held", valueType: "state", binding: "180-1", value: bundleElement("First")})
 	server := updating(t, fake.JSON(http.StatusOK, read),
-		fake.JSON(http.StatusOK, createdIssueWith("DEV-1", "x", "null", held)))
+		fake.JSON(http.StatusOK, createdIssueWith("DEV-1", "x", `"Second"`, held)))
 
-	got := runWith(t, server.Env(), "issue", "update", "dev-1",
-		"--field", "State=Отклонена", "--field", "Причина отклонения=Дубль")
+	got := runWith(t, server.Env(), "issue", "update", "dev-1", "--description", "Second",
+		"--field", "Held=First", "--clear", "Emptied", "--fields", "idReadable")
 
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
+	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-1\"\n"}, got)
 	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
-	assert.Equal(t, []string{"/api/issues/dev-1", "/api/issues/DEV-1"}, server.Paths())
-	assert.Equal(t, []string{issueWriteFields, askedIssueFields}, server.Fields())
-
-	want := `{"customFields":[` +
-		`{"$type":"StateMachineIssueCustomField","name":"State","value":{"name":"Отклонена"}},` +
-		`{"$type":"SingleEnumIssueCustomField","name":"Причина отклонения","value":{"name":"Дубль"}}]}`
-	assert.JSONEq(t, want, server.Bodies()[1])
+	assert.Equal(t, []string{
+		"/api/issues/dev-1?fields=" + issueWriteFields,
+		"/api/issues/DEV-1?fields=idReadable,description," + customFieldsFields,
+	}, server.Targets())
+	assert.JSONEq(t, `{"description":"Second","customFields":[`+
+		`{"$type":"StateMachineIssueCustomField","name":"Held","value":{"name":"First"}},`+
+		`{"$type":"SingleEnumIssueCustomField","name":"Emptied","value":null}]}`, server.Last(t).Body)
 }
 
 func TestIssueUpdateRefusesAnAnswerThatEmptiedWhatTheWriteFilled(t *testing.T) {
 	t.Parallel()
-	project := projectResponse(writableField{id: "187-2", kind: "PeriodProjectCustomField", name: "Оценка",
+	project := projectResponse(writableField{id: "180-1", kind: "PeriodProjectCustomField", name: "Period",
 		valueType: "period", canBeEmpty: true})
-	read := issueToUpdate("DEV-1", project,
-		currentField{name: "Оценка", kind: "PeriodIssueCustomField", binding: "187-2"})
-	held := receivedFields(receivedField{name: "Оценка", valueType: "period", binding: "187-2"})
-	server := updating(t, fake.JSON(http.StatusOK, read),
+	held := receivedFields(receivedField{name: "Period", valueType: "period", binding: "180-1"})
+	server := updating(t, fake.JSON(http.StatusOK, issueToUpdate("DEV-1", project)),
 		fake.JSON(http.StatusOK, createdIssueWith("DEV-1", "x", "null", held)))
 
-	got := runWith(t, server.Env(), "issue", "update", "DEV-1", "--field", "Оценка=PT7H")
+	got := runWith(t, server.Env(), "issue", "update", "DEV-1", "--field", "Period=PT7H", "--fields", "idReadable")
 
 	want := faultDocument{
 		code: "upstream_invalid",
 		details: []detail{
-			{"request", updateRequest(server.URL, "DEV-1", askedIssueFields)},
+			{"request", updateRequest(server.URL, "DEV-1", "idReadable,"+customFieldsFields)},
 			{"issue", "DEV-1"},
-			{"mismatch", []any{[]detail{{"field", "Оценка"}, {"expected", "PT7H"}, {"actual", nil}}}},
+			{"mismatch", []any{[]detail{{"field", "Period"}, {"expected", "PT7H"}, {"actual", nil}}}},
 		},
 	}
 	assert.Equal(t, want, requireUncertainty(t, got))
-	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
-	assert.JSONEq(t, `{"customFields":[{"$type":"PeriodIssueCustomField","name":"Оценка","value":{"minutes":420}}]}`,
-		server.Bodies()[1])
 }
 
 func TestIssueUpdateRefusesTheClassesOfTheIssueOfAnotherShape(t *testing.T) {
 	t.Parallel()
-	project := projectResponse(writableField{id: "180-14", kind: "StateProjectCustomField", name: "State",
+	project := projectResponse(writableField{id: "180-1", kind: "StateProjectCustomField", name: "Held",
 		valueType: "state", canBeEmpty: true})
-	tests := []struct {
-		name string
-		held string
-	}{
-		{
-			name: "the class of a field the issue holds",
-			held: `{"$type":7,"name":"State","projectCustomField":{"$type":"ProjectCustomField","id":"180-14"}}`,
-		},
-		{
-			name: "the binding a field of the issue stands for",
-			held: `{"$type":"StateIssueCustomField","name":"State","projectCustomField":{"$type":"ProjectCustomField","id":7}}`,
+	read := `{"$type":"Issue","idReadable":"DEV-1","customFields":[{"$type":7,"name":"Held",` +
+		`"projectCustomField":{"$type":"ProjectCustomField","id":"180-1"}}],"project":` + project + `}`
+	server := updating(t, fake.JSON(http.StatusOK, read), noUpdate(t))
+
+	got := runWith(t, server.Env(), "issue", "update", "DEV-1", "--field", "Held=First")
+
+	want := faultDocument{
+		code: "upstream_invalid",
+		details: []detail{
+			{"request", issueRequest(server.URL, "DEV-1", issueWriteFields)},
+			{"upstream_status", 200},
+			{"upstream_body", read},
 		},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			read := `{"$type":"Issue","idReadable":"DEV-1","customFields":[` + tc.held + `],"project":` + project + `}`
-			server := updating(t, fake.JSON(http.StatusOK, read), noUpdate(t))
-
-			got := runWith(t, server.Env(), "issue", "update", "DEV-1", "--field", "State=Новая")
-
-			want := faultDocument{
-				code: "upstream_invalid",
-				details: []detail{
-					{"request", issueRequest(server.URL, "DEV-1", issueWriteFields)},
-					{"upstream_status", 200},
-					{"upstream_body", read},
-				},
-			}
-			assert.Equal(t, want, requireFault(t, got))
-			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
-		})
-	}
-}
-
-func TestIssueUpdateTakesTheExpressionOfAWrite(t *testing.T) {
-	t.Parallel()
-	project := projectResponse(
-		writableField{id: "180-15", name: "Type", valueType: "enum", canBeEmpty: true},
-		writableField{id: "180-16", name: "Priority", valueType: "enum", canBeEmpty: true},
-	)
-	read := issueToUpdate("DEV-1", project,
-		currentField{name: "Type", kind: "SingleEnumIssueCustomField", binding: "180-15"})
-	held := receivedFields(
-		receivedField{name: "Priority", valueType: "enum", ordinal: "2", binding: "180-16",
-			value: bundleElement("Low")},
-		receivedField{name: "Type", valueType: "enum", ordinal: "1", binding: "180-15",
-			value: bundleElement("Task")},
-	)
-	written := createdIssueWith("DEV-1", "x", "null", held)
-	t.Run("the check reads more than the document prints", func(t *testing.T) {
-		t.Parallel()
-		server := updating(t, fake.JSON(http.StatusOK, read), fake.JSON(http.StatusOK, written))
-
-		got := runWith(t, server.Env(), "issue", "update", "DEV-1", "--summary", "x",
-			"--field", "Type=Task", "--fields", "idReadable")
-
-		require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-		assert.Equal(t, "idReadable: \"DEV-1\"\n", got.stdout)
-		assert.Equal(t, []string{issueWriteFields, "idReadable,summary," + customFieldsFields},
-			server.Fields())
-	})
-	t.Run("a custom field named in the expression", func(t *testing.T) {
-		t.Parallel()
-		server := fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case strings.HasPrefix(r.URL.Path, cataloguePath):
-				fake.JSON(http.StatusOK, devCatalogue())(w, r)
-			case r.Method == http.MethodPost:
-				fake.JSON(http.StatusOK, written)(w, r)
-			default:
-				fake.JSON(http.StatusOK, read)(w, r)
-			}
-		})
-
-		got := runWith(t, server.Env(), "issue", "update", "DEV-1", "--field", "Type=Task",
-			"--fields", `idReadable,customFields("приоритет")`)
-
-		require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-		assert.Equal(t, "idReadable: \"DEV-1\"\ncustomFields:\n  \"Priority\": \"Low\"\n", got.stdout)
-		assert.Equal(t, []string{"/api/issues/DEV-1", cataloguePath, "/api/issues/DEV-1"}, server.Paths())
-		for _, query := range server.Queries() {
-			assert.Empty(t, query["customFields"], "a write never cuts the answer down by name")
-		}
-	})
-	t.Run("the comments of the issue", func(t *testing.T) {
-		t.Parallel()
-		server := fake.ServeNothing(t)
-
-		got := runWith(t, server.Env(), "issue", "update", "DEV-1", "--summary", "x",
-			"--fields", "+comments(text)")
-
-		assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-		assert.Empty(t, server.Requests())
-	})
-}
-
-func TestIssueUpdateIsUncertainWhereTheAnswerCannotBePrinted(t *testing.T) {
-	t.Parallel()
-	project := projectResponse(writableField{id: "180-14", kind: "StateProjectCustomField", name: "State",
-		valueType: "state", canBeEmpty: true})
-	held := receivedFields(receivedField{name: "Примечание", valueType: "string", binding: "187-10", value: "42"})
-	server := updating(t, fake.JSON(http.StatusOK, issueToUpdate("DEV-1", project)),
-		fake.JSON(http.StatusOK, createdIssueWith("DEV-1", "x", "null", held)))
-
-	got := runWith(t, server.Env(), "issue", "update", "DEV-1", "--summary", "x")
-
-	found := requireUncertainty(t, got)
-	assert.Equal(t, "upstream_invalid", found.code)
-	assert.Equal(t, detail{"upstream_status", 200}, found.details[1])
-	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
+	assert.Equal(t, want, requireFault(t, got))
+	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 }

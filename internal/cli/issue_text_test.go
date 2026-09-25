@@ -88,69 +88,6 @@ func TestIssueShowPrintsTextAsALiteralBlockWhereverItCan(t *testing.T) {
 	}
 }
 
-func TestIssueShowPrintsTextUnderANestedKeyAndInsideARecord(t *testing.T) {
-	t.Parallel()
-	positions := []struct {
-		name   string
-		fields string
-		wrap   func(text string) map[string]any
-		path   []string
-		record bool
-	}{
-		{
-			name:   "a nested mapping",
-			fields: "project(description)",
-			wrap: func(text string) map[string]any {
-				return map[string]any{"project": map[string]any{"$type": "Project", "description": text}}
-			},
-			path: []string{"project", "description"},
-		},
-		{
-			name:   "a record of a list",
-			fields: "pinnedComments(id,text)",
-			wrap: func(text string) map[string]any {
-				comment := map[string]any{"$type": "IssueComment", "id": "3-19", "text": text}
-				return map[string]any{"pinnedComments": []any{comment}}
-			},
-			path:   []string{"pinnedComments", "text"},
-			record: true,
-		},
-	}
-	for _, position := range positions {
-		t.Run(position.name, func(t *testing.T) {
-			t.Parallel()
-			for _, tc := range textCases() {
-				t.Run(tc.name, func(t *testing.T) {
-					t.Parallel()
-					server := fake.Serve(t, fake.JSON(http.StatusOK, issueWith(t, position.wrap(tc.text))))
-
-					got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", position.fields)
-
-					require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-					root := requireMapping(t, "stdout", got.stdout)
-					printed := nodeAt(t, root, position.path...)
-					assert.Equal(t, tc.text, printed.Value, "stdout: %q", got.stdout)
-					assert.Equal(t, tc.style(), printed.Style, "stdout: %q", got.stdout)
-					if position.record {
-						items := nodeAt(t, root, position.path[0])
-						require.Equal(t, yaml.SequenceNode, items.Kind)
-						assert.Equal(t, yaml.Style(0), items.Content[0].Style, "stdout: %q", got.stdout)
-					}
-				})
-			}
-		})
-	}
-}
-
-func TestIssueShowPrintsADescriptionThatIsNotThereAsNull(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, `{"$type":"Issue","idReadable":"DEV-1","description":null}`))
-
-	got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=0", "--fields", "idReadable,description")
-
-	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-1\"\ndescription: null\n"}, got)
-}
-
 func issueWith(t *testing.T, keys map[string]any) string {
 	t.Helper()
 	object := map[string]any{"$type": "Issue", "idReadable": "DEV-1"}

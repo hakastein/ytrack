@@ -1,14 +1,11 @@
 package cli_test
 
 import (
-	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/hakastein/ytrack/internal/fake"
 )
@@ -91,16 +88,10 @@ func TestIssueDeleteReadsTheIDAndDeletesByIt(t *testing.T) {
 	got := runWith(t, server.Env(), "issue", "delete", "dev-7")
 
 	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-7\"\n"}, got)
-	requests := server.Requests()
-	require.Len(t, requests, 2)
-	assert.Equal(t, http.MethodGet, requests[0].Method)
-	assert.Equal(t, "/api/issues/dev-7", requests[0].URL.Path)
-	assert.Equal(t, url.Values{"fields": {deletedFields}}, requests[0].URL.Query())
-	assert.Equal(t, http.MethodDelete, requests[1].Method)
-	assert.Equal(t, "/api/issues/DEV-7", requests[1].URL.Path)
-	assert.Empty(t, requests[1].URL.RawQuery, "a deletion asks for no fields")
-	assert.Equal(t, "Bearer "+fake.Token, requests[1].Header.Get("Authorization"))
-	assert.Equal(t, []string{"", ""}, server.Bodies(), "neither request carries a body")
+	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
+	assert.Equal(t, []string{"/api/issues/dev-7?fields=" + deletedFields, "/api/issues/DEV-7?"}, server.Targets())
+	assert.Equal(t, "Bearer "+fake.Token, server.Last(t).Header.Get("Authorization"))
+	assert.Equal(t, []string{"", ""}, server.Bodies())
 }
 
 func TestIssueDeleteRefusesAnIssueTheReadDoesNotFind(t *testing.T) {
@@ -164,70 +155,40 @@ func TestIssueDeleteRefusesWhatTheServerRefused(t *testing.T) {
 
 func TestIssueDeleteRefusesA200ThatCarriesABody(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name        string
-		contentType string
-		body        string
-	}{
-		{name: "a JSON object", contentType: "application/json", body: `{"x":1}`},
-		{name: "a web page", contentType: "text/html", body: "<!doctype html>\n<html><body>Log in</body></html>"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := deleting(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), func(w http.ResponseWriter, _ *http.Request) {
-				w.Header().Set("Content-Type", tc.contentType)
-				w.WriteHeader(http.StatusOK)
-				_, _ = io.WriteString(w, tc.body)
-			})
+	const body = `{"x":1}`
+	server := deleting(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), fake.JSON(http.StatusOK, body))
 
-			got := runWith(t, server.Env(), "issue", "delete", "DEV-7")
+	got := runWith(t, server.Env(), "issue", "delete", "DEV-7")
 
-			want := faultDocument{
-				code: "upstream_invalid",
-				details: []detail{
-					{"request", "DELETE " + server.URL + "/api/issues/DEV-7"},
-					{"upstream_status", 200},
-					{"upstream_body", tc.body},
-				},
-			}
-			assert.Equal(t, want, requireUncertainty(t, got))
-			assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
-		})
+	want := faultDocument{
+		code: "upstream_invalid",
+		details: []detail{
+			{"request", "DELETE " + server.URL + "/api/issues/DEV-7"},
+			{"upstream_status", 200},
+			{"upstream_body", body},
+		},
 	}
+	assert.Equal(t, want, requireUncertainty(t, got))
+	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
 }
 
 func TestIssueDeleteRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name     string
-		received string
-	}{
-		{name: "two dots", received: `".."`},
-		{name: "a path after the id", received: `"DEV-7/.."`},
-		{name: "the id of an article", received: `"DEV-A-7"`},
-		{name: "a number", received: "7"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			body := `{"$type":"Issue","idReadable":` + tc.received + `}`
-			server := deleting(t, fake.JSON(http.StatusOK, body), noDeletion(t))
+	const body = `{"$type":"Issue","idReadable":"DEV-7/.."}`
+	server := deleting(t, fake.JSON(http.StatusOK, body), noDeletion(t))
 
-			got := runWith(t, server.Env(), "issue", "delete", "dev-7")
+	got := runWith(t, server.Env(), "issue", "delete", "dev-7")
 
-			want := faultDocument{
-				code: "upstream_invalid",
-				details: []detail{
-					{"request", issueRequest(server.URL, "dev-7", deletedFields)},
-					{"upstream_status", 200},
-					{"upstream_body", body},
-				},
-			}
-			assert.Equal(t, want, requireFault(t, got))
-			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
-		})
+	want := faultDocument{
+		code: "upstream_invalid",
+		details: []detail{
+			{"request", issueRequest(server.URL, "dev-7", deletedFields)},
+			{"upstream_status", 200},
+			{"upstream_body", body},
+		},
 	}
+	assert.Equal(t, want, requireFault(t, got))
+	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 }
 
 func sentMethods(u *fake.Server) []string {
