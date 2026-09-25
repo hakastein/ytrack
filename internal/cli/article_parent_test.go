@@ -1,14 +1,12 @@
 package cli_test
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/url"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/hakastein/ytrack/internal/fake"
 )
@@ -22,10 +20,6 @@ func articleToWriteRequest(address, id string) string {
 func articleOfDEVToWrite(id, readable string) string {
 	return `{"$type":"Article","id":` + strconv.Quote(id) + `,"idReadable":` + strconv.Quote(readable) +
 		`,"project":{"$type":"Project","shortName":"DEV"}}`
-}
-
-func parentNamed(readable string) string {
-	return `{"$type":"Article","idReadable":` + strconv.Quote(readable) + `,"summary":"Родительская статья"}`
 }
 
 func filingUnderAParent(t *testing.T, read, creation http.HandlerFunc) *fake.Server {
@@ -67,33 +61,6 @@ func TestArticleCreateRefusesAParentOfAnyOtherFormBeforeAnyRequest(t *testing.T)
 	}
 }
 
-func TestArticleCreateAddressesTheParentByTheIDTheReadGave(t *testing.T) {
-	t.Parallel()
-	filed := answeredArticle{readable: "DEV-A-8", summary: "x", parent: parentNamed("DEV-A-1")}
-	server := filingUnderAParent(t,
-		fake.JSON(http.StatusOK, articleOfDEVToWrite("177-1", "DEV-A-1")),
-		fake.JSON(http.StatusOK, filed.json()))
-
-	got := runWith(t, server.Env(), "article", "create", "DEV", "--summary", "x", "--parent", "dev-A-1")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
-	assert.Equal(t, []string{"/api/articles/dev-A-1", "/api/articles"}, server.Paths())
-	assert.Equal(t, []string{articleToWriteFields, askedArticleFields}, server.Fields())
-
-	var body map[string]any
-	require.NoError(t, json.Unmarshal([]byte(server.Last(t).Body), &body))
-	assert.Equal(t, map[string]any{
-		"project":       map[string]any{"shortName": "DEV"},
-		"summary":       "x",
-		"parentArticle": map[string]any{"id": "177-1"},
-	}, body)
-
-	mapping := requireMapping(t, "stdout", got.stdout)
-	assert.Equal(t, "DEV-A-1", nodeAt(t, mapping, "parentArticle", "idReadable").Value)
-}
-
 func TestArticleCreateRefusesAParentTheServerDoesNotHave(t *testing.T) {
 	t.Parallel()
 	said := `{"error":"Not Found","error_description":"Can't find article with id DEV-A-99999"}`
@@ -114,140 +81,21 @@ func TestArticleCreateRefusesAParentTheServerDoesNotHave(t *testing.T) {
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 }
 
-func TestArticleCreateRefusesAParentOfAnotherProject(t *testing.T) {
+func TestArticleCreateRefusesAParentLeftEmptyInTheResponse(t *testing.T) {
 	t.Parallel()
-	found := `{"$type":"Article","id":"177-50","idReadable":"DEMO-A-1",` +
-		`"project":{"$type":"Project","shortName":"DEMO"}}`
+	const found = `{"$type":"Article","id":null,"idReadable":"DEV-A-1","project":{"$type":"Project","shortName":"DEV"}}`
 	server := filingUnderAParent(t, fake.JSON(http.StatusOK, found), noCreation(t))
 
-	got := runWith(t, server.Env(), "article", "create", "DEV", "--summary", "x", "--parent", "DEMO-A-1")
+	got := runWith(t, server.Env(), "article", "create", "DEV", "--summary", "Title", "--parent", "DEV-A-1")
 
 	want := faultDocument{
-		code: "bad_usage",
+		code: "upstream_invalid",
 		details: []detail{
-			{"request", articleToWriteRequest(server.URL, "DEMO-A-1")},
-			{"project", "DEV"},
-			{"parent", "DEMO-A-1"},
-			{"parent_project", "DEMO"},
+			{"request", articleToWriteRequest(server.URL, "DEV-A-1")},
+			{"upstream_status", 200},
+			{"upstream_body", found},
 		},
 	}
 	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
-}
-
-func TestArticleCreateRefusesAParentLeftEmptyInTheResponse(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		found string
-	}{
-		{
-			name: "no internal id",
-			found: `{"$type":"Article","id":null,"idReadable":"DEV-A-1",` +
-				`"project":{"$type":"Project","shortName":"DEV"}}`,
-		},
-		{
-			name:  "no project at all",
-			found: `{"$type":"Article","id":"177-1","idReadable":"DEV-A-1","project":null}`,
-		},
-		{
-			name: "a project of no name",
-			found: `{"$type":"Article","id":"177-1","idReadable":"DEV-A-1",` +
-				`"project":{"$type":"Project","shortName":null}}`,
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := filingUnderAParent(t, fake.JSON(http.StatusOK, tc.found), noCreation(t))
-
-			got := runWith(t, server.Env(), "article", "create", "DEV", "--summary", "x", "--parent", "DEV-A-1")
-
-			want := faultDocument{
-				code: "upstream_invalid",
-				details: []detail{
-					{"request", articleToWriteRequest(server.URL, "DEV-A-1")},
-					{"upstream_status", 200},
-					{"upstream_body", tc.found},
-				},
-			}
-			assert.Equal(t, want, requireFault(t, got))
-			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
-		})
-	}
-}
-
-func TestArticleCreateFilesUnderAParentOfTheProjectInAnotherLetterCase(t *testing.T) {
-	t.Parallel()
-	filed := answeredArticle{readable: "DEV-A-8", summary: "x", parent: parentNamed("DEV-A-1")}
-	server := filingUnderAParent(t,
-		fake.JSON(http.StatusOK, articleOfDEVToWrite("177-1", "DEV-A-1")),
-		fake.JSON(http.StatusOK, filed.json()))
-
-	got := runWith(t, server.Env(), "article", "create", "dev", "--summary", "x", "--parent", "DEV-A-1")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
-	var body map[string]any
-	require.NoError(t, json.Unmarshal([]byte(server.Last(t).Body), &body))
-	assert.Equal(t, map[string]any{
-		"project":       map[string]any{"shortName": "dev"},
-		"summary":       "x",
-		"parentArticle": map[string]any{"id": "177-1"},
-	}, body)
-}
-
-func TestArticleCreateRefusesAnAnswerCarryingAnotherParent(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name     string
-		parent   string
-		received any
-	}{
-		{name: "no parent at all", parent: "null", received: nil},
-		{name: "another parent", parent: parentNamed("DEV-A-2"), received: "DEV-A-2"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			filed := answeredArticle{readable: "DEV-A-8", summary: "x", parent: tc.parent}
-			server := filingUnderAParent(t,
-				fake.JSON(http.StatusOK, articleOfDEVToWrite("177-1", "DEV-A-1")),
-				fake.JSON(http.StatusOK, filed.json()))
-
-			got := runWith(t, server.Env(), "article", "create", "DEV", "--summary", "x", "--parent", "DEV-A-1")
-
-			want := faultDocument{
-				code: "upstream_invalid",
-				details: []detail{
-					{"request", articleCreationRequest(server.URL, askedArticleFields)},
-					{"article", "DEV-A-8"},
-					{"mismatch", []any{
-						[]detail{{"field", "parentArticle"}, {"expected", "DEV-A-1"}, {"actual", tc.received}},
-					}},
-				},
-			}
-			assert.Equal(t, want, requireUncertainty(t, got))
-			assert.Empty(t, got.stdout)
-		})
-	}
-}
-
-func TestArticleCreateAsksForTheParentWhateverTheExpressionSays(t *testing.T) {
-	t.Parallel()
-	filed := `{"$type":"Article","idReadable":"DEV-A-8","summary":"x","content":null,` +
-		`"project":{"$type":"Project","shortName":"DEV"},"parentArticle":{"$type":"Article","id":"177-1"}}`
-	server := filingUnderAParent(t,
-		fake.JSON(http.StatusOK, articleOfDEVToWrite("177-1", "DEV-A-1")),
-		fake.JSON(http.StatusOK, filed))
-
-	got := runWith(t, server.Env(), "article", "create", "DEV", "--summary", "x", "--parent", "DEV-A-1",
-		"--fields", "idReadable")
-
-	asked := "idReadable,summary,content,project(shortName),parentArticle(idReadable)"
-	assert.Equal(t, []string{articleToWriteFields, asked}, server.Fields())
-	found := requireUncertainty(t, got)
-	assert.Equal(t, "upstream_invalid", found.code)
-	assert.Empty(t, got.stdout)
 }

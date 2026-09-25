@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/hakastein/ytrack/internal/fake"
 )
@@ -66,15 +65,10 @@ func TestArticleDeleteReadsTheIDAndDeletesByIt(t *testing.T) {
 	got := runWith(t, server.Env(), "article", "delete", "dev-A-7")
 
 	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-A-7\"\n"}, got)
-	requests := server.Requests()
-	require.Len(t, requests, 2)
-	assert.Equal(t, http.MethodGet, requests[0].Method)
-	assert.Equal(t, "/api/articles/dev-A-7", requests[0].URL.Path)
-	assert.Equal(t, url.Values{"fields": {deletedFields}}, requests[0].URL.Query())
-	assert.Equal(t, http.MethodDelete, requests[1].Method)
-	assert.Equal(t, "/api/articles/DEV-A-7", requests[1].URL.Path)
-	assert.Empty(t, requests[1].URL.RawQuery, "a deletion asks for no fields")
-	assert.Equal(t, "Bearer "+fake.Token, requests[1].Header.Get("Authorization"))
+	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
+	assert.Equal(t, []string{"/api/articles/dev-A-7", "/api/articles/DEV-A-7"}, server.Paths())
+	assert.Equal(t, []url.Values{{"fields": {deletedFields}}, {}}, server.Queries())
+	assert.Equal(t, "Bearer "+fake.Token, server.Last(t).Header.Get("Authorization"))
 	assert.Equal(t, []string{"", ""}, server.Bodies(), "neither request carries a body")
 }
 

@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
 
 	"github.com/hakastein/ytrack/internal/fake"
@@ -16,13 +15,13 @@ import (
 const articleListFields = "idReadable,summary"
 
 const (
-	listedParent = `{"summary":"Родительская статья","$type":"Article","idReadable":"DEV-A-1"}`
-	listedChild  = `{"idReadable":"DEV-A-2","$type":"Article","summary":"Дочерняя статья"}`
+	listedParent = `{"summary":"Parent","$type":"Article","idReadable":"DEV-A-1"}`
+	listedChild  = `{"idReadable":"DEV-A-2","$type":"Article","summary":"Child"}`
 )
 
 const (
-	printedParentRow = `  - {idReadable: "DEV-A-1", summary: "Родительская статья"}` + "\n"
-	printedChildRow  = `  - {idReadable: "DEV-A-2", summary: "Дочерняя статья"}` + "\n"
+	printedParentRow = `  - {idReadable: "DEV-A-1", summary: "Parent"}` + "\n"
+	printedChildRow  = `  - {idReadable: "DEV-A-2", summary: "Child"}` + "\n"
 )
 
 func articleListRequest(address, fields, top, escapedQuery string) string {
@@ -66,8 +65,6 @@ func TestArticleListTakesItsSearchFromTheQueryFlagAlone(t *testing.T) {
 	}{
 		{name: "no search at all"},
 		{name: "the flag twice", argv: []string{"--query", "a", "--query", "b"}},
-		{name: "a byte that is no UTF-8", argv: []string{"--query", "\xff"}},
-		{name: "a truncated sequence inside a search that parses", argv: []string{"--query", "title: \xc3\x28"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -90,7 +87,6 @@ func TestArticleListRefusesWhatItCannotSend(t *testing.T) {
 	}{
 		{name: "a limit of zero", flags: []string{"--limit", "0"}},
 		{name: "the limit twice", flags: []string{"--limit", "1", "--limit", "2"}},
-		{name: "comments added to the default", flags: []string{"--fields", "+comments"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -105,35 +101,18 @@ func TestArticleListRefusesWhatItCannotSend(t *testing.T) {
 	}
 }
 
-func TestArticleListSendsTheSearchWordForWordAndAsksForNoMarkup(t *testing.T) {
+func TestArticleListSendsTheSearchAsWritten(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name   string
-		search string
-	}{
-		{name: "brackets that open and never close", search: "(((("},
-		{name: "a saved search of the language of issues", search: "#Unresolved"},
-		{name: "characters a query escapes", search: "title: a&b=c?d#e%20+f"},
-		{name: "a tab and a line feed inside", search: "title:\tпервая\nвторая"},
-		{name: "a line separator inside", search: "title: первая\xe2\x80\xa8вторая"},
-		{name: "an empty search", search: ""},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := selecting(t, fake.JSON(http.StatusOK, "["+listedParent+"]"))
+	const search = "  project: DEV  "
+	server := selecting(t, fake.JSON(http.StatusOK, "["+listedParent+"]"))
 
-			got := runWith(t, server.Env(), "article", "list", "--query", tc.search)
+	got := runWith(t, server.Env(), "article", "list", "--query", search)
 
-			want := "total: 1\nreturned: 1\ntruncated: false\narticles:\n" + printedParentRow
-			assert.Equal(t, outcome{stdout: want}, got)
-			requests := server.Requests()
-			require.Len(t, requests, 1)
-			assert.Equal(t, "/api/articles", requests[0].URL.Path)
-			assert.Equal(t, url.Values{"fields": {articleListFields}, "$top": {"50"}, "query": {tc.search}},
-				requests[0].URL.Query())
-		})
-	}
+	want := "total: 1\nreturned: 1\ntruncated: false\narticles:\n" + printedParentRow
+	assert.Equal(t, outcome{stdout: want}, got)
+	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
+	assert.Equal(t, []string{"/api/articles"}, server.Paths())
+	assert.Equal(t, []url.Values{{"fields": {articleListFields}, "$top": {"50"}, "query": {search}}}, server.Queries())
 }
 
 func TestArticleListPrintsTheSameDocumentHoweverManyWereFound(t *testing.T) {

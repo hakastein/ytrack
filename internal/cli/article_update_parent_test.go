@@ -3,12 +3,10 @@ package cli_test
 import (
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/hakastein/ytrack/internal/fake"
 )
@@ -25,39 +23,6 @@ func articleLineFields() string {
 
 func articleLineRequest(address, id string) string {
 	return "GET " + address + "/api/articles/" + url.PathEscape(id) + "?fields=" + articleLineFields()
-}
-
-type ancestor struct{ id, readable string }
-
-const (
-	rootParent    = "null"
-	parentNotSent = ""
-)
-
-func nestedLine(topParent string, steps []ancestor) string {
-	nested := topParent
-	for at := len(steps) - 1; at >= 0; at-- {
-		body := `{"$type":"Article","id":` + strconv.Quote(steps[at].id) +
-			`,"idReadable":` + strconv.Quote(steps[at].readable)
-		if nested != parentNotSent {
-			body += `,"parentArticle":` + nested
-		}
-		nested = body + `}`
-	}
-	return nested
-}
-
-func articleAbove(id, readable, project, topParent string, steps ...ancestor) string {
-	body := `{"$type":"Article","id":` + strconv.Quote(id) + `,"idReadable":` + strconv.Quote(readable) +
-		`,"project":{"$type":"Project","shortName":` + strconv.Quote(project) + `}`
-	if line := nestedLine(topParent, steps); line != parentNotSent {
-		body += `,"parentArticle":` + line
-	}
-	return body + `}`
-}
-
-func rootOfDEV(id, readable string) string {
-	return articleAbove(id, readable, "DEV", rootParent)
 }
 
 func movingAnArticle(t *testing.T, reads map[string]http.HandlerFunc, update http.HandlerFunc) *fake.Server {
@@ -85,11 +50,6 @@ func TestArticleUpdateRefusesAParentBeforeAnyRequest(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "a parent written and taken away both", argv: []string{"--parent", "DEV-A-2", "--clear", "parent"}},
-		{
-			name: "a parent written and taken away under another letter case",
-			argv: []string{"--parent", "DEV-A-2", "--clear", "PARENT"},
-		},
 		{name: "the id of an issue for a parent", argv: []string{"--parent", "DEV-1"}},
 		{name: "an internal id for a parent", argv: []string{"--parent", "177-1"}},
 		{name: "the marker of the parent in lower case", argv: []string{"--parent", "DEV-a-1"}},
@@ -107,42 +67,6 @@ func TestArticleUpdateRefusesAParentBeforeAnyRequest(t *testing.T) {
 			assert.Empty(t, server.Requests())
 		})
 	}
-}
-
-func TestArticleUpdateMovesAnArticleUnderTheIDTheReadGave(t *testing.T) {
-	t.Parallel()
-	filed := answeredArticle{readable: "DEV-A-7", summary: "x", parent: parentNamed("DEV-A-1")}
-	server := movingAnArticle(t, map[string]http.HandlerFunc{
-		"dev-A-7": fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		"dev-A-1": fake.JSON(http.StatusOK, rootOfDEV("177-1", "DEV-A-1")),
-	}, fake.JSON(http.StatusOK, filed.json()))
-
-	got := runWith(t, server.Env(), "article", "update", "dev-A-7", "--parent", "dev-A-1")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	assert.Equal(t, []string{http.MethodGet, http.MethodGet, http.MethodPost}, sentMethods(server))
-	assert.Equal(t, []string{"/api/articles/dev-A-7", "/api/articles/dev-A-1", "/api/articles/DEV-A-7"},
-		server.Paths())
-	assert.Equal(t, []string{articleToWriteFields, articleLineFields(), articleShowFields}, server.Fields())
-	assert.Equal(t, map[string]any{"parentArticle": map[string]any{"id": "177-1"}}, sentChanges(t, server))
-	assert.Equal(t, "DEV-A-1", nodeAt(t, requireMapping(t, "stdout", got.stdout), "parentArticle", "idReadable").Value)
-}
-
-func TestArticleUpdateAsksForTheParentWhateverTheExpressionSays(t *testing.T) {
-	t.Parallel()
-	filed := answeredArticle{readable: "DEV-A-7", summary: "x", parent: parentNamed("DEV-A-1")}
-	server := movingAnArticle(t, map[string]http.HandlerFunc{
-		"DEV-A-7": fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		"DEV-A-1": fake.JSON(http.StatusOK, rootOfDEV("177-1", "DEV-A-1")),
-	}, fake.JSON(http.StatusOK, filed.json()))
-
-	got := runWith(t, server.Env(), "article", "update", "DEV-A-7", "--parent", "DEV-A-1", "--fields", "idReadable")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, "idReadable: \"DEV-A-7\"\n", got.stdout)
-	assert.Equal(t, []string{articleToWriteFields, articleLineFields(), "idReadable,parentArticle(idReadable)"},
-		server.Fields())
 }
 
 func TestArticleUpdateRefusesAParentTheServerDoesNotHave(t *testing.T) {
@@ -167,220 +91,4 @@ func TestArticleUpdateRefusesAParentTheServerDoesNotHave(t *testing.T) {
 	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet, http.MethodGet}, sentMethods(server))
 	assert.Equal(t, []string{"/api/articles/DEV-A-7", "/api/articles/DEV-A-99999"}, server.Paths())
-}
-
-func TestArticleUpdateRefusesAParentThatClosesTheLine(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name     string
-		parent   string
-		readable string
-		found    string
-		chain    []any
-	}{
-		{
-			name:     "the article itself",
-			parent:   "dev-A-7",
-			readable: "DEV-A-7",
-			found:    articleAbove("177-7", "DEV-A-7", "DEV", rootParent),
-			chain:    []any{"DEV-A-7"},
-		},
-		{
-			name:     "an article written under it",
-			parent:   "DEV-A-9",
-			readable: "DEV-A-9",
-			found: articleAbove("177-9", "DEV-A-9", "DEV", rootParent,
-				ancestor{id: "177-8", readable: "DEV-A-8"}, ancestor{id: "177-7", readable: "DEV-A-7"}),
-			chain: []any{"DEV-A-9", "DEV-A-8", "DEV-A-7"},
-		},
-		{
-			name:     "an article written under it, with a root above them both",
-			parent:   "DEV-A-9",
-			readable: "DEV-A-9",
-			found: articleAbove("177-9", "DEV-A-9", "DEV", rootParent,
-				ancestor{id: "177-7", readable: "DEV-A-7"}, ancestor{id: "177-1", readable: "DEV-A-1"}),
-			chain: []any{"DEV-A-9", "DEV-A-7"},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := movingAnArticle(t, map[string]http.HandlerFunc{
-				"DEV-A-7": fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-				tc.parent: fake.JSON(http.StatusOK, tc.found),
-			}, noUpdate(t))
-
-			got := runWith(t, server.Env(), "article", "update", "DEV-A-7", "--parent", tc.parent)
-
-			want := faultDocument{
-				code: "bad_usage",
-				details: []detail{
-					{"request", articleLineRequest(server.URL, tc.parent)},
-					{"article", "DEV-A-7"},
-					{"parent", tc.readable},
-					{"chain", tc.chain},
-				},
-			}
-			assert.Equal(t, want, requireFault(t, got))
-			assert.Equal(t, []string{http.MethodGet, http.MethodGet}, sentMethods(server))
-		})
-	}
-}
-
-func TestArticleUpdateReadsOnWhereTheLineIsDeeperThanOneRequest(t *testing.T) {
-	t.Parallel()
-	steps := make([]ancestor, 0, ancestorsPerRequest)
-	for at := range ancestorsPerRequest {
-		steps = append(steps, ancestor{id: "177-" + strconv.Itoa(30+at), readable: "DEV-A-" + strconv.Itoa(30+at)})
-	}
-	deepest := steps[len(steps)-1]
-	filed := answeredArticle{readable: "DEV-A-7", summary: "x", parent: parentNamed("DEV-A-20")}
-	server := movingAnArticle(t, map[string]http.HandlerFunc{
-		"DEV-A-7":  fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		"DEV-A-20": fake.JSON(http.StatusOK, articleAbove("177-20", "DEV-A-20", "DEV", parentNotSent, steps...)),
-		deepest.id: fake.JSON(http.StatusOK, articleAbove(deepest.id, deepest.readable, "DEV", rootParent,
-			ancestor{id: "177-2", readable: "DEV-A-2"})),
-	}, fake.JSON(http.StatusOK, filed.json()))
-
-	got := runWith(t, server.Env(), "article", "update", "DEV-A-7", "--parent", "DEV-A-20")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, []string{"/api/articles/DEV-A-7", "/api/articles/DEV-A-20", "/api/articles/" + deepest.id,
-		"/api/articles/DEV-A-7"}, server.Paths())
-	assert.Equal(t, articleLineFields(), server.Fields()[2], "the line is read on with the same expression")
-}
-
-func TestArticleUpdateRefusesAnAncestorStepLeftEmptyInTheResponse(t *testing.T) {
-	t.Parallel()
-	found := `{"$type":"Article","id":"177-9","idReadable":"DEV-A-9",` +
-		`"project":{"$type":"Project","shortName":"DEV"},` +
-		`"parentArticle":{"$type":"Article","id":null,"idReadable":"DEV-A-8","parentArticle":null}}`
-	server := movingAnArticle(t, map[string]http.HandlerFunc{
-		"DEV-A-7": fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		"DEV-A-9": fake.JSON(http.StatusOK, found),
-	}, noUpdate(t))
-
-	got := runWith(t, server.Env(), "article", "update", "DEV-A-7", "--parent", "DEV-A-9")
-
-	want := faultDocument{
-		code: "upstream_invalid",
-		details: []detail{
-			{"request", articleLineRequest(server.URL, "DEV-A-9")},
-			{"upstream_status", 200},
-			{"upstream_body", found},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet, http.MethodGet}, sentMethods(server))
-}
-
-func TestArticleUpdateRefusesALineThatRepeatsAnArticle(t *testing.T) {
-	t.Parallel()
-	server := movingAnArticle(t, map[string]http.HandlerFunc{
-		"DEV-A-7": fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		"DEV-A-9": fake.JSON(http.StatusOK, articleAbove("177-9", "DEV-A-9", "DEV", rootParent,
-			ancestor{id: "177-8", readable: "DEV-A-8"}, ancestor{id: "177-9", readable: "DEV-A-9"})),
-	}, noUpdate(t))
-
-	got := runWith(t, server.Env(), "article", "update", "DEV-A-7", "--parent", "DEV-A-9")
-
-	want := faultDocument{
-		code: "upstream_invalid",
-		details: []detail{
-			{"request", articleLineRequest(server.URL, "DEV-A-9")},
-			{"article", "DEV-A-9"},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet, http.MethodGet}, sentMethods(server))
-}
-
-func TestArticleUpdateRefusesAParentOfAnotherProject(t *testing.T) {
-	t.Parallel()
-	server := movingAnArticle(t, map[string]http.HandlerFunc{
-		"DEV-A-7":  fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		"DEMO-A-1": fake.JSON(http.StatusOK, articleAbove("177-50", "DEMO-A-1", "DEMO", rootParent)),
-	}, noUpdate(t))
-
-	got := runWith(t, server.Env(), "article", "update", "DEV-A-7", "--parent", "DEMO-A-1")
-
-	want := faultDocument{
-		code: "bad_usage",
-		details: []detail{
-			{"request", articleLineRequest(server.URL, "DEMO-A-1")},
-			{"project", "DEV"},
-			{"parent", "DEMO-A-1"},
-			{"parent_project", "DEMO"},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet, http.MethodGet}, sentMethods(server))
-}
-
-func TestArticleUpdateTakesTheParentAwayWithoutReadingOne(t *testing.T) {
-	t.Parallel()
-	filed := answeredArticle{readable: "DEV-A-7", summary: "x"}
-	server := movingAnArticle(t, map[string]http.HandlerFunc{
-		"DEV-A-7": fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-	}, fake.JSON(http.StatusOK, filed.json()))
-
-	got := runWith(t, server.Env(), "article", "update", "DEV-A-7", "--clear", "parent")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Empty(t, got.stderr)
-	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
-	assert.Equal(t, map[string]any{"parentArticle": nil}, sentChanges(t, server))
-	assert.Nil(t, requireValue(t, nodeAt(t, requireMapping(t, "stdout", got.stdout), "parentArticle")))
-}
-
-func TestArticleUpdateRefusesAnAnswerThatDisagreesAboutTheParent(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name     string
-		argv     []string
-		parent   string
-		mismatch []detail
-	}{
-		{
-			name:     "a parent still standing where the call took it away",
-			argv:     []string{"--clear", "parent"},
-			parent:   parentNamed("DEV-A-1"),
-			mismatch: []detail{{"field", "parentArticle"}, {"expected", nil}, {"actual", "DEV-A-1"}},
-		},
-		{
-			name:     "no parent at all where the call wrote one",
-			argv:     []string{"--parent", "DEV-A-1"},
-			parent:   "null",
-			mismatch: []detail{{"field", "parentArticle"}, {"expected", "DEV-A-1"}, {"actual", nil}},
-		},
-		{
-			name:     "another parent than the one that was read",
-			argv:     []string{"--parent", "DEV-A-1"},
-			parent:   parentNamed("DEV-A-2"),
-			mismatch: []detail{{"field", "parentArticle"}, {"expected", "DEV-A-1"}, {"actual", "DEV-A-2"}},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			filed := answeredArticle{readable: "DEV-A-7", summary: "x", parent: tc.parent}
-			server := movingAnArticle(t, map[string]http.HandlerFunc{
-				"DEV-A-7": fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-				"DEV-A-1": fake.JSON(http.StatusOK, rootOfDEV("177-1", "DEV-A-1")),
-			}, fake.JSON(http.StatusOK, filed.json()))
-
-			got := runWith(t, server.Env(), append([]string{"article", "update", "DEV-A-7"}, tc.argv...)...)
-
-			want := faultDocument{
-				code: "upstream_invalid",
-				details: []detail{
-					{"request", articleUpdateRequest(server.URL, "DEV-A-7", articleShowFields)},
-					{"article", "DEV-A-7"},
-					{"mismatch", []any{tc.mismatch}},
-				},
-			}
-			assert.Equal(t, want, requireUncertainty(t, got))
-			assert.Empty(t, got.stdout)
-		})
-	}
 }

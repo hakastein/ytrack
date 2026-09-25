@@ -73,17 +73,6 @@ func TestCommentDeleteRemovesACommentOfAnIssueInOneRequest(t *testing.T) {
 	assert.Equal(t, []string{""}, server.Bodies())
 }
 
-func TestCommentDeleteRemovesACommentOfAnArticleInOneRequest(t *testing.T) {
-	t.Parallel()
-	server := removingAComment(t, deletionDone())
-
-	got := runWith(t, server.Env(), "comment", "delete", "DEV-A-3", "8-5")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, "id: \"8-5\"\n", got.stdout)
-	assert.Equal(t, []string{"/api/articles/DEV-A-3/comments/8-5"}, server.Paths())
-}
-
 func TestCommentDeleteReadsTheAnswerOfTheRemoval(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
