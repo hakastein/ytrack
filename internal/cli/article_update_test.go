@@ -1,12 +1,10 @@
 package cli_test
 
 import (
-	"encoding/json"
 	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/hakastein/ytrack/internal/fake"
 )
@@ -27,13 +25,6 @@ func updatingAnArticle(t *testing.T, read, update http.HandlerFunc) *fake.Server
 		}
 		update(w, r)
 	})
-}
-
-func sentChanges(t *testing.T, u *fake.Server) map[string]any {
-	t.Helper()
-	var body map[string]any
-	require.NoError(t, json.Unmarshal([]byte(u.Last(t).Body), &body))
-	return body
 }
 
 func TestArticleUpdateRefusesACallThatWritesNothing(t *testing.T) {
@@ -59,7 +50,7 @@ func TestArticleUpdateWritesTheArticleTheReadFound(t *testing.T) {
 	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-A-7\"\nsummary: \"Title\"\n"}, got)
 	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
 	assert.Equal(t, []string{"/api/articles/DEV-A-7", "/api/articles/DEV-A-7"}, server.Paths())
-	assert.Equal(t, map[string]any{"content": hostileText}, sentChanges(t, server))
+	assert.Equal(t, map[string]any{"content": hostileText}, server.LastJSON(t))
 }
 
 func TestArticleUpdateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {

@@ -2,7 +2,6 @@ package cli_test
 
 import (
 	"cmp"
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"testing"
@@ -47,13 +46,6 @@ func creatingAnArticle(t *testing.T, creation http.HandlerFunc) *fake.Server {
 	})
 }
 
-func sentArticle(t *testing.T, u *fake.Server) map[string]any {
-	t.Helper()
-	var body map[string]any
-	require.NoError(t, json.Unmarshal([]byte(u.Last(t).Body), &body))
-	return body
-}
-
 func TestArticleCreateRefusesBeforeAnyRequest(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -91,7 +83,7 @@ func TestArticleCreateFilesTheArticleInOneRequest(t *testing.T) {
 		"project": map[string]any{"shortName": "DEV"},
 		"summary": "Title",
 		"content": hostileText,
-	}, sentArticle(t, server))
+	}, server.LastJSON(t))
 
 	mapping := requireMapping(t, "stdout", got.stdout)
 	assert.Equal(t, []string{"idReadable", "summary", "reporter", "created", "updated", "tags", "parentArticle",

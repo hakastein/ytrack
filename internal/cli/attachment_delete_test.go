@@ -46,7 +46,7 @@ func TestAttachmentDeletePrintsWhatTheReadBeforeItFound(t *testing.T) {
 func TestAttachmentDeleteRefusesAnAnswerItCannotBeAddressedBy(t *testing.T) {
 	t.Parallel()
 	read := attachmentOf("12-5", "a.txt", "..")
-	server := deleting(t, fake.JSON(http.StatusOK, read), noDeletion(t))
+	server := deleting(t, fake.JSON(http.StatusOK, read), fake.Unexpected(t))
 
 	got := runWith(t, server.Env(), "attachment", "delete", "DEV-7", "12-5")
 

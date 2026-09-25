@@ -94,20 +94,6 @@ func articleServer(t *testing.T, reads map[string]string, write http.HandlerFunc
 	})
 }
 
-func articleNoWrite(t *testing.T) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		assert.Fail(t, "an article was written", "%s %s", r.Method, r.URL)
-		http.Error(w, "no write was expected", http.StatusTeapot)
-	}
-}
-
-func articleSent(t *testing.T, server *fake.Server) map[string]any {
-	t.Helper()
-	var body map[string]any
-	require.NoError(t, json.Unmarshal([]byte(server.Last(t).Body), &body))
-	return body
-}
-
 func articleNamed(readable string) *render.Node {
 	return render.NewMap(render.Pair{Key: "idReadable", Value: render.NewString(readable)})
 }
@@ -286,7 +272,7 @@ func TestCreateArticleSendsWhatItWasGiven(t *testing.T) {
 			_, fault = call(t.Context(), client(t, server))
 
 			require.Nil(t, fault)
-			assert.Equal(t, tc.sent, articleSent(t, server))
+			assert.Equal(t, tc.sent, server.LastJSON(t))
 		})
 	}
 }
@@ -356,7 +342,7 @@ func TestUpdateArticleSendsWhatItWasGiven(t *testing.T) {
 			_, fault = call(t.Context(), client(t, server))
 
 			require.Nil(t, fault)
-			assert.Equal(t, tc.sent, articleSent(t, server))
+			assert.Equal(t, tc.sent, server.LastJSON(t))
 		})
 	}
 }
@@ -698,7 +684,7 @@ func TestArticleWritesRefuseAParentOfAnotherProject(t *testing.T) {
 			server := articleServer(t, map[string]string{
 				"DEV-A-7":  articleLine("DEV", articleNothingAbove, articleWritten),
 				"DEMO-A-1": articleLine("DEMO", articleRootAbove, articleOfDEMO),
-			}, articleNoWrite(t))
+			}, fake.Unexpected(t))
 			call, fault := tc.call()
 			require.Nil(t, fault)
 
@@ -734,7 +720,7 @@ func TestUpdateArticleRefusesAnArticleItCannotWriteByTheRead(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := articleServer(t, map[string]string{"DEV-A-7": tc.read}, articleNoWrite(t))
+			server := articleServer(t, map[string]string{"DEV-A-7": tc.read}, fake.Unexpected(t))
 			call, fault := youtrack.UpdateArticle("DEV-A-7", new("Title"), nil, nil, nil, nil)
 			require.Nil(t, fault)
 
@@ -783,7 +769,7 @@ func TestUpdateArticleRefusesAParentThatClosesTheLine(t *testing.T) {
 			server := articleServer(t, map[string]string{
 				"DEV-A-7": articleLine("DEV", articleNothingAbove, articleWritten),
 				tc.parent: tc.line,
-			}, articleNoWrite(t))
+			}, fake.Unexpected(t))
 			call, fault := youtrack.UpdateArticle("DEV-A-7", nil, nil, &tc.parent, nil, nil)
 			require.Nil(t, fault)
 
@@ -826,7 +812,7 @@ func TestUpdateArticleRefusesALineOfParentsTheServerBrokeOff(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := articleServer(t, tc.reads, articleNoWrite(t))
+			server := articleServer(t, tc.reads, fake.Unexpected(t))
 			call, fault := youtrack.UpdateArticle("DEV-A-7", nil, nil, new("DEV-A-9"), nil, nil)
 			require.Nil(t, fault)
 
@@ -880,7 +866,7 @@ func TestUpdateArticleRefusesAnAncestorItCannotRead(t *testing.T) {
 			server := articleServer(t, map[string]string{
 				"DEV-A-7": articleLine("DEV", articleNothingAbove, articleWritten),
 				"DEV-A-9": tc.line,
-			}, articleNoWrite(t))
+			}, fake.Unexpected(t))
 			call, fault := youtrack.UpdateArticle("DEV-A-7", nil, nil, new("DEV-A-9"), nil, nil)
 			require.Nil(t, fault)
 
@@ -903,7 +889,7 @@ func TestUpdateArticleRefusesAParentOfAnotherShape(t *testing.T) {
 	server := articleServer(t, map[string]string{
 		"DEV-A-7": articleLine("DEV", articleNothingAbove, articleWritten),
 		"DEV-A-9": line,
-	}, articleNoWrite(t))
+	}, fake.Unexpected(t))
 	call, fault := youtrack.UpdateArticle("DEV-A-7", nil, nil, new("DEV-A-9"), nil, nil)
 	require.Nil(t, fault)
 
@@ -917,7 +903,7 @@ func TestUpdateArticleRefusesALineThatRepeatsAnArticle(t *testing.T) {
 	server := articleServer(t, map[string]string{
 		"DEV-A-7": articleLine("DEV", articleNothingAbove, articleWritten),
 		"DEV-A-9": articleLine("DEV", articleRootAbove, articleChild, articleBetween, articleChild),
-	}, articleNoWrite(t))
+	}, fake.Unexpected(t))
 	call, fault := youtrack.UpdateArticle("DEV-A-7", nil, nil, new("DEV-A-9"), nil, nil)
 	require.Nil(t, fault)
 
@@ -947,7 +933,7 @@ func TestUpdateArticleReadsTheLineOnWhereItIsDeeperThanOneRequest(t *testing.T) 
 	assert.Equal(t, []string{"/api/articles/DEV-A-7", "/api/articles/DEV-A-9", "/api/articles/" + deepest.id,
 		"/api/articles/DEV-A-7"}, server.Paths())
 	assert.Equal(t, server.Request(t, 1).URL.Query().Get("fields"), server.Request(t, 2).URL.Query().Get("fields"))
-	assert.Equal(t, map[string]any{"parentArticle": map[string]any{"id": articleChild.id}}, articleSent(t, server))
+	assert.Equal(t, map[string]any{"parentArticle": map[string]any{"id": articleChild.id}}, server.LastJSON(t))
 }
 
 func articleComment(id string, created int64, text string) map[string]any {

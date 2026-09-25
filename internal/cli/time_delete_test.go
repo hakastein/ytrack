@@ -47,7 +47,7 @@ func TestTimeDeleteReadsTheWorkItemAndThenRemovesIt(t *testing.T) {
 func TestTimeDeleteRemovesNothingByAReadOfAnotherShape(t *testing.T) {
 	t.Parallel()
 	read := workItemOfAnIssue("..", "DEV-1")
-	server := removingTime(t, fake.JSON(http.StatusOK, read), noDeletion(t))
+	server := removingTime(t, fake.JSON(http.StatusOK, read), fake.Unexpected(t))
 
 	got := runWith(t, server.Env(), "time", "delete", "DEV-1", "199-7")
 

@@ -89,7 +89,7 @@ func TestTagRemoveRefusesWhatTheReadsBeforeTheRemovalDoNotAllow(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := takingATagOff(t, fake.JSON(http.StatusOK, tc.owner), shownTags(), noDeletion(t))
+			server := takingATagOff(t, fake.JSON(http.StatusOK, tc.owner), shownTags(), fake.Unexpected(t))
 
 			got := runWith(t, server.Env(), "tag", "remove", "DEV-7", "--name", tc.written)
 

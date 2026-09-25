@@ -52,13 +52,6 @@ func linking(t *testing.T, write http.HandlerFunc) *fake.Server {
 	})
 }
 
-func noLinkWritten(t *testing.T) http.HandlerFunc {
-	t.Helper()
-	return func(_ http.ResponseWriter, r *http.Request) {
-		assert.Fail(t, "a write reached the server", "%s %s", r.Method, r.URL)
-	}
-}
-
 func TestLinkAddRefusesAnEmptyPhrase(t *testing.T) {
 	t.Parallel()
 	server := fake.ServeNothing(t)
@@ -93,7 +86,7 @@ func TestLinkAddWritesTheLinkAndPrintsTheLinksOfTheIssue(t *testing.T) {
 
 func TestLinkAddRefusesAPhraseNoLinkGoesBy(t *testing.T) {
 	t.Parallel()
-	server := linking(t, noLinkWritten(t))
+	server := linking(t, fake.Unexpected(t))
 
 	got := runWith(t, server.Env(), "link", "add", "DEV-1", "Neds", "DEV-2")
 
@@ -110,7 +103,7 @@ func TestLinkAddRefusesAPhraseNoLinkGoesBy(t *testing.T) {
 
 func TestLinkAddRefusesLinkingAnIssueToItself(t *testing.T) {
 	t.Parallel()
-	server := linking(t, noLinkWritten(t))
+	server := linking(t, fake.Unexpected(t))
 
 	got := runWith(t, server.Env(), "link", "add", "DEV-1", "ties", "DEV-1")
 

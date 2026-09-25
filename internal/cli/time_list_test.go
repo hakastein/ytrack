@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/hakastein/ytrack/internal/fake"
 )
@@ -44,11 +43,10 @@ func TestTimeListAsksTheWorkItemsOfTheIssueInOneRequest(t *testing.T) {
 
 	want := "total: 2\nreturned: 2\ntruncated: false\nworkItems:\n" + printedWorkItemRow + printedSecondRow
 	assert.Equal(t, outcome{stdout: want}, got)
-	requests := server.Requests()
-	require.Len(t, requests, 1)
-	assert.Equal(t, http.MethodGet, requests[0].Method)
-	assert.Equal(t, workItemsPath("DEV-1"), requests[0].URL.Path)
-	assert.Equal(t, url.Values{"fields": {sentWorkItemFields}, "$top": {"50"}}, requests[0].URL.Query())
+	assert.Len(t, server.Requests(), 1)
+	assert.Equal(t, http.MethodGet, server.Request(t, 0).Method)
+	assert.Equal(t, workItemsPath("DEV-1"), server.Request(t, 0).URL.Path)
+	assert.Equal(t, url.Values{"fields": {sentWorkItemFields}, "$top": {"50"}}, server.Request(t, 0).URL.Query())
 }
 
 func TestTimeListRefusesAnAnswerOfAnotherShape(t *testing.T) {

@@ -72,13 +72,6 @@ func tagServer(t *testing.T, routes map[string]http.HandlerFunc) *fake.Server {
 	return fake.Serve(t, mux.ServeHTTP)
 }
 
-func tagBodySent(t *testing.T, server *fake.Server) map[string]any {
-	t.Helper()
-	var body map[string]any
-	require.NoError(t, json.Unmarshal([]byte(server.Last(t).Body), &body))
-	return body
-}
-
 func tagCreationEchoed(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	fake.JSON(http.StatusOK, `{"$type":"Tag",`+strings.TrimPrefix(string(body), "{"))(w, r)
@@ -207,7 +200,7 @@ func TestCreateTagSendsTheNameAsWritten(t *testing.T) {
 			_, fault = call(t.Context(), client(t, server))
 
 			require.Nil(t, fault)
-			assert.Equal(t, map[string]any{"name": tc.written}, tagBodySent(t, server))
+			assert.Equal(t, map[string]any{"name": tc.written}, server.LastJSON(t))
 		})
 	}
 }
@@ -363,7 +356,7 @@ func TestCreateTagWritesEachSetOfGroupsItWasGiven(t *testing.T) {
 			_, fault = call(t.Context(), client(t, server))
 
 			require.Nil(t, fault)
-			assert.Equal(t, tc.body, tagBodySent(t, server))
+			assert.Equal(t, tc.body, server.LastJSON(t))
 			assert.Equal(t, []string{"/api/groups", "/api/tags"}, server.Paths())
 		})
 	}

@@ -69,7 +69,7 @@ func TestTagDeletePrintsWhatTheResolverFound(t *testing.T) {
 
 func TestTagDeleteRefusesANameNoTagCarries(t *testing.T) {
 	t.Parallel()
-	server := resolvingTags(t, tagsOfTwoOwners(), noDeletion(t))
+	server := resolvingTags(t, tagsOfTwoOwners(), fake.Unexpected(t))
 
 	got := runWith(t, server.Env(), "tag", "delete", "--name", "redy")
 
@@ -87,7 +87,7 @@ func TestTagDeleteRefusesANameNoTagCarries(t *testing.T) {
 func TestTagDeleteRefusesAnIDItCannotAddressTheDeletionBy(t *testing.T) {
 	t.Parallel()
 	catalogue := tagCatalogue(catalogueTag("..", "Ready", "first"))
-	server := resolvingTags(t, catalogue, noDeletion(t))
+	server := resolvingTags(t, catalogue, fake.Unexpected(t))
 
 	got := runWith(t, server.Env(), "tag", "delete", "--name", "Ready")
 

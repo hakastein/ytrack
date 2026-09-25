@@ -1,7 +1,6 @@
 package cli_test
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"testing"
@@ -52,13 +51,6 @@ func commenting(t *testing.T, write http.HandlerFunc) *fake.Server {
 	})
 }
 
-func sentComment(t *testing.T, u *fake.Server) map[string]any {
-	t.Helper()
-	var body map[string]any
-	require.NoError(t, json.Unmarshal([]byte(u.Last(t).Body), &body))
-	return body
-}
-
 func TestCommentCreateRefusesACallWithNoText(t *testing.T) {
 	t.Parallel()
 	server := fake.ServeNothing(t)
@@ -79,7 +71,7 @@ func TestCommentCreateWritesOnAnIssueInOneRequest(t *testing.T) {
 	assert.Empty(t, got.stderr)
 	assert.Equal(t, []string{"/api/issues/DEV-7/comments"}, server.Paths())
 	assert.Equal(t, []string{writtenCommentFields}, server.Fields())
-	assert.Equal(t, map[string]any{"text": hostileText}, sentComment(t, server))
+	assert.Equal(t, map[string]any{"text": hostileText}, server.LastJSON(t))
 
 	mapping := requireMapping(t, "stdout", got.stdout)
 	assert.Equal(t, []string{"id", "author", "created", "updated", "text"}, keysOf(mapping))

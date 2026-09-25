@@ -116,7 +116,7 @@ func TestTimeCreateWritesTheWorkItemAndPrintsWhatTheServerKept(t *testing.T) {
 
 func TestTimeCreateRefusesATypeTheProjectDoesNotHave(t *testing.T) {
 	t.Parallel()
-	server := writingTimeAgainstTheSettings(t, noWorkItemWritten(t))
+	server := writingTimeAgainstTheSettings(t, fake.Unexpected(t))
 
 	got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H", "--type", "Secnd")
 
@@ -148,11 +148,4 @@ func TestTimeCreateRefusesADurationTheServerKeptOtherwise(t *testing.T) {
 			{"mismatch", []any{[]detail{{"field", "duration"}, {"expected", "PT1H30M"}, {"actual", "PT1H"}}}},
 		},
 	}, requireUncertainty(t, got))
-}
-
-func noWorkItemWritten(t *testing.T) http.HandlerFunc {
-	t.Helper()
-	return func(_ http.ResponseWriter, r *http.Request) {
-		assert.Fail(t, "a work item was written", "%s %s", r.Method, r.URL)
-	}
 }

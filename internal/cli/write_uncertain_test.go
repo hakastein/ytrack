@@ -96,7 +96,7 @@ func TestIssueDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 				server = fake.ServeAlone(t, readThenDeletion(func(w http.ResponseWriter, r *http.Request) {
 					server.StopListening(t)
 					readDEV7()(w, r)
-				}, noDeletion(t)))
+				}, fake.Unexpected(t)))
 				return server
 			},
 			want: func(address string) faultDocument {
@@ -108,7 +108,7 @@ func TestIssueDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 		{
 			name: "the call was cancelled before the deletion was sent",
 			serve: func(t *testing.T, cancel context.CancelFunc) *fake.Server {
-				return deleting(t, cancellingOnArrival(cancel), noDeletion(t))
+				return deleting(t, cancellingOnArrival(cancel), fake.Unexpected(t))
 			},
 			want: func(address string) faultDocument {
 				return faultDocument{code: "upstream_failed", details: []detail{

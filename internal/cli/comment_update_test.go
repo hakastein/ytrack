@@ -1,7 +1,6 @@
 package cli_test
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"testing"
@@ -25,13 +24,6 @@ func commentWriteRequest(address, owner, comment, fields string) string {
 
 func commentDeletedState(gone bool) string {
 	return `{"$type":"IssueComment","deleted":` + strconv.FormatBool(gone) + `}`
-}
-
-func sentText(t *testing.T, u *fake.Server) map[string]any {
-	t.Helper()
-	var body map[string]any
-	require.NoError(t, json.Unmarshal([]byte(u.Last(t).Body), &body))
-	return body
 }
 
 func updatingAComment(t *testing.T, read, write http.HandlerFunc) *fake.Server {
@@ -70,7 +62,7 @@ func TestCommentUpdateReadsAnIssueCommentBeforeWritingIt(t *testing.T) {
 	assert.Equal(t, []string{"/api/issues/dev-7/comments/7-12", "/api/issues/dev-7/comments/7-12"},
 		server.Paths())
 	assert.Equal(t, []string{commentDeletedFields, writtenCommentFields}, server.Fields())
-	assert.Equal(t, map[string]any{"text": hostileText}, sentText(t, server))
+	assert.Equal(t, map[string]any{"text": hostileText}, server.LastJSON(t))
 
 	mapping := requireMapping(t, "stdout", got.stdout)
 	assert.Equal(t, []string{"id", "author", "created", "updated", "text"}, keysOf(mapping))

@@ -109,9 +109,13 @@ func Unreachable() *Server {
 
 func ServeNothing(t *testing.T) *Server {
 	t.Helper()
-	return Serve(t, func(_ http.ResponseWriter, r *http.Request) {
+	return Serve(t, Unexpected(t))
+}
+
+func Unexpected(t *testing.T) http.HandlerFunc {
+	return func(_ http.ResponseWriter, r *http.Request) {
 		assert.Fail(t, "a request reached the server", "%s %s", r.Method, r.URL)
-	})
+	}
 }
 
 func (s *Server) journaling(t *testing.T, handler http.HandlerFunc) http.Handler {
@@ -162,6 +166,13 @@ func (s *Server) Last(t *testing.T) Request {
 	received := s.Requests()
 	require.NotEmpty(t, received, "no request reached the server")
 	return received[len(received)-1]
+}
+
+func (s *Server) LastJSON(t *testing.T) map[string]any {
+	t.Helper()
+	var body map[string]any
+	require.NoError(t, json.Unmarshal([]byte(s.Last(t).Body), &body))
+	return body
 }
 
 func (s *Server) Paths() []string {

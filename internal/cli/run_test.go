@@ -168,3 +168,24 @@ func requireMapping(t *testing.T, what, text string) *yaml.Node {
 	require.Equal(t, yaml.MappingNode, mapping.Kind, "%s: %q", what, text)
 	return mapping
 }
+
+func nodeAt(t *testing.T, mapping *yaml.Node, path ...string) *yaml.Node {
+	t.Helper()
+	node := mapping
+	for _, key := range path {
+		if node.Kind == yaml.SequenceNode {
+			require.Len(t, node.Content, 1)
+			node = node.Content[0]
+		}
+		require.Equal(t, yaml.MappingNode, node.Kind, "no mapping stands where %q was looked for", key)
+		found := false
+		for pair := range slices.Chunk(node.Content, 2) {
+			if pair[0].Value == key {
+				node, found = pair[1], true
+				break
+			}
+		}
+		require.True(t, found, "no key %q", key)
+	}
+	return node
+}

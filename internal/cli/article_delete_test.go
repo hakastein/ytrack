@@ -48,7 +48,7 @@ func TestArticleDeleteRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := `{"$type":"Article","idReadable":` + tc.received + `}`
-			server := deleting(t, fake.JSON(http.StatusOK, body), noDeletion(t))
+			server := deleting(t, fake.JSON(http.StatusOK, body), fake.Unexpected(t))
 
 			got := runWith(t, server.Env(), "article", "delete", "dev-A-7")
 

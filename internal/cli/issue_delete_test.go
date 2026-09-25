@@ -35,13 +35,6 @@ func deletionDone() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }
 }
 
-func noDeletion(t *testing.T) http.HandlerFunc {
-	t.Helper()
-	return func(_ http.ResponseWriter, r *http.Request) {
-		assert.Fail(t, "a deletion reached the server", "%s %s", r.Method, r.URL)
-	}
-}
-
 func entityNotFound(id string) string {
 	return `{"error":"Not Found","error_description":"Entity with id ` + id + ` not found"}`
 }
@@ -62,7 +55,7 @@ func TestIssueDeleteReadsTheIDAndDeletesByIt(t *testing.T) {
 func TestIssueDeleteRefusesAReadableIDItCannotAddressBy(t *testing.T) {
 	t.Parallel()
 	const body = `{"$type":"Issue","idReadable":"DEV-7/.."}`
-	server := deleting(t, fake.JSON(http.StatusOK, body), noDeletion(t))
+	server := deleting(t, fake.JSON(http.StatusOK, body), fake.Unexpected(t))
 
 	got := runWith(t, server.Env(), "issue", "delete", "dev-7")
 
