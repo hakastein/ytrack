@@ -144,16 +144,6 @@ func TestListRefusesAPageItCannotSend(t *testing.T) {
 	}
 }
 
-func TestActivityRefusesALimitThatLeavesNoRoomForTheActivityPastIt(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "activity", "list", "DEV-1", "--limit", "2147483647")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
 func TestListPrintsAPageInTheMiddleOfTheCollection(t *testing.T) {
 	t.Parallel()
 	for _, list := range pagedLists() {

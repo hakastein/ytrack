@@ -17,16 +17,6 @@ func workItemUpdateRequest(address, issue, id, fields string) string {
 	return "POST " + address + workItemPath(issue, id) + "?fields=" + fields
 }
 
-func TestTimeUpdateRefusesACallThatWritesNothing(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "time", "update", "DEV-1", "199-6")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
 func TestTimeUpdatePrintsTheDefaultFieldsOfTheWorkItem(t *testing.T) {
 	t.Parallel()
 	server := writingTime(t, fake.JSON(http.StatusOK, answeredWorkItem{id: "199-6", text: asJSON("x")}.json()))

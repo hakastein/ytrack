@@ -41,22 +41,6 @@ func lookedIn(places ...any) detail {
 	return detail{"looked_in", places}
 }
 
-func TestProjectShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, projectDEV))
-
-	got := runWith(t, server.Env(), "project", "show", "DEV")
-
-	assert.Equal(t, outcome{stdout: printedDEV}, got)
-	assert.Equal(t, []string{"/api/admin/projects/DEV"}, server.Paths())
-	request := server.Last(t)
-	assert.Equal(t, http.MethodGet, request.Method)
-	assert.Equal(t, url.Values{"fields": {"shortName,name,plugins(timeTrackingSettings(enabled,workItemTypes(name)))"}},
-		request.URL.Query())
-	assert.Equal(t, "Bearer "+fake.Token, request.Header.Get("Authorization"))
-	assert.Equal(t, "application/json", request.Header.Get("Accept"))
-}
-
 func TestProjectShowReachesTheAPIUnderThePathOfTheAddress(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

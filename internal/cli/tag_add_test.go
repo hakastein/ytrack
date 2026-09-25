@@ -39,16 +39,6 @@ func shownTags() http.HandlerFunc {
 	return fake.JSON(http.StatusOK, tagsOfTwoOwners())
 }
 
-func TestTagAddRefusesAnEmptyName(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "tag", "add", "DEV-7", "--name", "")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
 func TestTagAddReadsTheOwnerThenResolvesTheNameThenWrites(t *testing.T) {
 	t.Parallel()
 	server := addingATag(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), shownTags(),

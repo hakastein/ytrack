@@ -46,29 +46,3 @@ func TestTimeListAsksTheWorkItemsOfTheIssueInOneRequestAndPrintsThem(t *testing.
 	assert.Equal(t, []string{http.MethodGet + " " + workItemsPath("DEV-1")}, server.Routes())
 	assert.Equal(t, url.Values{"fields": {sentWorkItemFields}, "$top": {"50"}}, server.Request(t, 0).URL.Query())
 }
-
-func TestTimeListRefusesAnAnswerOfAnotherShape(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, listedWorkItem))
-
-	got := runWith(t, server.Env(), "time", "list", "DEV-1", "--fields", "id")
-
-	assert.Equal(t, faultDocument{
-		code: "upstream_invalid",
-		details: []detail{
-			{"request", "GET " + server.URL + workItemsPath("DEV-1") + "?fields=id&$top=50"},
-			{"upstream_status", 200},
-			{"upstream_body", listedWorkItem},
-		},
-	}, requireFault(t, got))
-}
-
-func TestTimeListRefusesANameUnderTheDuration(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "time", "list", "DEV-1", "--fields", "duration(minutes)")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}

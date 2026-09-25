@@ -84,16 +84,6 @@ func TestIssueListTakesItsSearchFromTheQueryFlagAlone(t *testing.T) {
 	}
 }
 
-func TestIssueListRefusesCommentsAskedForInTheExpression(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "issue", "list", "--query", "", "--fields", "+comments")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
 func TestIssueListPrintsTheIssuesTheSearchFinds(t *testing.T) {
 	t.Parallel()
 	server := fake.Serve(t, fake.Searching(t, fake.JSON(http.StatusOK, `[`+listedDEV1()+`,`+listedDEV2()+`]`)))

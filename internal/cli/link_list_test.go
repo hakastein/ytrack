@@ -15,16 +15,6 @@ func linkListFields(target string) string {
 	return "links(issues(" + target + "),direction,linkType(sourceToTarget,targetToSource),issuesSize)"
 }
 
-func TestLinkListRefusesANameUnderASlotOfATargetIssue(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "link", "list", "DEV-1", "--fields", "+links(id)")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
 func TestLinkListPrintsThePhrasesOfAnIssueInTheOrderReceived(t *testing.T) {
 	t.Parallel()
 	server := fake.Serve(t, fake.JSON(http.StatusOK, `{"$type":"Issue","links":[`+

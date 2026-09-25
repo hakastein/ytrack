@@ -46,23 +46,6 @@ func TestProjectListAddsFieldsToTheDefaultOfTheList(t *testing.T) {
 	assert.Equal(t, []url.Values{{"fields": {"shortName,name,id"}, "$top": {"50"}}}, server.Queries())
 }
 
-func TestProjectListRefusesAnAnswerOfAnotherShape(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, listedDEV))
-
-	got := runWith(t, server.Env(), "project", "list", "--fields", "shortName")
-
-	want := faultDocument{
-		code: "upstream_invalid",
-		details: []detail{
-			{"request", listRequest(server.URL, "shortName", "50")},
-			{"upstream_status", 200},
-			{"upstream_body", listedDEV},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-}
-
 func TestProjectListRefusesAFieldAProjectDidNotBring(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

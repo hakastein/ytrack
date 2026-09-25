@@ -93,20 +93,3 @@ func TestArticleCreateFilesTheArticleInOneRequestAndPrintsIt(t *testing.T) {
 }
 
 const hostileText = "  First\r\nSecond\rThird   \n---\n~~~\n\xc2\x85\xe2\x80\xa8\xef\xbb\xbf\xf0\x9f\x98\x80\n  "
-
-func TestArticleCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
-	t.Parallel()
-	server := creatingAnArticle(t, fake.JSON(http.StatusOK, createdArticle("DEV-A-7", "title", "null")))
-
-	got := runWith(t, server.Env(), "article", "create", "DEV", "--summary", "Title", "--fields", "idReadable")
-
-	want := faultDocument{
-		code: "upstream_invalid",
-		details: []detail{
-			{"request", articleCreationRequest(server.URL, "idReadable,summary,content,project(shortName)")},
-			{"article", "DEV-A-7"},
-			{"mismatch", []any{[]detail{{"field", "summary"}, {"expected", "Title"}, {"actual", "title"}}}},
-		},
-	}
-	assert.Equal(t, want, requireUncertainty(t, got))
-}

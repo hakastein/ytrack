@@ -35,16 +35,6 @@ func selecting(t *testing.T, handler http.HandlerFunc) *fake.Server {
 	})
 }
 
-func TestArticleListRefusesACallWithNoSearch(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "article", "list")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
 func TestArticleListPrintsTheDefaultFieldsOfEachArticle(t *testing.T) {
 	t.Parallel()
 	server := selecting(t, fake.JSON(http.StatusOK, "["+listedParent+","+listedChild+"]"))

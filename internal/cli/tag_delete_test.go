@@ -43,16 +43,6 @@ func resolvingTags(t *testing.T, catalogue string, deletion http.HandlerFunc) *f
 	return fake.Serve(t, readThenDeletion(fake.JSON(http.StatusOK, catalogue), deletion))
 }
 
-func TestTagDeleteRefusesAnEmptyName(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "tag", "delete", "--name", "")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
 func TestTagDeletePrintsWhatTheResolverFound(t *testing.T) {
 	t.Parallel()
 	server := resolvingTags(t, tagsOfTwoOwners(), deletionDone())

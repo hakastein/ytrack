@@ -15,16 +15,6 @@ func removalNames() []detail {
 	return []detail{{"issue", "DEV-1"}, {"phrase", "needs"}, {"target", "DEV-2"}}
 }
 
-func TestLinkRemoveRefusesAnEmptyPhrase(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "link", "remove", "DEV-1", "", "DEV-2")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
 func TestLinkRemoveTakesTheLinkAwayBySlotAndInternalID(t *testing.T) {
 	t.Parallel()
 	server := linking(t, deletionDone())

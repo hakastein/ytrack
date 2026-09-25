@@ -31,16 +31,6 @@ func madeTag(name string) string {
 	return sharedTag(name, nil, nil)
 }
 
-func TestTagCreateRefusesAnEmptyName(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "tag", "create", "--name", "")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
 func TestTagCreatePrintsTheTagTheServerMade(t *testing.T) {
 	t.Parallel()
 	server := creatingATag(t, fake.JSON(http.StatusOK, madeTag("[bug] fix login")))

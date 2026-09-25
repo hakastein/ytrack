@@ -372,3 +372,98 @@ func TestEveryWriteIsUncertainWhereItsAnswerNeverCame(t *testing.T) {
 		})
 	}
 }
+
+func TestEveryWriteExitsWith2WhereTheAnswerDisagreesWithTheWrite(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		serve func(t *testing.T) *fake.Server
+		argv  []string
+		want  func(address string) faultDocument
+	}{
+		{
+			name: "comment create",
+			serve: func(t *testing.T) *fake.Server {
+				return commenting(t, fake.JSON(http.StatusOK, createdComment("7-12", "text")))
+			},
+			argv: []string{"comment", "create", "DEV-7", "--text", "Text", "--fields", "id,text"},
+			want: func(address string) faultDocument {
+				return faultDocument{code: "upstream_invalid", details: []detail{
+					{"request", issueCommentRequest(address, "DEV-7", "id,text")},
+					{"comment", "7-12"},
+					{"mismatch", []any{[]detail{{"field", "text"}, {"expected", "Text"}, {"actual", "text"}}}},
+				}}
+			},
+		},
+		{
+			name: "comment update",
+			serve: func(t *testing.T) *fake.Server {
+				return updatingAComment(t, fake.JSON(http.StatusOK, commentDeletedState(false)),
+					fake.JSON(http.StatusOK, createdComment("7-12", "text")))
+			},
+			argv: []string{"comment", "update", "DEV-7", "7-12", "--text", "Text", "--fields", "text"},
+			want: func(address string) faultDocument {
+				return faultDocument{code: "upstream_invalid", details: []detail{
+					{"request", commentWriteRequest(address, "DEV-7", "7-12", "text")},
+					{"comment", "7-12"},
+					{"mismatch", []any{[]detail{{"field", "text"}, {"expected", "Text"}, {"actual", "text"}}}},
+				}}
+			},
+		},
+		{
+			name: "issue create",
+			serve: func(t *testing.T) *fake.Server {
+				return creating(t, fake.JSON(http.StatusOK, projectRequiringNothing()),
+					fake.JSON(http.StatusOK, createdIssueWith("DEV-7", "upper", "null", "[]")))
+			},
+			argv: []string{"issue", "create", "DEV", "--summary", "Upper", "--fields", "idReadable"},
+			want: func(address string) faultDocument {
+				return faultDocument{code: "upstream_invalid", details: []detail{
+					{"request", creationRequest(address, "idReadable,summary")},
+					{"issue", "DEV-7"},
+					{"mismatch", []any{[]detail{{"field", "summary"}, {"expected", "Upper"}, {"actual", "upper"}}}},
+				}}
+			},
+		},
+		{
+			name: "article create",
+			serve: func(t *testing.T) *fake.Server {
+				return creatingAnArticle(t, fake.JSON(http.StatusOK, createdArticle("DEV-A-7", "title", "null")))
+			},
+			argv: []string{"article", "create", "DEV", "--summary", "Title", "--fields", "idReadable"},
+			want: func(address string) faultDocument {
+				return faultDocument{code: "upstream_invalid", details: []detail{
+					{"request", articleCreationRequest(address, "idReadable,summary,content,project(shortName)")},
+					{"article", "DEV-A-7"},
+					{"mismatch", []any{[]detail{{"field", "summary"}, {"expected", "Title"}, {"actual", "title"}}}},
+				}}
+			},
+		},
+		{
+			name: "article update",
+			serve: func(t *testing.T) *fake.Server {
+				filed := answeredArticle{readable: "DEV-A-7", summary: "Title", content: asJSON("text")}
+				return updatingAnArticle(t, fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
+					fake.JSON(http.StatusOK, filed.json()))
+			},
+			argv: []string{"article", "update", "DEV-A-7", "--content", "Text", "--fields", "idReadable"},
+			want: func(address string) faultDocument {
+				return faultDocument{code: "upstream_invalid", details: []detail{
+					{"request", articleUpdateRequest(address, "DEV-A-7", "idReadable,content")},
+					{"article", "DEV-A-7"},
+					{"mismatch", []any{[]detail{{"field", "content"}, {"expected", "Text"}, {"actual", "text"}}}},
+				}}
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := tc.serve(t)
+
+			got := runWith(t, server.Env(), tc.argv...)
+
+			assert.Equal(t, tc.want(server.URL), requireUncertainty(t, got))
+		})
+	}
+}

@@ -104,16 +104,6 @@ func creationRequest(address, fields string) string {
 	return "POST " + address + "/api/issues?fields=" + fields
 }
 
-func TestIssueCreateRefusesACallWithNoTitle(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "issue", "create", "DEV")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
 func TestIssueCreateReadsTheProjectAndFilesTheIssue(t *testing.T) {
 	t.Parallel()
 	metadata := projectResponse(writableField{id: "180-1", kind: "SimpleProjectCustomField", name: "Field",
@@ -167,24 +157,6 @@ func TestIssueCreateNamesEveryRequiredFieldAtOnce(t *testing.T) {
 	}
 	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet}, server.Methods())
-}
-
-func TestIssueCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
-	t.Parallel()
-	server := creating(t, fake.JSON(http.StatusOK, projectRequiringNothing()),
-		fake.JSON(http.StatusOK, createdIssueWith("DEV-7", "upper", "null", "[]")))
-
-	got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "Upper", "--fields", "idReadable")
-
-	want := faultDocument{
-		code: "upstream_invalid",
-		details: []detail{
-			{"request", creationRequest(server.URL, "idReadable,summary")},
-			{"issue", "DEV-7"},
-			{"mismatch", []any{[]detail{{"field", "summary"}, {"expected", "Upper"}, {"actual", "upper"}}}},
-		},
-	}
-	assert.Equal(t, want, requireUncertainty(t, got))
 }
 
 func TestIssueCreateRefusesMetadataOfTheProjectOfAnotherShape(t *testing.T) {

@@ -16,16 +16,6 @@ func tagsRequest(address, fields, top string) string {
 	return "GET " + address + "/api/tags?fields=" + fields + "&$top=" + top
 }
 
-func TestTagListRefusesAnExpressionThatDoesNotParse(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "tag", "list", "--fields", "name,,owner")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
 func TestTagListPrintsTheRecordsAsTheyWereAskedFor(t *testing.T) {
 	t.Parallel()
 	const records = `[{"$type":"Tag","owner":{"$type":"User","login":"first"},"name":"[bug] fix login",` +

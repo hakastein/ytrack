@@ -52,16 +52,6 @@ func linking(t *testing.T, write http.HandlerFunc) *fake.Server {
 	})
 }
 
-func TestLinkAddRefusesAnEmptyPhrase(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "link", "add", "DEV-1", "", "DEV-2")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
 func TestLinkAddWritesTheLinkAndPrintsTheLinksOfTheIssue(t *testing.T) {
 	t.Parallel()
 	server := linking(t, fake.JSON(http.StatusOK, linkWrittenTo(

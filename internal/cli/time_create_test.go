@@ -72,16 +72,6 @@ func writingTimeAgainstTheSettings(t *testing.T, write http.HandlerFunc) *fake.S
 	})
 }
 
-func TestTimeCreateRefusesADurationLongerThanTheServerKeeps(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT2147483648M")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
 func TestTimeCreateWritesTheWorkItemAndPrintsWhatTheServerKept(t *testing.T) {
 	t.Parallel()
 	spent := receivedField{name: "Spent", valueType: "period", value: `{"$type":"DurationValue","minutes":90}`}

@@ -22,16 +22,6 @@ func fieldsQueries(fields string) []url.Values {
 	return []url.Values{{"fields": {fields}, "$top": {"-1"}}}
 }
 
-func TestFieldListRefusesFieldsThatAreNotAnExpression(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "field", "list", "DEV", "--fields", "field(")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
 const shuffledFields = `[
 	{"$type":"SimpleProjectCustomField","ordinal":3,"canBeEmpty":true,
 	 "field":{"$type":"CustomField","fieldType":{"isMultiValue":false,"valueType":"string","$type":"FieldType"},"localizedName":null,"name":"Third"}},

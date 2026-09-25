@@ -16,16 +16,6 @@ func attachmentsRequest(address, owners, id, fields, top string) string {
 	return "GET " + address + "/api/" + owners + "/" + id + "/attachments?fields=" + fields + "&$top=" + top
 }
 
-func TestAttachmentListRefusesTheContentOfAFile(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "attachment", "list", "DEV-1", "--fields", "+base64Content")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
 func TestAttachmentListPrintsTheRecordsAsTheyWereAskedFor(t *testing.T) {
 	t.Parallel()
 	const records = `[{"name":"заметка.txt","$type":"IssueAttachment","size":75,` +

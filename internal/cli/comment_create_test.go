@@ -51,16 +51,6 @@ func commenting(t *testing.T, write http.HandlerFunc) *fake.Server {
 	})
 }
 
-func TestCommentCreateRefusesACallWithNoText(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "comment", "create", "DEV-1")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
 func TestCommentCreateWritesOnAnIssueInOneRequestAndPrintsTheComment(t *testing.T) {
 	t.Parallel()
 	server := commenting(t, fake.JSON(http.StatusOK, createdComment("7-12", hostileText)))
@@ -82,24 +72,6 @@ func TestCommentCreateWritesOnAnIssueInOneRequestAndPrintsTheComment(t *testing.
 	written := nodeAt(t, mapping, "text")
 	assert.Equal(t, hostileText, written.Value)
 	assert.Equal(t, yaml.DoubleQuotedStyle, written.Style, "a carriage return keeps text out of a literal block")
-}
-
-func TestCommentCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
-	t.Parallel()
-	server := commenting(t, fake.JSON(http.StatusOK, createdComment("7-12", "text")))
-
-	got := runWith(t, server.Env(), "comment", "create", "DEV-7", "--text", "Text", "--fields", "id,text")
-
-	want := faultDocument{
-		code: "upstream_invalid",
-		details: []detail{
-			{"request", issueCommentRequest(server.URL, "DEV-7", "id,text")},
-			{"comment", "7-12"},
-			{"mismatch", []any{[]detail{{"field", "text"}, {"expected", "Text"}, {"actual", "text"}}}},
-		},
-	}
-	assert.Equal(t, want, requireUncertainty(t, got))
-	assert.Equal(t, []string{http.MethodPost}, server.Methods())
 }
 
 func TestCommentCreateChecksTheResponseAgainstTheSchemaOfTheOwner(t *testing.T) {

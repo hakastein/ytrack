@@ -129,7 +129,7 @@ func TestActivityPrintsTheActivitiesOfTheIssueItWasGiven(t *testing.T) {
 	}, server.Targets(t))
 }
 
-func TestActivityRefusesAnAnswerOfAnotherShape(t *testing.T) {
+func TestActivityRefusesActivitiesOutOfOrder(t *testing.T) {
 	t.Parallel()
 	outOfOrder := `[` + sentCreatedActivity(oldest) + `,` + sentLinkActivity(middle) + `]`
 	server := activityServer(t, fake.JSON(http.StatusOK, outOfOrder))

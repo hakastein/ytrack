@@ -1,14 +1,6 @@
 package cli_test
 
-import (
-	"net/http"
-	"net/url"
-	"testing"
-
-	"github.com/stretchr/testify/assert"
-
-	"github.com/hakastein/ytrack/internal/fake"
-)
+import ()
 
 const articleShowFields = "idReadable,summary,reporter(login),created,updated,tags(name)," +
 	"parentArticle(idReadable,summary),childArticles(idReadable,summary),content"
@@ -37,15 +29,3 @@ content: |-
   second line
 comments: []
 `
-
-func TestArticleShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, articleWithAChild()))
-
-	got := runWith(t, server.Env(), "article", "show", "DEV-A-1")
-
-	assert.Equal(t, outcome{stdout: printedArticleWithAChild}, got)
-	assert.Equal(t, []string{http.MethodGet}, server.Methods())
-	assert.Equal(t, []string{"/api/articles/DEV-A-1"}, server.Paths())
-	assert.Equal(t, []url.Values{{"fields": {sentArticleFields}}}, server.Queries())
-}

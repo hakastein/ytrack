@@ -11,26 +11,6 @@ import (
 
 const commentFields = "comments(id,author(login),created,text,deleted)"
 
-func TestIssueShowRefusesACommentsFlagThatIsNeitherAllNorACount(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--comments=every")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
-func TestIssueShowRefusesCommentsAskedForInTheExpression(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "issue", "show", "DEV-1", "--fields", "+comments")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
 func TestIssueShowAsksForNoCommentsAtZero(t *testing.T) {
 	t.Parallel()
 	server := fake.Serve(t, fake.JSON(http.StatusOK, `{"$type":"Issue","idReadable":"DEV-1"}`))

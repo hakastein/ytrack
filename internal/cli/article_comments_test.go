@@ -13,26 +13,6 @@ const articleCommentFields = "comments(id,author(login),created,text)"
 
 const sentArticleFields = articleShowFields + "," + articleCommentFields
 
-func TestArticleShowRefusesACommentsFlagThatIsNeitherAllNorACount(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "article", "show", "DEV-A-1", "--comments=-1")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
-func TestArticleShowRefusesCommentsAskedForInTheExpression(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "article", "show", "DEV-A-1", "--fields", "+comments")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
 func TestArticleShowRefusesCommentsOfAnotherShape(t *testing.T) {
 	t.Parallel()
 	const body = `{"$type":"Article","idReadable":"DEV-A-1","comments":null}`

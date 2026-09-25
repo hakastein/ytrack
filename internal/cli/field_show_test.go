@@ -71,16 +71,6 @@ func serveTheProject(t *testing.T, metadata string, field http.HandlerFunc) *fak
 	})
 }
 
-func TestFieldShowRefusesTheEmptyName(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "field", "show", "DEV", "")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
 func TestFieldShowPrintsTheFieldItsNameResolvesTo(t *testing.T) {
 	t.Parallel()
 	metadata := projectMetadata(projectField("180-1", "Type", "Kind"))

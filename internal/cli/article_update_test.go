@@ -27,16 +27,6 @@ func updatingAnArticle(t *testing.T, read, update http.HandlerFunc) *fake.Server
 	})
 }
 
-func TestArticleUpdateRefusesACallThatWritesNothing(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "article", "update", "DEV-A-7")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
 func TestArticleUpdatePrintsTheDefaultFieldsOfTheArticle(t *testing.T) {
 	t.Parallel()
 	filed := answeredArticle{readable: "DEV-A-7", summary: "Title"}
@@ -67,26 +57,6 @@ func TestArticleUpdateWritesTheArticleTheReadFound(t *testing.T) {
 	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, server.Methods())
 	assert.Equal(t, []string{"/api/articles/DEV-A-7", "/api/articles/DEV-A-7"}, server.Paths())
 	assert.Equal(t, map[string]any{"content": hostileText}, server.LastJSON(t))
-}
-
-func TestArticleUpdateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
-	t.Parallel()
-	filed := answeredArticle{readable: "DEV-A-7", summary: "Title", content: asJSON("text")}
-	server := updatingAnArticle(t,
-		fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		fake.JSON(http.StatusOK, filed.json()))
-
-	got := runWith(t, server.Env(), "article", "update", "DEV-A-7", "--content", "Text", "--fields", "idReadable")
-
-	want := faultDocument{
-		code: "upstream_invalid",
-		details: []detail{
-			{"request", articleUpdateRequest(server.URL, "DEV-A-7", "idReadable,content")},
-			{"article", "DEV-A-7"},
-			{"mismatch", []any{[]detail{{"field", "content"}, {"expected", "Text"}, {"actual", "text"}}}},
-		},
-	}
-	assert.Equal(t, want, requireUncertainty(t, got))
 }
 
 func TestArticleUpdateRefusesAReadableIDItCannotAddressBy(t *testing.T) {

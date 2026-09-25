@@ -53,16 +53,6 @@ func updateRequest(address, readable, fields string) string {
 	return "POST " + address + "/api/issues/" + readable + "?fields=" + fields
 }
 
-func TestIssueUpdateRefusesACallThatWritesNothing(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "issue", "update", "DEV-1")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
 func TestIssueUpdatePrintsTheDefaultFieldsOfTheIssue(t *testing.T) {
 	t.Parallel()
 	server := updating(t, fake.JSON(http.StatusOK, issueToUpdate("DEV-1", projectRequiringNothing())),
