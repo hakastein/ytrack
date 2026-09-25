@@ -87,10 +87,10 @@ func TestCreateIssueNamesEveryRequiredFieldItLeavesEmpty(t *testing.T) {
 			t.Parallel()
 			server := servingIssueWrite(t, writtenProject(tc.fields...), "[]", fake.JSON(http.StatusOK, writtenIssue(t, nil)))
 
-			_, fault := writingIssueTo(t, server)(youtrack.CreateIssue("DEV", "First", nil, tc.filled, nil))
+			_, fault := callOn(t, server)(youtrack.CreateIssue("DEV", "First", nil, tc.filled, nil))
 
 			want := diag.Fault{Code: diag.MissingRequired, Details: []render.Pair{
-				writtenMetadataRequest(server), writtenProjectDetail(), {Key: "missing", Value: writtenList(tc.missing...)},
+				writtenMetadataRequest(server), writtenProjectDetail(), {Key: "missing", Value: texts(tc.missing...)},
 			}}
 			assert.Equal(t, want, refusal(t, fault))
 			assert.Equal(t, []string{writtenProjectPath}, server.Paths())
@@ -134,7 +134,7 @@ func TestCreateIssueFilesAnIssueWithoutAFieldNobodyAsksFor(t *testing.T) {
 			answer := writtenIssue(t, map[string]any{"summary": "First", "customFields": writtenValues(tc.held...)})
 			server := servingIssueWrite(t, writtenProject(tc.fields...), "[]", fake.JSON(http.StatusOK, answer))
 
-			node, fault := writingIssueTo(t, server)(youtrack.CreateIssue("DEV", "First", nil, tc.filled, new("idReadable")))
+			node, fault := callOn(t, server)(youtrack.CreateIssue("DEV", "First", nil, tc.filled, new("idReadable")))
 
 			require.Nil(t, fault)
 			assert.Equal(t, writtenID(), node)
@@ -183,7 +183,7 @@ func TestCreateIssueRefusesAValueAConditionHides(t *testing.T) {
 			project := writtenProject(tc.watched, writtenField{id: "1-2", name: "Shown", valueType: "enum", condition: tc.shownAt})
 			server := servingIssueWrite(t, project, "[]", fake.JSON(http.StatusOK, writtenIssue(t, nil)))
 
-			_, fault := writingIssueTo(t, server)(youtrack.CreateIssue("DEV", "First", nil, append(tc.filled, "Shown=First"), nil))
+			_, fault := callOn(t, server)(youtrack.CreateIssue("DEV", "First", nil, append(tc.filled, "Shown=First"), nil))
 
 			kept, invalid := issueWriteRefusal(t, fault)
 			assert.Equal(t, diag.Fault{Code: diag.BadUsage, Details: []render.Pair{
@@ -265,7 +265,7 @@ func TestCreateIssueSendsAValueAConditionShows(t *testing.T) {
 			answer := writtenIssue(t, map[string]any{"summary": "First", "customFields": writtenValues(tc.held...)})
 			server := servingIssueWrite(t, project, "[]", fake.JSON(http.StatusOK, answer))
 
-			_, fault := writingIssueTo(t, server)(youtrack.CreateIssue("DEV", "First", nil, append(tc.filled, "Shown=First"),
+			_, fault := callOn(t, server)(youtrack.CreateIssue("DEV", "First", nil, append(tc.filled, "Shown=First"),
 				new("idReadable")))
 
 			require.Nil(t, fault)
@@ -283,10 +283,10 @@ func TestUpdateIssueRefusesToEmptyAFieldTheProjectRequires(t *testing.T) {
 	)
 	server := servingIssueWrite(t, project, "[]", fake.JSON(http.StatusOK, writtenIssue(t, nil)))
 
-	_, fault := writingIssueTo(t, server)(youtrack.UpdateIssue("DEV-1", nil, nil, nil, []string{"Optional", "second", "First"}, nil))
+	_, fault := callOn(t, server)(youtrack.UpdateIssue("DEV-1", nil, nil, nil, []string{"Optional", "second", "First"}, nil))
 
 	want := diag.Fault{Code: diag.MissingRequired, Details: []render.Pair{
-		writtenReadRequest(server), writtenProjectDetail(), {Key: "missing", Value: writtenList("First", "Second")},
+		writtenReadRequest(server), writtenProjectDetail(), {Key: "missing", Value: texts("First", "Second")},
 	}}
 	assert.Equal(t, want, refusal(t, fault))
 	assert.Equal(t, []string{writtenIssuePath}, server.Paths())

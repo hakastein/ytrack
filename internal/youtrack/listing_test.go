@@ -1,7 +1,6 @@
 package youtrack_test
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
@@ -64,18 +63,14 @@ func projectPageAndCount(page, count string) http.HandlerFunc {
 	}
 }
 
-func pageNumber(n int) *render.Node {
-	return render.NewNumber(json.Number(strconv.Itoa(n)))
-}
-
 func pageOfProjects(total int, truncated bool, ids ...int) *render.Node {
 	records := make([]*render.Node, 0, len(ids))
 	for _, id := range ids {
 		records = append(records, render.NewMap(render.Pair{Key: "id", Value: render.NewString(fmt.Sprintf("0-%d", id))}))
 	}
 	return render.NewMap(
-		render.Pair{Key: "total", Value: pageNumber(total)},
-		render.Pair{Key: "returned", Value: pageNumber(len(ids))},
+		render.Pair{Key: "total", Value: number(total)},
+		render.Pair{Key: "returned", Value: number(len(ids))},
 		render.Pair{Key: "truncated", Value: render.NewBool(truncated)},
 		render.Pair{Key: "projects", Value: render.NewList(records...)},
 	)
@@ -208,8 +203,8 @@ func TestListProjectsRefusesAPageTheCollectionCannotHold(t *testing.T) {
 			handler: projectPageAndCount(projectsAnswer(2, 3), projectsAnswer(0, 1, 2)),
 			page:    youtrack.Page{Limit: 2, Skip: 2},
 			want: diag.Fault{Code: diag.UpstreamFailed, Details: []render.Pair{
-				{Key: "total", Value: pageNumber(3)},
-				{Key: "returned", Value: pageNumber(2)},
+				{Key: "total", Value: number(3)},
+				{Key: "returned", Value: number(2)},
 			}},
 		},
 		{
@@ -217,8 +212,8 @@ func TestListProjectsRefusesAPageTheCollectionCannotHold(t *testing.T) {
 			handler: fake.JSON(http.StatusOK, projectsAnswer(0, 1)),
 			page:    youtrack.Page{Limit: 1},
 			want: diag.Fault{Code: diag.UpstreamInvalid, Details: []render.Pair{
-				{Key: "limit", Value: pageNumber(1)},
-				{Key: "returned", Value: pageNumber(2)},
+				{Key: "limit", Value: number(1)},
+				{Key: "returned", Value: number(2)},
 			}},
 		},
 	}
@@ -257,7 +252,7 @@ func TestListProjectsRefusesAnAnswerThatIsNoListOfObjects(t *testing.T) {
 
 			want := diag.Fault{Code: diag.UpstreamInvalid, Details: []render.Pair{
 				{Key: "request", Value: render.NewString("GET " + server.URL + "/api/admin/projects?fields=id&$top=2")},
-				{Key: "upstream_status", Value: pageNumber(http.StatusOK)},
+				{Key: "upstream_status", Value: number(http.StatusOK)},
 				{Key: "upstream_body", Value: render.NewString(tc.answer)},
 			}}
 			assert.Equal(t, want, refusal(t, fault))

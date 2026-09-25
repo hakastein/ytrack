@@ -101,25 +101,11 @@ func articleNoWrite(t *testing.T) http.HandlerFunc {
 	}
 }
 
-func articleRequest(t *testing.T, server *fake.Server) render.Pair {
-	t.Helper()
-	sent := server.Last(t)
-	fields := sent.URL.Query().Get("fields")
-	return render.Pair{Key: "request", Value: render.NewString(sent.Method + " " + server.URL + sent.URL.Path + "?fields=" + fields)}
-}
-
 func articleSent(t *testing.T, server *fake.Server) map[string]any {
 	t.Helper()
 	var body map[string]any
 	require.NoError(t, json.Unmarshal([]byte(server.Last(t).Body), &body))
 	return body
-}
-
-func articleMismatch(field string, expected, actual *render.Node) *render.Node {
-	return render.NewMap(
-		render.Pair{Key: "field", Value: render.NewString(field)},
-		render.Pair{Key: "expected", Value: expected},
-		render.Pair{Key: "actual", Value: actual})
 }
 
 func articleNamed(readable string) *render.Node {
@@ -484,14 +470,14 @@ func TestCreateArticleRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 			summary:  "Title",
 			filed:    map[string]any{"summary": "title"},
 			article:  articleWritten.readable,
-			mismatch: []*render.Node{articleMismatch("summary", render.NewString("Title"), render.NewString("title"))},
+			mismatch: []*render.Node{mismatch("summary", render.NewString("Title"), render.NewString("title"))},
 		},
 		{
 			name:     "content the server kept none of",
 			summary:  "Title",
 			content:  new("Text"),
 			article:  articleWritten.readable,
-			mismatch: []*render.Node{articleMismatch("content", render.NewString("Text"), render.NewNull())},
+			mismatch: []*render.Node{mismatch("content", render.NewString("Text"), render.NewNull())},
 		},
 		{
 			name:    "content the server cut a carriage return out of",
@@ -500,7 +486,7 @@ func TestCreateArticleRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 			filed:   map[string]any{"content": "FirstSecond"},
 			article: articleWritten.readable,
 			mismatch: []*render.Node{
-				articleMismatch("content", render.NewString("First\rSecond"), render.NewString("FirstSecond")),
+				mismatch("content", render.NewString("First\rSecond"), render.NewString("FirstSecond")),
 			},
 		},
 		{
@@ -509,14 +495,14 @@ func TestCreateArticleRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 			filed: map[string]any{"idReadable": articleOfDEMO.readable,
 				"project": map[string]any{"$type": "Project", "shortName": "DEMO"}},
 			article:  articleOfDEMO.readable,
-			mismatch: []*render.Node{articleMismatch("project", render.NewString("DEV"), render.NewString("DEMO"))},
+			mismatch: []*render.Node{mismatch("project", render.NewString("DEV"), render.NewString("DEMO"))},
 		},
 		{
 			name:     "an article filed in no project",
 			summary:  "Title",
 			filed:    map[string]any{"project": nil},
 			article:  articleWritten.readable,
-			mismatch: []*render.Node{articleMismatch("project", render.NewString("DEV"), render.NewNull())},
+			mismatch: []*render.Node{mismatch("project", render.NewString("DEV"), render.NewNull())},
 		},
 		{
 			name:    "the title and the content both",
@@ -525,8 +511,8 @@ func TestCreateArticleRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 			filed:   map[string]any{"summary": "title", "content": "text"},
 			article: articleWritten.readable,
 			mismatch: []*render.Node{
-				articleMismatch("summary", render.NewString("Title"), render.NewString("title")),
-				articleMismatch("content", render.NewString("Text"), render.NewString("text")),
+				mismatch("summary", render.NewString("Title"), render.NewString("title")),
+				mismatch("content", render.NewString("Text"), render.NewString("text")),
 			},
 		},
 		{
@@ -535,7 +521,7 @@ func TestCreateArticleRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 			parent:  new("DEV-A-1"),
 			article: articleWritten.readable,
 			mismatch: []*render.Node{
-				articleMismatch("parentArticle", render.NewString(articleParent.readable), render.NewNull()),
+				mismatch("parentArticle", render.NewString(articleParent.readable), render.NewNull()),
 			},
 		},
 		{
@@ -545,7 +531,7 @@ func TestCreateArticleRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 			filed:   map[string]any{"parentArticle": articleFiledUnder(articleOtherParent)},
 			article: articleWritten.readable,
 			mismatch: []*render.Node{
-				articleMismatch("parentArticle", render.NewString(articleParent.readable), render.NewString(articleOtherParent)),
+				mismatch("parentArticle", render.NewString(articleParent.readable), render.NewString(articleOtherParent)),
 			},
 		},
 	}
@@ -560,7 +546,7 @@ func TestCreateArticleRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 			_, fault = call(t.Context(), client(t, server))
 
 			want := diag.Fault{Code: diag.UpstreamInvalid, AfterWrite: true, Details: []render.Pair{
-				articleRequest(t, server),
+				lastRequest(t, server),
 				{Key: "article", Value: render.NewString(tc.article)},
 				{Key: "mismatch", Value: render.NewList(tc.mismatch...)},
 			}}
@@ -584,36 +570,36 @@ func TestUpdateArticleRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 			name:     "a title the server stored in another letter case",
 			summary:  new("Title"),
 			filed:    map[string]any{"summary": "title"},
-			mismatch: articleMismatch("summary", render.NewString("Title"), render.NewString("title")),
+			mismatch: mismatch("summary", render.NewString("Title"), render.NewString("title")),
 		},
 		{
 			name:     "content the server cut a carriage return out of",
 			content:  new("First\rSecond"),
 			filed:    map[string]any{"content": "FirstSecond"},
-			mismatch: articleMismatch("content", render.NewString("First\rSecond"), render.NewString("FirstSecond")),
+			mismatch: mismatch("content", render.NewString("First\rSecond"), render.NewString("FirstSecond")),
 		},
 		{
 			name:     "content still standing where the call took it away",
 			cleared:  []string{"content"},
 			filed:    map[string]any{"content": "Text"},
-			mismatch: articleMismatch("content", render.NewNull(), render.NewString("Text")),
+			mismatch: mismatch("content", render.NewNull(), render.NewString("Text")),
 		},
 		{
 			name:     "a parent still standing where the call took it away",
 			cleared:  []string{"parent"},
 			filed:    map[string]any{"parentArticle": articleFiledUnder(articleParent.readable)},
-			mismatch: articleMismatch("parentArticle", render.NewNull(), render.NewString(articleParent.readable)),
+			mismatch: mismatch("parentArticle", render.NewNull(), render.NewString(articleParent.readable)),
 		},
 		{
 			name:     "no parent where the call wrote one",
 			parent:   new("DEV-A-1"),
-			mismatch: articleMismatch("parentArticle", render.NewString(articleParent.readable), render.NewNull()),
+			mismatch: mismatch("parentArticle", render.NewString(articleParent.readable), render.NewNull()),
 		},
 		{
 			name:     "another parent than the one the call wrote",
 			parent:   new("DEV-A-1"),
 			filed:    map[string]any{"parentArticle": articleFiledUnder(articleOtherParent)},
-			mismatch: articleMismatch("parentArticle", render.NewString(articleParent.readable), render.NewString(articleOtherParent)),
+			mismatch: mismatch("parentArticle", render.NewString(articleParent.readable), render.NewString(articleOtherParent)),
 		},
 	}
 	for _, tc := range tests {
@@ -629,7 +615,7 @@ func TestUpdateArticleRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 			_, fault = call(t.Context(), client(t, server))
 
 			want := diag.Fault{Code: diag.UpstreamInvalid, AfterWrite: true, Details: []render.Pair{
-				articleRequest(t, server),
+				lastRequest(t, server),
 				{Key: "article", Value: render.NewString(articleWritten.readable)},
 				{Key: "mismatch", Value: render.NewList(tc.mismatch)},
 			}}
@@ -719,7 +705,7 @@ func TestArticleWritesRefuseAParentOfAnotherProject(t *testing.T) {
 			_, fault = call(t.Context(), client(t, server))
 
 			want := diag.Fault{Code: diag.BadUsage, Details: []render.Pair{
-				articleRequest(t, server),
+				lastRequest(t, server),
 				{Key: "project", Value: render.NewString("DEV")},
 				{Key: "parent", Value: render.NewString(articleOfDEMO.readable)},
 				{Key: "parent_project", Value: render.NewString("DEMO")},
@@ -755,7 +741,7 @@ func TestUpdateArticleRefusesAnArticleItCannotWriteByTheRead(t *testing.T) {
 			_, fault = call(t.Context(), client(t, server))
 
 			want := diag.Fault{Code: diag.UpstreamInvalid, Details: []render.Pair{
-				articleRequest(t, server),
+				lastRequest(t, server),
 				{Key: "upstream_status", Value: render.NewNumber("200")},
 				{Key: "upstream_body", Value: render.NewString(tc.read)},
 			}}
@@ -804,7 +790,7 @@ func TestUpdateArticleRefusesAParentThatClosesTheLine(t *testing.T) {
 			_, fault = call(t.Context(), client(t, server))
 
 			want := diag.Fault{Code: diag.BadUsage, Details: []render.Pair{
-				articleRequest(t, server),
+				lastRequest(t, server),
 				{Key: "article", Value: render.NewString(articleWritten.readable)},
 				{Key: "parent", Value: tc.chain[0]},
 				{Key: "chain", Value: render.NewList(tc.chain...)},
@@ -850,7 +836,7 @@ func TestUpdateArticleRefusesALineOfParentsTheServerBrokeOff(t *testing.T) {
 				render.Pair{Key: "field", Value: render.NewString("parentArticle")},
 				render.Pair{Key: "type", Value: render.NewString("Article")})
 			want := diag.Fault{Code: diag.UpstreamInvalid, Details: []render.Pair{
-				articleRequest(t, server),
+				lastRequest(t, server),
 				{Key: "fields", Value: render.NewString(server.Last(t).URL.Query().Get("fields"))},
 				{Key: "missing", Value: render.NewList(missing)},
 			}}
@@ -901,7 +887,7 @@ func TestUpdateArticleRefusesAnAncestorItCannotRead(t *testing.T) {
 			_, fault = call(t.Context(), client(t, server))
 
 			want := diag.Fault{Code: diag.UpstreamInvalid, Details: []render.Pair{
-				articleRequest(t, server),
+				lastRequest(t, server),
 				{Key: "upstream_status", Value: render.NewNumber("200")},
 				{Key: "upstream_body", Value: render.NewString(tc.line)},
 			}}
@@ -925,7 +911,7 @@ func TestUpdateArticleRefusesAParentOfAnotherShape(t *testing.T) {
 	_, fault = call(t.Context(), client(t, server))
 
 	want := diag.Fault{Code: diag.UpstreamInvalid, Details: []render.Pair{
-		articleRequest(t, server),
+		lastRequest(t, server),
 		{Key: "upstream_status", Value: render.NewNumber("200")},
 		{Key: "upstream_body", Value: render.NewString(line)},
 	}}
@@ -944,7 +930,7 @@ func TestUpdateArticleRefusesALineThatRepeatsAnArticle(t *testing.T) {
 	_, fault = call(t.Context(), client(t, server))
 
 	want := diag.Fault{Code: diag.UpstreamInvalid, Details: []render.Pair{
-		articleRequest(t, server),
+		lastRequest(t, server),
 		{Key: "article", Value: render.NewString(articleChild.readable)},
 	}}
 	assert.Equal(t, want, refusal(t, fault))

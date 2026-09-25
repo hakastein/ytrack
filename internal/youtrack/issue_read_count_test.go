@@ -2,7 +2,6 @@ package youtrack_test
 
 import (
 	"net/http"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -20,18 +19,6 @@ const (
 
 func issueCount(count string) http.HandlerFunc {
 	return fake.JSON(http.StatusOK, `{"$type":"IssueCountResponse","count":`+count+`}`)
-}
-
-func issueCountsInTurn(counts ...http.HandlerFunc) http.HandlerFunc {
-	var mu sync.Mutex
-	answered := 0
-	return func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		count := counts[min(answered, len(counts)-1)]
-		answered++
-		mu.Unlock()
-		count(w, r)
-	}
 }
 
 func issueCounted(count http.HandlerFunc) http.HandlerFunc {
@@ -94,7 +81,7 @@ func TestListIssuesPrintsTheCountOfTheSearch(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := fake.Serve(t, fake.Searching(t, issueCounted(issueCountsInTurn(tc.counts...))))
+			server := fake.Serve(t, fake.Searching(t, issueCounted(fake.InTurn(tc.counts...))))
 
 			node, _, fault := searchListing(t, server, "field: value", "idReadable", 1)
 
@@ -150,7 +137,7 @@ func TestListIssuesRefusesACountThatIsNoNumberOfIssues(t *testing.T) {
 
 			_, _, fault := searchListing(t, server, "field: value", "idReadable", 1)
 
-			request := issueReadRequest(server, http.MethodPost, issueCountTarget)
+			request := requestTo(http.MethodPost, server, issueCountTarget)
 			want := diag.Fault{Code: diag.UpstreamInvalid, Details: append([]render.Pair{request}, tc.afterRequest...)}
 			assert.Equal(t, want, refusal(t, fault))
 		})
@@ -160,12 +147,12 @@ func TestListIssuesRefusesACountThatIsNoNumberOfIssues(t *testing.T) {
 func TestListIssuesRefusesWhereTheCounterFailsWhenAskedAgain(t *testing.T) {
 	t.Parallel()
 	failed := fake.JSON(http.StatusInternalServerError, `{"error":"server_error","error_description":"failed"}`)
-	server := fake.Serve(t, fake.Searching(t, issueCounted(issueCountsInTurn(issueCount("-1"), failed))))
+	server := fake.Serve(t, fake.Searching(t, issueCounted(fake.InTurn(issueCount("-1"), failed))))
 
 	_, _, fault := searchListing(t, server, "field: value", "idReadable", 1)
 
 	assert.Equal(t, diag.Fault{Code: diag.UpstreamFailed, Details: []render.Pair{
-		issueReadRequest(server, http.MethodPost, issueCountTarget),
+		requestTo(http.MethodPost, server, issueCountTarget),
 		{Key: "upstream_status", Value: render.NewNumber("500")},
 		{Key: "upstream_error", Value: render.NewString("server_error")},
 		{Key: "upstream_message", Value: render.NewString("failed")},

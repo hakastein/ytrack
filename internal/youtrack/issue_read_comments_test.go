@@ -152,7 +152,7 @@ func TestShowIssueRefusesCommentsOfAnotherShape(t *testing.T) {
 			_, fault := issueReadShown(t, server, "idReadable", comments)
 
 			target := issueReadPath + "?fields=idReadable," + issueReadCommentFields
-			assert.Equal(t, issueReadShapeFault(server, http.MethodGet, target, body), refusal(t, fault))
+			assert.Equal(t, unreadable(requestTo(http.MethodGet, server, target), body), refusal(t, fault))
 		})
 	}
 }

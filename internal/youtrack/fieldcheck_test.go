@@ -17,7 +17,7 @@ const fieldcheckAsked = "shortName,name,archived,leader(login)"
 
 func fieldcheckFault(server *fake.Server, code diag.Code, target, expression, key string, entries ...*render.Node) diag.Fault {
 	return diag.Fault{Code: code, Details: []render.Pair{
-		issueReadRequest(server, http.MethodGet, target+"?fields="+expression),
+		requestTo(http.MethodGet, server, target+"?fields="+expression),
 		{Key: "fields", Value: render.NewString(expression)},
 		{Key: key, Value: render.NewList(entries...)},
 	}}

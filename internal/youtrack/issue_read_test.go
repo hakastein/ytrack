@@ -14,11 +14,6 @@ import (
 	"github.com/hakastein/ytrack/internal/youtrack"
 )
 
-// The zone is set before any goroutine starts: a test that sets it races with the fake server, which reads it.
-func init() {
-	time.Local = time.FixedZone("UTC+5", 5*60*60)
-}
-
 const issueReadPath = "/api/issues/DEV-1"
 
 func issueReadShown(t *testing.T, server *fake.Server, expression string, comments youtrack.Comments) (*render.Node, *diag.Fault) {
@@ -26,18 +21,6 @@ func issueReadShown(t *testing.T, server *fake.Server, expression string, commen
 	call, fault := youtrack.ShowIssue("DEV-1", &expression, comments)
 	require.Nil(t, fault)
 	return call(t.Context(), client(t, server))
-}
-
-func issueReadRequest(server *fake.Server, method, target string) render.Pair {
-	return render.Pair{Key: "request", Value: render.NewString(method + " " + server.URL + target)}
-}
-
-func issueReadShapeFault(server *fake.Server, method, target, body string) diag.Fault {
-	return diag.Fault{Code: diag.UpstreamInvalid, Details: []render.Pair{
-		issueReadRequest(server, method, target),
-		{Key: "upstream_status", Value: render.NewNumber("200")},
-		{Key: "upstream_body", Value: render.NewString(body)},
-	}}
 }
 
 func TestShowIssueRefusesAnExpressionBeforeTheNetwork(t *testing.T) {
@@ -205,7 +188,7 @@ func TestShowIssueRefusesAMomentThatIsNoWholeNumberOfMilliseconds(t *testing.T) 
 
 			_, fault := issueReadShown(t, server, "created", youtrack.Comments{})
 
-			want := issueReadShapeFault(server, http.MethodGet, issueReadPath+"?fields=created", tc.body)
+			want := unreadable(requestTo(http.MethodGet, server, issueReadPath+"?fields=created"), tc.body)
 			assert.Equal(t, want, refusal(t, fault))
 		})
 	}

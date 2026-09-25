@@ -137,28 +137,8 @@ func servingIssueWrite(t *testing.T, project, classes string, write http.Handler
 	return fake.Serve(t, mux.ServeHTTP)
 }
 
-func writingIssueTo(t *testing.T, server *fake.Server) func(youtrack.Call, *diag.Fault) (*render.Node, *diag.Fault) {
-	t.Helper()
-	return func(call youtrack.Call, fault *diag.Fault) (*render.Node, *diag.Fault) {
-		t.Helper()
-		require.Nil(t, fault)
-		return call(t.Context(), client(t, server))
-	}
-}
-
 func writtenID() *render.Node {
 	return render.NewMap(render.Pair{Key: "idReadable", Value: render.NewString("DEV-1")})
-}
-
-func writtenRequest(method string, server *fake.Server, target string) render.Pair {
-	return render.Pair{Key: "request", Value: render.NewString(method + " " + server.URL + target)}
-}
-
-func writtenMismatch(field string, expected, actual *render.Node) *render.Node {
-	return render.NewMap(
-		render.Pair{Key: "field", Value: render.NewString(field)},
-		render.Pair{Key: "expected", Value: expected},
-		render.Pair{Key: "actual", Value: actual})
 }
 
 func writtenMismatchFault(request render.Pair, mismatch ...*render.Node) diag.Fault {
@@ -280,7 +260,7 @@ func TestCreateIssueSendsTheTitleAndTheDescriptionAsWritten(t *testing.T) {
 	answer := writtenIssue(t, map[string]any{"summary": title, "description": description})
 	server := servingIssueWrite(t, writtenProject(), "[]", fake.JSON(http.StatusOK, answer))
 
-	_, fault := writingIssueTo(t, server)(youtrack.CreateIssue("DEV", title, new(description), nil, new("idReadable")))
+	_, fault := callOn(t, server)(youtrack.CreateIssue("DEV", title, new(description), nil, new("idReadable")))
 
 	require.Nil(t, fault)
 	assert.Equal(t, []string{writtenProjectPath, "/api/issues"}, server.Paths())
@@ -322,7 +302,7 @@ func TestUpdateIssueSendsOnlyThePartsItWrites(t *testing.T) {
 			t.Parallel()
 			server := servingIssueWrite(t, writtenProject(), "[]", fake.JSON(http.StatusOK, writtenIssue(t, tc.answer)))
 
-			_, fault := writingIssueTo(t, server)(youtrack.UpdateIssue("DEV-1", tc.summary, tc.description, nil, tc.cleared,
+			_, fault := callOn(t, server)(youtrack.UpdateIssue("DEV-1", tc.summary, tc.description, nil, tc.cleared,
 				new("idReadable")))
 
 			require.Nil(t, fault)
@@ -388,7 +368,7 @@ func TestIssueWriteAsksForWhatItChecks(t *testing.T) {
 			t.Parallel()
 			server := servingIssueWrite(t, project, "[]", fake.JSON(http.StatusOK, writtenIssue(t, tc.answer)))
 
-			_, fault := writingIssueTo(t, server)(tc.call())
+			_, fault := callOn(t, server)(tc.call())
 
 			require.Nil(t, fault)
 			assert.Equal(t, tc.fields, server.Last(t).URL.Query().Get("fields"))
@@ -418,7 +398,7 @@ func TestIssueWritePrintsWhatTheCallerAskedFor(t *testing.T) {
 			answer := writtenIssue(t, map[string]any{"summary": "First", "description": "Second"})
 			server := servingIssueWrite(t, writtenProject(), "[]", fake.JSON(http.StatusOK, answer))
 
-			node, fault := writingIssueTo(t, server)(youtrack.CreateIssue("DEV", "First", new("Second"), nil, new(tc.expression)))
+			node, fault := callOn(t, server)(youtrack.CreateIssue("DEV", "First", new("Second"), nil, new(tc.expression)))
 
 			require.Nil(t, fault)
 			assert.Equal(t, tc.printed, node)
@@ -443,7 +423,7 @@ func TestIssueWriteRefusesAnAnswerThatDisagreesWithTheText(t *testing.T) {
 			},
 			answer:   map[string]any{"summary": "upper"},
 			target:   "/api/issues?fields=idReadable,summary",
-			mismatch: []*render.Node{writtenMismatch("summary", render.NewString("Upper"), render.NewString("upper"))},
+			mismatch: []*render.Node{mismatch("summary", render.NewString("Upper"), render.NewString("upper"))},
 		},
 		{
 			name: "a title with a space the server doubled",
@@ -452,7 +432,7 @@ func TestIssueWriteRefusesAnAnswerThatDisagreesWithTheText(t *testing.T) {
 			},
 			answer:   map[string]any{"summary": "a  b"},
 			target:   writtenIssuePath + "?fields=idReadable,summary",
-			mismatch: []*render.Node{writtenMismatch("summary", render.NewString("a b"), render.NewString("a  b"))},
+			mismatch: []*render.Node{mismatch("summary", render.NewString("a b"), render.NewString("a  b"))},
 		},
 		{
 			name: "a description in another letter case",
@@ -461,7 +441,7 @@ func TestIssueWriteRefusesAnAnswerThatDisagreesWithTheText(t *testing.T) {
 			},
 			answer:   map[string]any{"summary": "First", "description": "upper"},
 			target:   created,
-			mismatch: []*render.Node{writtenMismatch("description", render.NewString("Upper"), render.NewString("upper"))},
+			mismatch: []*render.Node{mismatch("description", render.NewString("Upper"), render.NewString("upper"))},
 		},
 		{
 			name: "a description the server kept none of",
@@ -470,7 +450,7 @@ func TestIssueWriteRefusesAnAnswerThatDisagreesWithTheText(t *testing.T) {
 			},
 			answer:   map[string]any{"summary": "First", "description": nil},
 			target:   created,
-			mismatch: []*render.Node{writtenMismatch("description", render.NewString("Second"), render.NewNull())},
+			mismatch: []*render.Node{mismatch("description", render.NewString("Second"), render.NewNull())},
 		},
 		{
 			name: "a title and a description both",
@@ -480,8 +460,8 @@ func TestIssueWriteRefusesAnAnswerThatDisagreesWithTheText(t *testing.T) {
 			answer: map[string]any{"summary": "Third", "description": "Fourth"},
 			target: created,
 			mismatch: []*render.Node{
-				writtenMismatch("summary", render.NewString("First"), render.NewString("Third")),
-				writtenMismatch("description", render.NewString("Second"), render.NewString("Fourth")),
+				mismatch("summary", render.NewString("First"), render.NewString("Third")),
+				mismatch("description", render.NewString("Second"), render.NewString("Fourth")),
 			},
 		},
 		{
@@ -491,7 +471,7 @@ func TestIssueWriteRefusesAnAnswerThatDisagreesWithTheText(t *testing.T) {
 			},
 			answer:   map[string]any{"description": "Kept"},
 			target:   writtenIssuePath + "?fields=idReadable,description",
-			mismatch: []*render.Node{writtenMismatch("description", render.NewNull(), render.NewString("Kept"))},
+			mismatch: []*render.Node{mismatch("description", render.NewNull(), render.NewString("Kept"))},
 		},
 	}
 	for _, tc := range tests {
@@ -499,9 +479,9 @@ func TestIssueWriteRefusesAnAnswerThatDisagreesWithTheText(t *testing.T) {
 			t.Parallel()
 			server := servingIssueWrite(t, writtenProject(), "[]", fake.JSON(http.StatusOK, writtenIssue(t, tc.answer)))
 
-			_, fault := writingIssueTo(t, server)(tc.call())
+			_, fault := callOn(t, server)(tc.call())
 
-			want := writtenMismatchFault(writtenRequest(http.MethodPost, server, tc.target), tc.mismatch...)
+			want := writtenMismatchFault(requestTo(http.MethodPost, server, tc.target), tc.mismatch...)
 			assert.Equal(t, want, refusal(t, fault))
 		})
 	}
@@ -513,10 +493,10 @@ func TestIssueWriteRefusesAnAnswerItCannotPrintAfterTheWrite(t *testing.T) {
 		writtenValue{name: "Field", valueType: "string", value: "42"})})
 	server := servingIssueWrite(t, writtenProject(), "[]", fake.JSON(http.StatusOK, answer))
 
-	_, fault := writingIssueTo(t, server)(youtrack.CreateIssue("DEV", "First", nil, nil, new("idReadable,customFields")))
+	_, fault := callOn(t, server)(youtrack.CreateIssue("DEV", "First", nil, nil, new("idReadable,customFields")))
 
 	want := diag.Fault{Code: diag.UpstreamInvalid, AfterWrite: true, Details: []render.Pair{
-		writtenRequest(http.MethodPost, server, "/api/issues?fields=idReadable,"+writtenCustomFields+",summary"),
+		requestTo(http.MethodPost, server, "/api/issues?fields=idReadable,"+writtenCustomFields+",summary"),
 		{Key: "upstream_status", Value: render.NewNumber("200")},
 		{Key: "upstream_body", Value: render.NewString(answer)},
 	}}
@@ -535,7 +515,7 @@ func TestIssueWritePrintsACustomFieldTheExpressionNamesAndChecksThemAll(t *testi
 	mux.HandleFunc("POST /api/issues", fake.JSON(http.StatusOK, answer))
 	server := fake.Serve(t, mux.ServeHTTP)
 
-	node, fault := writingIssueTo(t, server)(youtrack.CreateIssue("DEV", "First", nil, nil, new(`idReadable,customFields("localized")`)))
+	node, fault := callOn(t, server)(youtrack.CreateIssue("DEV", "First", nil, nil, new(`idReadable,customFields("localized")`)))
 
 	require.Nil(t, fault)
 	assert.Equal(t, render.NewMap(
@@ -583,10 +563,10 @@ func TestIssueWriteIsUncertainOfATruncatedAnswerOnlyWhereItMayHaveWritten(t *tes
 			t.Parallel()
 			server := servingIssueWrite(t, writtenProject(), "[]", issueWriteBrokenOff(tc.status))
 
-			_, fault := writingIssueTo(t, server)(youtrack.UpdateIssue("DEV-1", new("First"), nil, nil, nil, new("idReadable")))
+			_, fault := callOn(t, server)(youtrack.UpdateIssue("DEV-1", new("First"), nil, nil, nil, new("idReadable")))
 
 			want := diag.Fault{Code: tc.code, Details: append([]render.Pair{
-				writtenRequest(http.MethodPost, server, writtenIssuePath+"?fields=idReadable,summary"),
+				requestTo(http.MethodPost, server, writtenIssuePath+"?fields=idReadable,summary"),
 				{Key: "upstream_status", Value: render.NewNumber(json.Number(strconv.Itoa(tc.status)))},
 			}, tc.details...)}
 			assert.Equal(t, want, refusal(t, fault))
@@ -636,10 +616,10 @@ func TestUpdateIssueRefusesAnIssueOfAnotherShape(t *testing.T) {
 			mux.HandleFunc("GET "+writtenIssuePath, fake.JSON(http.StatusOK, tc.read))
 			server := fake.Serve(t, mux.ServeHTTP)
 
-			_, fault := writingIssueTo(t, server)(youtrack.UpdateIssue("DEV-1", nil, nil, []string{"Field=First"}, nil, nil))
+			_, fault := callOn(t, server)(youtrack.UpdateIssue("DEV-1", nil, nil, []string{"Field=First"}, nil, nil))
 
 			want := diag.Fault{Code: diag.UpstreamInvalid, Details: []render.Pair{
-				writtenRequest(http.MethodGet, server, writtenIssuePath+"?fields="+writtenReadFields),
+				requestTo(http.MethodGet, server, writtenIssuePath+"?fields="+writtenReadFields),
 				{Key: "upstream_status", Value: render.NewNumber("200")},
 				{Key: "upstream_body", Value: render.NewString(tc.read)},
 			}}
@@ -663,7 +643,7 @@ func TestDeleteIssueDeletesByTheIDTheReadAnswers(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	node, fault := writingIssueTo(t, server)(youtrack.DeleteIssue("dev-7"))
+	node, fault := callOn(t, server)(youtrack.DeleteIssue("dev-7"))
 
 	require.Nil(t, fault)
 	assert.Equal(t, render.NewMap(render.Pair{Key: "idReadable", Value: render.NewString("DEV-7")}), node)
@@ -696,10 +676,10 @@ func TestDeleteIssueRefusesAReadableIDItCannotDeleteBy(t *testing.T) {
 			read := `{"$type":"Issue","idReadable":` + tc.readable + `}`
 			server := servingIssueDeletion(t, read, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 
-			_, fault := writingIssueTo(t, server)(youtrack.DeleteIssue("dev-7"))
+			_, fault := callOn(t, server)(youtrack.DeleteIssue("dev-7"))
 
 			want := diag.Fault{Code: diag.UpstreamInvalid, Details: []render.Pair{
-				writtenRequest(http.MethodGet, server, "/api/issues/dev-7?fields=idReadable"),
+				requestTo(http.MethodGet, server, "/api/issues/dev-7?fields=idReadable"),
 				{Key: "upstream_status", Value: render.NewNumber("200")},
 				{Key: "upstream_body", Value: render.NewString(read)},
 			}}
@@ -713,10 +693,10 @@ func TestDeleteIssueRefusesADeletionAnsweredWithABody(t *testing.T) {
 	t.Parallel()
 	server := servingIssueDeletion(t, `{"$type":"Issue","idReadable":"DEV-7"}`, fake.JSON(http.StatusOK, `{"x":1}`))
 
-	_, fault := writingIssueTo(t, server)(youtrack.DeleteIssue("dev-7"))
+	_, fault := callOn(t, server)(youtrack.DeleteIssue("dev-7"))
 
 	want := diag.Fault{Code: diag.UpstreamInvalid, AfterWrite: true, Details: []render.Pair{
-		writtenRequest(http.MethodDelete, server, "/api/issues/DEV-7"),
+		requestTo(http.MethodDelete, server, "/api/issues/DEV-7"),
 		{Key: "upstream_status", Value: render.NewNumber("200")},
 		{Key: "upstream_body", Value: render.NewString(`{"x":1}`)},
 	}}

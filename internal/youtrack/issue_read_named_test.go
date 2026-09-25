@@ -64,7 +64,7 @@ func issueReadNamed(name, value string) render.Pair {
 
 func issueReadUnresolved(server *fake.Server, fields, key string, entries ...*render.Node) diag.Fault {
 	return diag.Fault{Code: diag.UnknownName, Details: []render.Pair{
-		issueReadRequest(server, http.MethodGet, issueReadCatalogueTarget),
+		requestTo(http.MethodGet, server, issueReadCatalogueTarget),
 		{Key: "fields", Value: render.NewString(fields)},
 		{Key: key, Value: render.NewList(entries...)},
 	}}

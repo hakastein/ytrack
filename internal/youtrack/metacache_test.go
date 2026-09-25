@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -42,13 +41,6 @@ func fieldMetaOneField() *fieldMetaInstance {
 
 func fieldMetaAnswering(naming string) http.HandlerFunc {
 	return fake.JSON(http.StatusOK, fieldMetaAnswer(naming))
-}
-
-func fieldMetaInTurn(answers ...http.HandlerFunc) http.HandlerFunc {
-	var served atomic.Int64
-	return func(w http.ResponseWriter, r *http.Request) {
-		answers[min(int(served.Add(1)), len(answers))-1](w, r)
-	}
 }
 
 func (i *fieldMetaInstance) change(projects map[string]string, answers map[string]http.HandlerFunc) {
@@ -157,7 +149,7 @@ func TestShowFieldReadsTheMetadataAgainWhenTheCacheMisses(t *testing.T) {
 		{
 			name:     "an answer to the request of the cached field that cannot be read",
 			projects: map[string]string{"DEV": fieldMetaProject(fieldMetaBinding("1-1", field))},
-			answers:  map[string]http.HandlerFunc{"1-1": fieldMetaInTurn(fake.JSON(http.StatusOK, `[]`), fieldMetaAnswering(field))},
+			answers:  map[string]http.HandlerFunc{"1-1": fake.InTurn(fake.JSON(http.StatusOK, `[]`), fieldMetaAnswering(field))},
 			asked:    "Field",
 			paths:    []string{fieldMetaPath, fieldMetaFirstPath, fieldMetaFirstPath, fieldMetaPath, fieldMetaFirstPath},
 		},
@@ -290,7 +282,7 @@ func TestShowFieldRefusesAnIdNoPathCanHoldOverTheCacheAsWell(t *testing.T) {
 
 	_, fault = fieldMetaShowOf(t, fieldMetaCached(t, server, root), "DEV", "Field")
 
-	assert.Equal(t, refusedAsUnreadable(t, server, metadata), refusal(t, fault))
+	assert.Equal(t, unreadable(lastRequest(t, server), metadata), refusal(t, fault))
 	assert.Equal(t, []string{fieldMetaPath, fieldMetaPath}, server.Paths())
 }
 
@@ -326,7 +318,7 @@ func TestShowFieldPassesOnAFailureOfTheFieldUnderAWarmCache(t *testing.T) {
 			_, fault = fieldMetaShowOf(t, fieldMetaCached(t, server, root), "DEV", "Field")
 
 			want := diag.Fault{Code: tc.code, Details: []render.Pair{
-				requestDetailOfLast(t, server),
+				lastRequest(t, server),
 				{Key: "upstream_status", Value: render.NewNumber(json.Number(strconv.Itoa(tc.status)))},
 			}}
 			assert.Equal(t, want, refusal(t, fault))

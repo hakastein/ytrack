@@ -1,7 +1,6 @@
 package youtrack_test
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -124,26 +123,10 @@ func linkServer(t *testing.T, source, target string, write http.HandlerFunc) *fa
 	return fake.Serve(t, mux.ServeHTTP)
 }
 
-func linkCall(t *testing.T, server *fake.Server) func(youtrack.Call, *diag.Fault) (*render.Node, *diag.Fault) {
-	t.Helper()
-	return func(call youtrack.Call, fault *diag.Fault) (*render.Node, *diag.Fault) {
-		require.Nil(t, fault)
-		return call(t.Context(), client(t, server))
-	}
-}
-
-func linkRequest(method string, server *fake.Server, target string) render.Pair {
-	return render.Pair{Key: "request", Value: render.NewString(method + " " + server.URL + target)}
-}
-
-func linkCount(n int) *render.Node {
-	return render.NewNumber(json.Number(strconv.Itoa(n)))
-}
-
 func linkDocument(total, returned int, truncated bool, phrases ...render.Pair) *render.Node {
 	return render.NewMap(
-		render.Pair{Key: "total", Value: linkCount(total)},
-		render.Pair{Key: "returned", Value: linkCount(returned)},
+		render.Pair{Key: "total", Value: number(total)},
+		render.Pair{Key: "returned", Value: number(returned)},
 		render.Pair{Key: "truncated", Value: render.NewBool(truncated)},
 		render.Pair{Key: "links", Value: render.NewMap(phrases...)})
 }
@@ -257,7 +240,7 @@ func TestListLinksPrintsThePhrasesOfTheIssueInTheOrderReceived(t *testing.T) {
 		copyOfSlot.listed(),
 	)))
 
-	node, fault := linkCall(t, server)(youtrack.ListLinks("DEV-1", new("idReadable")))
+	node, fault := callOn(t, server)(youtrack.ListLinks("DEV-1", new("idReadable")))
 
 	require.Nil(t, fault)
 	assert.Equal(t, linkDocument(5, 5, false,
@@ -275,7 +258,7 @@ func TestListLinksCountsWhatTheServerSaysALinkHolds(t *testing.T) {
 		linkListedSlot(`"INWARD"`, needsLinkType, "0", "[]"),
 	)))
 
-	node, fault := linkCall(t, server)(youtrack.ListLinks("DEV-1", new("idReadable")))
+	node, fault := callOn(t, server)(youtrack.ListLinks("DEV-1", new("idReadable")))
 
 	require.Nil(t, fault)
 	assert.Equal(t, linkDocument(5, 2, true, linkRecords("ties", "DEV-2", "DEV-3")), node)
@@ -286,7 +269,7 @@ func TestListLinksPrintsTheTextOfATargetOnTheLineOfItsRecord(t *testing.T) {
 	server := fake.Serve(t, fake.JSON(http.StatusOK, linkListed(
 		tiesSlot.listed(`{"$type":"Issue","idReadable":"DEV-2","description":"first\nsecond"}`))))
 
-	node, fault := linkCall(t, server)(youtrack.ListLinks("DEV-1", new("description")))
+	node, fault := callOn(t, server)(youtrack.ListLinks("DEV-1", new("description")))
 
 	require.Nil(t, fault)
 	assert.Equal(t, linkDocument(1, 1, false, render.FromData("ties", render.NewList(render.NewMap(
@@ -342,11 +325,11 @@ func TestListLinksRefusesLinksOfAnotherShape(t *testing.T) {
 			body := linkListed(tc.links...)
 			server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-			_, fault := linkCall(t, server)(youtrack.ListLinks("DEV-1", new("idReadable")))
+			_, fault := callOn(t, server)(youtrack.ListLinks("DEV-1", new("idReadable")))
 
 			assert.Equal(t, diag.Fault{Code: diag.UpstreamInvalid, Details: []render.Pair{
-				linkRequest(http.MethodGet, server, "/api/issues/DEV-1?fields="+linkListFields),
-				{Key: "upstream_status", Value: linkCount(200)},
+				requestTo(http.MethodGet, server, "/api/issues/DEV-1?fields="+linkListFields),
+				{Key: "upstream_status", Value: number(200)},
 				{Key: "upstream_body", Value: render.NewString(body)},
 			}}, refusal(t, fault))
 		})
@@ -378,7 +361,7 @@ func TestAddLinkWritesToTheSlotThePhraseNames(t *testing.T) {
 			t.Parallel()
 			server := linkServer(t, linkEverySlot(), linkTarget, fake.JSON(http.StatusOK, tc.slot.writtenToTheTarget()))
 
-			_, fault := linkCall(t, server)(youtrack.AddLink("DEV-1", tc.phrase, "DEV-2", new("idReadable")))
+			_, fault := callOn(t, server)(youtrack.AddLink("DEV-1", tc.phrase, "DEV-2", new("idReadable")))
 
 			require.Nil(t, fault)
 			assert.Equal(t, "/api/issues/DEV-1/links/"+tc.slot.id+"/issues", server.Last(t).URL.Path)
@@ -395,7 +378,7 @@ func TestAddLinkAsksForTheIssuesAndTheTargetAsAskedOfIt(t *testing.T) {
 	mux.Handle("POST /api/issues/DEV-1/links/5-1t/issues", fake.JSON(http.StatusOK, needsSlot.writtenToTheTarget()))
 	server := fake.Serve(t, mux.ServeHTTP)
 
-	_, fault := linkCall(t, server)(youtrack.AddLink("dev-1", "needs", "DEV-2", new("idReadable")))
+	_, fault := callOn(t, server)(youtrack.AddLink("dev-1", "needs", "DEV-2", new("idReadable")))
 
 	require.Nil(t, fault)
 	assert.Equal(t, []string{
@@ -410,7 +393,7 @@ func TestAddLinkPrintsTheLinksTheWriteLeftTheIssueWith(t *testing.T) {
 	answer := needsSlot.written(needsSlot.listed(linkTarget), tiesSlot.listed(`{"id":"3-4","idReadable":"DEV-4"}`))
 	server := linkServer(t, linkEverySlot(), linkTarget, fake.JSON(http.StatusOK, answer))
 
-	node, fault := linkCall(t, server)(youtrack.AddLink("DEV-1", "needs", "DEV-2", new("idReadable")))
+	node, fault := callOn(t, server)(youtrack.AddLink("DEV-1", "needs", "DEV-2", new("idReadable")))
 
 	require.Nil(t, fault)
 	assert.Equal(t, linkDocument(2, 2, false, linkRecords("needs", "DEV-2"), linkRecords("ties", "DEV-4")), node)
@@ -426,7 +409,7 @@ func TestAddLinkResolvesAPhraseTwoSlotsAnswerToByItsSpelling(t *testing.T) {
 		t.Parallel()
 		server := linkServer(t, source, linkTarget, fake.JSON(http.StatusOK, needsSlot.writtenToTheTarget()))
 
-		_, fault := linkCall(t, server)(youtrack.AddLink("DEV-1", "needs", "DEV-2", new("idReadable")))
+		_, fault := callOn(t, server)(youtrack.AddLink("DEV-1", "needs", "DEV-2", new("idReadable")))
 
 		require.Nil(t, fault)
 		assert.Equal(t, "/api/issues/DEV-1/links/5-1t/issues", server.Last(t).URL.Path)
@@ -436,10 +419,10 @@ func TestAddLinkResolvesAPhraseTwoSlotsAnswerToByItsSpelling(t *testing.T) {
 		t.Parallel()
 		server := linkServer(t, source, linkTarget, fake.JSON(http.StatusOK, needsSlot.writtenToTheTarget()))
 
-		_, fault := linkCall(t, server)(youtrack.AddLink("DEV-1", "NEEDS", "DEV-2", new("idReadable")))
+		_, fault := callOn(t, server)(youtrack.AddLink("DEV-1", "NEEDS", "DEV-2", new("idReadable")))
 
 		assert.Equal(t, diag.Fault{Code: diag.UnknownName, Details: []render.Pair{
-			linkRequest(http.MethodGet, server, "/api/issues/DEV-1?fields="+linkSourceFields),
+			requestTo(http.MethodGet, server, "/api/issues/DEV-1?fields="+linkSourceFields),
 			{Key: "issue", Value: render.NewString("DEV-1")},
 			linkUnknownPhrase("NEEDS", "leads", "needs"),
 		}}, refusal(t, fault))
@@ -481,10 +464,10 @@ func TestAddLinkRefusesAPhraseNoSlotGoesBy(t *testing.T) {
 			t.Parallel()
 			server := linkServer(t, tc.source, linkTarget, fake.JSON(http.StatusOK, needsSlot.writtenToTheTarget()))
 
-			_, fault := linkCall(t, server)(youtrack.AddLink("DEV-1", tc.phrase, "DEV-2", nil))
+			_, fault := callOn(t, server)(youtrack.AddLink("DEV-1", tc.phrase, "DEV-2", nil))
 
 			assert.Equal(t, diag.Fault{Code: diag.UnknownName, Details: []render.Pair{
-				linkRequest(http.MethodGet, server, "/api/issues/DEV-1?fields="+linkSourceFields),
+				requestTo(http.MethodGet, server, "/api/issues/DEV-1?fields="+linkSourceFields),
 				{Key: "issue", Value: render.NewString("DEV-1")},
 				linkUnknownPhrase(tc.phrase, tc.nearest...),
 			}}, refusal(t, fault))
@@ -506,10 +489,10 @@ func TestAddLinkRefusesTwoSlotsUnderOnePhraseAndWritesEveryOther(t *testing.T) {
 		t.Parallel()
 		server := linkServer(t, source, linkTarget, fake.JSON(http.StatusOK, needsSlot.writtenToTheTarget()))
 
-		_, fault := linkCall(t, server)(youtrack.AddLink("DEV-1", "x", "DEV-2", nil))
+		_, fault := callOn(t, server)(youtrack.AddLink("DEV-1", "x", "DEV-2", nil))
 
 		assert.Equal(t, diag.Fault{Code: diag.UpstreamInvalid, Details: []render.Pair{
-			linkRequest(http.MethodGet, server, "/api/issues/DEV-1?fields="+linkSourceFields),
+			requestTo(http.MethodGet, server, "/api/issues/DEV-1?fields="+linkSourceFields),
 			{Key: "issue", Value: render.NewString("DEV-1")},
 			{Key: "phrase", Value: render.NewString("X")},
 		}}, refusal(t, fault))
@@ -520,7 +503,7 @@ func TestAddLinkRefusesTwoSlotsUnderOnePhraseAndWritesEveryOther(t *testing.T) {
 		t.Parallel()
 		server := linkServer(t, source, linkTarget, fake.JSON(http.StatusOK, needsSlot.writtenToTheTarget()))
 
-		_, fault := linkCall(t, server)(youtrack.AddLink("DEV-1", "needs", "DEV-2", new("idReadable")))
+		_, fault := callOn(t, server)(youtrack.AddLink("DEV-1", "needs", "DEV-2", new("idReadable")))
 
 		require.Nil(t, fault)
 		assert.Equal(t, "/api/issues/DEV-1/links/5-1t/issues", server.Last(t).URL.Path)
@@ -580,10 +563,10 @@ func TestAddLinkRefusesASlotAddressedAgainstItsOwnEnd(t *testing.T) {
 			t.Parallel()
 			server := linkServer(t, linkSource(tc.slot), linkTarget, fake.JSON(http.StatusOK, tc.slot.writtenToTheTarget()))
 
-			_, fault := linkCall(t, server)(youtrack.AddLink("DEV-1", tc.phrase, "DEV-2", nil))
+			_, fault := callOn(t, server)(youtrack.AddLink("DEV-1", tc.phrase, "DEV-2", nil))
 
 			assert.Equal(t, diag.Fault{Code: diag.UpstreamInvalid, Details: []render.Pair{
-				linkRequest(http.MethodGet, server, "/api/issues/DEV-1?fields="+linkSourceFields),
+				requestTo(http.MethodGet, server, "/api/issues/DEV-1?fields="+linkSourceFields),
 				{Key: "issue", Value: render.NewString("DEV-1")},
 				{Key: "phrase", Value: render.NewString(tc.phrase)},
 			}}, refusal(t, fault))
@@ -627,11 +610,11 @@ func TestAddLinkRefusesAnIssueReadOfAnotherShape(t *testing.T) {
 			t.Parallel()
 			server := linkServer(t, tc.source, linkTarget, fake.JSON(http.StatusOK, needsSlot.writtenToTheTarget()))
 
-			_, fault := linkCall(t, server)(youtrack.AddLink("DEV-1", "needs", "DEV-2", nil))
+			_, fault := callOn(t, server)(youtrack.AddLink("DEV-1", "needs", "DEV-2", nil))
 
 			assert.Equal(t, diag.Fault{Code: diag.UpstreamInvalid, Details: []render.Pair{
-				linkRequest(http.MethodGet, server, "/api/issues/DEV-1?fields="+linkSourceFields),
-				{Key: "upstream_status", Value: linkCount(200)},
+				requestTo(http.MethodGet, server, "/api/issues/DEV-1?fields="+linkSourceFields),
+				{Key: "upstream_status", Value: number(200)},
 				{Key: "upstream_body", Value: render.NewString(tc.source)},
 			}}, refusal(t, fault))
 			assert.Equal(t, []string{"/api/issues/DEV-1"}, server.Paths())
@@ -644,11 +627,11 @@ func TestAddLinkRefusesATargetUnderTheIDItIsAddressedByRatherThanTheInternalOne(
 	const target = `{"$type":"Issue","id":"DEV-2","idReadable":"DEV-2"}`
 	server := linkServer(t, linkEverySlot(), target, fake.JSON(http.StatusOK, needsSlot.writtenToTheTarget()))
 
-	_, fault := linkCall(t, server)(youtrack.AddLink("DEV-1", "needs", "DEV-2", nil))
+	_, fault := callOn(t, server)(youtrack.AddLink("DEV-1", "needs", "DEV-2", nil))
 
 	assert.Equal(t, diag.Fault{Code: diag.UpstreamInvalid, Details: []render.Pair{
-		linkRequest(http.MethodGet, server, "/api/issues/DEV-2?fields="+linkTargetFields),
-		{Key: "upstream_status", Value: linkCount(200)},
+		requestTo(http.MethodGet, server, "/api/issues/DEV-2?fields="+linkTargetFields),
+		{Key: "upstream_status", Value: number(200)},
 		{Key: "upstream_body", Value: render.NewString(target)},
 	}}, refusal(t, fault))
 	assert.Equal(t, []string{"/api/issues/DEV-1", "/api/issues/DEV-2"}, server.Paths())
@@ -668,10 +651,10 @@ func TestAddLinkRefusesLinkingAnIssueToItself(t *testing.T) {
 			t.Parallel()
 			server := fake.Serve(t, fake.JSON(http.StatusOK, linkEverySlot()))
 
-			_, fault := linkCall(t, server)(youtrack.AddLink("DEV-1", "ties", tc.target, nil))
+			_, fault := callOn(t, server)(youtrack.AddLink("DEV-1", "ties", tc.target, nil))
 
 			assert.Equal(t, diag.Fault{Code: diag.BadUsage, Details: []render.Pair{
-				linkRequest(http.MethodGet, server, "/api/issues/"+tc.target+"?fields="+linkTargetFields),
+				requestTo(http.MethodGet, server, "/api/issues/"+tc.target+"?fields="+linkTargetFields),
 				{Key: "issue", Value: render.NewString("DEV-1")},
 				{Key: "target", Value: render.NewString("DEV-1")},
 			}}, refusal(t, fault))
@@ -713,11 +696,11 @@ func TestAddLinkRefusesAnIssueTheServerDoesNotHave(t *testing.T) {
 			mux.Handle("GET /api/issues/DEV-2", tc.target)
 			server := fake.Serve(t, mux.ServeHTTP)
 
-			_, fault := linkCall(t, server)(youtrack.AddLink("DEV-1", "needs", "DEV-2", nil))
+			_, fault := callOn(t, server)(youtrack.AddLink("DEV-1", "needs", "DEV-2", nil))
 
 			assert.Equal(t, diag.Fault{Code: diag.NotFound, Details: []render.Pair{
-				linkRequest(http.MethodGet, server, tc.read),
-				{Key: "upstream_status", Value: linkCount(404)},
+				requestTo(http.MethodGet, server, tc.read),
+				{Key: "upstream_status", Value: number(404)},
 				{Key: "upstream_error", Value: render.NewString("Not Found")},
 				{Key: "upstream_message", Value: render.NewString("Entity not found")},
 			}}, refusal(t, fault))
@@ -764,13 +747,13 @@ func TestAddLinkRefusesAnAnswerThatDoesNotHoldTheLink(t *testing.T) {
 			t.Parallel()
 			server := linkServer(t, linkEverySlot(), linkTarget, fake.JSON(http.StatusOK, tc.written))
 
-			_, fault := linkCall(t, server)(youtrack.AddLink("DEV-1", "needs", "DEV-2", new("idReadable")))
+			_, fault := callOn(t, server)(youtrack.AddLink("DEV-1", "needs", "DEV-2", new("idReadable")))
 
 			assert.Equal(t, diag.Fault{
 				Code:       diag.UpstreamInvalid,
 				AfterWrite: true,
 				Details: append([]render.Pair{
-					linkRequest(http.MethodPost, server, "/api/issues/DEV-1/links/5-1t/issues?fields="+linkWriteFields),
+					requestTo(http.MethodPost, server, "/api/issues/DEV-1/links/5-1t/issues?fields="+linkWriteFields),
 				}, linkNames()...),
 			}, refusal(t, fault))
 		})
@@ -782,14 +765,14 @@ func TestAddLinkNamesTheLinkInWhatTheServerSaidAboutTheWrite(t *testing.T) {
 	server := linkServer(t, linkEverySlot(), linkTarget,
 		fake.JSON(http.StatusBadRequest, `{"error":"invalid_properties","error_description":"A cycle"}`))
 
-	_, fault := linkCall(t, server)(youtrack.AddLink("DEV-1", "NEEDS", "DEV-2", new("idReadable")))
+	_, fault := callOn(t, server)(youtrack.AddLink("DEV-1", "NEEDS", "DEV-2", new("idReadable")))
 
 	assert.Equal(t, diag.Fault{
 		Code: diag.Rejected,
 		Details: append([]render.Pair{
-			linkRequest(http.MethodPost, server, "/api/issues/DEV-1/links/5-1t/issues?fields="+linkWriteFields),
+			requestTo(http.MethodPost, server, "/api/issues/DEV-1/links/5-1t/issues?fields="+linkWriteFields),
 		}, linkNames(
-			render.Pair{Key: "upstream_status", Value: linkCount(400)},
+			render.Pair{Key: "upstream_status", Value: number(400)},
 			render.Pair{Key: "upstream_error", Value: render.NewString("invalid_properties")},
 			render.Pair{Key: "upstream_message", Value: render.NewString("A cycle")},
 		)...),
@@ -802,7 +785,7 @@ func TestRemoveLinkTakesTheLinkAwayBySlotAndInternalID(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	node, fault := linkCall(t, server)(youtrack.RemoveLink("DEV-1", "NEEDS", "DEV-2"))
+	node, fault := callOn(t, server)(youtrack.RemoveLink("DEV-1", "NEEDS", "DEV-2"))
 
 	require.Nil(t, fault)
 	assert.Equal(t, render.NewMap(
@@ -818,12 +801,12 @@ func TestRemoveLinkRefusesALinkTheIssueDoesNotHold(t *testing.T) {
 	server := linkServer(t, linkEverySlot(), linkTarget,
 		fake.JSON(http.StatusNotFound, `{"error":"Not Found","error_description":"Entity not found"}`))
 
-	_, fault := linkCall(t, server)(youtrack.RemoveLink("DEV-1", "needs", "DEV-2"))
+	_, fault := callOn(t, server)(youtrack.RemoveLink("DEV-1", "needs", "DEV-2"))
 
 	assert.Equal(t, diag.Fault{
 		Code: diag.NotFound,
-		Details: append([]render.Pair{linkRequest(http.MethodDelete, server, linkRemovalTarget)}, linkNames(
-			render.Pair{Key: "upstream_status", Value: linkCount(404)},
+		Details: append([]render.Pair{requestTo(http.MethodDelete, server, linkRemovalTarget)}, linkNames(
+			render.Pair{Key: "upstream_status", Value: number(404)},
 			render.Pair{Key: "upstream_error", Value: render.NewString("Not Found")},
 			render.Pair{Key: "upstream_message", Value: render.NewString("Entity not found")},
 		)...),
@@ -871,11 +854,11 @@ func TestRemoveLinkRefusesBeforeTheRemovalTheWayAddDoes(t *testing.T) {
 			t.Parallel()
 			server := linkServer(t, linkEverySlot(), linkTarget, fake.JSON(http.StatusOK, ""))
 
-			_, fault := linkCall(t, server)(youtrack.RemoveLink("DEV-1", tc.phrase, tc.target))
+			_, fault := callOn(t, server)(youtrack.RemoveLink("DEV-1", tc.phrase, tc.target))
 
 			assert.Equal(t, diag.Fault{
 				Code:    tc.code,
-				Details: append([]render.Pair{linkRequest(http.MethodGet, server, tc.read)}, tc.details...),
+				Details: append([]render.Pair{requestTo(http.MethodGet, server, tc.read)}, tc.details...),
 			}, refusal(t, fault))
 			assert.Equal(t, tc.paths, server.Paths())
 		})

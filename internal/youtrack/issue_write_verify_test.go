@@ -43,13 +43,13 @@ func TestCreateIssueRefusesAnAnswerThatDisagreesWithACustomField(t *testing.T) {
 			expected: render.NewString("Upper"), actual: render.NewString("upper")},
 		{name: "a set holding a value more", valueType: "enum", multi: true, filled: []string{"Field=First", "Field=Second"},
 			held:     `[` + writtenElement("First") + `,` + writtenElement("Second") + `,` + writtenElement("Third") + `]`,
-			expected: writtenList("First", "Second"), actual: writtenList("First", "Second", "Third")},
+			expected: texts("First", "Second"), actual: texts("First", "Second", "Third")},
 		{name: "a set holding a value fewer", valueType: "enum", multi: true, filled: []string{"Field=First", "Field=Second"},
 			held:     `[` + writtenElement("First") + `]`,
-			expected: writtenList("First", "Second"), actual: writtenList("First")},
+			expected: texts("First", "Second"), actual: texts("First")},
 		{name: "a set held empty", valueType: "enum", multi: true, filled: []string{"Field=First"},
 			held:     `[]`,
-			expected: writtenList("First"), actual: render.NewList([]*render.Node{}...)},
+			expected: texts("First"), actual: render.NewList([]*render.Node{}...)},
 		{name: "a value held as nothing", valueType: "enum", filled: []string{"Field=First"},
 			held:     `null`,
 			expected: render.NewString("First"), actual: render.NewNull()},
@@ -71,11 +71,11 @@ func TestCreateIssueRefusesAnAnswerThatDisagreesWithACustomField(t *testing.T) {
 			t.Parallel()
 			server := servingAWrittenField(t, tc.valueType, tc.multi, tc.held)
 
-			_, fault := writingIssueTo(t, server)(youtrack.CreateIssue("DEV", "First", nil, tc.filled, new("idReadable")))
+			_, fault := callOn(t, server)(youtrack.CreateIssue("DEV", "First", nil, tc.filled, new("idReadable")))
 
 			want := writtenMismatchFault(
-				writtenRequest(http.MethodPost, server, "/api/issues?fields=idReadable,summary,"+writtenCustomFields),
-				writtenMismatch("Field", tc.expected, tc.actual))
+				requestTo(http.MethodPost, server, "/api/issues?fields=idReadable,summary,"+writtenCustomFields),
+				mismatch("Field", tc.expected, tc.actual))
 			assert.Equal(t, want, refusal(t, fault))
 		})
 	}
@@ -111,7 +111,7 @@ func TestCreateIssueTakesAnAnswerThatHoldsWhatWasWritten(t *testing.T) {
 			t.Parallel()
 			server := servingAWrittenField(t, tc.valueType, tc.multi, tc.held)
 
-			node, fault := writingIssueTo(t, server)(youtrack.CreateIssue("DEV", "First", nil, tc.filled, new("idReadable")))
+			node, fault := callOn(t, server)(youtrack.CreateIssue("DEV", "First", nil, tc.filled, new("idReadable")))
 
 			require.Nil(t, fault)
 			assert.Equal(t, writtenID(), node)
@@ -135,7 +135,7 @@ func TestUpdateIssueTakesAnAnswerWhereAnEmptiedFieldHoldsNothing(t *testing.T) {
 			answer := writtenIssue(t, map[string]any{"customFields": tc.held})
 			server := servingIssueWrite(t, project, "[]", fake.JSON(http.StatusOK, answer))
 
-			node, fault := writingIssueTo(t, server)(youtrack.UpdateIssue("DEV-1", nil, nil, nil, []string{"Field"}, new("idReadable")))
+			node, fault := callOn(t, server)(youtrack.UpdateIssue("DEV-1", nil, nil, nil, []string{"Field"}, new("idReadable")))
 
 			require.Nil(t, fault)
 			assert.Equal(t, writtenID(), node)
@@ -155,18 +155,18 @@ func TestUpdateIssueRefusesAnAnswerWhereAnEmptiedFieldHoldsAValue(t *testing.T) 
 		{name: "a field that holds one value", held: writtenElement("First"),
 			expected: render.NewNull(), actual: render.NewString("First")},
 		{name: "a field that holds several", multi: true, held: `[` + writtenElement("First") + `]`,
-			expected: render.NewList([]*render.Node{}...), actual: writtenList("First")},
+			expected: render.NewList([]*render.Node{}...), actual: texts("First")},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := servingAWrittenField(t, "enum", tc.multi, tc.held)
 
-			_, fault := writingIssueTo(t, server)(youtrack.UpdateIssue("DEV-1", nil, nil, nil, []string{"Field"}, new("idReadable")))
+			_, fault := callOn(t, server)(youtrack.UpdateIssue("DEV-1", nil, nil, nil, []string{"Field"}, new("idReadable")))
 
 			want := writtenMismatchFault(
-				writtenRequest(http.MethodPost, server, writtenIssuePath+"?fields=idReadable,"+writtenCustomFields),
-				writtenMismatch("Field", tc.expected, tc.actual))
+				requestTo(http.MethodPost, server, writtenIssuePath+"?fields=idReadable,"+writtenCustomFields),
+				mismatch("Field", tc.expected, tc.actual))
 			assert.Equal(t, want, refusal(t, fault))
 		})
 	}

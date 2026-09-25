@@ -251,3 +251,10 @@ func StyleRange(startInUTF16, lengthInUTF16 int, style string) string {
 	return fmt.Sprintf(`{"$type":"SearchStyleRange","start":%d,"length":%d,"style":%q}`,
 		startInUTF16, lengthInUTF16, style)
 }
+
+func InTurn(answers ...http.HandlerFunc) http.HandlerFunc {
+	var served atomic.Int64
+	return func(w http.ResponseWriter, r *http.Request) {
+		answers[min(int(served.Add(1)), len(answers))-1](w, r)
+	}
+}

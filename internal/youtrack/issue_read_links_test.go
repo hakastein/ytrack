@@ -191,7 +191,7 @@ func TestShowIssueRefusesLinksOfAnotherShape(t *testing.T) {
 			_, fault := issueReadShown(t, server, "links", youtrack.Comments{})
 
 			target := issueReadPath + "?fields=links(issues(idReadable)," + issueReadPhraseFields + ")"
-			assert.Equal(t, issueReadShapeFault(server, http.MethodGet, target, body), refusal(t, fault))
+			assert.Equal(t, unreadable(requestTo(http.MethodGet, server, target), body), refusal(t, fault))
 		})
 	}
 }

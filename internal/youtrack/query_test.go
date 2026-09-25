@@ -192,7 +192,7 @@ func TestListIssuesWarnsOfTheFreeTextOfASearchTheServerThenRefuses(t *testing.T)
 
 	assert.Equal(t, []diag.Warning{searchFreeText(query, "word")}, searchWarnings(t, warned))
 	assert.Equal(t, diag.Fault{Code: diag.Rejected, Details: []render.Pair{
-		issueReadRequest(server, http.MethodGet, searchIssuesPath+"?query=field%3A+word&fields=idReadable&$top=50"),
+		requestTo(http.MethodGet, server, searchIssuesPath+"?query=field%3A+word&fields=idReadable&$top=50"),
 		{Key: "upstream_status", Value: render.NewNumber("400")},
 		{Key: "upstream_error", Value: render.NewString("invalid_query")},
 		{Key: "upstream_message", Value: render.NewString("refused")},
@@ -206,7 +206,7 @@ func TestListIssuesSearchesNothingWhereTheSearchCannotBeMarkedUp(t *testing.T) {
 	_, _, fault := searchListing(t, server, "field: value", "idReadable", 50)
 
 	assert.Equal(t, diag.Fault{Code: diag.UpstreamFailed, Details: []render.Pair{
-		issueReadRequest(server, http.MethodPost, fake.AssistPath+"?fields="+searchMarkupFields),
+		requestTo(http.MethodPost, server, fake.AssistPath+"?fields="+searchMarkupFields),
 		{Key: "upstream_status", Value: render.NewNumber("500")},
 		{Key: "upstream_error", Value: render.NewString("server_error")},
 		{Key: "upstream_message", Value: render.NewString("failed")},
@@ -272,7 +272,7 @@ func TestListIssuesRefusesAMarkupThatDoesNotFitTheSearch(t *testing.T) {
 
 			_, _, fault := searchListing(t, server, query, "idReadable", 50)
 
-			request := issueReadRequest(server, http.MethodPost, fake.AssistPath+"?fields="+searchMarkupFields)
+			request := requestTo(http.MethodPost, server, fake.AssistPath+"?fields="+searchMarkupFields)
 			want := diag.Fault{Code: diag.UpstreamInvalid, Details: append([]render.Pair{request}, tc.afterRequest...)}
 			assert.Equal(t, want, refusal(t, fault))
 			assert.Equal(t, []string{fake.AssistPath}, server.Paths())

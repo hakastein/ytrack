@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -102,39 +101,14 @@ func activityNoNames() *render.Node {
 	return render.NewMap([]render.Pair{}...)
 }
 
-func activityStrings(texts ...string) *render.Node {
-	items := make([]*render.Node, 0, len(texts))
-	for _, text := range texts {
-		items = append(items, render.NewString(text))
-	}
-	return render.NewList(items...)
-}
-
 func withNearest(key, written string, nearest ...string) *render.Node {
 	return render.NewMap(
 		render.Pair{Key: key, Value: render.NewString(written)},
-		render.Pair{Key: "nearest", Value: activityStrings(nearest...)})
+		render.Pair{Key: "nearest", Value: texts(nearest...)})
 }
 
 func activityUnknown(pairs ...render.Pair) diag.Fault {
 	return diag.Fault{Code: diag.UnknownName, Details: pairs}
-}
-
-func refusedAsUnreadable(t *testing.T, server *fake.Server, body string) diag.Fault {
-	t.Helper()
-	return diag.Fault{Code: diag.UpstreamInvalid, Details: []render.Pair{
-		requestDetailOfLast(t, server),
-		{Key: "upstream_status", Value: render.NewNumber("200")},
-		{Key: "upstream_body", Value: render.NewString(body)},
-	}}
-}
-
-func requestDetailOfLast(t *testing.T, server *fake.Server) render.Pair {
-	t.Helper()
-	sent := server.Last(t)
-	query, err := url.QueryUnescape(sent.URL.RawQuery)
-	require.NoError(t, err)
-	return render.Pair{Key: "request", Value: render.NewString(sent.Method + " " + server.URL + sent.URL.Path + "?" + query)}
 }
 
 func TestListActivitiesRefusesACallItCannotSend(t *testing.T) {
@@ -318,7 +292,7 @@ func TestListActivitiesSendsNoActivitiesWhereTheLinkTypesFail(t *testing.T) {
 	_, fault := activityList(t, server, nil)
 
 	want := diag.Fault{Code: diag.UpstreamFailed, Details: []render.Pair{
-		requestDetailOfLast(t, server),
+		lastRequest(t, server),
 		{Key: "upstream_status", Value: render.NewNumber("500")},
 	}}
 	assert.Equal(t, want, refusal(t, fault))
@@ -359,7 +333,7 @@ func TestListActivitiesRefusesLinkTypesItCannotRead(t *testing.T) {
 
 			_, fault := activityList(t, server, nil)
 
-			assert.Equal(t, refusedAsUnreadable(t, server, tc.linkTypes), refusal(t, fault))
+			assert.Equal(t, unreadable(lastRequest(t, server), tc.linkTypes), refusal(t, fault))
 			assert.Equal(t, []string{activityLinkTypesPath}, server.Paths())
 		})
 	}
@@ -454,7 +428,7 @@ func TestListActivitiesRefusesAnActivityItCannotRead(t *testing.T) {
 
 			_, fault := activityList(t, server, new("field,added,removed"))
 
-			assert.Equal(t, refusedAsUnreadable(t, server, tc.activities), refusal(t, fault))
+			assert.Equal(t, unreadable(lastRequest(t, server), tc.activities), refusal(t, fault))
 		})
 	}
 }
@@ -472,7 +446,7 @@ func TestListActivitiesChecksTheOrderOfTheMomentsWhateverItPrints(t *testing.T) 
 
 			_, fault := activityList(t, server, &expression)
 
-			assert.Equal(t, refusedAsUnreadable(t, server, outOfOrder), refusal(t, fault))
+			assert.Equal(t, unreadable(lastRequest(t, server), outOfOrder), refusal(t, fault))
 		})
 	}
 }
@@ -489,7 +463,7 @@ func TestListActivitiesChecksTheFilterOfAChangedFieldWhateverItPrints(t *testing
 
 			_, fault := activityList(t, server, &expression)
 
-			assert.Equal(t, refusedAsUnreadable(t, server, predefined), refusal(t, fault))
+			assert.Equal(t, unreadable(lastRequest(t, server), predefined), refusal(t, fault))
 		})
 	}
 }
@@ -590,21 +564,21 @@ func TestListActivitiesPrintsTheValuesOfAChangeAsAList(t *testing.T) {
 			name: "a moment put there and null taken away",
 			activity: activityJSON("IssueResolvedActivityItem", "IssueResolvedCategory", activityEarly,
 				`"field":null,"added":2000,"removed":null`),
-			added:   activityStrings("1970-01-01T00:00:02Z"),
+			added:   texts("1970-01-01T00:00:02Z"),
 			removed: activityNothing(),
 		},
 		{
 			name: "one text at either end",
 			activity: activityJSON("SimpleValueActivityItem", "SummaryCategory", activityEarly,
 				`"field":null,"added":"Late","removed":"Early"`),
-			added:   activityStrings("Late"),
-			removed: activityStrings("Early"),
+			added:   texts("Late"),
+			removed: texts("Early"),
 		},
 		{
 			name: "a text of lines, which stays on the line of the record",
 			activity: activityJSON("TextMarkupActivityItem", "DescriptionCategory", activityEarly,
 				`"field":null,"added":"First\nSecond","removed":null`),
-			added:   activityStrings("First\nSecond"),
+			added:   texts("First\nSecond"),
 			removed: activityNothing(),
 		},
 		{
@@ -626,8 +600,8 @@ func TestListActivitiesPrintsTheValuesOfAChangeAsAList(t *testing.T) {
 			activity: activityJSON("WorkItemDurationActivityItem", "WorkItemCategory", activityEarly,
 				`"field":null,"added":{"$type":"DurationValue","id":"120","minutes":120},`+
 					`"removed":{"$type":"DurationValue","id":"90","minutes":90}`),
-			added:   activityStrings("PT2H"),
-			removed: activityStrings("PT1H30M"),
+			added:   texts("PT2H"),
+			removed: texts("PT1H30M"),
 		},
 	}
 	for _, tc := range tests {
@@ -680,14 +654,14 @@ func TestListActivitiesPrintsTheValuesOfACustomFieldByTheTypeOfTheField(t *testi
 				render.Pair{Key: "login", Value: render.NewString("first")},
 				render.Pair{Key: "name", Value: render.NewString("First")})),
 		},
-		{name: "a period", valueType: "period", added: `6755`, want: activityStrings("PT112H35M")},
-		{name: "a period of no minutes", valueType: "period", added: `0`, want: activityStrings("PT0M")},
-		{name: "a date", valueType: "date", added: `129600000`, want: activityStrings("1970-01-02")},
-		{name: "a moment", valueType: "date and time", added: `0`, want: activityStrings("1970-01-01T00:00:00Z")},
+		{name: "a period", valueType: "period", added: `6755`, want: texts("PT112H35M")},
+		{name: "a period of no minutes", valueType: "period", added: `0`, want: texts("PT0M")},
+		{name: "a date", valueType: "date", added: `129600000`, want: texts("1970-01-02")},
+		{name: "a moment", valueType: "date and time", added: `0`, want: texts("1970-01-01T00:00:00Z")},
 		{name: "a whole number", valueType: "integer", added: `10`, want: render.NewList(render.NewNumber("10"))},
 		{name: "a fraction", valueType: "float", added: `1.5`, want: render.NewList(render.NewNumber("1.5"))},
-		{name: "a line of text", valueType: "string", added: `"Line"`, want: activityStrings("Line")},
-		{name: "a text of lines", valueType: "text", added: `"First\nSecond"`, want: activityStrings("First\nSecond")},
+		{name: "a line of text", valueType: "string", added: `"Line"`, want: texts("Line")},
+		{name: "a text of lines", valueType: "text", added: `"First\nSecond"`, want: texts("First\nSecond")},
 		{name: "a field emptied outright", valueType: "state", added: `null`, want: activityNothing()},
 		{name: "a field nothing was put into", valueType: "state", added: `[]`, want: activityNothing()},
 		{name: "a field of bare values emptied outright", valueType: "period", added: `null`, want: activityNothing()},
@@ -768,7 +742,7 @@ func TestListActivitiesPrintsOfAValueTheNamesItsTypeDeclares(t *testing.T) {
 				`"field":null,"added":[{"$type":"VcsChange","urls":["https://vcs.example/commit/1"],"version":"1",`+
 					`"text":"First\nSecond","date":1000}],"removed":[]`)),
 			want: []*render.Node{render.NewMap(render.Pair{Key: "added", Value: render.NewList(render.NewMap(
-				render.Pair{Key: "urls", Value: activityStrings("https://vcs.example/commit/1")},
+				render.Pair{Key: "urls", Value: texts("https://vcs.example/commit/1")},
 				render.Pair{Key: "version", Value: render.NewString("1")},
 				render.Pair{Key: "text", Value: render.NewString("First\nSecond")},
 				render.Pair{Key: "date", Value: render.NewString("1970-01-01T00:00:01Z")}))})},

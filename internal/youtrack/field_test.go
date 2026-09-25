@@ -91,7 +91,7 @@ func fieldMetaListed(records ...*render.Node) *render.Node {
 func fieldMetaDenied(t *testing.T, server *fake.Server) diag.Fault {
 	t.Helper()
 	return diag.Fault{Code: diag.Denied, Details: []render.Pair{
-		requestDetailOfLast(t, server),
+		lastRequest(t, server),
 		{Key: "project", Value: render.NewString("DEV")},
 		{Key: "permission", Value: render.NewString("jetbrains.jetpass.project-read")},
 	}}
@@ -100,7 +100,7 @@ func fieldMetaDenied(t *testing.T, server *fake.Server) diag.Fault {
 func fieldMetaUnknown(t *testing.T, server *fake.Server, asked string, nearest ...string) diag.Fault {
 	t.Helper()
 	return diag.Fault{Code: diag.UnknownName, Details: []render.Pair{
-		requestDetailOfLast(t, server),
+		lastRequest(t, server),
 		{Key: "project", Value: render.NewString("DEV")},
 		{Key: "unknown", Value: render.NewList(withNearest("field", asked, nearest...))},
 	}}
@@ -196,7 +196,7 @@ func TestListFieldsRefusesAnOrdinalItCannotOrderBy(t *testing.T) {
 
 			_, fault := fieldMetaList(t, server, "field(name)")
 
-			assert.Equal(t, refusedAsUnreadable(t, server, fields), refusal(t, fault))
+			assert.Equal(t, unreadable(lastRequest(t, server), fields), refusal(t, fault))
 		})
 	}
 }
@@ -361,7 +361,7 @@ func TestShowFieldRefusesMetadataItCannotRead(t *testing.T) {
 
 			_, fault := fieldMetaShow(t, client(t, server), "Field", tc.expression)
 
-			assert.Equal(t, refusedAsUnreadable(t, server, tc.metadata), refusal(t, fault))
+			assert.Equal(t, unreadable(lastRequest(t, server), tc.metadata), refusal(t, fault))
 			assert.Equal(t, []string{fieldMetaPath}, server.Paths())
 		})
 	}
@@ -375,7 +375,7 @@ func TestShowFieldRefusesAFieldItCannotCompare(t *testing.T) {
 
 	_, fault := fieldMetaShow(t, client(t, server), "Field", new("canBeEmpty"))
 
-	assert.Equal(t, refusedAsUnreadable(t, server, answer), refusal(t, fault))
+	assert.Equal(t, unreadable(lastRequest(t, server), answer), refusal(t, fault))
 }
 
 func TestShowFieldRefusesAFieldThatChangedBetweenTheTwoRequests(t *testing.T) {
@@ -400,7 +400,7 @@ func TestShowFieldRefusesAFieldThatChangedBetweenTheTwoRequests(t *testing.T) {
 			_, fault := fieldMetaShow(t, client(t, server), "Field", new("canBeEmpty"))
 
 			want := diag.Fault{Code: diag.UpstreamFailed, Details: []render.Pair{
-				requestDetailOfLast(t, server),
+				lastRequest(t, server),
 				{Key: "upstream_status", Value: render.NewNumber("200")},
 				{Key: "project", Value: render.NewString("DEV")},
 				{Key: "field", Value: render.NewString("Field")},

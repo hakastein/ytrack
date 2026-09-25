@@ -63,14 +63,6 @@ func tagCandidate(name, owner string) *render.Node {
 		render.Pair{Key: "owner", Value: render.NewString(owner)})
 }
 
-func tagTexts(texts ...string) *render.Node {
-	items := make([]*render.Node, 0, len(texts))
-	for _, text := range texts {
-		items = append(items, render.NewString(text))
-	}
-	return render.NewList(items...)
-}
-
 func tagServer(t *testing.T, routes map[string]http.HandlerFunc) *fake.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -398,7 +390,7 @@ func TestCreateTagAsksForTheGroupsOfEachSetItWrote(t *testing.T) {
 
 func TestCreateTagRefusesGroupNamesItCannotResolve(t *testing.T) {
 	t.Parallel()
-	every := tagTexts("First", "Second", "Team", "team")
+	every := texts("First", "Second", "Team", "team")
 	tests := []struct {
 		name    string
 		shared  youtrack.TagSharing
@@ -409,7 +401,7 @@ func TestCreateTagRefusesGroupNamesItCannotResolve(t *testing.T) {
 			shared: youtrack.TagSharing{VisibleFor: youtrack.VisibleFor{"Frist"}},
 			details: []render.Pair{{Key: "unknown", Value: render.NewList(render.NewMap(
 				render.Pair{Key: "group", Value: render.NewString("Frist")},
-				render.Pair{Key: "nearest", Value: tagTexts("First")}))}},
+				render.Pair{Key: "nearest", Value: texts("First")}))}},
 		},
 		{
 			name: "a name near no group in each set",
@@ -428,7 +420,7 @@ func TestCreateTagRefusesGroupNamesItCannotResolve(t *testing.T) {
 			shared: youtrack.TagSharing{UpdatableBy: youtrack.UpdatableBy{"TEAM"}},
 			details: []render.Pair{{Key: "ambiguous", Value: render.NewList(render.NewMap(
 				render.Pair{Key: "group", Value: render.NewString("TEAM")},
-				render.Pair{Key: "candidates", Value: tagTexts("Team", "team")}))}},
+				render.Pair{Key: "candidates", Value: texts("Team", "team")}))}},
 		},
 		{
 			name: "an unknown name and an ambiguous one",
@@ -442,7 +434,7 @@ func TestCreateTagRefusesGroupNamesItCannotResolve(t *testing.T) {
 					render.Pair{Key: "nearest", Value: every}))},
 				{Key: "ambiguous", Value: render.NewList(render.NewMap(
 					render.Pair{Key: "group", Value: render.NewString("TEAM")},
-					render.Pair{Key: "candidates", Value: tagTexts("Team", "team")}))},
+					render.Pair{Key: "candidates", Value: texts("Team", "team")}))},
 			},
 		},
 	}
@@ -549,8 +541,8 @@ func TestCreateTagRefusesASetOfGroupsThatCameBackAsAnother(t *testing.T) {
 			kept:     tagKeptWith("readSharingSettings", `[{"id":"6-1"}]`),
 			fields:   "name,readSharingSettings(permittedGroups(id))",
 			field:    "readSharingSettings.permittedGroups",
-			expected: tagTexts("6-1", "6-2"),
-			actual:   tagTexts("6-1"),
+			expected: texts("6-1", "6-2"),
+			actual:   texts("6-1"),
 		},
 		{
 			name:     "a group nobody wrote left among those that update it",
@@ -558,8 +550,8 @@ func TestCreateTagRefusesASetOfGroupsThatCameBackAsAnother(t *testing.T) {
 			kept:     tagKeptWith("updateSharingSettings", `[{"id":"6-1"},{"id":"6-2"}]`),
 			fields:   "name,updateSharingSettings(permittedGroups(id))",
 			field:    "updateSharingSettings.permittedGroups",
-			expected: tagTexts("6-1"),
-			actual:   tagTexts("6-1", "6-2"),
+			expected: texts("6-1"),
+			actual:   texts("6-1", "6-2"),
 		},
 		{
 			name:     "another group among those that tag with it",
@@ -567,8 +559,8 @@ func TestCreateTagRefusesASetOfGroupsThatCameBackAsAnother(t *testing.T) {
 			kept:     tagKeptWith("tagSharingSettings", `[{"id":"6-2"}]`),
 			fields:   "name,tagSharingSettings(permittedGroups(id))",
 			field:    "tagSharingSettings.permittedGroups",
-			expected: tagTexts("6-1"),
-			actual:   tagTexts("6-2"),
+			expected: texts("6-1"),
+			actual:   texts("6-2"),
 		},
 		{
 			name:     "no list of groups at all",
@@ -576,7 +568,7 @@ func TestCreateTagRefusesASetOfGroupsThatCameBackAsAnother(t *testing.T) {
 			kept:     tagKeptWith("readSharingSettings", `null`),
 			fields:   "name,readSharingSettings(permittedGroups(id))",
 			field:    "readSharingSettings.permittedGroups",
-			expected: tagTexts("6-1"),
+			expected: texts("6-1"),
 			actual:   render.NewNull(),
 		},
 	}
@@ -686,14 +678,14 @@ func TestDeleteTagRefusesANameThatNamesNoOneTag(t *testing.T) {
 			written: "Erly",
 			detail: render.Pair{Key: "unknown", Value: render.NewList(render.NewMap(
 				render.Pair{Key: "tag", Value: render.NewString("Erly")},
-				render.Pair{Key: "nearest", Value: tagTexts("Early")}))},
+				render.Pair{Key: "nearest", Value: texts("Early")}))},
 		},
 		{
 			name:    "a name near no tag",
 			written: "zzzzzz",
 			detail: render.Pair{Key: "unknown", Value: render.NewList(render.NewMap(
 				render.Pair{Key: "tag", Value: render.NewString("zzzzzz")},
-				render.Pair{Key: "nearest", Value: tagTexts("10-1", "Early", "Mixed", "Mixed", "mixed")}))},
+				render.Pair{Key: "nearest", Value: texts("10-1", "Early", "Mixed", "Mixed", "mixed")}))},
 		},
 		{
 			name:    "a name of several tags and no exact spelling",

@@ -27,24 +27,16 @@ func writtenProjectDetail() render.Pair {
 }
 
 func writtenMetadataRequest(server *fake.Server) render.Pair {
-	return writtenRequest(http.MethodGet, server, writtenProjectPath+"?fields="+writtenMetadataFields)
+	return requestTo(http.MethodGet, server, writtenProjectPath+"?fields="+writtenMetadataFields)
 }
 
 func writtenReadRequest(server *fake.Server) render.Pair {
-	return writtenRequest(http.MethodGet, server, writtenIssuePath+"?fields="+writtenReadFields)
+	return requestTo(http.MethodGet, server, writtenIssuePath+"?fields="+writtenReadFields)
 }
 
 func writtenCondition(watched string, forNothing bool, values ...string) string {
 	return `{"$type":"FieldBasedCondition","showForNullValue":` + strconv.FormatBool(forNothing) +
 		`,"field":{"$type":"ProjectCustomField","id":` + strconv.Quote(watched) + `},"values":` + writtenNames(values...) + `}`
-}
-
-func writtenList(names ...string) *render.Node {
-	items := make([]*render.Node, 0, len(names))
-	for _, name := range names {
-		items = append(items, render.NewString(name))
-	}
-	return render.NewList(items...)
 }
 
 func TestIssueWriteSendsAValueUnderTheClassAndTheKeyOfItsType(t *testing.T) {
@@ -144,7 +136,7 @@ func TestIssueWriteSendsAValueUnderTheClassAndTheKeyOfItsType(t *testing.T) {
 			answer := writtenIssue(t, map[string]any{"summary": "First", "customFields": held})
 			server := servingIssueWrite(t, project, "[]", fake.JSON(http.StatusOK, answer))
 
-			_, fault := writingIssueTo(t, server)(youtrack.CreateIssue("DEV", "First", nil, tc.filled, new("idReadable")))
+			_, fault := callOn(t, server)(youtrack.CreateIssue("DEV", "First", nil, tc.filled, new("idReadable")))
 
 			require.Nil(t, fault)
 			assert.JSONEq(t, writtenBody(tc.sent), server.Last(t).Body)
@@ -225,7 +217,7 @@ func TestIssueWriteRefusesAValueItsFieldCannotHold(t *testing.T) {
 			project := writtenProject(writtenField{id: "1-1", name: "Field", valueType: tc.valueType})
 			server := servingIssueWrite(t, project, "[]", fake.JSON(http.StatusOK, writtenIssue(t, nil)))
 
-			_, fault := writingIssueTo(t, server)(youtrack.CreateIssue("DEV", "First", nil, []string{"Field=" + tc.given}, nil))
+			_, fault := callOn(t, server)(youtrack.CreateIssue("DEV", "First", nil, []string{"Field=" + tc.given}, nil))
 
 			kept, invalid := issueWriteRefusal(t, fault)
 			want := diag.Fault{Code: diag.BadUsage, Details: []render.Pair{
@@ -247,7 +239,7 @@ func TestIssueWriteNamesEveryValueItCannotSendAtOnce(t *testing.T) {
 	)
 	server := servingIssueWrite(t, project, "[]", fake.JSON(http.StatusOK, writtenIssue(t, nil)))
 
-	_, fault := writingIssueTo(t, server)(youtrack.CreateIssue("DEV", "First", nil,
+	_, fault := callOn(t, server)(youtrack.CreateIssue("DEV", "First", nil,
 		[]string{"Third= x", "Second=P1D", "First=2.5"}, nil))
 
 	kept, invalid := issueWriteRefusal(t, fault)
@@ -295,7 +287,7 @@ func TestIssueWriteRefusesMoreThanAFieldTakesInOneWrite(t *testing.T) {
 			t.Parallel()
 			server := servingIssueWrite(t, project, "[]", fake.JSON(http.StatusOK, writtenIssue(t, nil)))
 
-			_, fault := writingIssueTo(t, server)(tc.call())
+			_, fault := callOn(t, server)(tc.call())
 
 			kept, invalid := issueWriteRefusal(t, fault)
 			assert.Equal(t, diag.Fault{Code: diag.BadUsage, Details: []render.Pair{
@@ -350,7 +342,7 @@ func TestIssueWriteResolvesAFieldByItsNameAndSendsTheNameOfTheProject(t *testing
 			answer := writtenIssue(t, map[string]any{"summary": "First", "customFields": held})
 			server := servingIssueWrite(t, writtenProject(tc.fields...), "[]", fake.JSON(http.StatusOK, answer))
 
-			_, fault := writingIssueTo(t, server)(youtrack.CreateIssue("DEV", "First", nil, []string{tc.filled}, new("idReadable")))
+			_, fault := callOn(t, server)(youtrack.CreateIssue("DEV", "First", nil, []string{tc.filled}, new("idReadable")))
 
 			require.Nil(t, fault)
 			assert.JSONEq(t, writtenBody(`{"$type":"SimpleIssueCustomField","name":"`+tc.sent+`","value":"First"}`),
@@ -369,7 +361,7 @@ func TestIssueWriteRefusesANameNoSingleFieldAnswersTo(t *testing.T) {
 	unknown := func(field string, nearest ...string) *render.Node {
 		return render.NewMap(
 			render.Pair{Key: "field", Value: render.NewString(field)},
-			render.Pair{Key: "nearest", Value: writtenList(nearest...)})
+			render.Pair{Key: "nearest", Value: texts(nearest...)})
 	}
 	tests := []struct {
 		name    string
@@ -439,7 +431,7 @@ func TestIssueWriteRefusesANameNoSingleFieldAnswersTo(t *testing.T) {
 			key:     "ambiguous",
 			named: []*render.Node{render.NewMap(
 				render.Pair{Key: "field", Value: render.NewString("shared")},
-				render.Pair{Key: "candidates", Value: writtenList("First", "Second")})},
+				render.Pair{Key: "candidates", Value: texts("First", "Second")})},
 		},
 	}
 	for _, tc := range tests {
@@ -447,7 +439,7 @@ func TestIssueWriteRefusesANameNoSingleFieldAnswersTo(t *testing.T) {
 			t.Parallel()
 			server := servingIssueWrite(t, project, "[]", fake.JSON(http.StatusOK, writtenIssue(t, nil)))
 
-			_, fault := writingIssueTo(t, server)(tc.call())
+			_, fault := callOn(t, server)(tc.call())
 
 			want := diag.Fault{Code: diag.UnknownName, Details: []render.Pair{
 				tc.request(server), writtenProjectDetail(), {Key: tc.key, Value: render.NewList(tc.named...)},
@@ -491,7 +483,7 @@ func TestIssueWriteRefusesMetadataOfAnotherShape(t *testing.T) {
 			t.Parallel()
 			server := servingIssueWrite(t, tc.project, "[]", fake.JSON(http.StatusOK, writtenIssue(t, nil)))
 
-			_, fault := writingIssueTo(t, server)(youtrack.CreateIssue("DEV", "First", nil, []string{"Field=First"}, nil))
+			_, fault := callOn(t, server)(youtrack.CreateIssue("DEV", "First", nil, []string{"Field=First"}, nil))
 
 			want := diag.Fault{Code: diag.UpstreamInvalid, Details: []render.Pair{
 				writtenMetadataRequest(server),
@@ -540,7 +532,7 @@ func TestUpdateIssueEmptiesAFieldTheWayItsTypeHoldsNothing(t *testing.T) {
 			answer := writtenIssue(t, map[string]any{"customFields": writtenValues(tc.held...)})
 			server := servingIssueWrite(t, project, "[]", fake.JSON(http.StatusOK, answer))
 
-			_, fault := writingIssueTo(t, server)(youtrack.UpdateIssue("DEV-1", nil, nil, nil, []string{tc.cleared}, new("idReadable")))
+			_, fault := callOn(t, server)(youtrack.UpdateIssue("DEV-1", nil, nil, nil, []string{tc.cleared}, new("idReadable")))
 
 			require.Nil(t, fault)
 			assert.JSONEq(t, `{"customFields":[`+tc.sent+`]}`, server.Last(t).Body)
@@ -561,7 +553,7 @@ func TestUpdateIssueWritesAFieldUnderTheClassTheIssueHoldsItIn(t *testing.T) {
 	)})
 	server := servingIssueWrite(t, project, classes, fake.JSON(http.StatusOK, answer))
 
-	_, fault := writingIssueTo(t, server)(youtrack.UpdateIssue("DEV-1", nil, nil, []string{"Held=First", "Unheld=Second"}, nil,
+	_, fault := callOn(t, server)(youtrack.UpdateIssue("DEV-1", nil, nil, []string{"Held=First", "Unheld=Second"}, nil,
 		new("idReadable")))
 
 	require.Nil(t, fault)

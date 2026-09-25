@@ -406,14 +406,6 @@ func TestCommentWritesCheckMoreThanTheyPrint(t *testing.T) {
 	}
 }
 
-func commentNames(names ...string) *render.Node {
-	nodes := make([]*render.Node, 0, len(names))
-	for _, name := range names {
-		nodes = append(nodes, render.NewString(name))
-	}
-	return render.NewList(nodes...)
-}
-
 func TestCommentCallsCheckTheAnswerAgainstTheSchemaOfTheOwner(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -435,7 +427,7 @@ func TestCommentCallsCheckTheAnswerAgainstTheSchemaOfTheOwner(t *testing.T) {
 			target:  "/api/articles/DEV-A-3/comments?fields=id,deleted,text",
 			fields:  "id,deleted,text",
 			unknown: "deleted",
-			nearest: commentNames("$type", "article", "attachments", "author", "created", "id", "pinned", "reactions",
+			nearest: texts("$type", "article", "attachments", "author", "created", "id", "pinned", "reactions",
 				"text", "updated", "visibility"),
 			afterWrite: true,
 		},
@@ -448,7 +440,7 @@ func TestCommentCallsCheckTheAnswerAgainstTheSchemaOfTheOwner(t *testing.T) {
 			target:  "/api/issues/DEV-7/comments?fields=id,article(idReadable),text",
 			fields:  "id,article(idReadable),text",
 			unknown: "article",
-			nearest: commentNames("$type", "attachments", "author", "created", "deleted", "id", "issue", "pinned",
+			nearest: texts("$type", "attachments", "author", "created", "deleted", "id", "issue", "pinned",
 				"reactions", "text", "textPreview", "updated", "visibility"),
 			afterWrite: true,
 		},
@@ -461,7 +453,7 @@ func TestCommentCallsCheckTheAnswerAgainstTheSchemaOfTheOwner(t *testing.T) {
 			target:  "/api/articles/DEV-A-3/comments?fields=id,deleted&$top=1",
 			fields:  "id,deleted",
 			unknown: "deleted",
-			nearest: commentNames("$type", "article", "attachments", "author", "created", "id", "pinned", "reactions",
+			nearest: texts("$type", "article", "attachments", "author", "created", "id", "pinned", "reactions",
 				"text", "updated", "visibility"),
 		},
 	}

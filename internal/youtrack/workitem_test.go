@@ -82,30 +82,6 @@ func writingWorkItem(t *testing.T, settings string, answer workItemAnswer) *fake
 	})
 }
 
-func workItemCall(t *testing.T, server *fake.Server) func(youtrack.Call, *diag.Fault) (*render.Node, *diag.Fault) {
-	t.Helper()
-	return func(call youtrack.Call, fault *diag.Fault) (*render.Node, *diag.Fault) {
-		require.Nil(t, fault)
-		return call(t.Context(), client(t, server))
-	}
-}
-
-func workItemRequestSent(t *testing.T, server *fake.Server) render.Pair {
-	t.Helper()
-	sent := server.Last(t)
-	return render.Pair{Key: "request", Value: render.NewString(sent.Method + " " + server.URL + sent.URL.Path +
-		"?fields=" + sent.URL.Query().Get("fields"))}
-}
-
-func workItemAnswerDetails(t *testing.T, server *fake.Server, body string) []render.Pair {
-	t.Helper()
-	return []render.Pair{
-		workItemRequestSent(t, server),
-		{Key: "upstream_status", Value: render.NewNumber("200")},
-		{Key: "upstream_body", Value: render.NewString(body)},
-	}
-}
-
 func workItemProjectOf(project string) string {
 	return `{"$type":"Issue","idReadable":"DEV-1","project":` + project + `}`
 }
@@ -373,7 +349,7 @@ func TestCreateWorkItemWritesWhatTheCallGives(t *testing.T) {
 			t.Parallel()
 			server := writingWorkItem(t, workItemProjectSettings(), tc.answer)
 
-			_, fault := workItemCall(t, server)(youtrack.CreateWorkItem("DEV-1", tc.spent, tc.day, tc.text, nil,
+			_, fault := callOn(t, server)(youtrack.CreateWorkItem("DEV-1", tc.spent, tc.day, tc.text, nil,
 				tc.attributes, new("id")))
 
 			require.Nil(t, fault)
@@ -430,7 +406,7 @@ func TestUpdateWorkItemWritesTheNamedPartsAlone(t *testing.T) {
 			t.Parallel()
 			server := writingWorkItem(t, workItemProjectSettings(), tc.answer)
 
-			_, fault := workItemCall(t, server)(youtrack.UpdateWorkItem("DEV-1", "7-1", tc.spent, tc.day, tc.text,
+			_, fault := callOn(t, server)(youtrack.UpdateWorkItem("DEV-1", "7-1", tc.spent, tc.day, tc.text,
 				tc.workType, tc.attributes, tc.cleared, new("id")))
 
 			require.Nil(t, fault)
@@ -539,7 +515,7 @@ func TestWorkItemWriteAsksForWhatItChecksWhateverWasAskedToPrint(t *testing.T) {
 			t.Parallel()
 			server := writingWorkItem(t, workItemProjectSettings(), tc.answer)
 
-			node, fault := workItemCall(t, server)(tc.write())
+			node, fault := callOn(t, server)(tc.write())
 
 			require.Nil(t, fault)
 			assert.Equal(t, render.NewMap(render.Pair{Key: "id", Value: render.NewString("7-1")}), node)
@@ -651,14 +627,14 @@ func TestCreateWorkItemRefusesWhatTheServerKeptOtherwise(t *testing.T) {
 			t.Parallel()
 			server := writingWorkItem(t, workItemProjectSettings(), tc.answer)
 
-			_, fault := workItemCall(t, server)(youtrack.CreateWorkItem("DEV-1", "PT1H30M", tc.day, tc.text, tc.workType,
+			_, fault := callOn(t, server)(youtrack.CreateWorkItem("DEV-1", "PT1H30M", tc.day, tc.text, tc.workType,
 				tc.attributes, new("id")))
 
 			assert.Equal(t, diag.Fault{
 				Code:       diag.UpstreamInvalid,
 				AfterWrite: true,
 				Details: []render.Pair{
-					workItemRequestSent(t, server),
+					lastRequest(t, server),
 					{Key: "issue", Value: render.NewString("DEV-1")},
 					{Key: "id", Value: render.NewString("7-1")},
 					{Key: "mismatch", Value: render.NewList(render.NewMap(
@@ -779,14 +755,14 @@ func TestUpdateWorkItemRefusesWhatTheServerKeptOtherwise(t *testing.T) {
 			t.Parallel()
 			server := writingWorkItem(t, workItemProjectSettings(), tc.answer)
 
-			_, fault := workItemCall(t, server)(youtrack.UpdateWorkItem("DEV-1", "7-1", tc.spent, tc.day, tc.text,
+			_, fault := callOn(t, server)(youtrack.UpdateWorkItem("DEV-1", "7-1", tc.spent, tc.day, tc.text,
 				tc.workType, tc.attributes, tc.cleared, new("id")))
 
 			assert.Equal(t, diag.Fault{
 				Code:       diag.UpstreamInvalid,
 				AfterWrite: true,
 				Details: []render.Pair{
-					workItemRequestSent(t, server),
+					lastRequest(t, server),
 					{Key: "issue", Value: render.NewString("DEV-1")},
 					{Key: "id", Value: render.NewString("7-1")},
 					{Key: "mismatch", Value: render.NewList(render.NewMap(
@@ -804,13 +780,13 @@ func TestCreateWorkItemTellsAKeptTypeByItsIDFromOneOfTheSameName(t *testing.T) {
 	server := writingWorkItem(t, workItemSettings(lowerTwinType+","+upperTwinType, ""),
 		workItemAnswer{workType: lowerTwinType})
 
-	_, fault := workItemCall(t, server)(youtrack.CreateWorkItem("DEV-1", "PT1H30M", nil, nil, new("TWIN"), nil, new("id")))
+	_, fault := callOn(t, server)(youtrack.CreateWorkItem("DEV-1", "PT1H30M", nil, nil, new("TWIN"), nil, new("id")))
 
 	assert.Equal(t, diag.Fault{
 		Code:       diag.UpstreamInvalid,
 		AfterWrite: true,
 		Details: []render.Pair{
-			workItemRequestSent(t, server),
+			lastRequest(t, server),
 			{Key: "issue", Value: render.NewString("DEV-1")},
 			{Key: "id", Value: render.NewString("7-1")},
 			{Key: "mismatch", Value: render.NewList(render.NewMap(
@@ -873,7 +849,7 @@ func TestWorkItemWriteChecksOnlyWhatItWrote(t *testing.T) {
 			t.Parallel()
 			server := writingWorkItem(t, workItemProjectSettings(), tc.answer)
 
-			node, fault := workItemCall(t, server)(tc.write())
+			node, fault := callOn(t, server)(tc.write())
 
 			require.Nil(t, fault)
 			assert.Equal(t, tc.printed, node)
@@ -917,7 +893,7 @@ func TestCreateWorkItemResolvesATypeOfTheProjectByName(t *testing.T) {
 			t.Parallel()
 			server := writingWorkItem(t, workItemSettings(tc.types, ""), workItemAnswer{workType: tc.kept})
 
-			_, fault := workItemCall(t, server)(youtrack.CreateWorkItem("DEV-1", "PT1H30M", nil, nil, new(tc.named), nil,
+			_, fault := callOn(t, server)(youtrack.CreateWorkItem("DEV-1", "PT1H30M", nil, nil, new(tc.named), nil,
 				new("id")))
 
 			require.Nil(t, fault)
@@ -1001,12 +977,12 @@ func TestWorkItemWriteRefusesANameTheProjectDoesNotHave(t *testing.T) {
 			t.Parallel()
 			server := writingWorkItem(t, tc.settings, workItemAnswer{})
 
-			_, fault := workItemCall(t, server)(tc.write())
+			_, fault := callOn(t, server)(tc.write())
 
 			assert.Equal(t, diag.Fault{
 				Code: diag.UnknownName,
 				Details: []render.Pair{
-					workItemRequestSent(t, server),
+					lastRequest(t, server),
 					{Key: "project", Value: render.NewString("DEV")},
 					{Key: "unknown", Value: render.NewList(tc.unknown...)},
 				},
@@ -1066,10 +1042,10 @@ func TestWorkItemWriteRefusesSettingsOfAnotherShape(t *testing.T) {
 			t.Parallel()
 			server := writingWorkItem(t, tc.read, workItemAnswer{})
 
-			_, fault := workItemCall(t, server)(youtrack.CreateWorkItem("DEV-1", "PT1H", nil, nil, new("First"),
+			_, fault := callOn(t, server)(youtrack.CreateWorkItem("DEV-1", "PT1H", nil, nil, new("First"),
 				tc.attributes, nil))
 
-			assert.Equal(t, diag.Fault{Code: diag.UpstreamInvalid, Details: workItemAnswerDetails(t, server, tc.read)},
+			assert.Equal(t, unreadable(lastRequest(t, server), tc.read),
 				refusal(t, fault))
 			assert.Equal(t, []string{"/api/issues/DEV-1"}, server.Paths())
 		})
@@ -1084,7 +1060,7 @@ func TestDeleteWorkItemRemovesTheWorkItemUnderTheIssueTheReadNamed(t *testing.T)
 	mux.HandleFunc("DELETE "+workItemOfTheIssue, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	server := fake.Serve(t, mux.ServeHTTP)
 
-	node, fault := workItemCall(t, server)(youtrack.DeleteWorkItem("dev-1", "7-1"))
+	node, fault := callOn(t, server)(youtrack.DeleteWorkItem("dev-1", "7-1"))
 
 	require.Nil(t, fault)
 	assert.Equal(t, render.NewMap(
@@ -1113,9 +1089,9 @@ func TestDeleteWorkItemRemovesNothingByAReadOfAnotherShape(t *testing.T) {
 			t.Parallel()
 			server := fake.Serve(t, fake.JSON(http.StatusOK, tc.read))
 
-			_, fault := workItemCall(t, server)(youtrack.DeleteWorkItem("DEV-1", "7-1"))
+			_, fault := callOn(t, server)(youtrack.DeleteWorkItem("DEV-1", "7-1"))
 
-			assert.Equal(t, diag.Fault{Code: diag.UpstreamInvalid, Details: workItemAnswerDetails(t, server, tc.read)},
+			assert.Equal(t, unreadable(lastRequest(t, server), tc.read),
 				refusal(t, fault))
 			assert.Equal(t, []string{workItemOfTheIssue}, server.Paths())
 		})
@@ -1192,7 +1168,7 @@ func TestListWorkItemsPrintsAWorkItem(t *testing.T) {
 			t.Parallel()
 			server := fake.Serve(t, fake.JSON(http.StatusOK, "["+tc.received+"]"))
 
-			node, fault := workItemCall(t, server)(youtrack.ListWorkItems("DEV-1", new(tc.expression), youtrack.Page{Limit: 50}))
+			node, fault := callOn(t, server)(youtrack.ListWorkItems("DEV-1", new(tc.expression), youtrack.Page{Limit: 50}))
 
 			require.Nil(t, fault)
 			assert.Equal(t, workItemListing(render.NewMap(render.Pair{Key: tc.expression, Value: tc.printed})), node)
@@ -1228,7 +1204,7 @@ func TestListWorkItemsRefusesAWorkItemOfAnotherShape(t *testing.T) {
 			body := "[" + tc.received + "]"
 			server := fake.Serve(t, fake.JSON(http.StatusOK, body))
 
-			_, fault := workItemCall(t, server)(youtrack.ListWorkItems("DEV-1", new("duration,attributes"),
+			_, fault := callOn(t, server)(youtrack.ListWorkItems("DEV-1", new("duration,attributes"),
 				youtrack.Page{Limit: 50}))
 
 			assert.Equal(t, diag.Fault{Code: diag.UpstreamInvalid, Details: []render.Pair{
@@ -1244,7 +1220,7 @@ func TestListWorkItemsAsksTheIssuesOfALinkSlotOfTheIssue(t *testing.T) {
 	t.Parallel()
 	server := fake.Serve(t, fake.JSON(http.StatusOK, "[]"))
 
-	_, fault := workItemCall(t, server)(youtrack.ListWorkItems("DEV-1", new("issue(links(issues(idReadable)))"),
+	_, fault := callOn(t, server)(youtrack.ListWorkItems("DEV-1", new("issue(links(issues(idReadable)))"),
 		youtrack.Page{Limit: 50}))
 
 	require.Nil(t, fault)
