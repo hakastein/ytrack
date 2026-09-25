@@ -8,8 +8,6 @@ import (
 
 //go:generate go run ../../scripts/catalogue.go ../../api/openapi.json catalogue.gen.go
 
-// A schema of the specification under the name the server writes in $type, with the element written for each
-// property it declares itself.
 type schema struct {
 	parent     string
 	properties map[string]string
@@ -21,11 +19,9 @@ const (
 )
 
 type typeRef struct {
-	// "" where the specification names no schema.
 	schema string
 	list   bool
-	// "" where the scalar is written as it arrived.
-	kind string
+	kind   string
 }
 
 func parseTypeRef(written string) typeRef {
@@ -41,14 +37,11 @@ func parseTypeRef(written string) typeRef {
 	return e
 }
 
-// schemas is the catalogue with the descendants of each schema beside it.
 type schemas struct {
 	byName   map[string]schema
 	children map[string][]string
 }
 
-// The catalogue is built once for a command and handed down from there: the generated map literal of every
-// schema costs 55 µs and 105 KB to build, and a command reads a dozen places by it.
 func loadSchemas() *schemas {
 	byName := catalogue()
 	children := map[string][]string{}
@@ -60,7 +53,6 @@ func loadSchemas() *schemas {
 	return &schemas{byName: byName, children: children}
 }
 
-// declaration is what schema name declares property to hold, itself or through a schema it extends.
 func (c *schemas) declaration(name, property string) (typeRef, bool) {
 	for s, ok := c.byName[name]; ok; s, ok = c.byName[s.parent] {
 		if written, declared := s.properties[property]; declared {
@@ -70,9 +62,6 @@ func (c *schemas) declaration(name, property string) (typeRef, bool) {
 	return typeRef{}, false
 }
 
-// isSubtypeOf is whether name is ancestor or extends it, however deep, and false for a name the catalogue does not
-// have. A place read by one name alone would miss every subtype the server answers with: avatarUrl is declared
-// on User and arrives on Me and on VcsUnresolvedUser too.
 func (c *schemas) isSubtypeOf(name, ancestor string) bool {
 	for {
 		if name == ancestor {

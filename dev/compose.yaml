@@ -14,8 +14,7 @@ services:
       - logs:/opt/youtrack/logs
       - backups:/opt/youtrack/backups
     healthcheck:
-      # Мастер настройки и настроенный инстанс отвечают разными кодами, поэтому
-      # проверяется сам факт HTTP-ответа, а не 2xx
+      # Без -f: мастер настройки и настроенный инстанс отвечают на /api/config разными кодами
       test: ["CMD-SHELL", "curl -sS -o /dev/null http://127.0.0.1:8080/api/config"]
       interval: 10s
       timeout: 10s
@@ -24,8 +23,7 @@ services:
 
   tools:
     build: ./tools
-    # Playwright обязан ходить ровно по base URL инстанса, иначе мастер настройки
-    # уводит редиректом на адрес, которого в контейнере нет
+    # Мастер настройки редиректит на base URL инстанса, а localhost хоста виден только из сети хоста
     network_mode: host
     user: "${UID:-1000}:${GID:-1000}"
     environment:

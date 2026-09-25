@@ -11,8 +11,6 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// What the list asks of a comment where the caller writes none: on an issue whether it was taken back as well,
-// and on an article, which keeps no such comment, not that.
 const (
 	issueCommentListFields   = "id,author(login),created,text,deleted"
 	articleCommentListFields = "id,author(login),created,text"
@@ -24,7 +22,6 @@ const (
 	devInstanceSecondComment  = "7-3"
 )
 
-// Comments of the server as a page of the list brings them, $type and all.
 const (
 	listedIssueComment = `{"deleted":false,"author":{"login":"admin","$type":"User"},"created":1789395789677,` +
 		`"text":"первая\nвторая","id":"7-2","$type":"IssueComment"}`
@@ -34,7 +31,6 @@ const (
 		`"text":"к статье","id":"8-4","$type":"ArticleComment"}`
 )
 
-// commentListing is the document comment list prints, read back.
 type commentListing struct {
 	Total     int             `yaml:"total"`
 	Returned  int             `yaml:"returned"`
@@ -75,8 +71,6 @@ func TestCommentListHelpNamesItsDefaultFields(t *testing.T) {
 	assert.Contains(t, got.stdout, issueCommentListFields)
 }
 
-// Every call that names no one owner ytrack can address is refused before the network, the way every command
-// of an owner refuses it, and so is a limit no list of the tool takes.
 func TestCommentListRefusesACallThatNamesNoOneOwner(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -102,15 +96,12 @@ func TestCommentListRefusesACallThatNamesNoOneOwner(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, "bad_usage", requireRefusal(t, got).code)
+			assert.Equal(t, "bad_usage", requireFault(t, got).code)
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// An issue goes to the API of issues with the limit as $top, and its records come one to a line in the order
-// they arrived. A comment its author took back is one of them, printed with its text null and deleted true,
-// where a show of the issue would leave it out.
 func TestCommentListPrintsTheCommentsOfAnIssueWithDeletedOnesAmongThem(t *testing.T) {
 	t.Parallel()
 	server := serve(t, respondWith(http.StatusOK, "["+listedIssueComment+","+listedDeletedComment+"]"))
@@ -125,8 +116,6 @@ func TestCommentListPrintsTheCommentsOfAnIssueWithDeletedOnesAmongThem(t *testin
 	assert.Equal(t, []url.Values{{"fields": {issueCommentListFields}, "$top": {"50"}}}, server.sentQueries())
 }
 
-// An article goes to the API of articles, and deleted is asked for by nobody there: the server sends no such
-// name for a comment of an article, which it never keeps once taken back.
 func TestCommentListPrintsTheCommentsOfAnArticleWithoutDeleted(t *testing.T) {
 	t.Parallel()
 	server := serve(t, respondWith(http.StatusOK, "["+listedArticleComment+"]"))
@@ -140,8 +129,6 @@ func TestCommentListPrintsTheCommentsOfAnArticleWithoutDeleted(t *testing.T) {
 	assert.Equal(t, []url.Values{{"fields": {articleCommentListFields}, "$top": {"50"}}}, server.sentQueries())
 }
 
-// A leading + adds to the default of the kind of owner the call named, and deleted written on an article is a
-// name its comment does not carry.
 func TestCommentListAddsToTheDefaultOfTheOwnerItNamed(t *testing.T) {
 	t.Parallel()
 
@@ -161,14 +148,12 @@ func TestCommentListAddsToTheDefaultOfTheOwnerItNamed(t *testing.T) {
 
 		got := runWith(t, server.env(), "comment", "list", "DEV-A-1", "--fields", "+deleted")
 
-		found := requireRefusal(t, got)
+		found := requireFault(t, got)
 		assert.Equal(t, "unknown_name", found.code)
 		assert.Equal(t, []string{articleCommentListFields + ",deleted"}, server.sentFields())
 	})
 }
 
-// A page that fills the limit proves nothing about the rest, so the whole is read off a second pass over ids
-// alone on the same path; a count below what arrived is two different collections and no document.
 func TestCommentListCountsTheCommentsWhenTheyFillTheLimit(t *testing.T) {
 	t.Parallel()
 
@@ -198,7 +183,7 @@ func TestCommentListCountsTheCommentsWhenTheyFillTheLimit(t *testing.T) {
 		assert.Equal(t, faultDocument{
 			code:    "upstream_failed",
 			details: []detail{{"total", 0}, {"returned", 1}},
-		}, requireRefusal(t, got))
+		}, requireFault(t, got))
 	})
 
 	t.Run("more arrived than the limit", func(t *testing.T) {
@@ -210,7 +195,7 @@ func TestCommentListCountsTheCommentsWhenTheyFillTheLimit(t *testing.T) {
 		assert.Equal(t, faultDocument{
 			code:    "upstream_invalid",
 			details: []detail{{"limit", 1}, {"returned", 2}},
-		}, requireRefusal(t, got))
+		}, requireFault(t, got))
 		assert.Len(t, server.requests(), 1)
 	})
 }

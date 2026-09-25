@@ -13,8 +13,6 @@ import (
 )
 
 const (
-	// How a refusal names an address or a token nobody will find in a variable or a file: they were typed a
-	// moment ago.
 	addressTyped = "the address typed"
 	tokenTyped   = "the token typed"
 
@@ -54,15 +52,12 @@ func newAuth(env []string, stdin *os.File, stdout io.Writer, renderer render.Ren
 	logout.Long = "Log out of this directory. The token stays valid."
 	logout.Flags().BoolVar(&logoutGlobal, "global", false, "log out of the global login")
 
-	auth := newCommand("auth", rejectGroup)
+	auth := newCommand("auth", requireSubcommand)
 	auth.Short = "Manage login"
 	auth.AddCommand(status, login, logout)
 	return auth
 }
 
-// login asks for an address and a token on the terminal and has the server say whose token it is before any of
-// it is written down: a token the server would refuse is better refused where it was typed than in some later
-// command far from the mistake.
 func login(ctx context.Context, env []string, stdin *os.File, stdout io.Writer, renderer render.Renderer, global bool) *diag.Fault {
 	tty, fault := terminal(stdin)
 	if fault != nil {
@@ -95,25 +90,20 @@ func login(ctx context.Context, env []string, stdin *os.File, stdout io.Writer, 
 	if reason := validateToken(secret, tokenTyped); reason != "" {
 		return &diag.Fault{Code: diag.BadUsage, Message: reason}
 	}
-	// The login is checked and nothing else, so this client reads no cache and leaves none behind.
-	user, fault := youtrack.CurrentUser(ctx, youtrack.New(address, secret, ""))
+	user, fault := youtrack.CurrentUser(ctx, youtrack.New(address, secret, noMetadataCache))
 	if fault != nil {
-		// The token was typed on this run rather than found somewhere, so there is no origin for it to name.
 		return fault
 	}
-	// The records were read before the dialogue; a file changed since is written over, which no lock prevents.
 	if fault := saveRecords(path, upsertRecord(records, kept, address, secret)); fault != nil {
 		return fault
 	}
 	return printNode(stdout, renderer, render.NewMap(
-		// An address may carry a password, masked here as in the request of a refusal.
 		render.Pair{Key: "url", Value: render.NewString(address.Redacted())},
 		render.Pair{Key: "scope", Value: render.NewString(kept.String())},
 		render.Pair{Key: "user", Value: user},
 	))
 }
 
-// logout changes the file and nothing else, so it asks for no address and no token of its own.
 func logout(env []string, stdout io.Writer, renderer render.Renderer, global bool) *diag.Fault {
 	path, kept, fault := loginTarget(env, global, "auth logout takes out the login of the directory it was called in, and ")
 	if fault != nil {
@@ -131,15 +121,11 @@ func logout(env []string, stdout io.Writer, renderer render.Renderer, global boo
 		return fault
 	}
 	return printNode(stdout, renderer, render.NewMap(
-		// An address may carry a password, masked here as in the request of a refusal.
 		render.Pair{Key: "url", Value: render.NewString(taken.address.Redacted())},
 		render.Pair{Key: "scope", Value: render.NewString(kept.String())},
 	))
 }
 
-// loginTarget is the file of login records and the one record of it a call is about: the record of the directory the
-// call was made in, or the record for everywhere. Both commands settle it before they act, and wanted is the half of
-// the refusal that says what the directory was needed for.
 func loginTarget(env []string, global bool, wanted string) (path string, kept scope, fault *diag.Fault) {
 	home := lookup(env, homeVariable)
 	if path = recordsPath(home); path == "" {
@@ -156,8 +142,6 @@ func loginTarget(env []string, global bool, wanted string) (path string, kept sc
 	return path, dirScope(dir), nil
 }
 
-// A logout that changed nothing while a token still goes out from here would leave the caller sure they had
-// logged out, so the refusal names the login that stays in charge.
 func noSavedLoginFault(records []record, kept scope) *diag.Fault {
 	if kept.isGlobal() {
 		return &diag.Fault{Code: diag.BadUsage, Message: "no global login is saved"}
@@ -178,7 +162,6 @@ func describeScope(held record) string {
 
 func statusDocument(c connection, user *render.Node) *render.Node {
 	return render.NewMap(
-		// An address may carry a password, masked here as in the request of a refusal.
 		render.Pair{Key: "url", Value: render.NewString(c.address.Redacted())},
 		c.from.pair(),
 		render.Pair{Key: "user", Value: user},

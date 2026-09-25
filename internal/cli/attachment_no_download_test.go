@@ -6,8 +6,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// base64Content is the file's own bytes, which ytrack never downloads, so --fields is refused wherever it
-// names that field, before any request goes out.
 func TestFieldsRefusesTheContentOfAFileWhereverItIsWritten(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -27,7 +25,7 @@ func TestFieldsRefusesTheContentOfAFileWhereverItIsWritten(t *testing.T) {
 			argv: []string{"article", "show", "DEV-A-1", "--fields", "attachments(base64Content)"},
 		},
 		{
-			name: "in a record of a selection",
+			name: "in a record of a list",
 			argv: []string{"issue", "list", "--query", "x", "--fields", "+attachments(base64Content)"},
 		},
 		{
@@ -42,7 +40,7 @@ func TestFieldsRefusesTheContentOfAFileWhereverItIsWritten(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "bad_usage", found.code)
 			assert.Empty(t, found.details)
 			assert.Empty(t, server.requests())

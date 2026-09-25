@@ -3,7 +3,7 @@ name: youtrack
 description: Use for any interaction with YouTrack.
 ---
 
-YouTrack is reached through the `ytrack` CLI: `ytrack <entity> <verb>`, entities
+YouTrack is reached through the `ytrack` CLI: `ytrack <command> <subcommand>`, commands
 `issue`, `activity`, `comment`, `link`, `tag`, `field`, `time`, `attachment`,
 `article`, `project`, `user`, `auth`.
 
@@ -11,4 +11,4 @@ YouTrack is reached through the `ytrack` CLI: `ytrack <entity> <verb>`, entities
 - An answer holds only the fields asked for — the command's default set or `--fields`.
   A field that is not printed was not requested; it is not empty.
 - Exit `2` is `write_uncertain`: the write reached the server and may or may not
-  have landed. Read the entity back before repeating it.
+  have landed. Read the object back before repeating it.

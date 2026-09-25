@@ -15,34 +15,25 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// Requests are counted by endpoint, so a request a later change adds to a selection leaves the
-// counts of these scenarios as they are.
 const (
 	issuesPath = "/api/issues"
 	countPath  = "/api/issuesGetter/count"
 )
 
-// What issue list prints by default, which is what its help names, and the two custom fields of it as query
-// parameters of their own, which is how the answer is cut down to them.
 const (
 	issueListFields = "idReadable,summary,customFields(State,Type),created"
 	namedState      = "State"
 	namedType       = "Type"
 )
 
-// The default with the block of custom fields filled in, which is what goes out as fields=.
 const sentIssueListFields = "idReadable,summary," + translatedCustomFieldsFields + ",created"
 
-// A record of a selection as the server sends it under the default expression: $type on every object, an id
-// nobody asked for, and the keys in an order other than the one asked for, the custom fields included — the
-// server answers Type before State, and the record prints them in the order the expression named them.
 type listedIssue struct {
-	id       string
-	internal string
-	summary  string
-	state    string
-	// Milliseconds since the epoch, as JSON holds them.
-	created string
+	id                 string
+	internal           string
+	summary            string
+	state              string
+	createdEpochMillis string
 }
 
 func (i listedIssue) sent() string {
@@ -50,24 +41,22 @@ func (i listedIssue) sent() string {
 		`,"customFields":` + receivedFields(
 		receivedField{name: namedType, valueType: "enum", ordinal: "1", binding: "180-15", value: bundleElement("Task")},
 		receivedField{name: namedState, valueType: "state", ordinal: "8", binding: "180-14", value: bundleElement(i.state)},
-	) + `,"idReadable":` + strconv.Quote(i.id) + `,"created":` + i.created + `}`
+	) + `,"idReadable":` + strconv.Quote(i.id) + `,"created":` + i.createdEpochMillis + `}`
 }
 
-// The three records the scenarios of a selection are answered with. A created without milliseconds and one
-// ending in a zero are there because a moment is printed with as much of a second as it holds.
 func listedDEV1() string {
 	return listedIssue{id: "DEV-1", internal: "3-19", summary: "[bug] fix login",
-		state: "In Progress", created: "1789035410875"}.sent()
+		state: "In Progress", createdEpochMillis: "1789035410875"}.sent()
 }
 
 func listedDEV2() string {
 	return listedIssue{id: "DEV-2", internal: "3-20", summary: "Вторая задача",
-		state: "Отклонена", created: "1789035411000"}.sent()
+		state: "Отклонена", createdEpochMillis: "1789035411000"}.sent()
 }
 
 func listedDEV3() string {
 	return listedIssue{id: "DEV-3", internal: "3-21", summary: "Третья задача",
-		state: "Новая", created: "1789035412400"}.sent()
+		state: "Новая", createdEpochMillis: "1789035412400"}.sent()
 }
 
 const (
@@ -79,20 +68,15 @@ const (
 		`customFields: {"State": "Новая", "Type": "Task"}, created: "2026-09-10T10:16:52.4Z"}` + "\n"
 )
 
-// A refusal names the request issue list sends: the search stands escaped, the way it went out, while the
-// fields= expression reads as written. The two names of the default follow the search, a parameter each.
-func issueListRequest(address, query, fields, top string) string {
-	return "GET " + address + issuesPath + "?query=" + query +
+func issueListRequest(address, escapedQuery, fields, top string) string {
+	return "GET " + address + issuesPath + "?query=" + escapedQuery +
 		"&customFields=" + namedState + "&customFields=" + namedType + "&fields=" + fields + "&$top=" + top
 }
 
-// The request that counts, which carries its search in a body rather than in the query of the URL.
 func countRequest(address string) string {
 	return "POST " + address + countPath + "?fields=count"
 }
 
-// issueListing is the document issue list prints, read back. total and truncated are pointers because a total
-// the server would not say is printed null, and then so is whether anything was cut off.
 type issueListing struct {
 	Total     *int             `yaml:"total"`
 	Returned  int              `yaml:"returned"`
@@ -103,12 +87,10 @@ type issueListing struct {
 func requireIssueListing(t *testing.T, got outcome) issueListing {
 	t.Helper()
 	assert.Empty(t, got.stderr)
-	return requireListingPrinted(t, got)
+	return requireListingIgnoringStderr(t, got)
 }
 
-// requireListingPrinted is the document of a selection whatever stderr holds: a search the server looks for as
-// text is warned about and is printed all the same.
-func requireListingPrinted(t *testing.T, got outcome) issueListing {
+func requireListingIgnoringStderr(t *testing.T, got outcome) issueListing {
 	t.Helper()
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	decoder := yaml.NewDecoder(strings.NewReader(got.stdout))
@@ -122,12 +104,10 @@ func requireListingPrinted(t *testing.T, got outcome) issueListing {
 	return printed
 }
 
-// countHandler answers the counter with a body of the shape it answers with, whatever count reads as.
 func countHandler(count string) http.HandlerFunc {
 	return respondWith(http.StatusOK, `{"$type":"IssueCountResponse","count":`+count+`}`)
 }
 
-// countedIssues answers a selection with records and the request that counts them with count.
 func countedIssues(records string, count http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == countPath {
@@ -138,7 +118,6 @@ func countedIssues(records string, count http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// breakOff is an answer that never comes: the connection goes away once the request has been read whole.
 func breakOff(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(io.Discard, r.Body)
 	if conn, _, err := http.NewResponseController(w).Hijack(); err == nil {
@@ -146,7 +125,6 @@ func breakOff(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// sentTo is how many requests of the server's log went to one endpoint.
 func sentTo(server *upstream, path string) int {
 	sent := 0
 	for _, p := range server.sentPaths() {
@@ -157,8 +135,6 @@ func sentTo(server *upstream, path string) int {
 	return sent
 }
 
-// countCalls keeps what each request to the counter carried: the log of the server keeps the request and not
-// the body, which the handler is the last to see.
 type countCalls struct {
 	mu   sync.Mutex
 	sent []countCall
@@ -213,14 +189,12 @@ func TestIssueListTakesItsSearchFromTheQueryFlagAlone(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The flags of a list are the ones every list takes; what is checked here is that this command is wired to
-// them, not the checks themselves.
 func TestIssueListRefusesTheFlagsOfAListItCannotSend(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -239,14 +213,12 @@ func TestIssueListRefusesTheFlagsOfAListItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), slices.Concat([]string{"issue", "list", "--query", ""}, tc.flags)...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// A selection prints a line an issue at a time, which a comment does not fit on, so comments are refused before
-// any request wherever an issue stands in the expression, and the refusal names the command that prints them.
 func TestIssueListRefusesWhatOnlyIssueShowPrints(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -263,14 +235,12 @@ func TestIssueListRefusesWhatOnlyIssueShowPrints(t *testing.T) {
 
 			got := runWith(t, server.env(), "issue", "list", "--query", "", "--fields", tc.expression)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The help names the default field expression, which is data the help must keep in sync with the command's
-// actual behaviour, rather than words this scenario would have to update if the wording around it changed.
 func TestIssueListHelpNamesTheDefaultFields(t *testing.T) {
 	t.Parallel()
 
@@ -281,9 +251,6 @@ func TestIssueListHelpNamesTheDefaultFields(t *testing.T) {
 	assert.Contains(t, got.stdout, issueListFields)
 }
 
-// The search is the caller's and reaches the server as it stands: ytrack reads no word of it, so a text every
-// local parser of the query language would refuse is sent and answered like any other. The markup that goes
-// out ahead of it is asked about those same words, byte for byte.
 func TestIssueListSendsASearchItReadsNoWordOf(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -316,18 +283,16 @@ func TestIssueListSendsASearchItReadsNoWordOf(t *testing.T) {
 			requireMarkedUpFirst(t, server, tc.query)
 			requests := server.requests()
 			require.Len(t, requests, 2)
-			selection := requests[1]
-			assert.Equal(t, issuesPath, selection.URL.Path)
-			assert.Equal(t, []string{tc.query}, selection.URL.Query()["query"])
-			assert.Equal(t, []string{"50"}, selection.URL.Query()["$top"])
-			assert.Equal(t, []string{sentIssueListFields}, selection.URL.Query()["fields"])
-			assert.Equal(t, []string{namedState, namedType}, selection.URL.Query()["customFields"])
+			search := requests[1]
+			assert.Equal(t, issuesPath, search.URL.Path)
+			assert.Equal(t, []string{tc.query}, search.URL.Query()["query"])
+			assert.Equal(t, []string{"50"}, search.URL.Query()["$top"])
+			assert.Equal(t, []string{sentIssueListFields}, search.URL.Query()["fields"])
+			assert.Equal(t, []string{namedState, namedType}, search.URL.Query()["customFields"])
 		})
 	}
 }
 
-// pflag reads the value of a flag as text wherever it starts, so a search needs no separator of its own, and a
-// search that spells a flag of cobra's own is still a search.
 func TestIssueListSearchesForATextThatLooksLikeAFlag(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -339,7 +304,6 @@ func TestIssueListSearchesForATextThatLooksLikeAFlag(t *testing.T) {
 		{name: "a leading dash, joined", flag: []string{"--query=-тег"}, query: "-тег"},
 		{name: "the word help, apart", flag: []string{"--query", "--help"}, query: "--help"},
 		{name: "the word help, joined", flag: []string{"--query=--help"}, query: "--help"},
-		// -- is still read; it is no longer the way a leading dash gets through, and the help names it no more.
 		{name: "a separator after the flag", flag: []string{"--query", "-тег", "--"}, query: "-тег"},
 	}
 	for _, tc := range tests {
@@ -349,7 +313,6 @@ func TestIssueListSearchesForATextThatLooksLikeAFlag(t *testing.T) {
 
 			got := runWith(t, server.env(), slices.Concat([]string{"issue", "list"}, tc.flag)...)
 
-			// Printed rather than the help of the command, which cobra prints for --help anywhere else.
 			want := "total: 1\nreturned: 1\ntruncated: false\nissues:\n" + printedDEV1Row
 			assert.Equal(t, outcome{stdout: want}, got)
 			requireMarkedUpFirst(t, server, tc.query)
@@ -360,8 +323,6 @@ func TestIssueListSearchesForATextThatLooksLikeAFlag(t *testing.T) {
 	}
 }
 
-// A record carries the keys asked for, in the order asked for, whatever order the server sent them in, and
-// each one is a line of its own.
 func TestIssueListPrintsARecordToALine(t *testing.T) {
 	t.Parallel()
 	server := searching(t, respondWith(http.StatusOK, `[`+listedDEV1()+`,`+listedDEV2()+`]`))
@@ -375,8 +336,6 @@ func TestIssueListPrintsARecordToALine(t *testing.T) {
 	assert.Equal(t, 0, sentTo(server, countPath))
 }
 
-// The shape of the document is a function of the command and not of how many records arrived: one record is a
-// list of one, and none is an empty list.
 func TestIssueListPrintsAListWhateverTheCountOfRecords(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -404,8 +363,6 @@ func TestIssueListPrintsAListWhateverTheCountOfRecords(t *testing.T) {
 	}
 }
 
-// A page longer than the limit means $top went out wrong or the server ignored it, and a count of it would be
-// of something else.
 func TestIssueListRefusesMoreIssuesThanTheLimit(t *testing.T) {
 	t.Parallel()
 	server := searching(t, respondWith(http.StatusOK, `[`+listedDEV1()+`,`+listedDEV2()+`,`+listedDEV3()+`]`))
@@ -416,14 +373,12 @@ func TestIssueListRefusesMoreIssuesThanTheLimit(t *testing.T) {
 		code:    "upstream_invalid",
 		details: []detail{{"limit", 2}, {"returned", 3}},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	requireMarkedUpFirst(t, server, "")
 	assert.Equal(t, 1, sentTo(server, issuesPath))
 	assert.Equal(t, 0, sentTo(server, countPath))
 }
 
-// A search the server will not run is the caller's to fix, and what it tripped over is the server's to say, so
-// the answer passes on word for word.
 func TestIssueListPassesOnWhatTheServerSaysOfASearchItRefuses(t *testing.T) {
 	t.Parallel()
 	const child = "Unexpected token: 'Opne' at position 12"
@@ -443,13 +398,11 @@ func TestIssueListPassesOnWhatTheServerSaysOfASearchItRefuses(t *testing.T) {
 			{"upstream_body", said},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	requireMarkedUpFirst(t, server, "State: Opne")
 	assert.Equal(t, 1, sentTo(server, issuesPath))
 }
 
-// A page that fills the limit proves nothing about what is beyond it, so the server is asked how many the
-// search finds; a page short of the limit is the whole of it and is counted by itself.
 func TestIssueListCountsOnlyAPageThatFillsTheLimit(t *testing.T) {
 	t.Parallel()
 	threeIssues := `[` + listedDEV1() + `,` + listedDEV2() + `,` + listedDEV3() + `]`
@@ -489,8 +442,6 @@ func TestIssueListCountsOnlyAPageThatFillsTheLimit(t *testing.T) {
 	}
 }
 
-// The counter is asked the search in a body, since a POST is how the server takes it; the search it counts is
-// the one the page came from, word for word.
 func TestIssueListAsksTheCounterTheSearchItAskedThePageFor(t *testing.T) {
 	t.Parallel()
 	const query = `project: DEV "exact phrase" \ "`
@@ -508,13 +459,11 @@ func TestIssueListAsksTheCounterTheSearchItAskedThePageFor(t *testing.T) {
 	}}
 	assert.Equal(t, sent, calls.calls())
 	requireMarkedUpFirst(t, server, query)
-	// The markup, the selection and the count, in that order.
-	counts := server.sentQueries()[2]
-	assert.Equal(t, url.Values{"fields": {"count"}}, counts)
+	counted := countedAt(server)
+	require.Len(t, counted, 1)
+	assert.Equal(t, url.Values{"fields": {"count"}}, server.sentQueries()[counted[0]])
 }
 
-// A count that fails takes the command with it: a document without it would have to say whether the rest were
-// cut off, and nothing answered that.
 func TestIssueListRefusesWhenTheCountFails(t *testing.T) {
 	t.Parallel()
 	const said = `{"error":"server_error","error_description":"java.lang.NullPointerException"}`
@@ -559,15 +508,13 @@ func TestIssueListRefusesWhenTheCountFails(t *testing.T) {
 
 			want := tc.want
 			want.details[0].value = countRequest(server.url)
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			requireMarkedUpFirst(t, server, "a")
 			assert.Equal(t, 1, sentTo(server, countPath))
 		})
 	}
 }
 
-// A count that never arrived is a read whose answer was lost: the instance is what it was, so the command
-// refuses with the code of a failure rather than of a write it is unsure of.
 func TestIssueListRefusesACountWhoseAnswerBreaksOff(t *testing.T) {
 	t.Parallel()
 	server := searching(t, countedIssues(`[`+listedDEV1()+`]`, breakOff))
@@ -575,15 +522,13 @@ func TestIssueListRefusesACountWhoseAnswerBreaksOff(t *testing.T) {
 	got := runWith(t, server.env(), "issue", "list", "--query", "a", "--limit", "1")
 
 	got.stderr = strings.ReplaceAll(got.stderr, server.url, "<upstream>")
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "upstream_failed", found.code)
 	assert.Equal(t, []detail{{"request", countRequest("<upstream>")}}, found.details)
 	requireMarkedUpFirst(t, server, "a")
 	assert.Equal(t, 1, sentTo(server, countPath))
 }
 
-// A count below the records that arrived is the selection changing between the two requests, and the document
-// has no way to say so: a total under returned would print truncated: false over a page that was cut.
 func TestIssueListRefusesACountBelowTheIssuesReceived(t *testing.T) {
 	t.Parallel()
 	server := searching(t, countedIssues(`[`+listedDEV1()+`,`+listedDEV2()+`,`+listedDEV3()+`]`, countHandler("2")))
@@ -594,13 +539,11 @@ func TestIssueListRefusesACountBelowTheIssuesReceived(t *testing.T) {
 		code:    "upstream_failed",
 		details: []detail{{"total", 2}, {"returned", 3}},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	requireMarkedUpFirst(t, server, "")
 	assert.Equal(t, 1, sentTo(server, countPath))
 }
 
-// Only a whole number of issues and the -1 of a count that is not ready are answers of the counter; anything
-// else is the server saying something the protocol of its own has no place for.
 func TestIssueListRefusesACountThatIsNoNumberOfIssues(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -620,7 +563,7 @@ func TestIssueListRefusesACountThatIsNoNumberOfIssues(t *testing.T) {
 
 			got := runWith(t, server.env(), "issue", "list", "--query", "a", "--limit", "1")
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
 			requireMarkedUpFirst(t, server, "a")
 			assert.Equal(t, 1, sentTo(server, countPath))
@@ -628,12 +571,8 @@ func TestIssueListRefusesACountThatIsNoNumberOfIssues(t *testing.T) {
 	}
 }
 
-// The selection the contract scenarios run names its fixtures, so neither the issues a neighbouring test
-// creates nor how many of them there are reaches the document; sort by settles the order the server keeps.
 const devInstanceIssues = "issue id: DEV-1, DEV-2, DEV-3 sort by: {issue id} asc"
 
-// records is the records of a printed selection as they were printed, so a scenario can hold the keys to their
-// order and a value to the style it was written in.
 func records(t *testing.T, got outcome) []*yaml.Node {
 	t.Helper()
 	return nodeAt(t, requireMapping(t, "stdout", got.stdout), "issues").Content
@@ -681,7 +620,6 @@ func TestIssueListPrintsTheIssuesOfTheDevInstanceTheSearchNames(t *testing.T) {
 	assert.Equal(t, []url.Values{{"query": {devInstanceIssues}, "customFields": {namedState, namedType}, "fields": {sentIssueListFields}, "$top": {"50"}}}, dev.sentQueries()[1:])
 }
 
-// A page short of the limit is the whole of what the search finds, so the counter is not asked at all.
 func TestIssueListDoesNotCountTheIssuesOfTheDevInstanceThatFitTheLimit(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -705,7 +643,7 @@ func TestIssueListPassesOnTheDevInstanceRefusingAValueOfAField(t *testing.T) {
 	assert.Equal(t, warningOf(query, "Progress"), requireWarning(t, documents[0]))
 	assert.Equal(t, 1, strings.Count(got.stderr, separator), "stderr: %q", got.stderr)
 	got.stderr = got.stderr[strings.Index(got.stderr, separator)+len(separator):]
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "rejected", found.code)
 	assert.Equal(t, detail{"upstream_status", 400}, found.details[1])
 	assert.Equal(t, detail{"upstream_error", "invalid_query"}, found.details[2])

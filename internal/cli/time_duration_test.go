@@ -13,15 +13,11 @@ func oneWorkItem(duration, date string) string {
 	return `[{"$type":"IssueWorkItem","id":"199-6","duration":` + duration + `,"date":` + date + `}]`
 }
 
-// The duration as YouTrack answers with it: the minutes, the same length written in the language of the
-// instance, and the id, which is the minutes as text.
 func receivedDuration(minutes, presentation string) string {
 	return `{"$type":"DurationValue","minutes":` + minutes + `,"presentation":"` + presentation +
 		`","id":"` + minutes + `"}`
 }
 
-// A duration is printed as the one length it is, so no name stands under it: neither the minutes it is read
-// from, nor the two forms the server writes beside them. Nothing of this costs a request.
 func TestTimeListRefusesANameUnderTheDuration(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -41,14 +37,12 @@ func TestTimeListRefusesANameUnderTheDuration(t *testing.T) {
 			got := runWith(t, server.env(), "time", "list", "DEV-1", "--fields", tc.expression)
 
 			want := faultDocument{code: "bad_usage"}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The minutes are what the period is made of, whatever the server writes beside them: hours alone, minutes
-// alone, both, a whole day and the largest length the server takes all read the one way.
 func TestTimeListPrintsTheDurationAsAPeriodOfTheMinutes(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -84,8 +78,6 @@ func TestTimeListPrintsTheDurationAsAPeriodOfTheMinutes(t *testing.T) {
 	}
 }
 
-// The minutes are the whole of what a duration is read from, so a duration that arrives without them, or
-// with something other than a whole number of them, is a refusal and no document.
 func TestTimeListRefusesADurationItCannotRead(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -104,14 +96,12 @@ func TestTimeListRefusesADurationItCannotRead(t *testing.T) {
 
 			got := runWith(t, server.env(), "time", "list", "DEV-1", "--fields", "id,duration")
 
-			assert.Equal(t, "upstream_invalid", requireRefusal(t, got).code)
+			assert.Equal(t, "upstream_invalid", requireFault(t, got).code)
 			assert.Empty(t, got.stdout)
 		})
 	}
 }
 
-// A duration the issue holds none of is printed empty, as every other name asked for and empty is: an
-// absent length is not a lie about one.
 func TestTimeListPrintsADurationTheWorkItemHasNone(t *testing.T) {
 	t.Parallel()
 	server := serve(t, respondWith(http.StatusOK, oneWorkItem("null", "null")))
@@ -123,9 +113,6 @@ func TestTimeListPrintsADurationTheWorkItemHasNone(t *testing.T) {
 	assert.Equal(t, outcome{stdout: want}, got)
 }
 
-// The day is printed as the moment it arrived, in UTC and in no zone of the reader: YouTrack keeps midnight
-// UTC of the calendar day it was written against, and a moment that is not midnight is printed as it stands
-// rather than moved to one.
 func TestTimeListPrintsTheDayOfAWorkItemInUTC(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

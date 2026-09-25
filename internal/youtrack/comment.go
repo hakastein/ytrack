@@ -14,40 +14,25 @@ import (
 )
 
 const (
-	commentsKey = "comments"
-	deletedKey  = "deleted"
-	// The key the id of a comment stands under in a refusal about it, which is what the caller calls the thing
-	// the command wrote.
-	commentKey = "comment"
-	// Where that refusal sends the caller to read the id off: both entities that carry a readable id keep
-	// comments of their own.
+	commentsKey      = "comments"
+	deletedKey       = "deleted"
+	commentKey       = "comment"
 	commentOwnerNoun = "the issue or the article"
 )
 
-// What a comment holds where the caller writes no expression of their own: which comment it is, who wrote it,
-// when it was written, whether it has been changed since, and the text of it. Every key of it arrives under a
-// 200 for a member's token as well as an admin's, so no key of the default costs a reader their document.
-//
-// updated is part of the state a write leaves behind — null on a comment nobody has changed, a moment on one
-// that has been — which is why it stands here and in no expression --comments sends.
 const CommentFields = "id,author(login),created,updated,text"
 
-// The value --comments takes for every comment there is.
 const everyComment = "all"
 
-// Comments is how many comments of an issue or an article are printed: all of them, or the last of them by the
-// moment they were written. The zero value asks for none.
 type Comments struct {
 	last int
 	all  bool
 }
 
-// AllComments is what a show prints where the caller writes no --comments of their own.
 func AllComments() Comments {
 	return Comments{all: true}
 }
 
-// ParseComments reads the value of --comments.
 func ParseComments(text string) (Comments, error) {
 	if text == everyComment {
 		return AllComments(), nil
@@ -71,8 +56,6 @@ func (c Comments) String() string {
 	return strconv.Itoa(c.last)
 }
 
-// None asked for is not the same as none there, so at zero neither the key nor anything about comments in the
-// request is there at all, while an entity that has none prints the key empty.
 func (c Comments) asked() bool {
 	return c.all || c.last > 0
 }
@@ -115,9 +98,6 @@ func (h commentTarget) keepsDeleted() bool {
 	return h.api.getComment != nil
 }
 
-// commentTargetOf is the machinery of the kind of owner a command was given, which is the one place the two kinds
-// are told apart: everything below it — the schema the answer stands at, the word a refusal uses, the API the
-// request goes to — follows from it rather than from a second reading of the id.
 func commentTargetOf(kind ownerKind) commentTarget {
 	if kind == articleOwner {
 		return articleCommentTarget()
@@ -125,25 +105,19 @@ func commentTargetOf(kind ownerKind) commentTarget {
 	return issueCommentTarget()
 }
 
-// Why comments stand nowhere in the expression of a show: the flag of its own fills them.
 const commentsOfAShow = "is filled by --comments, which settles how many comments are printed and what each of " +
 	"them holds"
 
-// Why comments stand nowhere in the expression of a selection: a record is one line, which a list of comments
-// does not fit on.
 func (h commentTarget) commentsOfAList() string {
 	return fmt.Sprintf("holds the comments of an %s, which are printed a record at a time by ytrack comment "+
 		"list, and with the %s itself by ytrack %s show --comments", h.owner, h.owner, h.owner)
 }
 
-// Why comments stand nowhere in the expression of a write: a write never touches them, and an entity with
-// dozens of them would be paid for on every call.
 func (h commentTarget) commentsOfAWrite() string {
 	return fmt.Sprintf("holds the comments of an %s, which no write changes; they are printed by ytrack %s "+
 		"show --comments", h.owner, h.owner)
 }
 
-// Comments are asked for one way, and it is never the expression, wherever the entity stands in it.
 func (h commentTarget) reject(spec *schemas, expression string, requested []requestedField, because string) *diag.Fault {
 	path, written := firstFieldNamed(spec, h.schema, h.schema, commentsKey, requested, nil)
 	if !written {
@@ -153,7 +127,6 @@ func (h commentTarget) reject(spec *schemas, expression string, requested []requ
 	return &diag.Fault{Code: diag.BadUsage, Message: message}
 }
 
-// What a comment holds is the tool's: --comments names comments, --fields names the fields of the entity.
 func commentOutputFields() []requestedField {
 	return []requestedField{
 		{name: idKey},
@@ -163,9 +136,6 @@ func commentOutputFields() []requestedField {
 	}
 }
 
-// CreateComment is the call that writes text as a new comment of the issue or of the article of that readable
-// id, and prints the comment as the server kept it, with the fields of expression, or with them added to
-// CommentFields when it starts with +; nil is the caller leaning on the default whole.
 func CreateComment(id, text string, expression *string) (Call, *diag.Fault) {
 	at, fault := parseOwner(id)
 	if fault != nil {
@@ -185,9 +155,6 @@ func CreateComment(id, text string, expression *string) (Call, *diag.Fault) {
 	}, nil
 }
 
-// One POST is the whole command. The owner is not read first: an issue or an article the instance has none of,
-// and one the token may not see, are both answered 404 by the server itself, and nothing is written either way;
-// the answer carries the comment that was added, so nothing is read back afterwards.
 func (c *Client) createComment(ctx context.Context, spec *schemas, at owner, written commentCreate, requested []requestedField) (*render.Node, *diag.Fault) {
 	held := commentTargetOf(at.kind)
 	body := written.body()
@@ -196,9 +163,6 @@ func (c *Client) createComment(ctx context.Context, spec *schemas, at owner, wri
 	}, written.verify, writeResultNode(requested))
 }
 
-// UpdateComment is the call that writes text into the comment of that id on the issue or the article of that
-// readable id, and prints the comment as the server kept it, with the fields of expression, or with them added
-// to CommentFields when it starts with +; nil is the caller leaning on the default whole.
 func UpdateComment(id, comment, text string, expression *string) (Call, *diag.Fault) {
 	at, fault := parseOwner(id)
 	if fault != nil {
@@ -236,9 +200,6 @@ func (c *Client) updateComment(ctx context.Context, spec *schemas, at owner, wri
 	}, written.verify, writeResultNode(requested))
 }
 
-// The read before the write, which is a read and not a write: a comment the owner has none of is answered 404
-// here and the write never goes out, and one that was taken back is refused with nothing written either. The
-// race — taken back between this read and the write — is what the check of the answer is for.
 func (c *Client) checkCommentNotDeleted(ctx context.Context, spec *schemas, held commentTarget, at owner, comment childID) *diag.Fault {
 	a, fault := c.request(ctx, spec, held.comment, []requestedField{{name: deletedKey}}, func(ctx context.Context, fields string) (*http.Response, error) {
 		return held.api.getComment(c, ctx, at, comment, fields)
@@ -264,8 +225,6 @@ const deletedCommentMessage = "the comment was taken back by whoever wrote it, a
 	"a comment without a word: the text would be changed where nothing prints it and the answer would carry " +
 	"none. A comment taken back is removed for good by ytrack comment delete and changed by nothing at all"
 
-// DeleteComment is the call that takes the comment of that id away from the issue or the article of that
-// readable id for good, and prints the id it was known by.
 func DeleteComment(id, comment string) (Call, *diag.Fault) {
 	at, fault := parseOwner(id)
 	if fault != nil {
@@ -280,10 +239,6 @@ func DeleteComment(id, comment string) (Call, *diag.Fault) {
 	}, nil
 }
 
-// Nothing is read before the deletion, unlike the deletion of an owner: the server matches the id of a
-// comment exactly — 7-02 names no comment where 7-2 stands — so a 200 says the caller's own id is the one the
-// comment went by, and a comment that is not there, or hangs from another owner, is answered 404 with nothing
-// destroyed. A comment its author took back is not read for either: removing it for good is what this is.
 func (c *Client) deleteComment(ctx context.Context, at owner, comment childID) (*render.Node, *diag.Fault) {
 	held := commentTargetOf(at.kind)
 	if fault := writeEmpty(ctx, func(ctx context.Context) (*http.Response, error) {
@@ -294,9 +249,6 @@ func (c *Client) deleteComment(ctx context.Context, at owner, comment childID) (
 	return render.NewMap(render.Pair{Key: idKey, Value: render.NewString(comment.String())}), nil
 }
 
-// commentFields is an expression of a command that prints one comment, held to what a comment may be asked
-// for. A nil expression is the caller leaning on the default whole, and then nothing in the tree is theirs to
-// answer for.
 func commentFields(expression *string) ([]requestedField, *diag.Fault) {
 	if expression == nil {
 		return parseDefault(CommentFields, false)
@@ -304,9 +256,6 @@ func commentFields(expression *string) ([]requestedField, *diag.Fault) {
 	return parseFields(*expression, CommentFields)
 }
 
-// listed is what a comment is asked for by the owner's kind: what a show prints of it and, where the kind keeps
-// comments taken back, whether this one was. An article keeps none, and the server sends no deleted for its
-// comments at all, so the name is asked for there by nobody.
 func (h commentTarget) listed() []requestedField {
 	held := commentOutputFields()
 	if h.keepsDeleted() {
@@ -315,16 +264,10 @@ func (h commentTarget) listed() []requestedField {
 	return held
 }
 
-// CommentListFields is what comment list asks of a comment of an issue where the caller writes no expression
-// of their own, which is the default --help names. A show asks the same and prints all but deleted, since it
-// leaves a comment taken back out; a list prints that comment among the rest, so it has to say which it is.
 func CommentListFields() string {
 	return formatFields(issueCommentTarget().listed())
 }
 
-// ListComments is the call for one page of the comments of the issue or the article of that readable id, with the
-// fields of expression, or with them added to the default of that kind of owner when it starts with +; nil is
-// the caller leaning on the default whole.
 func ListComments(id string, expression *string, page Page) (Call, *diag.Fault) {
 	at, fault := parseOwner(id)
 	if fault != nil {
@@ -348,17 +291,12 @@ func ListComments(id string, expression *string, page Page) (Call, *diag.Fault) 
 	}, nil
 }
 
-// The comments of an owner are a subresource of their own, so the machinery of every other list of the tool
-// holds here unchanged. The count is the pass over ids rather than commentsCount of the owner: the counter leaves
-// a comment taken back out, and the page carries it.
 func (c *Client) listComments(ctx context.Context, spec *schemas, held commentTarget, at owner, requested []requestedField, page Page) (*render.Node, *diag.Fault) {
 	return c.listPage(ctx, spec, commentsKey, "[]"+held.comment, requested, page, func(ctx context.Context, fields string, w window) (*http.Response, error) {
 		return held.api.list(c, ctx, at, fields, w)
 	})
 }
 
-// merged is the expression that goes out: the caller's with the comments added where any were asked for, and
-// theirs untouched where none were.
 func (c Comments) merged(h commentTarget, asked []requestedField) []requestedField {
 	if !c.asked() {
 		return asked
@@ -366,7 +304,6 @@ func (c Comments) merged(h commentTarget, asked []requestedField) []requestedFie
 	return withFields(asked, requestedField{name: commentsKey, children: h.listed()})
 }
 
-// pair is what a show prints after the fields asked of it, and nothing at all where no comments were asked for.
 func (c Comments) pair(h commentTarget, a decodedResponse, holder map[string]any) ([]render.Pair, *diag.Fault) {
 	if !c.asked() {
 		return nil, nil
@@ -378,14 +315,11 @@ func (c Comments) pair(h commentTarget, a decodedResponse, holder map[string]any
 	return []render.Pair{{Key: commentsKey, Value: printed}}, nil
 }
 
-// A comment beside the moment it was written, which is what the list is put in order by.
 type datedComment struct {
 	created int64
 	comment map[string]any
 }
 
-// of is the comments as they are printed: the deleted left out, the rest oldest first, and of those the last
-// the caller asked for. The order is ytrack's own, so an answer sent out of order is nothing to guard against.
 func (c Comments) of(h commentTarget, a decodedResponse, holder map[string]any) (*render.Node, *diag.Fault) {
 	received, isList := holder[commentsKey].([]any)
 	if !isList {
@@ -425,8 +359,6 @@ func (c Comments) of(h commentTarget, a decodedResponse, holder map[string]any) 
 	return render.NewList(printed...), nil
 }
 
-// deleted is whether the author took the comment back, and always false where the entity keeps none: nothing
-// about deletion was asked for there, so nothing about it is read.
 func (h commentTarget) deleted(a decodedResponse, comment map[string]any) (bool, *diag.Fault) {
 	if !h.keepsDeleted() {
 		return false, nil

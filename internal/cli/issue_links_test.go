@@ -14,8 +14,8 @@ import (
 
 const linkParts = "direction,linkType(sourceToTarget,targetToSource)"
 
-func linksFields(link, partner string) string {
-	return link + "(issues(" + partner + ")," + linkParts + ")"
+func linksFields(link, target string) string {
+	return link + "(issues(" + target + ")," + linkParts + ")"
 }
 
 type receivedLink struct {
@@ -41,7 +41,7 @@ func receivedLinks(links ...receivedLink) string {
 	return "[" + strings.Join(sent, ",") + "]"
 }
 
-func partnerIssue(id, summary string) string {
+func targetIssue(id, summary string) string {
 	return `{"$type":"Issue","idReadable":` + strconv.Quote(id) + `,"summary":` + strconv.Quote(summary) + `}`
 }
 
@@ -63,7 +63,6 @@ func emptyIssueLinks() []receivedLink {
 	}
 }
 
-// showLinks is the block one answer prints under links, as the mapping of phrases.
 func showLinks(t *testing.T, body, expression string) (outcome, *yaml.Node) {
 	t.Helper()
 	server := serve(t, respondWith(http.StatusOK, body))
@@ -78,7 +77,6 @@ func showLinks(t *testing.T, body, expression string) (outcome, *yaml.Node) {
 	return got, block
 }
 
-// keysOf is the keys of a mapping in the order printed.
 func keysOf(node *yaml.Node) []string {
 	keys := []string{}
 	for pair := range slices.Chunk(node.Content, 2) {
@@ -105,7 +103,6 @@ func TestIssueShowPrintsALinkUnderThePhraseOfItsOwnEnd(t *testing.T) {
 			phrase: "depends on",
 		},
 		{
-			// An undirected type reads the same from either end and leaves the phrase back empty.
 			name:   "at either end of an undirected link",
 			link:   receivedLink{direction: "BOTH", sourceToTarget: "relates to"},
 			phrase: "relates to",
@@ -114,7 +111,7 @@ func TestIssueShowPrintsALinkUnderThePhraseOfItsOwnEnd(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			tc.link.issues = []string{partnerIssue("DEV-2", "Отклонённая задача")}
+			tc.link.issues = []string{targetIssue("DEV-2", "Отклонённая задача")}
 
 			got, block := showLinks(t, issueWithLinks(tc.link), "links")
 
@@ -133,9 +130,7 @@ func TestIssueShowLeavesOutTheEmptyLinkSlots(t *testing.T) {
 	assert.NotContains(t, got.stdout, "163-")
 }
 
-// The caller who asks nothing of the issues at the other end is answered the id each of them is addressed by,
-// which is what goes out as well: a link is of no use without a way to name the issue it reaches.
-func TestIssueShowAsksForTheReadableIDOfEveryPartnerByDefault(t *testing.T) {
+func TestIssueShowAsksForTheReadableIDOfEveryTargetByDefault(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name       string
@@ -149,7 +144,7 @@ func TestIssueShowAsksForTheReadableIDOfEveryPartnerByDefault(t *testing.T) {
 			t.Parallel()
 			body := issueWithLinks(receivedLink{
 				direction: "BOTH", sourceToTarget: "relates to",
-				issues: []string{partnerIssue("DEV-2", "Отклонённая задача")},
+				issues: []string{targetIssue("DEV-2", "Отклонённая задача")},
 			})
 
 			got, _ := showLinks(t, body, tc.expression)
@@ -162,11 +157,9 @@ func TestIssueShowAsksForTheReadableIDOfEveryPartnerByDefault(t *testing.T) {
 	}
 }
 
-// A block of phrases cannot carry a link the server names nothing, and two links of one phrase would print as
-// one key, so either is the end of the call rather than a document missing a link.
 func TestIssueShowRefusesLinksTheServerNamesBadly(t *testing.T) {
 	t.Parallel()
-	partner := []string{partnerIssue("DEV-2", "Отклонённая задача")}
+	target := []string{targetIssue("DEV-2", "Отклонённая задача")}
 	tests := []struct {
 		name     string
 		received []receivedLink
@@ -174,14 +167,14 @@ func TestIssueShowRefusesLinksTheServerNamesBadly(t *testing.T) {
 		{
 			name: "two links of one phrase",
 			received: []receivedLink{
-				{direction: "OUTWARD", sourceToTarget: "X", targetToSource: "Y", issues: partner},
-				{direction: "BOTH", sourceToTarget: "X", issues: partner},
+				{direction: "OUTWARD", sourceToTarget: "X", targetToSource: "Y", issues: target},
+				{direction: "BOTH", sourceToTarget: "X", issues: target},
 			},
 		},
 		{
 			name: "a link holding issues and going by no phrase",
 			received: []receivedLink{
-				{direction: "INWARD", sourceToTarget: "is required for", targetToSource: "", issues: partner},
+				{direction: "INWARD", sourceToTarget: "is required for", targetToSource: "", issues: target},
 			},
 		},
 	}
@@ -200,7 +193,7 @@ func TestIssueShowRefusesLinksTheServerNamesBadly(t *testing.T) {
 					{"upstream_status", 200},
 					{"upstream_body", body},
 				},
-			}, requireRefusal(t, got))
+			}, requireFault(t, got))
 		})
 	}
 }
@@ -212,18 +205,17 @@ func issueLinkWith(issues, direction, linkType string) string {
 
 func TestIssueShowRefusesLinksOfAShapeTheSpecificationDoesNotGive(t *testing.T) {
 	t.Parallel()
-	const partners = `[{"$type":"Issue","idReadable":"DEV-2"}]`
+	const targets = `[{"$type":"Issue","idReadable":"DEV-2"}]`
 	const linkType = `{"$type":"IssueLinkType","sourceToTarget":"relates to","targetToSource":"relates to"}`
 	tests := []struct {
-		name string
-		// What stands under links, as JSON.
+		name  string
 		links string
 	}{
-		{name: "a slot is no object", links: `[[` + issueLinkWith(partners, `"BOTH"`, linkType) + `]]`},
+		{name: "a slot is no object", links: `[[` + issueLinkWith(targets, `"BOTH"`, linkType) + `]]`},
 		{name: "the issues of a slot are no array", links: `[` + issueLinkWith(`null`, `"BOTH"`, linkType) + `]`},
 		{name: "an issue at the other end is no object", links: `[` + issueLinkWith(`[null]`, `"BOTH"`, linkType) + `]`},
-		{name: "the end the issue stands at is no text", links: `[` + issueLinkWith(partners, `null`, linkType) + `]`},
-		{name: "the type of a link is no object", links: `[` + issueLinkWith(partners, `"BOTH"`, `null`) + `]`},
+		{name: "the end the issue stands at is no text", links: `[` + issueLinkWith(targets, `null`, linkType) + `]`},
+		{name: "the type of a link is no object", links: `[` + issueLinkWith(targets, `"BOTH"`, `null`) + `]`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -240,7 +232,7 @@ func TestIssueShowRefusesLinksOfAShapeTheSpecificationDoesNotGive(t *testing.T) 
 					{"upstream_status", 200},
 					{"upstream_body", body},
 				},
-			}, requireRefusal(t, got))
+			}, requireFault(t, got))
 		})
 	}
 }
@@ -265,7 +257,7 @@ func TestIssueShowRefusesNamesWrittenUnderALinkSlot(t *testing.T) {
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--fields", tc.expression)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}

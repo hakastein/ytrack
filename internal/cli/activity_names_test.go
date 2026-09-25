@@ -8,21 +8,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// An author with a whole tree of the catalogue under it, as the server would send one: the names a record of the
-// journal is read by — field, added, removed — are declared by other schemas too, and every schema below
-// is reachable from an activity by a path the specification itself draws.
 func sentAuthorWith(held string) string {
 	return `{"$type":"User","login":"admin","savedQueries":[{"$type":"SavedQuery","issues":[{"$type":"Issue",` +
 		held + `}]}]}`
 }
 
-// The custom field of a project, reached through the saved queries of the author: ProjectCustomField declares a
-// field of its own, which is a CustomField and not the filter a record of the journal stands for.
 const sentProjectField = `"customFields":[{"$type":"IssueCustomField","projectCustomField":` +
 	`{"$type":"ProjectCustomField","field":{"$type":"CustomField","name":"Priority"}}}]`
 
-// Whether an attachment of an issue was taken off, reached the same way: IssueAttachment declares removed as the
-// flag it is, while a record of the journal holds the values a change took away under that name.
 const sentAttachmentRemoved = `"attachments":[{"$type":"IssueAttachment","removed":false}]`
 
 func TestActivityReadsTheNamesOfARecordAtTheRecordAndNowhereBelowIt(t *testing.T) {
@@ -57,9 +50,9 @@ func TestActivityReadsTheNamesOfARecordAtTheRecordAndNowhereBelowIt(t *testing.T
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := journal(t, respondWith(http.StatusOK, `[`+tc.activity+`]`))
+			server := activityServer(t, respondWith(http.StatusOK, `[`+tc.activity+`]`))
 
-			got := runWith(t, server.env(), "activity", "list", journalIssue,
+			got := runWith(t, server.env(), "activity", "list", activityIssue,
 				"--fields", tc.expression)
 
 			assert.Equal(t, outcome{stdout: oneRecord(tc.want)}, got)
@@ -69,11 +62,11 @@ func TestActivityReadsTheNamesOfARecordAtTheRecordAndNowhereBelowIt(t *testing.T
 
 func TestActivityShowsTheNamesOfAnActivityToACallerNearNoneOfThem(t *testing.T) {
 	t.Parallel()
-	server := journal(t, respondWith(http.StatusOK, `[`+sentCreatedActivity(middle)+`]`))
+	server := activityServer(t, respondWith(http.StatusOK, `[`+sentCreatedActivity(middle)+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue, "--fields", "timestamp,zzzzzz")
+	got := runWith(t, server.env(), "activity", "list", activityIssue, "--fields", "timestamp,zzzzzz")
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "unknown_name", found.code)
 	entry, isEntry := detailNamed(t, found, "unknown").([]any)
 	require.True(t, isEntry, "the unknown of the refusal: %v", found.details)

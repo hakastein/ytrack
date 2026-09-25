@@ -14,8 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// What a creation reads of a project before it sends anything: the id the body addresses it by, the name the
-// server keeps it under, and of every custom field what settles whether the call has to fill it.
 const projectWriteFields = "id,shortName,customFields(id,canBeEmpty,defaultValues(name)," +
 	"condition($type,showForNullValue,field(id),values(name))," +
 	"field(name,localizedName,fieldType(valueType,isMultiValue)))"
@@ -24,20 +22,16 @@ func withoutDefaults() []string {
 	return []string{"PeriodProjectCustomField", "SimpleProjectCustomField", "TextProjectCustomField"}
 }
 
-// A custom field of a project as the metadata of a write sees it, with the $type of the binding, which settles
-// whether defaultValues stands there at all.
 type writableField struct {
-	id   string
-	kind string
-	name string
-	// The name the project gave the field of its own, empty where it gave it none.
+	id           string
+	kind         string
+	name         string
 	translate    string
 	valueType    string
 	isMultiValue bool
 	canBeEmpty   bool
 	defaults     []string
-	// The condition as the server sends it, empty where no condition hides the field.
-	condition string
+	condition    string
 }
 
 func (f writableField) sent() string {
@@ -69,7 +63,6 @@ func bundleNames(names []string) string {
 	return "[" + strings.Join(sent, ",") + "]"
 }
 
-// onlyWhen is the condition that keeps a field off an issue until the field of that id holds one of values.
 func onlyWhen(controls string, showForNullValue bool, values ...string) string {
 	return `{"$type":"FieldBasedCondition","showForNullValue":` + strconv.FormatBool(showForNullValue) +
 		`,"field":{"$type":"StateProjectCustomField","id":` + strconv.Quote(controls) + `}` +
@@ -84,7 +77,6 @@ func projectResponse(fields ...writableField) string {
 	return `{"$type":"Project","id":"0-1","shortName":"DEV","customFields":[` + strings.Join(sent, ",") + `]}`
 }
 
-// A project that requires nothing of a new issue, which is what a scenario about the body itself needs.
 func projectRequiringNothing() string {
 	return projectResponse(
 		writableField{id: "180-14", kind: "StateProjectCustomField", name: "State", valueType: "state",
@@ -94,28 +86,22 @@ func projectRequiringNothing() string {
 	)
 }
 
-// The issue a creation answers with, under the default expression: what the write put there and the empty
-// blocks of everything it did not. description is JSON already, so a scenario may send null for it.
-func createdIssue(readable, summary, description string) string {
-	return createdIssueWith(readable, summary, description, "[]")
+func createdIssue(readable, summary, descriptionJSON string) string {
+	return createdIssueWith(readable, summary, descriptionJSON, "[]")
 }
 
-func createdIssueWith(readable, summary, description, fields string) string {
+func createdIssueWith(readable, summary, descriptionJSON, fields string) string {
 	return `{"$type":"Issue","idReadable":` + strconv.Quote(readable) +
 		`,"summary":` + asJSON(summary) +
 		`,"reporter":{"$type":"User","login":"admin"},"created":1789035410875,"updated":1789035410875,` +
-		`"resolved":null,"tags":[],"customFields":` + fields + `,"links":[],"description":` + description + `}`
+		`"resolved":null,"tags":[],"customFields":` + fields + `,"links":[],"description":` + descriptionJSON + `}`
 }
 
-// asJSON is a string as JSON writes it, which is not always how a Go literal does: marshalling a string is
-// the one encoding that cannot fail.
 func asJSON(text string) string {
 	written, _ := json.Marshal(text)
 	return string(written)
 }
 
-// creating is the server of a creation: metadata answers the read of the project and creation the POST that
-// files the issue, so a scenario says what each half of the command was told.
 func creating(t *testing.T, metadata, creation http.HandlerFunc) *upstream {
 	t.Helper()
 	return serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -127,7 +113,6 @@ func creating(t *testing.T, metadata, creation http.HandlerFunc) *upstream {
 	})
 }
 
-// noCreation stands for the request a refusal before the write must not send.
 func noCreation(t *testing.T) http.HandlerFunc {
 	t.Helper()
 	return func(_ http.ResponseWriter, r *http.Request) {
@@ -135,7 +120,6 @@ func noCreation(t *testing.T) http.HandlerFunc {
 	}
 }
 
-// A refusal before the write names the read of the project as the request that was sent.
 func writeMetadataRequest(address, code string) string {
 	return "GET " + address + "/api/admin/projects/" + code + "?fields=" + projectWriteFields
 }
@@ -144,8 +128,6 @@ func creationRequest(address, fields string) string {
 	return "POST " + address + "/api/issues?fields=" + fields
 }
 
-// What a creation takes: one project, written as an argument, and a title, which is the value of a flag.
-// Whatever is missing or malformed among them is caught before any request goes out.
 func TestIssueCreateRefusesBeforeAnyRequest(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -166,15 +148,12 @@ func TestIssueCreateRefusesBeforeAnyRequest(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// Free text YouTrack would keep as something other than what was written never goes out: the write would
-// happen and the document would disagree with it, and the caller would be told about an issue that by then
-// exists. The runes stand in the literals as bytes, since a source file is read by more than one tool.
 func TestIssueCreateRefusesTextTheServerWouldRewrite(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -198,14 +177,12 @@ func TestIssueCreateRefusesTextTheServerWouldRewrite(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"issue", "create", "DEV"}, tc.argv...)...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// A creation has the flags it has: nothing reads a value out of a file, nothing clears a field of an issue
-// that does not exist yet, and comments are no part of a write.
 func TestIssueCreateHasNoFlagsBesidesItsOwn(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -224,21 +201,19 @@ func TestIssueCreateHasNoFlagsBesidesItsOwn(t *testing.T) {
 
 			got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", tc.flag, "y")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The expression of a write names what is printed of the issue it filed, and the comments are not among
-// them; the help says what a caller gets where they write no expression at all.
 func TestIssueCreatePrintsNoComments(t *testing.T) {
 	t.Parallel()
 	server := serveNothing(t)
 
 	got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x", "--fields", "+comments(text)")
 
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 	assert.Empty(t, server.requests())
 }
 
@@ -254,8 +229,6 @@ func TestIssueCreateHelpNamesTheDefaultAndNoFile(t *testing.T) {
 	assert.NotContains(t, got.stdout, "-file")
 }
 
-// The whole of the command over a project that requires nothing: the metadata is read, the body carries
-// the project by the id that read gave and the text as it was typed, and the answer is the document.
 func TestIssueCreateReadsTheProjectAndFilesTheIssue(t *testing.T) {
 	t.Parallel()
 	const title = "[bug] fix login"
@@ -294,8 +267,6 @@ func longDescription() string {
 	return strings.TrimSuffix(text.String(), "\n")
 }
 
-// Text is the value of a flag, so pflag hands it over whatever it starts with: a body of one dash and a
-// title of a dash and a letter both reach YouTrack as they were typed.
 func TestIssueCreateWritesTextThatStartsWithADash(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -340,9 +311,6 @@ func TestIssueCreateWritesTextThatStartsWithADash(t *testing.T) {
 	}
 }
 
-// Every field the project requires and the call does not fill is named at once and before anything is
-// written: the server names one per attempt, so a caller told by it alone would file the same issue four times
-// to learn four names. A field the project fills unasked is not required of the caller.
 func TestIssueCreateNamesEveryRequiredFieldAtOnce(t *testing.T) {
 	t.Parallel()
 	metadata := projectResponse(
@@ -363,12 +331,10 @@ func TestIssueCreateNamesEveryRequiredFieldAtOnce(t *testing.T) {
 			{"missing", []any{"Type", "Клиент"}},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 }
 
-// A field a condition hides is neither required of the caller nor sent: YouTrack throws it away under a 200
-// without saying so, and a caller told to fill it would be told to fill a field the issue cannot hold.
 func TestIssueCreateRequiresNoFieldAConditionHides(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -425,15 +391,12 @@ func TestIssueCreateRequiresNoFieldAConditionHides(t *testing.T) {
 				require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 				return
 			}
-			assert.Equal(t, detail{"missing", tc.missing}, requireRefusal(t, got).details[2])
+			assert.Equal(t, detail{"missing", tc.missing}, requireFault(t, got).details[2])
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 		})
 	}
 }
 
-// A 200 says the server took the body, not that it kept what was in it. What came back other than as it
-// went out is a refusal naming both, and nothing is printed: the issue exists and holds something the caller
-// did not write, which is what the exit code of a write that happened is for.
 func TestIssueCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -489,12 +452,8 @@ func TestIssueCreateRefusesAnAnswerThatDisagreesWithTheWrite(t *testing.T) {
 	}
 }
 
-// The metadata a write reads settles what is required of the caller, what is hidden and what the body may
-// carry, so every member of it is held to its shape before anything is sent: read as a zero value, a broken
-// one would turn into a refusal ytrack invented or a field the server threw away silently.
 func TestIssueCreateRefusesMetadataOfTheProjectOfAnotherShape(t *testing.T) {
 	t.Parallel()
-	// The field of the project with every member of the expression on it, so that a scenario replaces one.
 	field := func(members ...string) string {
 		return `{"$type":"EnumProjectCustomField","id":"180-15",` + strings.Join(members, ",") +
 			`,"field":{"$type":"CustomField","name":"Type","localizedName":null,` +
@@ -548,26 +507,22 @@ func TestIssueCreateRefusesMetadataOfTheProjectOfAnotherShape(t *testing.T) {
 					{"upstream_body", tc.project},
 				},
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 		})
 	}
 }
 
-// projectWith is the project a write reads, carrying that one custom field as the answer sends it.
 func projectWith(field string) string {
 	return `{"$type":"Project","id":"0-1","shortName":"DEV","customFields":[` + field + `]}`
 }
 
-// A refusal raised while the answer is printed follows the write as much as one the check raised: the issue
-// exists, and a caller who repeated the call on an exit code of 1 would file it a second time. The field that
-// came back holding a number where its type holds text is one the write never named, so the check of the
-// write passes and the document is where the answer is found out.
 func TestIssueCreateIsUncertainWhereTheAnswerCannotBePrinted(t *testing.T) {
 	t.Parallel()
-	held := receivedFields(receivedField{name: "Примечание", valueType: "string", binding: "187-10", value: "42"})
+	unwrittenStringHoldingANumber := receivedFields(
+		receivedField{name: "Примечание", valueType: "string", binding: "187-10", value: "42"})
 	server := creating(t, respondWith(http.StatusOK, projectRequiringNothing()),
-		respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", held)))
+		respondWith(http.StatusOK, createdIssueWith("DEV-7", "x", "null", unwrittenStringHoldingANumber)))
 
 	got := runWith(t, server.env(), "issue", "create", "DEV", "--summary", "x")
 
@@ -577,8 +532,6 @@ func TestIssueCreateIsUncertainWhereTheAnswerCannotBePrinted(t *testing.T) {
 	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
 }
 
-// What the server says about a body it refused passes on word for word, and the issue was never filed, so
-// the caller may fix the call and send it again.
 func TestIssueCreateRefusesWhatTheServerRefused(t *testing.T) {
 	t.Parallel()
 	const said = `{"error":"Field required","error_description":"Поле Тип обязательно","error_field":"Тип",` +
@@ -597,12 +550,10 @@ func TestIssueCreateRefusesWhatTheServerRefused(t *testing.T) {
 			{"upstream_body", said},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
 }
 
-// A project the token cannot read is the end of the call before the write, and a write the token may not
-// make is the server's refusal with the address and the token it went out with named.
 func TestIssueCreateRefusesWhatTheTokenMayNotReachAt(t *testing.T) {
 	t.Parallel()
 	t.Run("a project the read does not find", func(t *testing.T) {
@@ -621,7 +572,7 @@ func TestIssueCreateRefusesWhatTheTokenMayNotReachAt(t *testing.T) {
 				{"upstream_message", "Entity with id NOPE not found"},
 			},
 		}
-		assert.Equal(t, want, requireRefusal(t, got))
+		assert.Equal(t, want, requireFault(t, got))
 		assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 	})
 	t.Run("a token that may read the project and not write in it", func(t *testing.T) {
@@ -641,13 +592,11 @@ func TestIssueCreateRefusesWhatTheTokenMayNotReachAt(t *testing.T) {
 				authFromEnv(),
 			},
 		}
-		assert.Equal(t, want, requireRefusal(t, got))
+		assert.Equal(t, want, requireFault(t, got))
 		assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
 	})
 }
 
-// What the caller asks to print and what the check of the write reads are two things: the values that
-// went out are asked for whatever the expression says, and only the expression reaches the document.
 func TestIssueCreateChecksMoreThanItPrints(t *testing.T) {
 	t.Parallel()
 	server := creating(t, respondWith(http.StatusOK, projectRequiringNothing()),
@@ -661,9 +610,6 @@ func TestIssueCreateChecksMoreThanItPrints(t *testing.T) {
 	assert.Equal(t, []string{projectWriteFields, "idReadable,summary,description"}, server.sentFields())
 }
 
-// A custom field the caller names is picked out of the answer here rather than by the server: the parameter
-// that would cut the answer down applies to every block it holds, and the check reads the whole of the one the
-// write is about.
 func TestIssueCreatePrintsTheCustomFieldsItWasAskedFor(t *testing.T) {
 	t.Parallel()
 	issue := `{"$type":"Issue","idReadable":"DEV-7","summary":"x","customFields":` + receivedFields(
@@ -694,28 +640,21 @@ func TestIssueCreatePrintsTheCustomFieldsItWasAskedFor(t *testing.T) {
 	}
 }
 
-// The title every issue a contract test files goes by: the name of the scenario, so an issue left behind
-// names the test that left it.
 func contractTitle(t *testing.T) string {
 	t.Helper()
 	return "ytrack contract " + t.Name()
 }
 
-// removeIssue is the cleanup of a contract test that filed an issue: the deletion prints the id it was known
-// by, and a read afterwards finds nothing. The context of the test is cancelled before any cleanup runs, so
-// these two calls get one of their own or they would leave the issue behind.
 func removeIssue(t *testing.T, dev *upstream, readable string) {
 	t.Helper()
-	deleted := runInContext(t, context.Background(), dev.env(), "issue", "delete", readable)
+	outlivesTheTest := context.Background()
+	deleted := runInContext(t, outlivesTheTest, dev.env(), "issue", "delete", readable)
 	assert.Equal(t, outcome{stdout: "idReadable: " + strconv.Quote(readable) + "\n"}, deleted)
 
-	gone := runInContext(t, context.Background(), dev.env(), "issue", "show", readable, "--comments=0")
-	assert.Equal(t, "not_found", requireRefusalDocument(t, gone).code)
+	gone := runInContext(t, outlivesTheTest, dev.env(), "issue", "show", readable, "--comments=0")
+	assert.Equal(t, "not_found", requireFaultDocument(t, gone).code)
 }
 
-// DEV requires five fields of a new issue and fills one of them itself, so four are named and nothing is
-// written. Причина отклонения is not among them: State is filled with Новая unasked, and the condition on it
-// keeps the field off the issue.
 func TestIssueCreateNamesWhatTheDevProjectRequires(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -730,13 +669,10 @@ func TestIssueCreateNamesWhatTheDevProjectRequires(t *testing.T) {
 			{"missing", []any{"Type", "Категория", "Клиент", "Модуль системы"}},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(dev))
 }
 
-// DEMO requires three fields and fills every one of them itself, so a title is the whole of a call that
-// files an issue there. What the project put in those fields comes back in the answer to the write, which is
-// the one request: reading the new issue back would be a second.
 func TestIssueCreateFilesAnIssueTheDemoProjectFillsItself(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -749,7 +685,6 @@ func TestIssueCreateFilesAnIssueTheDemoProjectFillsItself(t *testing.T) {
 	mapping := requireMapping(t, "stdout", got.stdout)
 	readable := nodeAt(t, mapping, "idReadable").Value
 	require.Regexp(t, `^DEMO-[0-9]+$`, readable)
-	// Registered after the recorder's own cleanup, so the deletion runs first and the cassette records it.
 	t.Cleanup(func() { removeIssue(t, dev, readable) })
 
 	assert.Equal(t, title, nodeAt(t, mapping, "summary").Value)

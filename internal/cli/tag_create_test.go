@@ -16,19 +16,14 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// The expression a creation sends where the caller writes none: the whole of the list's default and the two
-// other sets of sharing beside it, the third of them the one --taggable-by writes.
 const createdTagFields = tagFields +
 	",updateSharingSettings(permittedGroups(name),permittedUsers(login))" +
 	",tagSharingSettings(permittedGroups(name),permittedUsers(login))"
 
-// tagCreationRequest is the request a creation goes out as, which is the one a refusal about it names.
 func tagCreationRequest(address, fields string) string {
 	return "POST " + address + "/api/tags?fields=" + fields
 }
 
-// creatingATag is the server of a creation: one POST is the whole command, so a request of any other method is
-// the scenario failing rather than the handler's business.
 func creatingATag(t *testing.T, creation http.HandlerFunc) *upstream {
 	t.Helper()
 	return serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -39,14 +34,10 @@ func creatingATag(t *testing.T, creation http.HandlerFunc) *upstream {
 	})
 }
 
-// madeTag is the answer of the server to a creation: the tag as YouTrack keeps a new one, owned by the caller
-// and shared with nobody at all. The third set is a class of its own on the server, which is what the $type of
-// it says.
 func madeTag(name string) string {
 	return sharedTag(name, nil, nil)
 }
 
-// sentTag is the body of the one request that went out, read as JSON reads it.
 func sentTag(t *testing.T, u *upstream) map[string]any {
 	t.Helper()
 	asks := u.asks()
@@ -56,7 +47,7 @@ func sentTag(t *testing.T, u *upstream) map[string]any {
 	return body
 }
 
-func runesCutOffTheEdges() []rune {
+func runesTheServerCutsOffTheEdges() []rune {
 	return []rune{' ', '\t', '\n', '\r', '\v', '\f', 0x1C, 0x1D, 0x1E, 0x1F, 0xA0, 0x2028, 0x2029, 0x3000}
 }
 
@@ -65,19 +56,14 @@ func contractTagName(t *testing.T) string {
 	return "ytrack contract " + t.Name()
 }
 
-// removeTag is the cleanup of a contract test that made a tag: the deletion prints the name and the owner of
-// what is gone. The context of the test is cancelled before any cleanup runs, so the call gets one of its own
-// or it would leave the tag behind. env is whose tag it is — a tag is destroyed by the token that owns it.
-func removeTag(t *testing.T, env []string, name, owner string) {
+func removeTag(t *testing.T, ownersEnv []string, name, owner string) {
 	t.Helper()
-	deleted := runInContext(t, context.Background(), env, "tag", "delete", "--name", name)
+	notCancelledAtCleanup := context.Background()
+	deleted := runInContext(t, notCancelledAtCleanup, ownersEnv, "tag", "delete", "--name", name)
 	want := "name: " + strconv.Quote(name) + "\nowner:\n  login: " + strconv.Quote(owner) + "\n"
 	assert.Equal(t, outcome{stdout: want}, deleted)
 }
 
-// A creation names one tag by --name and takes nothing else: no positional argument, which would swallow a
-// name beginning with a dash, and no flag of another verb. An empty name and no name at all are different
-// mistakes, and only the flag tells them apart.
 func TestTagCreateRefusesACallOfAnyOtherShape(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -99,15 +85,12 @@ func TestTagCreateRefusesACallOfAnyOtherShape(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"tag", "create"}, tc.argv...)...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// YouTrack cuts these runes off both edges of the name before it keeps the tag, so a call writing one there
-// would leave a tag called something it never asked for. The refusal comes before anything is sent — the tag
-// would exist by the time the answer disagreed — and it names the rune and the edge it stands at.
 func TestTagCreateRefusesANameTheServerWouldCut(t *testing.T) {
 	t.Parallel()
 	type edge struct {
@@ -115,7 +98,7 @@ func TestTagCreateRefusesANameTheServerWouldCut(t *testing.T) {
 		written string
 	}
 	var tests []edge
-	for _, r := range runesCutOffTheEdges() {
+	for _, r := range runesTheServerCutsOffTheEdges() {
 		tests = append(tests,
 			edge{name: fmt.Sprintf("U+%04X at the beginning", r), written: string(r) + "карта"},
 			edge{name: fmt.Sprintf("U+%04X at the end", r), written: "карта" + string(r)})
@@ -127,8 +110,8 @@ func TestTagCreateRefusesANameTheServerWouldCut(t *testing.T) {
 
 			got := runWith(t, server.env(), "tag", "create", "--name", tc.written)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
-			assert.Empty(t, server.requests())
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+			assert.Empty(t, server.requests(), "the tag would already exist when the answer showed the cut name")
 		})
 	}
 }
@@ -143,12 +126,9 @@ func TestTagCreateHelpNamesTheDefault(t *testing.T) {
 	assert.Contains(t, got.stdout, createdTagFields)
 }
 
-// The body is the name and not one key more: no $type, no id, no sharing. Runes the server is measured to
-// keep go out as they stand — the ones it cuts are refused before this — and a name beginning with a dash needs
-// no -- of its own, since the name is the value of a flag.
 func TestTagCreateSendsTheNameAndNothingElse(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
+	keptAsWrittenByTheServer := []struct {
 		name    string
 		written string
 	}{
@@ -163,7 +143,7 @@ func TestTagCreateSendsTheNameAndNothingElse(t *testing.T) {
 		{name: "a byte order mark at the edge", written: "карта" + string(rune(0xFEFF))},
 		{name: "a name beginning with a dash", written: "-x"},
 	}
-	for _, tc := range tests {
+	for _, tc := range keptAsWrittenByTheServer {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := creatingATag(t, respondWith(http.StatusOK, madeTag(tc.written)))
@@ -177,9 +157,6 @@ func TestTagCreateSendsTheNameAndNothingElse(t *testing.T) {
 	}
 }
 
-// What the command prints is the tag the answer carried, with the keys of the default in the order they
-// were asked for: $type stands nowhere, and the three empty sets say the tag is shared with nobody — the third
-// of them the one --taggable-by writes, so a creation that wrote it is read without an expression of its own.
 func TestTagCreatePrintsTheTagTheServerMade(t *testing.T) {
 	t.Parallel()
 	server := creatingATag(t, respondWith(http.StatusOK, madeTag("[bug] fix login")))
@@ -195,9 +172,6 @@ func TestTagCreatePrintsTheTagTheServerMade(t *testing.T) {
 	assert.Equal(t, []string{"/api/tags"}, server.sentPaths())
 }
 
-// A 200 says the server took the body, not that the name it kept is the name that went out. The runes it
-// is measured to cut are refused before the write, so a name that comes back another is something nobody
-// measured — and the tag carrying it exists by then, which is what the exit code of 2 says.
 func TestTagCreateRefusesANameTheServerKeptAsAnother(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -295,16 +269,12 @@ func TestTagCreateRefusesWhatTheServerRefused(t *testing.T) {
 					{"upstream_status", tc.status},
 				}, tc.details...),
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Empty(t, got.stdout)
 		})
 	}
 }
 
-// The body left whole and the connection went away before an answer: the tag may stand on the instance and
-// may never have been made, and nothing ytrack could send afterwards tells the two apart — a repeat would be
-// answered by whichever of the two is true. So the caller is told that much, and the exit code says the
-// instance may have changed.
 func TestTagCreateIsUncertainWhereTheAnswerNeverCame(t *testing.T) {
 	t.Parallel()
 	server := creatingATag(t, breakOff)
@@ -317,9 +287,6 @@ func TestTagCreateIsUncertainWhereTheAnswerNeverCame(t *testing.T) {
 	assert.Empty(t, got.stdout)
 }
 
-// What the caller asks to print and what the check of the write reads are two things: the name goes out
-// whatever the expression says, since a tag kept under another name is worth refusing over whether or not the
-// caller asked to see it, and only the expression reaches the document.
 func TestTagCreateChecksMoreThanItPrints(t *testing.T) {
 	t.Parallel()
 	server := creatingATag(t, respondWith(http.StatusOK, madeTag("карта")))
@@ -361,14 +328,11 @@ func TestTagCreateMakesATagOfTheDevInstanceAndDeletesIt(t *testing.T) {
 		"the tag stands in the list after it was destroyed")
 
 	again := runWith(t, dev.env(), "tag", "delete", "--name", name)
-	assert.Equal(t, "unknown_name", requireRefusal(t, again).code)
+	assert.Equal(t, "unknown_name", requireFault(t, again).code)
 	assert.Equal(t, []string{http.MethodPost, http.MethodGet, http.MethodGet, http.MethodDelete,
 		http.MethodGet, http.MethodGet}, sentMethods(dev))
 }
 
-// A name the token already owns a tag under is the server's own refusal, word for word, and nothing is
-// made: it reads the name without regard to letter case and says so in two different ways, one for the name as
-// it stands and one for the name in another case.
 func TestTagCreateRefusesANameThePolygonAlreadyHasATagUnder(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -387,7 +351,7 @@ func TestTagCreateRefusesANameThePolygonAlreadyHasATagUnder(t *testing.T) {
 	} {
 		got := runWith(t, dev.env(), "tag", "create", "--name", tc.written)
 
-		found := requireRefusal(t, got)
+		found := requireFault(t, got)
 		assert.Equal(t, "rejected", found.code)
 		body, isText := detailNamed(t, found, "upstream_body").(string)
 		require.True(t, isText)
@@ -396,9 +360,6 @@ func TestTagCreateRefusesANameThePolygonAlreadyHasATagUnder(t *testing.T) {
 	}
 }
 
-// The pair of the name and the owner is what is unique, not the name: a tag another user owns is invisible
-// here, so the limited token makes its own under the very same name and the server takes it. Each of the two is
-// destroyed by the token that owns it.
 func TestTagCreateMakesATagOfANameAnotherUserAlreadyOwns(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -418,25 +379,25 @@ func TestTagCreateMakesATagOfANameAnotherUserAlreadyOwns(t *testing.T) {
 	assert.Equal(t, "dev.limited", nodeAt(t, mapping, "owner", "login").Value)
 }
 
-// A comma is a character YouTrack keeps no tag name with, and it says so itself, HTML escapes and all: the
-// text passes on word for word rather than being read for what it means, and no tag was made.
 func TestTagCreateRefusesANameOfCharactersThePolygonWillNotKeep(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
-	name := contractTagName(t) + ", x"
+	withAComma := contractTagName(t) + ", x"
 
-	got := runWith(t, dev.env(), "tag", "create", "--name", name)
+	got := runWith(t, dev.env(), "tag", "create", "--name", withAComma)
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "rejected", found.code)
 	body, isText := detailNamed(t, found, "upstream_body").(string)
 	require.True(t, isText)
 	assert.Contains(t, body, "неподдерживаемых символов")
-	assert.Contains(t, body, "&quot;")
+	assert.Contains(t, body, "&quot;", "the server HTML-escapes its message")
 
 	listed := requireTagListing(t, runWith(t, dev.env(), "tag", "list"))
-	assert.False(t, slices.ContainsFunc(listed.Tags, func(record map[string]any) bool { return record["name"] == name }),
-		"a tag stands in the list although the server refused to make one")
+	listedWithAComma := slices.ContainsFunc(listed.Tags, func(record map[string]any) bool {
+		return record["name"] == withAComma
+	})
+	assert.False(t, listedWithAComma, "a tag stands in the list although the server refused to make one")
 }
 
 func TestTagCreateThenListCountsBeyondTheLimit(t *testing.T) {
@@ -459,14 +420,10 @@ func TestTagCreateThenListCountsBeyondTheLimit(t *testing.T) {
 	assert.Equal(t, countingTags("1"), sentQueriesFrom(dev, before))
 }
 
-// sentQueriesFrom is the queries of the requests a scenario sent after the ones its fixtures cost, which is how
-// a contract test holds one command to what it asked without counting what stood before it.
 func sentQueriesFrom(u *upstream, at int) []url.Values {
 	return u.sentQueries()[at:]
 }
 
-// A line feed inside the name is kept by the server as it stands, so the tag goes by a name of two lines:
-// it is printed quoted rather than as a block, and the very same argument resolves to it byte for byte.
 func TestTagCreateKeepsALineFeedInsideTheName(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)

@@ -12,12 +12,8 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// What a record of the list carries unasked, which is what its help names and what goes out where the caller
-// writes no expression of their own.
 const articleListFields = "idReadable,summary"
 
-// Records of the list under its default expression, with $type and the keys in an order other than the one
-// asked for: the server keeps an order of its own.
 const (
 	listedParent = `{"summary":"Родительская статья","$type":"Article","idReadable":"DEV-A-1"}`
 	listedChild  = `{"idReadable":"DEV-A-2","$type":"Article","summary":"Дочерняя статья"}`
@@ -29,14 +25,10 @@ const (
 	printedDemoRow   = `  - {idReadable: "DEMO-A-1", summary: "Начало работы с базой знаний YouTrack"}` + "\n"
 )
 
-// A refusal names the request article list sends: the fields= expression reads as written, while the search is
-// the text the server received, escaped.
-func articleListRequest(address, fields, top, search string) string {
-	return "GET " + address + "/api/articles?fields=" + fields + "&$top=" + top + "&query=" + search
+func articleListRequest(address, fields, top, escapedQuery string) string {
+	return "GET " + address + "/api/articles?fields=" + fields + "&$top=" + top + "&query=" + escapedQuery
 }
 
-// searchingArticles is what article list sends for a page of limit articles that it goes on to count: the same
-// search goes out both times, so the count is of the articles found rather than of the knowledge base.
 func searchingArticles(search, limit string) []url.Values {
 	return []url.Values{
 		{"fields": {articleListFields}, "$top": {limit}, "query": {search}},
@@ -44,7 +36,6 @@ func searchingArticles(search, limit string) []url.Values {
 	}
 }
 
-// articleListing is the document article list prints, read back.
 type articleListing struct {
 	Total     int              `yaml:"total"`
 	Returned  int              `yaml:"returned"`
@@ -65,13 +56,11 @@ func requireArticleListing(t *testing.T, got outcome) articleListing {
 	return printed
 }
 
-// selecting is the server of a selection of articles: it fails the scenario on a request that reaches for a
-// markup, since a search of the knowledge base asks for none, and leaves every other request to handler.
 func selecting(t *testing.T, handler http.HandlerFunc) *upstream {
 	t.Helper()
 	return serve(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == assistPath {
-			assert.Fail(t, "a selection of articles asked for a markup", "%s %s", r.Method, r.URL)
+			assert.Fail(t, "an article list asked for a markup", "%s %s", r.Method, r.URL)
 			http.Error(w, "the language of articles is not marked up", http.StatusInternalServerError)
 			return
 		}
@@ -79,8 +68,6 @@ func selecting(t *testing.T, handler http.HandlerFunc) *upstream {
 	})
 }
 
-// countedArticles answers a request for articles with records and the request that counts them, $top=-1, with
-// count.
 func countedArticles(records string, count http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("$top") == "-1" {
@@ -91,9 +78,6 @@ func countedArticles(records string, count http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// The search is the value of one flag: a word of its own is no search, no flag at all is its own refusal,
-// and bytes that are no text are refused before the network, since the server answers them with a 500 naming a
-// 400 and says nothing of what it read.
 func TestArticleListTakesItsSearchFromTheQueryFlagAlone(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -114,14 +98,12 @@ func TestArticleListTakesItsSearchFromTheQueryFlagAlone(t *testing.T) {
 
 			got := runWith(t, server.env(), slices.Concat([]string{"article", "list"}, tc.argv)...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// A limit the request cannot carry and a name the expression has no place for are both caught before any
-// request: comments hang from one article at a time and no record of a line holds them.
 func TestArticleListRefusesWhatItCannotSend(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -139,13 +121,12 @@ func TestArticleListRefusesWhatItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), slices.Concat([]string{"article", "list", "--query", ""}, tc.flags)...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The help names what goes out unasked and the flag the search is written with.
 func TestArticleListHelpNamesTheDefaultFieldsAndTheQueryFlag(t *testing.T) {
 	t.Parallel()
 
@@ -157,8 +138,6 @@ func TestArticleListHelpNamesTheDefaultFieldsAndTheQueryFlag(t *testing.T) {
 	assert.Contains(t, got.stdout, "--query")
 }
 
-// Nothing of the search is read by ytrack and nothing of it is marked up: whatever the caller wrote reaches
-// the server as they wrote it, and a query the server cannot parse is its business and not the tool's.
 func TestArticleListSendsTheSearchWordForWordAndAsksForNoMarkup(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -190,8 +169,6 @@ func TestArticleListSendsTheSearchWordForWordAndAsksForNoMarkup(t *testing.T) {
 	}
 }
 
-// The shape of the document does not depend on how many were found: an empty selection prints the same keys
-// as one that found something, with an empty list under the plural.
 func TestArticleListPrintsTheSameDocumentHoweverManyWereFound(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -227,15 +204,11 @@ func TestArticleListPrintsTheSameDocumentHoweverManyWereFound(t *testing.T) {
 	}
 }
 
-// articleRecords is the records of a printed selection as they were printed, so a scenario can hold the keys to
-// their order and a record to the one line it stands on.
 func articleRecords(t *testing.T, got outcome) []*yaml.Node {
 	t.Helper()
 	return nodeAt(t, requireMapping(t, "stdout", got.stdout), "articles").Content
 }
 
-// A page that fills the limit proves nothing about the whole, so it is counted by a second pass over ids
-// alone, and that pass asks the same search: a count of the knowledge base would answer about something else.
 func TestArticleListCountsTheArticlesWhenTheyFillTheLimit(t *testing.T) {
 	t.Parallel()
 	const found = `[{"id":"177-1","$type":"Article"},{"id":"177-2","$type":"Article"},{"id":"177-3","$type":"Article"}]`
@@ -248,7 +221,6 @@ func TestArticleListCountsTheArticlesWhenTheyFillTheLimit(t *testing.T) {
 	assert.Equal(t, searchingArticles("project: DEV", "2"), server.sentQueries())
 }
 
-// A page shorter than the limit is the whole of what the search found, and nothing is asked twice.
 func TestArticleListCountsNothingWhenThePageIsShortOfTheLimit(t *testing.T) {
 	t.Parallel()
 	server := selecting(t, respondWith(http.StatusOK, "["+listedParent+"]"))
@@ -260,8 +232,6 @@ func TestArticleListCountsNothingWhenThePageIsShortOfTheLimit(t *testing.T) {
 	assert.Len(t, server.requests(), 1)
 }
 
-// A count that fails, or that comes back below what already arrived, takes the command with it: half a
-// document would say the rest were not cut off.
 func TestArticleListRefusesWhenTheCountDoesNotMatch(t *testing.T) {
 	t.Parallel()
 	const said = `{"error":"server_error","error_description":"java.lang.NullPointerException"}`
@@ -305,14 +275,12 @@ func TestArticleListRefusesWhenTheCountDoesNotMatch(t *testing.T) {
 					want.details[i].value = articleListRequest(server.url, "id", "-1", "project%3A+DEV")
 				}
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Len(t, server.requests(), 2)
 		})
 	}
 }
 
-// A page longer than the limit means $top went out wrong or the server ignored it, and the count that would
-// follow it would be of something else, so the refusal comes before it.
 func TestArticleListRefusesMoreArticlesThanTheLimit(t *testing.T) {
 	t.Parallel()
 	server := selecting(t, respondWith(http.StatusOK, "["+listedParent+","+listedChild+"]"))
@@ -323,12 +291,10 @@ func TestArticleListRefusesMoreArticlesThanTheLimit(t *testing.T) {
 		code:    "upstream_invalid",
 		details: []detail{{"limit", 1}, {"returned", 2}},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Len(t, server.requests(), 1)
 }
 
-// A search the server parses and disagrees with is its refusal word for word, and it is one document: the
-// selection warns about nothing of its own, so nothing stands before it on stderr.
 func TestArticleListPassesOnTheServerRefusingASearch(t *testing.T) {
 	t.Parallel()
 	const said = `{"error":"invalid_query","error_description":"Can't parse search query, please check and update query syntax"}`
@@ -345,12 +311,10 @@ func TestArticleListPassesOnTheServerRefusingASearch(t *testing.T) {
 			{"upstream_message", "Can't parse search query, please check and update query syntax"},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Len(t, documentsOf(t, got.stderr), 1)
 }
 
-// The one article of the demo project, found by the project it stands in: one request, since the page is
-// shorter than the limit, and no markup asked for on the way.
 func TestArticleListFindsTheArticleOfTheDemoProjectOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -386,9 +350,6 @@ func TestArticleListFindsTheArticleOfTheDevInstanceByTheTitleAttribute(t *testin
 	assert.NotContains(t, got.stdout, "DEV-A-2")
 }
 
-// The same word under the attribute an issue goes by finds nothing at all, and the server says nothing
-// about it: an attribute of the other language is a silent empty list, and this is the fact that settles why
-// the selection asks for no markup — the markup would have warned about title and kept quiet here.
 func TestArticleListFindsNothingOfTheDevInstanceByAnAttributeOfIssues(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -399,15 +360,13 @@ func TestArticleListFindsNothingOfTheDevInstanceByAnAttributeOfIssues(t *testing
 	assert.Equal(t, []string{"/api/articles"}, dev.sentPaths())
 }
 
-// A project code the instance has none of is a search it parses and disagrees with, and its word for it
-// goes out as it came.
 func TestArticleListPassesOnTheDevInstanceRefusingAProjectItDoesNotHave(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
 	got := runWith(t, dev.env(), "article", "list", "--query", "project: NOPE")
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "rejected", found.code)
 	assert.Equal(t, "invalid_query", detailNamed(t, found, "upstream_error"))
 	assert.Len(t, dev.requests(), 1)

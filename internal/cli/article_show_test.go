@@ -11,13 +11,9 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// What --fields prints by default, which is what its help names and what goes out where the caller writes none
-// of their own: an article needs no composition of the tool's, so this is the whole of the request as well.
 const articleShowFields = "idReadable,summary,reporter(login),created,updated,tags(name)," +
 	"parentArticle(idReadable,summary),childArticles(idReadable,summary),content"
 
-// An article under the default expression, with $type on every object the server sends it on, an id that was
-// not asked for and the keys in an order other than the one asked for.
 func articleWithAChild() string {
 	return `{"summary":"[bug] fix login","$type":"Article","id":"177-1",` +
 		`"childArticles":[{"$type":"Article","idReadable":"DEV-A-2","summary":"Дочерняя статья"}],` +
@@ -43,14 +39,10 @@ content: |-
 comments: []
 `
 
-// A refusal names the request article show sends: the id stands in the path escaped, the way it went out.
 func articleRequest(address, id string) string {
 	return "GET " + address + "/api/articles/" + url.PathEscape(id) + "?fields=" + sentArticleFields
 }
 
-// The whole refusal a 404 for an article becomes, with what the server said about it word for word: said is
-// its own sentence for an article that was never written and the sentence of any missing entity for one the
-// token may not see.
 func noSuchArticle(address, id, said string) faultDocument {
 	return faultDocument{
 		code: "not_found",
@@ -63,8 +55,6 @@ func noSuchArticle(address, id, said string) faultDocument {
 	}
 }
 
-// articleWith is the answer for an article carrying keys, encoded the way the server encodes it: a control
-// character arrives escaped rather than raw, and a character outside the basic plane as a surrogate pair.
 func articleWith(t *testing.T, keys map[string]any) string {
 	t.Helper()
 	object := map[string]any{"$type": "Article", "idReadable": "DEV-A-1"}
@@ -76,7 +66,6 @@ func articleWith(t *testing.T, keys map[string]any) string {
 	return string(encoded)
 }
 
-// sentContent is the content of the one answer the server sent, as JSON read it.
 func sentContent(t *testing.T, u *upstream) any {
 	t.Helper()
 	answers := u.answers()
@@ -86,15 +75,13 @@ func sentContent(t *testing.T, u *upstream) any {
 	return body["content"]
 }
 
-// One article per call, and a group that names no command of its own is a refusal rather than a help page.
-// Nothing of this costs a request.
 func TestArticleShowRefusesBeforeAnyRequest(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
 		argv []string
 	}{
-		{name: "the group alone", argv: []string{"article"}},
+		{name: "the command alone", argv: []string{"article"}},
 		{name: "a command it does not have", argv: []string{"article", "bogus"}},
 		{name: "no id", argv: []string{"article", "show"}},
 		{name: "two ids", argv: []string{"article", "show", "DEV-A-1", "DEV-A-2"}},
@@ -106,7 +93,7 @@ func TestArticleShowRefusesBeforeAnyRequest(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -122,9 +109,6 @@ func TestArticleShowHelpNamesTheDefaultFields(t *testing.T) {
 	assert.Contains(t, got.stdout, articleShowFields)
 }
 
-// The document is the expression asked for: the keys stand in the order they were asked in whatever order
-// the server sent them, $type and an id nobody asked for are left out, and a summary is printed as it arrived.
-// One request carries the whole article, and it asks nothing of the server beyond the fields.
 func TestArticleShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
 	t.Parallel()
 	server := serve(t, respondWith(http.StatusOK, articleWithAChild()))
@@ -140,9 +124,6 @@ func TestArticleShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
 	assert.Equal(t, url.Values{"fields": {sentArticleFields}}, request.URL.Query())
 }
 
-// The content of an article comes back as it went out, whatever it holds: a literal block carries every
-// text but the ones holding a rune it cannot, and those go to the writer of double-quoted strings, which
-// carries them without loss too. An article keeps a carriage return, so that text reaches here for real.
 func TestArticleShowPrintsContentAsALiteralBlockWhereverItCanCarryIt(t *testing.T) {
 	t.Parallel()
 	for _, tc := range textCases() {
@@ -161,8 +142,6 @@ func TestArticleShowPrintsContentAsALiteralBlockWhereverItCanCarryIt(t *testing.
 	}
 }
 
-// A root article with nothing under it and nothing on it prints every key it was asked for: an empty
-// parent, an empty list of children, an empty list of tags, no content at all and no comment.
 func TestArticleShowPrintsAnEmptyArticle(t *testing.T) {
 	t.Parallel()
 	empty := map[string]any{
@@ -189,8 +168,6 @@ func TestArticleShowPrintsAnEmptyArticle(t *testing.T) {
 	}, requireDocument(t, got.stdout))
 }
 
-// What the server answers with is read the way every answer is: a body that is no JSON under a 200 is the
-// answer of something other than the endpoint asked for, and a 403 is the server saying no.
 func TestArticleShowPassesOnWhatTheServerAnswered(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -215,7 +192,7 @@ func TestArticleShowPassesOnWhatTheServerAnswered(t *testing.T) {
 
 			got := runWith(t, server.env(), "article", "show", "DEV-A-1")
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Len(t, server.requests(), 1)
 		})
@@ -276,36 +253,31 @@ func TestArticleShowRefusesAnArticleTheDevInstanceDoesNotHave(t *testing.T) {
 	got := runWith(t, dev.env(), "article", "show", "DEV-A-99999")
 
 	assert.Equal(t, noSuchArticle(dev.url, "DEV-A-99999", "Can't find article with id DEV-A-99999"),
-		requireRefusal(t, got))
+		requireFault(t, got))
 	require.Len(t, dev.requests(), 1)
 	assert.Equal(t, "/api/articles/DEV-A-99999", dev.sentPaths()[0])
 }
 
-// $top and $skip are ignored on one article, and the contract is worth a test of its own because
-// ytrack cannot break it from this side: the specification declares neither parameter for the operation, so the
-// proxy of the scenario writes them onto the wire. A $top of 0 obeyed would answer with no child at all, and a
-// $skip of 1 would step past the one there is; the article that comes back is the same either way, and the same
-// as the one that arrives with neither parameter sent.
 func TestArticleShowGetsTheSameArticleOfTheDevInstanceWhateverTopAndSkipSay(t *testing.T) {
 	t.Parallel()
 	const asked = "idReadable,childArticles(idReadable)"
 	tests := []struct {
-		name  string
-		added string
-		sent  url.Values
+		name         string
+		addedByProxy string
+		sent         url.Values
 	}{
 		{name: "plain", sent: url.Values{"fields": {asked}}},
 		{
-			name:  "top_skip",
-			added: "$top=0&$skip=1",
-			sent:  url.Values{"fields": {asked}, "$top": {"0"}, "$skip": {"1"}},
+			name:         "top_skip",
+			addedByProxy: "$top=0&$skip=1",
+			sent:         url.Values{"fields": {asked}, "$top": {"0"}, "$skip": {"1"}},
 		},
-		{name: "top_abc", added: "$top=abc", sent: url.Values{"fields": {asked}, "$top": {"abc"}}},
+		{name: "top_abc", addedByProxy: "$top=abc", sent: url.Values{"fields": {asked}, "$top": {"abc"}}},
 	}
 	printed := make([]string, 0, len(tests))
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			dev := devInstanceAsking(t, tc.added)
+			dev := devInstanceAsking(t, tc.addedByProxy)
 
 			got := runWith(t, dev.env(), "article", "show", "DEV-A-1", "--comments=0", "--fields", asked)
 
@@ -325,8 +297,6 @@ func TestArticleShowGetsTheSameArticleOfTheDevInstanceWhateverTopAndSkipSay(t *t
 	}
 }
 
-// An article hidden from a token is no article at all to it: the server answers 404 and says the entity is
-// not there, and ytrack passes that on rather than guessing at rights.
 func TestArticleShowRefusesTheArticleTheLimitedUserCannotSee(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -334,6 +304,6 @@ func TestArticleShowRefusesTheArticleTheLimitedUserCannotSee(t *testing.T) {
 	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited},
 		"article", "show", "DEV-A-1")
 
-	assert.Equal(t, noSuchArticle(dev.url, "DEV-A-1", "Entity with id DEV-A-1 not found"), requireRefusal(t, got))
+	assert.Equal(t, noSuchArticle(dev.url, "DEV-A-1", "Entity with id DEV-A-1 not found"), requireFault(t, got))
 	assert.Len(t, dev.requests(), 1)
 }

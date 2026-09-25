@@ -13,46 +13,31 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// The issue the scenarios of a stub server read the journal of, and where that journal is asked for.
 const (
-	journalIssue   = "DEV-7"
-	activitiesPath = "/api/issues/" + journalIssue + "/activities"
+	activityIssue  = "DEV-7"
+	activitiesPath = "/api/issues/" + activityIssue + "/activities"
 )
 
-// What activity list prints by default, which is what its help names, and the expression that goes out for it:
-// the category and the field arrive as objects and are printed by one name each, so the request asks for the
-// members they are read out of and for the type of the custom field, which says how a bare value of one reads,
-// and a value is asked for the minutes a duration is printed out of.
 const (
-	activityFields     = "timestamp,author(login),category,field,added(id,idReadable,login,name,urls),removed(id,idReadable,login,name,urls)"
-	sentActivityFields = "timestamp,author(login),category(id),field(name,customField(name,fieldType(valueType)))," +
+	defaultActivityFields = "timestamp,author(login),category,field,added(id,idReadable,login,name,urls),removed(id,idReadable,login,name,urls)"
+	sentActivityFields    = "timestamp,author(login),category(id),field(name,customField(name,fieldType(valueType)))," +
 		"added(id,idReadable,login,name,urls,minutes),removed(id,idReadable,login,name,urls,minutes)"
 )
 
-// Every category of the table, in the order it goes out, which is the order of the code points.
 const activityCategories = "AttachmentsCategory,CommentTextCategory,CommentsCategory,CustomFieldCategory," +
 	"DescriptionCategory,IssueCreatedCategory,IssueResolvedCategory,LinksCategory,SummaryCategory," +
 	"TagsCategory,VcsChangeCategory,WorkItemCategory"
 
-// An activity as the server sends it: $type on every object, an id nobody asked for, and the keys in an order
-// other than the one asked for. No target: the request never asks for it.
 type sentActivity struct {
-	kind     string
-	category string
-	// The whole of the category, for a scenario that sends one of another shape; the object naming the
-	// identifier above otherwise.
+	kind        string
+	category    string
 	categoryRaw string
-	// Milliseconds since the epoch, as JSON holds them.
-	timestamp string
-	login     string
-	// The whole of the author, for a scenario that asks for names below it; the login alone otherwise.
-	author string
-	// What the change put there and took away, as JSON, and the field it stands for. A change of a custom field
-	// names that field and the type of its values; every other category names a filter with no custom field
-	// under it.
-	added   string
-	removed string
-	field   string
+	timestamp   string
+	login       string
+	author      string
+	added       string
+	removed     string
+	field       string
 }
 
 const (
@@ -61,8 +46,6 @@ const (
 		`"name":"State","fieldType":{"$type":"FieldType","valueType":"state"}}}`
 )
 
-// The values of a change of a state field and of a link, as the server sends them: a bundle value carries the
-// name it goes by and an issue the readable id, each beside the id.
 const (
 	sentStateValue   = `[{"$type":"StateBundleElement","id":"156-17","name":"Duplicate"}]`
 	sentStateBefore  = `[{"$type":"StateBundleElement","id":"156-18","name":"Новая"}]`
@@ -126,7 +109,6 @@ const (
 		`category: "IssueCreatedCategory", field: null, added: [], removed: []}` + "\n"
 )
 
-// The three moments of those rows, newest first.
 const (
 	newest = "1789035412400"
 	middle = "1789035411000"
@@ -137,28 +119,22 @@ func threeActivities() string {
 	return `[` + sentFieldActivity(newest) + `,` + sentLinkActivity(middle) + `,` + sentCreatedActivity(oldest) + `]`
 }
 
-// An empty journal, which is what the server answers an issue nothing of the categories asked for happened to.
 const noActivities = `[]`
 
-func journal(t *testing.T, handler http.HandlerFunc) *upstream {
+func activityServer(t *testing.T, handler http.HandlerFunc) *upstream {
 	t.Helper()
 	return serve(t, linksKnown(handler))
 }
 
-// oneRecord is the document a journal of one activity prints, with nothing in the record but the names asked
-// for: what a value is printed as reads off the whole document, quotes, style and all.
 func oneRecord(printed string) string {
 	return "total: 1\nreturned: 1\ntruncated: false\nactivities:\n  - {" + printed + "}\n"
 }
 
-// activityRequest is the request the journal of journalIssue sends, as a refusal names it.
 func activityRequest(address, top string) string {
 	return "GET " + address + activitiesPath + "?categories=" + activityCategories + "&reverse=true&fields=" +
 		sentActivityFields + "&$top=" + top
 }
 
-// activityListing is the document activity list prints, read back. total is a pointer because a journal cut off
-// at the limit prints null: YouTrack counts activities nowhere.
 type activityListing struct {
 	Total      *int             `yaml:"total"`
 	Returned   int              `yaml:"returned"`
@@ -178,8 +154,6 @@ func requireActivityListing(t *testing.T, got outcome) activityListing {
 	return printed
 }
 
-// activitySent is the query of the request the journal itself sent, which is the one past the link types a
-// journal that prints a link reads first.
 func activitySent(t *testing.T, server *upstream) url.Values {
 	t.Helper()
 	for _, request := range server.requests() {
@@ -191,26 +165,21 @@ func activitySent(t *testing.T, server *upstream) url.Values {
 	return nil
 }
 
-// activities is the records of a printed journal as they were printed, so a scenario can hold a value to the
-// style it was written in.
 func activities(t *testing.T, got outcome) []*yaml.Node {
 	t.Helper()
 	return nodeAt(t, requireMapping(t, "stdout", got.stdout), "activities").Content
 }
 
-// The journal hangs from one issue and has no body of its own, so its one verb is list, the issue is the one
-// word it takes, and the name the journal went by before is no command at all. An article keeps no journal and
-// an internal id addresses no issue, so both are refused before anything is sent.
 func TestActivityTakesTheIssueAsItsOneArgument(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
 		argv []string
 	}{
-		{name: "no command of the group", argv: []string{"activity"}},
+		{name: "no subcommand", argv: []string{"activity"}},
 		{name: "one activity by an address of its own", argv: []string{"activity", "show", "DEV-1"}},
 		{
-			name: "the name the journal went by before",
+			name: "the name the activity went by before",
 			argv: []string{"issue-history", "list", "--query", "issue id: DEV-1"},
 		},
 		{name: "no issue at all", argv: []string{"activity", "list"}},
@@ -227,14 +196,12 @@ func TestActivityTakesTheIssueAsItsOneArgument(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The flags of a list are the ones every list takes, save that the limit stops one short of the largest int32:
-// the request asks for one activity past it.
 func TestActivityRefusesTheFlagsOfAListItCannotSend(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -259,9 +226,9 @@ func TestActivityRefusesTheFlagsOfAListItCannotSend(t *testing.T) {
 			t.Parallel()
 			server := serveNothing(t)
 
-			got := runWith(t, server.env(), slices.Concat([]string{"activity", "list", journalIssue}, tc.flags)...)
+			got := runWith(t, server.env(), slices.Concat([]string{"activity", "list", activityIssue}, tc.flags)...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -274,21 +241,18 @@ func TestActivityHelpNamesTheCategoriesAndTheDefaultFields(t *testing.T) {
 
 	assert.Equal(t, 0, got.code)
 	assert.Empty(t, got.stderr)
-	for _, said := range append(strings.Split(activityCategories, ","), activityFields, "--category") {
+	for _, said := range append(strings.Split(activityCategories, ","), defaultActivityFields, "--category") {
 		assert.Contains(t, got.stdout, said)
 	}
 	assert.NotContains(t, got.stdout, "--query")
 	assert.NotContains(t, got.stdout, "target")
 }
 
-// The journal is read at the issue it hangs from, the categories, the order and the one activity past the limit
-// go out on every call, and nothing else is asked first: no search to mark up, and no link types where no link
-// is printed. The target is asked for by nobody.
-func TestActivitySendsTheJournalOfTheIssueItWasGiven(t *testing.T) {
+func TestActivitySendsTheActivitiesOfTheIssueItWasGiven(t *testing.T) {
 	t.Parallel()
 	server := serve(t, respondWith(http.StatusOK, `[`+sentCreatedActivity(middle)+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue, "--category", "IssueCreatedCategory")
+	got := runWith(t, server.env(), "activity", "list", activityIssue, "--category", "IssueCreatedCategory")
 
 	want := "total: 1\nreturned: 1\ntruncated: false\nactivities:\n" +
 		strings.Replace(printedCreatedRow, "50.875Z", "51Z", 1)
@@ -303,14 +267,11 @@ func TestActivitySendsTheJournalOfTheIssueItWasGiven(t *testing.T) {
 	assert.NotContains(t, sent, "issueQuery")
 }
 
-// A record carries the keys asked for, in the order asked for, whatever order the server sent them in, and it
-// is one line: the category prints as the identifier it arrived under, a value as the tree the default asks of
-// it, and neither the id of the activity nor the issue it belongs to is printed at all.
 func TestActivityPrintsAnActivityToALine(t *testing.T) {
 	t.Parallel()
-	server := journal(t, respondWith(http.StatusOK, threeActivities()))
+	server := activityServer(t, respondWith(http.StatusOK, threeActivities()))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue)
+	got := runWith(t, server.env(), "activity", "list", activityIssue)
 
 	rows := printedFieldRow + printedLinkRow + printedCreatedRow
 	assert.Equal(t, outcome{stdout: "total: 3\nreturned: 3\ntruncated: false\nactivities:\n" + rows}, got)
@@ -322,7 +283,6 @@ func TestActivityPrintsAnActivityToALine(t *testing.T) {
 	assert.NotContains(t, got.stdout, "163-1")
 }
 
-// The shape of the document is a function of the command and not of how many activities arrived.
 func TestActivityPrintsAListWhateverTheCountOfActivities(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -344,22 +304,20 @@ func TestActivityPrintsAListWhateverTheCountOfActivities(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := journal(t, respondWith(http.StatusOK, tc.activities))
+			server := activityServer(t, respondWith(http.StatusOK, tc.activities))
 
-			got := runWith(t, server.env(), "activity", "list", journalIssue)
+			got := runWith(t, server.env(), "activity", "list", activityIssue)
 
 			assert.Equal(t, outcome{stdout: tc.want}, got)
 		})
 	}
 }
 
-// The one activity past the limit is what says the rest were cut off, and it says nothing about how many they
-// are, so the total is null while truncated is true.
 func TestActivityReadsTheCutOffTheActivityPastTheLimit(t *testing.T) {
 	t.Parallel()
-	server := journal(t, respondWith(http.StatusOK, threeActivities()))
+	server := activityServer(t, respondWith(http.StatusOK, threeActivities()))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue, "--limit", "2")
+	got := runWith(t, server.env(), "activity", "list", activityIssue, "--limit", "2")
 
 	rows := printedFieldRow + printedLinkRow
 	assert.Equal(t, outcome{stdout: "total: null\nreturned: 2\ntruncated: true\nactivities:\n" + rows}, got)
@@ -382,82 +340,73 @@ func TestActivityChecksTheActivityPastTheLimitWithTheRest(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			three := `[` + sentFieldActivity(newest) + `,` + sentLinkActivity(middle) + `,` + tc.past + `]`
-			server := journal(t, respondWith(http.StatusOK, three))
+			server := activityServer(t, respondWith(http.StatusOK, three))
 
-			got := runWith(t, server.env(), "activity", "list", journalIssue, "--limit", "2")
+			got := runWith(t, server.env(), "activity", "list", activityIssue, "--limit", "2")
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "upstream_invalid", found.code)
 			assert.Empty(t, got.stdout)
 		})
 	}
 }
 
-// More than the limit and the one activity past it means $top went out wrong or the server ignored it, and
-// nothing of what came back stands for the journal any more.
 func TestActivityRefusesMoreActivitiesThanItAskedFor(t *testing.T) {
 	t.Parallel()
 	four := `[` + sentFieldActivity(newest) + `,` + sentLinkActivity(middle) + `,` +
 		sentCreatedActivity(oldest) + `,` + sentCreatedActivity(oldest) + `]`
-	server := journal(t, respondWith(http.StatusOK, four))
+	server := activityServer(t, respondWith(http.StatusOK, four))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue, "--limit", "2")
+	got := runWith(t, server.env(), "activity", "list", activityIssue, "--limit", "2")
 
 	want := faultDocument{
 		code:    "upstream_invalid",
 		details: []detail{{"limit", 2}, {"returned", 4}},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 }
 
-// reverse=true is a parameter that could quietly stop being understood, and the order is checked by the data
-// rather than taken on the server's word; two activities of one moment are lawful.
 func TestActivityChecksTheServerKeepsTheRequestedOrder(t *testing.T) {
 	t.Parallel()
 	t.Run("an activity newer than the one before it", func(t *testing.T) {
 		t.Parallel()
-		server := journal(t, respondWith(http.StatusOK, `[`+sentCreatedActivity(oldest)+`,`+sentLinkActivity(middle)+`]`))
+		server := activityServer(t, respondWith(http.StatusOK, `[`+sentCreatedActivity(oldest)+`,`+sentLinkActivity(middle)+`]`))
 
-		got := runWith(t, server.env(), "activity", "list", journalIssue)
+		got := runWith(t, server.env(), "activity", "list", activityIssue)
 
-		found := requireRefusal(t, got)
+		found := requireFault(t, got)
 		assert.Equal(t, "upstream_invalid", found.code)
 	})
 	t.Run("two activities of one moment", func(t *testing.T) {
 		t.Parallel()
-		server := journal(t, respondWith(http.StatusOK, `[`+sentLinkActivity(middle)+`,`+sentLinkActivity(middle)+`]`))
+		server := activityServer(t, respondWith(http.StatusOK, `[`+sentLinkActivity(middle)+`,`+sentLinkActivity(middle)+`]`))
 
-		got := runWith(t, server.env(), "activity", "list", journalIssue)
+		got := runWith(t, server.env(), "activity", "list", activityIssue)
 
 		want := "total: 2\nreturned: 2\ntruncated: false\nactivities:\n" + printedLinkRow + printedLinkRow
 		assert.Equal(t, outcome{stdout: want}, got)
 	})
 }
 
-// The server answers a category it does not know with an empty journal rather than a refusal, so an activity of
-// a category nobody asked for is the filter not being applied. A vote is such a category: the instance keeps
-// activities of it and the table does not.
 func TestActivityRefusesAnActivityOfACategoryItDidNotAskFor(t *testing.T) {
 	t.Parallel()
 	voted := sentActivity{kind: "VotersActivityItem", category: "VotersCategory", timestamp: middle}.sent()
-	server := journal(t, respondWith(http.StatusOK, `[`+sentFieldActivity(newest)+`,`+voted+`]`))
+	server := activityServer(t, respondWith(http.StatusOK, `[`+sentFieldActivity(newest)+`,`+voted+`]`))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue)
+	got := runWith(t, server.env(), "activity", "list", activityIssue)
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "upstream_invalid", found.code)
 }
 
-// An issue the instance has none of and one the token may not see are both answered 404 by the server, and that
-// is the answer the caller is given: nothing of the issue is read first.
 func TestActivityPassesOnAnIssueTheServerDoesNotHave(t *testing.T) {
 	t.Parallel()
 	const said = `{"error":"Not Found","error_description":"Entity with id DEV-7 not found"}`
-	server := journal(t, respondWith(http.StatusNotFound, said))
+	server := activityServer(t, respondWith(http.StatusNotFound, said))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue)
+	got := runWith(t, server.env(), "activity", "list", activityIssue)
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "not_found", found.code)
 	assert.Equal(t, activityRequest(server.url, "51"), detailNamed(t, found, "request"))
 	assert.Equal(t, "Entity with id DEV-7 not found", detailNamed(t, found, "upstream_message"))

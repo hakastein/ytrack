@@ -3,7 +3,7 @@ info:
   title: YouTrack REST API for internal/ytapi
   version: 1.0.0
 actions:
-  # This `type` and `$type` inherited from BaseWorkItem would both be the Go field Type.
+  # Both this and inherited $type map to Go field Type.
   - target: $.components.schemas.IssueWorkItem.allOf[1].properties.type
     update:
       x-go-name: WorkItemType
@@ -25,9 +25,7 @@ actions:
   - target: $.paths['/issues/{id}'].get
     update:
       operationId: GetIssue
-  # The server filters the custom fields of one issue by name here too, and the specification declares the
-  # parameter for the collection of issues alone. It is repeated once per name, so it is an array that
-  # explodes into a parameter each.
+  # Spec omits customFields (server takes one parameter per name, not a single string).
   - target: $.paths['/issues/{id}'].get.parameters
     update:
       - name: customFields
@@ -39,34 +37,21 @@ actions:
           type: array
           items:
             type: string
-  # The first call of the tool that writes. DeleteIssuesId, the name the generator gives it, names the path
-  # rather than what the request does to the issue at the end of it.
   - target: $.paths['/issues/{id}'].delete
     update:
       operationId: DeleteIssue
-  # The write that files an issue. PostIssues, the name the generator gives it, names the method and the
-  # collection rather than what the request leaves behind.
   - target: $.paths['/issues'].post
     update:
       operationId: CreateIssue
-  # The write that changes an issue that exists. PostIssuesId, the name the generator gives it, names the
-  # method and the path rather than what the request leaves behind.
   - target: $.paths['/issues/{id}'].post
     update:
       operationId: UpdateIssue
-  # The write that links an issue to another through one slot of it. PostIssuesIdLinksIssueLinkIdIssues, the
-  # name the generator gives it, names the path rather than the issue the request adds to the link.
   - target: $.paths['/issues/{id}/links/{issueLinkId}/issues'].post
     update:
       operationId: AddLinkedIssue
-  # The write that takes an issue away from one slot of another. The specification declares no fields for it
-  # and the answer carries none. DeleteIssuesIdLinksIssueLinkIdIssuesIssueId, the name the generator gives it,
-  # names the path rather than the link the request takes away.
   - target: $.paths['/issues/{id}/links/{issueLinkId}/issues/{issueId}'].delete
     update:
       operationId: RemoveLinkedIssue
-  # For the collection the specification declares the parameter, and declares it a single string, which would
-  # carry one name where the server takes one per name; its own description says to use it several times.
   - target: $.paths['/issues'].get.parameters[?(@.name=='customFields')]
     update:
       style: form
@@ -75,13 +60,9 @@ actions:
         type: array
         items:
           type: string
-  # A POST that reads: it answers how many issues a search finds and changes nothing (Р11). The name the
-  # generator gives it, PostIssuesGetterCount, names the resource rather than the question.
   - target: $.paths['/issuesGetter/count'].post
     update:
       operationId: CountIssues
-  # A POST that reads as well (Р11): it marks a search up and changes nothing. PostSearchAssist, the name the
-  # generator gives it, names the resource rather than the question.
   - target: $.paths['/search/assist'].post
     update:
       operationId: AssistSearch
@@ -91,9 +72,6 @@ actions:
   - target: $.paths['/users/{id}'].get
     update:
       operationId: GetUser
-  # The server searches /users by query, and the specification declares that parameter for three operations of
-  # 248, none of them this one. An update of an object would replace the whole array of parameters, taking
-  # fields, $skip and $top with it, so the one parameter is appended as an array of one.
   - target: $.paths['/users'].get.parameters
     update:
       - name: query
@@ -104,172 +82,105 @@ actions:
   - target: $.paths['/articles/{id}'].get
     update:
       operationId: GetArticle
-  # The write that takes an article and the whole tree under it away. DeleteArticlesId, the name the generator
-  # gives it, names the path rather than what the request leaves behind.
   - target: $.paths['/articles/{id}'].delete
     update:
       operationId: DeleteArticle
-  # The write that files an article in the knowledge base. PostArticles, the name the generator gives it, names
-  # the method and the collection rather than what the request leaves behind.
   - target: $.paths['/articles'].post
     update:
       operationId: CreateArticle
-  # The write that changes an article that exists. PostArticlesId, the name the generator gives it, names the
-  # method and the path rather than what the request leaves behind.
   - target: $.paths['/articles/{id}'].post
     update:
       operationId: UpdateArticle
-  # The read that answers the comments of an issue. GetIssuesIdComments, the name the generator gives it, spells
-  # the path out segment by segment.
   - target: $.paths['/issues/{id}/comments'].get
     update:
       operationId: GetIssueComments
-  # The read that answers the journal of one issue. GetIssuesIdActivities, the name the generator gives it,
-  # spells the path out segment by segment.
   - target: $.paths['/issues/{id}/activities'].get
     update:
       operationId: GetIssueActivities
-  # The read that answers the comments of an article, named the same way for the same reason.
   - target: $.paths['/articles/{id}/comments'].get
     update:
       operationId: GetArticleComments
-  # The read that answers the children of an article. GetArticlesIdChildArticles, the name the generator gives
-  # it, spells the path out segment by segment.
   - target: $.paths['/articles/{id}/childArticles'].get
     update:
       operationId: GetArticleChildArticles
-  # The write that adds a comment to an issue. PostIssuesIdComments, the name the generator gives it, names the
-  # method and the path rather than what the request leaves behind.
   - target: $.paths['/issues/{id}/comments'].post
     update:
       operationId: CreateIssueComment
-  # The write that adds a comment to an article. PostArticlesIdComments, the name the generator gives it, names
-  # the method and the path the same way.
   - target: $.paths['/articles/{id}/comments'].post
     update:
       operationId: CreateArticleComment
-  # The read that answers whether the comment of an issue was taken back by whoever wrote it.
-  # GetIssuesIdCommentsIssueCommentId, the name the generator gives it, spells the path out segment by segment.
   - target: $.paths['/issues/{id}/comments/{issueCommentId}'].get
     update:
       operationId: GetIssueComment
-  # The write that changes a comment of an issue. PostIssuesIdCommentsIssueCommentId, the name the generator
-  # gives it, names the method and the path rather than what the request leaves behind.
   - target: $.paths['/issues/{id}/comments/{issueCommentId}'].post
     update:
       operationId: UpdateIssueComment
-  # The write that changes a comment of an article, named the same way for the same reason.
   - target: $.paths['/articles/{id}/comments/{articleCommentId}'].post
     update:
       operationId: UpdateArticleComment
-  # The write that removes a comment of an issue for good. DeleteIssuesIdCommentsIssueCommentId, the name the
-  # generator gives it, spells the path out segment by segment.
   - target: $.paths['/issues/{id}/comments/{issueCommentId}'].delete
     update:
       operationId: DeleteIssueComment
-  # The write that removes a comment of an article, named the same way for the same reason.
   - target: $.paths['/articles/{id}/comments/{articleCommentId}'].delete
     update:
       operationId: DeleteArticleComment
-  # The read that answers with the work items of an issue. GetIssuesIdTimeTrackingWorkItems, the name the
-  # generator gives it, spells the path out segment by segment; GetWorkItems is taken by /workItems.
   - target: $.paths['/issues/{id}/timeTracking/workItems'].get
     update:
       operationId: GetIssueWorkItems
-  # The write that adds a work item to an issue, named the same way for the same reason:
-  # PostIssuesIdTimeTrackingWorkItems spells the path out instead of saying what the operation does.
   - target: $.paths['/issues/{id}/timeTracking/workItems'].post
     update:
       operationId: CreateIssueWorkItem
-  # The write that changes a work item of an issue. PostIssuesIdTimeTrackingWorkItemsIssueWorkItemId, the name
-  # the generator gives it, spells the path out segment by segment rather than saying what the request leaves
-  # behind.
   - target: $.paths['/issues/{id}/timeTracking/workItems/{issueWorkItemId}'].post
     update:
       operationId: UpdateIssueWorkItem
-  # The read that answers with the work item a removal is about to destroy.
-  # GetIssuesIdTimeTrackingWorkItemsIssueWorkItemId, the name the generator gives it, spells the path out
-  # segment by segment; GetWorkItemsId is taken by /workItems/{id}.
   - target: $.paths['/issues/{id}/timeTracking/workItems/{issueWorkItemId}'].get
     update:
       operationId: GetIssueWorkItem
-  # The write that removes a work item of an issue for good. DeleteIssuesIdTimeTrackingWorkItemsIssueWorkItemId,
-  # the name the generator gives it, spells the path out the same way.
   - target: $.paths['/issues/{id}/timeTracking/workItems/{issueWorkItemId}'].delete
     update:
       operationId: DeleteIssueWorkItem
-  # The read that answers the attachments of an issue. GetIssuesIdAttachments, the name the generator gives it,
-  # spells the path out segment by segment.
   - target: $.paths['/issues/{id}/attachments'].get
     update:
       operationId: GetIssueAttachments
-  # The read that answers the attachments of an article, named the same way for the same reason.
   - target: $.paths['/articles/{id}/attachments'].get
     update:
       operationId: GetArticleAttachments
-  # The write that attaches a file to an issue, named for what it does rather than for the segments of its
-  # path, which is what PostIssuesIdAttachments spells out.
   - target: $.paths['/issues/{id}/attachments'].post
     update:
       operationId: CreateIssueAttachment
-  # The write that attaches a file to an article, named the same way for the same reason.
   - target: $.paths['/articles/{id}/attachments'].post
     update:
       operationId: CreateArticleAttachment
-  # The read a deletion makes before it destroys anything, which is what the deletion prints.
-  # GetIssuesIdAttachmentsIssueAttachmentId, the name the generator gives it, spells the path out segment by
-  # segment.
   - target: $.paths['/issues/{id}/attachments/{issueAttachmentId}'].get
     update:
       operationId: GetIssueAttachment
-  # The same read for an article, named the same way for the same reason.
   - target: $.paths['/articles/{id}/attachments/{articleAttachmentId}'].get
     update:
       operationId: GetArticleAttachment
-  # The write that takes a file off an issue for good. DeleteIssuesIdAttachmentsIssueAttachmentId, the name the
-  # generator gives it, spells the path out segment by segment.
   - target: $.paths['/issues/{id}/attachments/{issueAttachmentId}'].delete
     update:
       operationId: DeleteIssueAttachment
-  # The same write for an article, named the same way for the same reason.
   - target: $.paths['/articles/{id}/attachments/{articleAttachmentId}'].delete
     update:
       operationId: DeleteArticleAttachment
-  # The write that makes a tag of the caller's own. PostTags, the name the generator gives it, names the method
-  # and the collection rather than what the request leaves behind.
   - target: $.paths['/tags'].post
     update:
       operationId: CreateTag
-  # The write that destroys a tag for its owner and for everyone it was shared with. DeleteTagsId, the name the
-  # generator gives it, names the path rather than what the request leaves behind.
   - target: $.paths['/tags/{id}'].delete
     update:
       operationId: DeleteTag
-  # The write that hangs a tag on an issue. PostIssuesIdTags, the name the generator gives it, names the method
-  # and the path rather than what the request leaves behind, and the path it names is the one the deletion below
-  # shares.
   - target: $.paths['/issues/{id}/tags'].post
     update:
       operationId: AddIssueTag
-  # The write that hangs a tag on an article, named the same way for the same reason.
   - target: $.paths['/articles/{id}/tags'].post
     update:
       operationId: AddArticleTag
-  # The write that takes a tag off an issue and leaves the tag itself standing.
-  # DeleteIssuesIdTagsTagId, the name the generator gives it, spells the path out segment by segment and reads
-  # like the deletion of the tag, which is another operation altogether.
   - target: $.paths['/issues/{id}/tags/{tagId}'].delete
     update:
       operationId: RemoveIssueTag
-  # The same write for an article, named the same way for the same reason.
   - target: $.paths['/articles/{id}/tags/{tagId}'].delete
     update:
       operationId: RemoveArticleTag
-  # The server searches the knowledge base by query here too, in a language of its own, and the specification
-  # declares that parameter for three operations of 248, none of them this one. GetArticles is the name the
-  # generator already gives the operation, so the name needs no record. An update of an object would replace the
-  # whole array of parameters, taking fields, $skip and $top with it, so the one parameter is appended as an
-  # array of one.
   - target: $.paths['/articles'].get.parameters
     update:
       - name: query

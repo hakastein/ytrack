@@ -11,9 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// paddedInstant is the moment with its fraction filled out to milliseconds, so that two of them compare as text
-// the way they compare as moments: the renderer writes .4Z where .400Z would sort after .875Z.
-func paddedInstant(printed string) string {
+func sortableInstant(printed string) string {
 	moment, fraction, split := strings.Cut(strings.TrimSuffix(printed, "Z"), ".")
 	if !split {
 		fraction = ""
@@ -23,8 +21,6 @@ func paddedInstant(printed string) string {
 
 const mixedFixture = "DEV-1"
 
-// The fixture whose journal carries an edit of the summary, of the description, of the text of a comment and a
-// tag put on and taken off again.
 const editedFixture = "DEV-7"
 
 const resolvedFixture = "DEV-5"
@@ -35,7 +31,6 @@ func devInstanceCategories() []string {
 	})
 }
 
-// fixtureCarrying is the issue to hold a row of the table against.
 func fixtureCarrying(category string) string {
 	switch category {
 	case "CommentTextCategory", "DescriptionCategory", "SummaryCategory", "TagsCategory":
@@ -46,11 +41,11 @@ func fixtureCarrying(category string) string {
 	return mixedFixture
 }
 
-func journalPath(issue string) string {
+func activitiesPathOf(issue string) string {
 	return "/api/issues/" + issue + "/activities"
 }
 
-func editingJournal(edit func(url.Values)) func(*url.URL) {
+func editingActivities(edit func(url.Values)) func(*url.URL) {
 	return func(u *url.URL) {
 		if !strings.HasSuffix(u.Path, "/activities") {
 			return
@@ -70,7 +65,7 @@ func sentValues(t *testing.T, dev *upstream, name string) []any {
 			continue
 		}
 		var received []map[string]any
-		require.NoError(t, json.Unmarshal(answers[at], &received), "the answer of the journal: %s", answers[at])
+		require.NoError(t, json.Unmarshal(answers[at], &received), "the answer with activities: %s", answers[at])
 		held := make([]any, 0, len(received))
 		for _, activity := range received {
 			held = append(held, activity[name])
@@ -83,17 +78,17 @@ func sentValues(t *testing.T, dev *upstream, name string) []any {
 
 func TestActivityFindsTheDevInstanceAsksForTheCategories(t *testing.T) {
 	t.Parallel()
-	dev := devInstanceWithRewrite(t, editingJournal(func(asked url.Values) { asked.Del("categories") }))
+	dev := devInstanceWithRewrite(t, editingActivities(func(asked url.Values) { asked.Del("categories") }))
 
 	got := runWith(t, dev.env(), "activity", "list", mixedFixture)
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "rejected", found.code)
 	assert.Equal(t, 400, detailNamed(t, found, "upstream_status"))
 	assert.Equal(t, "No requested categories specified as a filter parameter",
 		detailNamed(t, found, "upstream_message"))
 	assert.NotContains(t, activitySent(t, dev), "categories")
-	assert.Equal(t, 1, sentTo(dev, journalPath(mixedFixture)))
+	assert.Equal(t, 1, sentTo(dev, activitiesPathOf(mixedFixture)))
 }
 
 func TestActivityFindsTheDevInstanceAnswersACategoryItDoesNotKnowWithNoActivity(t *testing.T) {
@@ -108,7 +103,7 @@ func TestActivityFindsTheDevInstanceAnswersACategoryItDoesNotKnowWithNoActivity(
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			dev := devInstanceWithRewrite(t, editingJournal(func(asked url.Values) { asked.Set("categories", tc.categories) }))
+			dev := devInstanceWithRewrite(t, editingActivities(func(asked url.Values) { asked.Set("categories", tc.categories) }))
 
 			got := runWith(t, dev.env(), "activity", "list", mixedFixture)
 
@@ -150,11 +145,7 @@ func TestActivityHelpNamesTheCategoriesCheckedAgainstTheDevInstance(t *testing.T
 	}
 }
 
-// The journal of the mixed fixture under the default: every record is one change, printed without the issue it
-// belongs to, and whatever a change put there or took away stands as a list — the minutes of the time spent as
-// the period they make, a link as the issue at its other end, a comment, an attachment and a work item as the
-// entities they are, each by the names the default asks of a value and it has.
-func TestActivityPrintsTheMixedJournalOfTheDevInstance(t *testing.T) {
+func TestActivityPrintsTheMixedActivitiesOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
@@ -171,9 +162,9 @@ func TestActivityPrintsTheMixedJournalOfTheDevInstance(t *testing.T) {
 		moment := nodeAt(t, record, "timestamp")
 		assert.Regexp(t, instantForm, moment.Value)
 		if before != "" {
-			assert.GreaterOrEqual(t, before, paddedInstant(moment.Value), "the activities arrived out of order")
+			assert.GreaterOrEqual(t, before, sortableInstant(moment.Value), "the activities arrived out of order")
 		}
-		before = paddedInstant(moment.Value)
+		before = sortableInstant(moment.Value)
 		one := printed.Activities[at]
 		assert.IsType(t, []any{}, one["added"], "added is no list: %v", one)
 		assert.IsType(t, []any{}, one["removed"], "removed is no list: %v", one)
@@ -209,7 +200,7 @@ func TestActivityPrintsTheMixedJournalOfTheDevInstance(t *testing.T) {
 	for _, unwanted := range []string{"target", "$type", "Зависит", "163-"} {
 		assert.NotContains(t, got.stdout, unwanted)
 	}
-	assert.Equal(t, 1, sentTo(dev, journalPath(mixedFixture)))
+	assert.Equal(t, 1, sentTo(dev, activitiesPathOf(mixedFixture)))
 }
 
 func TestActivityPrintsTheLinksOfTheDevInstanceByTheirPhrases(t *testing.T) {
@@ -233,8 +224,6 @@ func TestActivityPrintsTheLinksOfTheDevInstanceByTheirPhrases(t *testing.T) {
 	assert.Equal(t, 1, sentTo(dev, linkTypesPath))
 }
 
-// A polymorphic request over the mixed journal: each name is printed on the values whose type has it and left
-// out of the rest, and none of them is refused, though no type has all three.
 func TestActivityPrintsTheNamesOfEachTypeOfValueOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -253,8 +242,6 @@ func TestActivityPrintsTheNamesOfEachTypeOfValueOfTheDevInstance(t *testing.T) {
 	assert.Contains(t, printed.Activities, map[string]any{"category": "CustomFieldCategory", "added": []any{"PT1H30M"}})
 }
 
-// The fixture that was resolved: its state changed from one value of a bundle to another, each printed as the
-// tree the default asks of a value, and its resolution holds the moment it happened as the one item of a list.
 func TestActivityPrintsTheResolutionAndTheStateOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -307,8 +294,6 @@ func TestActivityPrintsTheEditsOfTheDevInstance(t *testing.T) {
 	}
 }
 
-// A tag put on and taken off again are two records, each holding the tag at the end it stands at and nothing at
-// the other.
 func TestActivityPrintsTheTagsOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -317,16 +302,16 @@ func TestActivityPrintsTheTagsOfTheDevInstance(t *testing.T) {
 
 	printed := requireActivityListing(t, got)
 	require.Len(t, printed.Activities, 2)
-	// Newest first, so the tag comes off in the first record and went on in the second.
-	assert.Equal(t, []any{}, printed.Activities[0]["added"])
-	assert.Equal(t, []any{}, printed.Activities[1]["removed"])
-	assert.Equal(t, printed.Activities[0]["removed"], printed.Activities[1]["added"])
-	tag := printed.Activities[1]["added"].([]any)
+	newer, older := printed.Activities[0], printed.Activities[1]
+	assert.Equal(t, []any{}, newer["added"])
+	assert.Equal(t, []any{}, older["removed"])
+	assert.Equal(t, newer["removed"], older["added"])
+	tag := older["added"].([]any)
 	require.Len(t, tag, 1)
 	assert.Equal(t, "история-полигона", tag[0].(map[string]any)["name"])
 }
 
-func TestActivityCutsTheJournalOfTheDevInstanceAtTheLimit(t *testing.T) {
+func TestActivityCutsTheActivitiesOfTheDevInstanceAtTheLimit(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
@@ -345,12 +330,11 @@ func TestActivityRefusesANameTheSchemasOfTheDevInstanceDoNotDeclare(t *testing.T
 
 	got := runWith(t, dev.env(), "activity", "list", mixedFixture, "--fields", "timestamp,autor")
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "unknown_name", found.code)
 	assert.Equal(t, []any{unknownEntry("autor", "author")}, detailNamed(t, found, "unknown"))
-	// The expression of the refusal is the one that went out, so the names ytrack merged in stand in it too.
 	assert.Equal(t, "timestamp,autor,category(id)", detailNamed(t, found, "fields"))
-	assert.Equal(t, 1, sentTo(dev, journalPath(mixedFixture)))
+	assert.Equal(t, 1, sentTo(dev, activitiesPathOf(mixedFixture)))
 }
 
 func TestActivityFindsNoIssueOfTheDevInstanceForTheLimitedToken(t *testing.T) {
@@ -360,9 +344,9 @@ func TestActivityFindsNoIssueOfTheDevInstanceForTheLimitedToken(t *testing.T) {
 	got := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited},
 		"activity", "list", mixedFixture)
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "not_found", found.code)
 	assert.Equal(t, 404, detailNamed(t, found, "upstream_status"))
 	assert.Empty(t, got.stdout)
-	assert.Equal(t, 1, sentTo(dev, journalPath(mixedFixture)))
+	assert.Equal(t, 1, sentTo(dev, activitiesPathOf(mixedFixture)))
 }

@@ -1,6 +1,3 @@
-/** Клиент к REST YouTrack и Hub — ровно столько, сколько нужно сидированию. */
-
-/** Ответ приезжает под выражением вызывающего, поэтому дерево, а не структура. */
 export type Tree = Record<string, any>;
 
 export class ApiError extends Error {
@@ -27,7 +24,6 @@ export class Api {
   ): Promise<any> {
     let url = this.baseUrl + path;
     if (fields) {
-      // Запятая и скобки — синтаксис выражения полей, кодировать их нечего
       url += (url.includes("?") ? "&" : "?") + "fields=" + encodeURIComponent(fields).replaceAll("%2C", ",");
     }
     const headers: Record<string, string> = { Authorization: `Bearer ${this.token}`, Accept: "application/json" };
@@ -46,7 +42,6 @@ export class Api {
     return this.call("POST", path, fields, JSON.stringify(body), "application/json");
   }
 
-  // Content-Type не задаётся: multipart-заголовок с boundary частей fetch ставит сам
   upload(path: string, form: FormData, fields?: string): Promise<any> {
     return this.call("POST", path, fields, form);
   }

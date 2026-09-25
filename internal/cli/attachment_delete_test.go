@@ -10,13 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The expression the read before a deletion sends, one to a kind of owner: the id it was asked by, the name
-// the document prints, and the owner the deletion is addressed by.
 func deletedAttachmentFields(owner string) string {
 	return "id,name," + owner + "(idReadable)"
 }
 
-// The two requests a deletion sends, as a refusal names them.
 func attachmentReadRequest(address, owners, owner, id, fields string) string {
 	return "GET " + address + "/api/" + owners + "/" + owner + "/attachments/" + id + "?fields=" + fields
 }
@@ -25,8 +22,6 @@ func attachmentDeletionRequest(address, owners, owner, id string) string {
 	return "DELETE " + address + "/api/" + owners + "/" + owner + "/attachments/" + id
 }
 
-// attachmentOf is what the read before a deletion is answered with: the attachment as it stands, under the
-// issue the server says it hangs from, which is not always the owner the caller wrote the call with.
 func attachmentOf(id, name, readable string) string {
 	return `{"$type":"IssueAttachment","id":` + strconv.Quote(id) + `,"name":` + strconv.Quote(name) +
 		`,"issue":{"$type":"Issue","idReadable":` + strconv.Quote(readable) + `}}`
@@ -36,8 +31,6 @@ func attachmentOfDEV7() string {
 	return attachmentOf("12-5", "a.txt", "DEV-7")
 }
 
-// A deletion names an owner and an attachment, and nothing else: a call of any other shape is refused
-// before a file is opened, a request is built or anything is destroyed.
 func TestAttachmentDeleteRefusesACallOfAnyOtherShape(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -47,7 +40,6 @@ func TestAttachmentDeleteRefusesACallOfAnyOtherShape(t *testing.T) {
 		{name: "nothing at all", argv: nil},
 		{name: "an owner alone", argv: []string{"DEV-1"}},
 		{name: "a third argument", argv: []string{"DEV-1", "12-2", "12-3"}},
-		// Nothing is asked before the file goes, so there is no flag that answers.
 		{name: "a flag that would confirm the deletion", argv: []string{"DEV-1", "12-2", "--yes"}},
 		{name: "a flag that would force it", argv: []string{"DEV-1", "12-2", "--force"}},
 	}
@@ -58,15 +50,12 @@ func TestAttachmentDeleteRefusesACallOfAnyOtherShape(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"attachment", "delete"}, tc.argv...)...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// An attachment is addressed by the internal id and by nothing else. A file name is the form worth naming among
-// these: an issue can carry the same name many times over, so a name addresses nothing even where it looks like
-// it should.
 func TestAttachmentDeleteRefusesAnIDThatIsNoInternalID(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -88,27 +77,23 @@ func TestAttachmentDeleteRefusesAnIDThatIsNoInternalID(t *testing.T) {
 
 			got := runWith(t, server.env(), "attachment", "delete", "--", "DEV-1", tc.id)
 
-			refused := requireRefusal(t, got)
+			refused := requireFault(t, got)
 			assert.Equal(t, "bad_usage", refused.code)
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// An internal id addresses the owner of nothing: a deletion names the entity the attachment hangs from by
-// the readable id, as every command that names one does.
 func TestAttachmentDeleteRefusesAnInternalIDForItsOwner(t *testing.T) {
 	t.Parallel()
 	server := serveNothing(t)
 
 	got := runWith(t, server.env(), "attachment", "delete", "3-19", "12-2")
 
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 	assert.Empty(t, server.requests())
 }
 
-// The help says what the command costs: nothing is asked before the file goes, so there is no flag that
-// answers, and the id it takes is the one the list prints.
 func TestAttachmentDeleteHelpAsksNothingAndNamesWhereTheIDComesFrom(t *testing.T) {
 	t.Parallel()
 
@@ -122,9 +107,6 @@ func TestAttachmentDeleteHelpAsksNothingAndNamesWhereTheIDComesFrom(t *testing.T
 	assert.Contains(t, got.stdout, "ytrack attachment list")
 }
 
-// The whole of the call on the wire: one read of the attachment under the owner the caller wrote, then the
-// deletion under the owner the server named, carrying no body and no query at all. What is printed is what the
-// read answered — the argument was never checked, and dev-7 and DEV-7 reach the same issue.
 func TestAttachmentDeletePrintsWhatTheReadBeforeItFound(t *testing.T) {
 	t.Parallel()
 	server := deleting(t, respondWith(http.StatusOK, attachmentOfDEV7()), deletionDone())
@@ -145,8 +127,6 @@ func TestAttachmentDeletePrintsWhatTheReadBeforeItFound(t *testing.T) {
 	assert.Empty(t, server.asks()[1])
 }
 
-// Where the read answers and where the deletion does, each status is read the way it is read everywhere,
-// and a read that finds nothing costs the caller no destructive request at all.
 func TestAttachmentDeleteReadsTheStatusOfEachRequest(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -198,7 +178,7 @@ func TestAttachmentDeleteReadsTheStatusOfEachRequest(t *testing.T) {
 
 			got := runWith(t, server.env(), "attachment", "delete", "DEV-7", "12-5")
 
-			refused := requireRefusalDocument(t, got)
+			refused := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, refused.code)
 			assert.Equal(t, tc.exit, got.code)
 			assert.Equal(t, detail{"request", tc.request(server.url)}, refused.details[0])
@@ -207,10 +187,6 @@ func TestAttachmentDeleteReadsTheStatusOfEachRequest(t *testing.T) {
 	}
 }
 
-// What the read answered is what the deletion is addressed by and what the document prints, so an answer
-// about anything but the attachment that was asked for stops the call where it stands: printing it would print
-// the unchecked, and destroying under it would destroy what nobody named. A body under the deletion is the
-// answer of something other than the endpoint asked, and by then the file is gone.
 func TestAttachmentDeleteRefusesAnAnswerItCannotBeAddressedBy(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -256,7 +232,7 @@ func TestAttachmentDeleteRefusesAnAnswerItCannotBeAddressedBy(t *testing.T) {
 
 			got := runWith(t, server.env(), "attachment", "delete", "DEV-7", "12-5")
 
-			refused := requireRefusalDocument(t, got)
+			refused := requireFaultDocument(t, got)
 			assert.Equal(t, "upstream_invalid", refused.code)
 			assert.Equal(t, tc.exit, got.code)
 			assert.Equal(t, tc.methods, sentMethods(server))
@@ -264,8 +240,6 @@ func TestAttachmentDeleteRefusesAnAnswerItCannotBeAddressedBy(t *testing.T) {
 	}
 }
 
-// The knowledge base is reached through its own API, and the owner the read is asked for stands under a
-// name of its own there: an attachment of an article carries article where one of an issue carries issue.
 func TestAttachmentDeleteTakesAFileOffAnArticleThroughItsOwnAPI(t *testing.T) {
 	t.Parallel()
 	const answered = `{"$type":"ArticleAttachment","id":"522-4","name":"кот.png",` +
@@ -289,27 +263,25 @@ func TestAttachmentDeleteTakesFilesOffThePolygon(t *testing.T) {
 	second := anIssueOfItsOwn(t, dev, "second")
 	article := attachedArticle(t, dev)
 	onTheIssue := attachedTo(t, dev, first, "заметка.txt", []byte("ytrack"))
-	// Not a picture: the bytes of one are no valid UTF-8, and go-vcr would write the upload into the cassette
-	// as base64. What a preview looks like live is held by the creation.
-	onTheArticle := attachedTo(t, dev, article, "вложение статьи.bin", everyLatinRune(1))
+	onTheArticle := attachedTo(t, dev, article, "вложение статьи.bin", everyLatin1RuneAsUTF8(1))
 
 	t.Run("an attachment of another issue", func(t *testing.T) {
 		before := len(dev.requests())
 
 		got := runWith(t, dev.env(), "attachment", "delete", second, onTheIssue.ID)
 
-		assert.Equal(t, "not_found", requireRefusal(t, got).code)
+		assert.Equal(t, "not_found", requireFault(t, got).code)
 		assert.Len(t, dev.requests()[before:], 1)
 	})
 	t.Run("an attachment of an issue named under an article", func(t *testing.T) {
 		got := runWith(t, dev.env(), "attachment", "delete", article, onTheIssue.ID)
 
-		assert.Equal(t, "not_found", requireRefusal(t, got).code)
+		assert.Equal(t, "not_found", requireFault(t, got).code)
 	})
 	t.Run("an attachment of an article named under an issue", func(t *testing.T) {
 		got := runWith(t, dev.env(), "attachment", "delete", first, onTheArticle.ID)
 
-		assert.Equal(t, "not_found", requireRefusal(t, got).code)
+		assert.Equal(t, "not_found", requireFault(t, got).code)
 	})
 	t.Run("the file is still there after every refusal", func(t *testing.T) {
 		listed := requireAttachmentListing(t, runWith(t, dev.env(), "attachment", "list", first))
@@ -320,7 +292,7 @@ func TestAttachmentDeleteTakesFilesOffThePolygon(t *testing.T) {
 
 		got := runWith(t, limited, "attachment", "delete", first, onTheIssue.ID)
 
-		assert.Equal(t, "not_found", requireRefusal(t, got).code)
+		assert.Equal(t, "not_found", requireFault(t, got).code)
 	})
 	t.Run("the owner written in lower case", func(t *testing.T) {
 		got := runWith(t, dev.env(), "attachment", "delete", strings.ToLower(first), onTheIssue.ID)
@@ -341,7 +313,7 @@ func TestAttachmentDeleteTakesFilesOffThePolygon(t *testing.T) {
 
 		got := runWith(t, dev.env(), "attachment", "delete", first, onTheIssue.ID)
 
-		assert.Equal(t, "not_found", requireRefusal(t, got).code)
+		assert.Equal(t, "not_found", requireFault(t, got).code)
 		assert.Len(t, dev.requests()[before:], 1)
 	})
 	t.Run("an attachment of an article", func(t *testing.T) {
@@ -354,8 +326,6 @@ func TestAttachmentDeleteTakesFilesOffThePolygon(t *testing.T) {
 	})
 }
 
-// anIssueOfItsOwn is one of the issues this scenario needs two of, told apart in the project by called; both
-// are filed by the command that files issues and taken away with everything hanging from them.
 func anIssueOfItsOwn(t *testing.T, dev *upstream, called string) string {
 	t.Helper()
 	summary := "ytrack contract " + t.Name() + " " + called
@@ -364,13 +334,10 @@ func anIssueOfItsOwn(t *testing.T, dev *upstream, called string) string {
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	readable := nodeAt(t, requireMapping(t, "stdout", got.stdout), "idReadable").Value
 	require.Regexp(t, `^DEV-[0-9]+$`, readable)
-	// Registered after the recorder's own cleanup, so the deletion runs first and the cassette records it.
 	t.Cleanup(func() { removeIssue(t, dev, readable) })
 	return readable
 }
 
-// attachedTo is the file a contract test about deletions works on: attached by the command that attaches
-// files, so the id and the signed link it is held to afterwards are the ones a caller would have.
 func attachedTo(t *testing.T, dev *upstream, owner, name string, content []byte) printedAttachment {
 	t.Helper()
 	got := runWith(t, dev.env(), "attachment", "create", owner, fileWith(t, name, content))

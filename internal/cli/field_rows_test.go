@@ -8,13 +8,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The two places the values a field allows arrive from, as field show asks for them.
 const (
 	bundleValues = "bundle(values(name,archived))"
 	bundleUsers  = "bundle(aggregatedUsers(login))"
 )
 
-// fieldShowDefault is the fields= field show sends for a field whose type keeps its values under tail.
 func fieldShowDefault(tail string) string {
 	if tail == "" {
 		return fieldListDefault
@@ -22,14 +20,10 @@ func fieldShowDefault(tail string) string {
 	return fieldListDefault + "," + tail
 }
 
-// Every row of the catalogue of custom-field types against the field of DEV that has it: what the default asks
-// the server for, and what comes back. Subtest names are the rows themselves and stay ASCII, since they become
-// the paths of the cassettes.
 func TestFieldShowAsksWhereTheValuesOfEachRowOfTheCatalogueLive(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		// field is the name the field goes by on DEV, and tail the place its type keeps its values.
+		name    string
 		field   string
 		tail    string
 		printed string
@@ -225,7 +219,6 @@ bundle:
 `,
 		},
 		{
-			// An empty bundle allows everyone rather than no one, banned accounts included.
 			name:  "user multiple",
 			field: "Соисполнители",
 			tail:  bundleUsers,
@@ -364,8 +357,6 @@ canBeEmpty: true
 	}
 }
 
-// A user bundle keeps under values the users and groups it was built from, and the users the field allows are
-// aggregatedUsers: the two answer different questions, so only the caller who names values is shown them.
 func TestFieldShowPrintsTheValuesOfAUserBundleOnlyWhenTheCallerNamesThem(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -383,8 +374,6 @@ func TestFieldShowPrintsTheValuesOfAUserBundleOnlyWhenTheCallerNamesThem(t *test
 		"field(name,localizedName,fieldType(valueType,isMultiValue))"}, dev.sentFields())
 }
 
-// A + adds to the default of the field's own type, so a name asked of the bundle joins the ones already there
-// rather than replacing them.
 func TestFieldShowAddsToTheDefaultOfTheTypeOfTheField(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -410,8 +399,6 @@ bundle:
 	assert.Equal(t, []string{metadataSent, fieldListDefault + ",bundle(values(name,archived,description))"}, dev.sentFields())
 }
 
-// The catalogue has no multi-valued state field: where its values would live is the one thing ytrack cannot
-// guess, and the server would answer the same type again.
 const (
 	stateOfMany = `{"$type":"StateProjectCustomField","id":"180-1","field":{"$type":"CustomField","name":"State",` +
 		`"localizedName":null,"fieldType":{"$type":"FieldType","valueType":"state","isMultiValue":true}}}`
@@ -444,14 +431,12 @@ func TestFieldShowRefusesTheDefaultOfATypeOutsideTheCatalogue(t *testing.T) {
 					{"upstream_body", metadata},
 				},
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Len(t, server.requests(), 1)
 		})
 	}
 }
 
-// Only a default has to know where the values of a field live, so a caller who wrote the whole expression is
-// answered whatever the type is.
 func TestFieldShowPrintsAFieldOfATypeOutsideTheCatalogueTheCallerAsksFor(t *testing.T) {
 	t.Parallel()
 	field := respondWith(http.StatusOK, answeredStateOfMany)

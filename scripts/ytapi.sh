@@ -1,31 +1,29 @@
 #!/usr/bin/env bash
-# oapi-codegen выходит с 0 и на пакете, который не собирается, и на пустом ClientInterface:
-# регенерацию проверяют утверждения о выхлопе, а не код возврата.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 readonly min_methods=335
+readonly grep_no_match=1
+readonly imports_cannot_judge=2
 readonly tree=$PWD
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ytapi.XXXXXXXXXX")
 trap 'rm -rf "$work"' EXIT
 readonly copy=$work/copy
 
-# Регенерация идёт в копии дерева вместе с незакоммиченными правками: само дерево
-# не меняется ни при каком исходе.
-mkdir "$copy"
-git ls-files -z --cached --others --exclude-standard |
+existing_only() {
 	while IFS= read -r -d '' path; do
-		# --cached называет и отслеживаемые файлы, удалённые из дерева.
 		if [[ -e $path || -L $path ]]; then
 			printf '%s\0' "$path"
 		fi
-	done |
+	done
+}
+
+mkdir "$copy"
+git ls-files -z --cached --others --exclude-standard | existing_only |
 	tar --null -cf - -T - | tar -xf - -C "$copy"
 cd "$copy"
 
-# Без удаления не сработавшая директива оставила бы в копии выхлоп из дерева,
-# и сравнение с деревом прошло бы.
 rm -rf internal/ytapi internal/youtrack/catalogue.gen.go
 if ! go generate ./...; then
 	echo "FAIL  go generate"
@@ -50,11 +48,10 @@ check() {
 	verdict "$name" "$code"
 }
 
-# grep выходит с 2, когда каталога нет, и это провал, а не отсутствие строки.
 stub_applied() {
 	local code=0
 	grep -rq ClientWithResponses internal/ytapi || code=$?
-	[[ $code -eq 1 ]]
+	[[ $code -eq $grep_no_match ]]
 }
 
 interface_floor() {
@@ -64,7 +61,6 @@ interface_floor() {
 	((methods >= min_methods))
 }
 
-# Каталог схем генерируется из той же спеки, что и internal/ytapi, и сверяется с деревом тем же утверждением.
 outputs_match() {
 	local code=0
 	diff -rq "$tree/internal/ytapi" "$copy/internal/ytapi" || code=1
@@ -72,18 +68,19 @@ outputs_match() {
 	return "$code"
 }
 
+# oapi-codegen выходит с 0 и на несобираемом пакете, и на пустом ClientInterface.
 check "go build ./internal/ytapi" go build ./internal/ytapi
 check "выхлоп в дереве совпадает с тем, что дают входы" outputs_match
 check "ClientWithResponses в выхлопе нет" stub_applied
 check "ClientInterface не меньше $min_methods методов" interface_floor
 
-# go run сводит любой ненулевой код к 1, а код 2 у проверки шва — отказ судить, а не утечка.
-imports=2
+# go run сводит любой ненулевой код выхода к 1.
+imports=$imports_cannot_judge
 if go build -o "$work/ytapi-imports" scripts/ytapi-imports.go; then
 	imports=0
 	"$work/ytapi-imports" || imports=$?
 fi
-if ((imports > 1)); then
+if ((imports >= imports_cannot_judge)); then
 	verdict "проверка шва не смогла судить" "$imports"
 else
 	verdict "ytapi виден только из адаптера" "$imports"

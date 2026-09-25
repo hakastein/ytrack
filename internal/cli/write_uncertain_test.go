@@ -13,16 +13,12 @@ import (
 	"github.com/hakastein/ytrack/internal/cli"
 )
 
-// What a gateway in front of YouTrack answers with when the server behind it says nothing: a page, under a
-// status YouTrack writes only as JSON.
 const gatewayPage = "<html><head><title>Bad Gateway</title></head><body>The server is not answering</body></html>"
 
-// The request the deletion of DEV-7 goes out as, which is the one a refusal about it names.
 func deletionRequest(address string) string {
 	return "DELETE " + address + "/api/issues/DEV-7"
 }
 
-// gateway is an answer of something other than YouTrack: a status of its own and a page under it.
 func gateway(status int) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -31,8 +27,6 @@ func gateway(status int) http.HandlerFunc {
 	}
 }
 
-// blockingHandler is a handler that tells the test its request arrived whole and then waits for the caller to go away,
-// which is what a server taking its time over a write looks like from outside.
 func blockingHandler(reached chan<- struct{}) http.HandlerFunc {
 	return func(_ http.ResponseWriter, r *http.Request) {
 		close(reached)
@@ -40,7 +34,11 @@ func blockingHandler(reached chan<- struct{}) http.HandlerFunc {
 	}
 }
 
-// runInContext is runWith on a context of the scenario's own: only one that cancels the call needs it.
+func cancelOnceReached(reached <-chan struct{}, cancel context.CancelFunc) {
+	<-reached
+	cancel()
+}
+
 func runInContext(t *testing.T, ctx context.Context, env []string, argv ...string) outcome {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
@@ -48,30 +46,21 @@ func runInContext(t *testing.T, ctx context.Context, env []string, argv ...strin
 	return outcome{code: code, stdout: stdout.String(), stderr: stderr.String()}
 }
 
-// The deletion left whole and the connection went away before an answer: the server may have carried it
-// out and may never have started, and nothing ytrack could send afterwards tells the two apart — a repeat
-// would delete an issue somebody else filed under the same id, and a read would answer about a deletion that
-// may still be under way. So the caller is told that much, and nothing else goes out.
 func TestIssueDeleteIsUncertainWhereTheAnswerNeverCame(t *testing.T) {
 	t.Parallel()
 	server := deleting(t, respondWith(http.StatusOK, issueNamed("DEV-7")), breakOff)
 
 	got := runWith(t, server.env(), "issue", "delete", "DEV-7")
 
-	// The word for a connection that went away comes from the kernel and differs between them.
 	found := requireUncertainty(t, got)
 	assert.Equal(t, "write_uncertain", found.code)
 	assert.Equal(t, []detail{{"request", deletionRequest(server.url)}}, found.details)
 	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
 }
 
-// Nothing was listening by the time the deletion was sent, so it never left: the issue stands where it
-// was, and the caller may send the same call again once the server is back.
 func TestIssueDeleteFailsWhereTheDeletionNeverLeft(t *testing.T) {
 	t.Parallel()
 	var server *upstream
-	// Without keep alives the answer to the read ends the connection it came back over, so the deletion has to
-	// dial the server that is no longer there instead of going out over a connection that is already open.
 	server = serveWithoutKeepAlive(t, readThenDeletion(func(w http.ResponseWriter, r *http.Request) {
 		server.stopListening(t)
 		respondWith(http.StatusOK, issueNamed("DEV-7"))(w, r)
@@ -79,8 +68,7 @@ func TestIssueDeleteFailsWhereTheDeletionNeverLeft(t *testing.T) {
 
 	got := runWith(t, server.env(), "issue", "delete", "DEV-7")
 
-	// The word for a connection nothing accepts is the kernel's too.
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "upstream_failed", found.code)
 	assert.Equal(t, []detail{{"request", deletionRequest(server.url)}}, found.details)
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
@@ -125,12 +113,7 @@ func TestIssueDeleteClassifiesACancelledCallByWhetherTheRequestWasSent(t *testin
 			server := deleting(t, read, deletion)
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			// Cancelled once the request is with the server, so which of the two ytrack was in the middle of
-			// is settled by the scenario rather than by which goroutine ran first.
-			go func() {
-				<-reached
-				cancel()
-			}()
+			go cancelOnceReached(reached, cancel)
 
 			got := runInContext(t, ctx, server.env(), "issue", "delete", "DEV-7")
 
@@ -138,16 +121,13 @@ func TestIssueDeleteClassifiesACancelledCallByWhetherTheRequestWasSent(t *testin
 				code:    tc.code,
 				details: []detail{{"request", tc.request(server.url)}},
 			}
-			assert.Equal(t, want, requireRefusalDocument(t, got))
+			assert.Equal(t, want, requireFaultDocument(t, got))
 			assert.Equal(t, tc.exit, got.code)
 			assert.Equal(t, tc.methods, sentMethods(server))
 		})
 	}
 }
 
-// A 5xx that is not YouTrack's own word about a failure was written by something between ytrack and the
-// instance, which may well have passed the deletion on; YouTrack's own says the server got as far as refusing
-// it, and that leaves the issue where it was.
 func TestIssueDeleteReadsA5xxByWhoWroteIt(t *testing.T) {
 	t.Parallel()
 	const failed = `{"error":"server_error","error_description":"java.lang.NullPointerException"}`
@@ -194,7 +174,7 @@ func TestIssueDeleteReadsA5xxByWhoWroteIt(t *testing.T) {
 
 			got := runWith(t, server.env(), "issue", "delete", "DEV-7")
 
-			found := requireRefusalDocument(t, got)
+			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
 			want := append([]detail{
@@ -207,9 +187,6 @@ func TestIssueDeleteReadsA5xxByWhoWroteIt(t *testing.T) {
 	}
 }
 
-// The status of the deletion arrived and the rest of the answer did not. The server had taken the request
-// by the time it answered, so the issue may well be gone, whatever the part of the answer that never came was
-// going to say.
 func TestIssueDeleteIsUncertainWhereTheAnswerBreaksOff(t *testing.T) {
 	t.Parallel()
 	const sent = "abc"
@@ -233,9 +210,6 @@ func TestIssueDeleteIsUncertainWhereTheAnswerBreaksOff(t *testing.T) {
 	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, sentMethods(server))
 }
 
-// The border is the same for the write that carries a body as for the one that carries none, and it is
-// where the request left rather than what the error says. An update left whole may well have been carried
-// out; one that never left leaves the issue exactly as the read before it found it.
 func TestIssueUpdateClassifiesALostResponseByWhetherTheWriteWasSent(t *testing.T) {
 	t.Parallel()
 	project := projectResponse(writableField{id: "180-15", name: "Type", valueType: "enum", canBeEmpty: true})
@@ -255,8 +229,6 @@ func TestIssueUpdateClassifiesALostResponseByWhetherTheWriteWasSent(t *testing.T
 	t.Run("the write never left", func(t *testing.T) {
 		t.Parallel()
 		var server *upstream
-		// Without keep alives the answer to the read ends the connection it came back over, so the write has to
-		// dial the server that is no longer there instead of going out over one that is already open.
 		server = serveWithoutKeepAlive(t, readThenUpdate(func(w http.ResponseWriter, r *http.Request) {
 			server.stopListening(t)
 			read(w, r)
@@ -264,16 +236,13 @@ func TestIssueUpdateClassifiesALostResponseByWhetherTheWriteWasSent(t *testing.T
 
 		got := runWith(t, server.env(), "issue", "update", "DEV-7", "--field", "Type=Task")
 
-		found := requireRefusal(t, got)
+		found := requireFault(t, got)
 		assert.Equal(t, "upstream_failed", found.code)
 		assert.Equal(t, []detail{{"request", updateRequest(server.url, "DEV-7", askedIssueFields)}}, found.details)
 		assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 	})
 }
 
-// The border holds wherever a deletion goes out, and the deletion of an article is where it costs most: a
-// subtree the caller cannot see the end of may be gone or may be standing, and nothing ytrack could send
-// afterwards tells the two apart. A deletion that never left leaves the tree exactly as the read found it.
 func TestArticleDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 	t.Parallel()
 	read := respondWith(http.StatusOK, articleNamed("DEV-A-7"))
@@ -302,8 +271,6 @@ func TestArticleDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 			name: "the deletion never left",
 			server: func(t *testing.T) *upstream {
 				var server *upstream
-				// Without keep alives the answer to the read ends the connection it came back over, so the
-				// deletion has to dial the server that is no longer there.
 				server = serveWithoutKeepAlive(t, readThenDeletion(func(w http.ResponseWriter, r *http.Request) {
 					server.stopListening(t)
 					read(w, r)
@@ -322,7 +289,7 @@ func TestArticleDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 
 			got := runWith(t, server.env(), "article", "delete", "DEV-A-7")
 
-			found := requireRefusalDocument(t, got)
+			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
 			assert.Equal(t, detail{"request", articleDeletionRequest(server.url, "DEV-A-7")}, found.details[0])
@@ -331,9 +298,6 @@ func TestArticleDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 	}
 }
 
-// The border holds where the write is the whole command and no read stands before it: a POST left whole
-// may well have added a comment nobody can see from here, and one that never left added none. A page under a
-// 5xx was written by something between ytrack and the instance, which may have passed the write on.
 func TestCommentCreateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -377,7 +341,7 @@ func TestCommentCreateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 
 			got := runWith(t, server.env(), "comment", "create", "DEV-7", "--text", "x")
 
-			found := requireRefusalDocument(t, got)
+			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
 			assert.Equal(t, detail{"request", issueCommentRequest(server.url, "DEV-7", writtenCommentFields)},
@@ -387,7 +351,6 @@ func TestCommentCreateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 	}
 }
 
-// A page under a 5xx was written by an intermediary that may have passed the write on.
 func TestTimeCreateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -431,7 +394,7 @@ func TestTimeCreateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 
 			got := runWith(t, server.env(), "time", "create", "DEV-1", "PT1H30M")
 
-			found := requireRefusalDocument(t, got)
+			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
 			assert.Equal(t, detail{"request", workItemWriteRequest(server.url, "DEV-1", sentWorkItemWriteFields)},
@@ -441,7 +404,6 @@ func TestTimeCreateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 	}
 }
 
-// A work item has no readable id to read back, so a POST that left whole may have changed one.
 func TestTimeUpdateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -485,7 +447,7 @@ func TestTimeUpdateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 
 			got := runWith(t, server.env(), "time", "update", "DEV-1", "199-6", "--text", "x")
 
-			found := requireRefusalDocument(t, got)
+			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
 			assert.Equal(t, detail{"request",
@@ -495,8 +457,6 @@ func TestTimeUpdateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 	}
 }
 
-// The read before DELETE tells the cases apart: a failed read leaves the item in place, a DELETE left
-// whole may have removed it.
 func TestTimeDeleteExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 	t.Parallel()
 	read := respondWith(http.StatusOK, workItemOfAnIssue("199-7", "DEV-1"))
@@ -532,8 +492,6 @@ func TestTimeDeleteExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 			name: "the removal never left",
 			server: func(t *testing.T) *upstream {
 				var server *upstream
-				// Without keep alives the answer to the read ends the connection it came back over, so the
-				// removal has to dial the server that is no longer there.
 				server = serveWithoutKeepAlive(t, readThenDeletion(func(w http.ResponseWriter, r *http.Request) {
 					server.stopListening(t)
 					read(w, r)
@@ -565,7 +523,7 @@ func TestTimeDeleteExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 
 			got := runWith(t, server.env(), "time", "delete", "DEV-1", "199-7")
 
-			found := requireRefusalDocument(t, got)
+			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
 			assert.Equal(t, detail{"request", tc.request(server.url)}, found.details[0])
@@ -574,9 +532,6 @@ func TestTimeDeleteExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 	}
 }
 
-// The border holds where a read stands before the write: the POST left whole may well have changed a
-// comment nobody can see from here, while anything that goes wrong during the read before it leaves the
-// comment exactly as it was and costs the caller nothing but sending the call again.
 func TestCommentUpdateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 	t.Parallel()
 	read := respondWith(http.StatusOK, commentDeletedState(false))
@@ -602,8 +557,6 @@ func TestCommentUpdateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 			name: "the write never left",
 			server: func(t *testing.T) *upstream {
 				var server *upstream
-				// Without keep alives the answer to the read ends the connection it came back over, so the write
-				// has to dial the server that is no longer there instead of going out over one already open.
 				server = serveWithoutKeepAlive(t, readThenUpdate(func(w http.ResponseWriter, r *http.Request) {
 					server.stopListening(t)
 					read(w, r)
@@ -633,7 +586,7 @@ func TestCommentUpdateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 
 			got := runWith(t, server.env(), "comment", "update", "DEV-7", "7-12", "--text", "x")
 
-			found := requireRefusalDocument(t, got)
+			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
 			assert.Equal(t, detail{"request", tc.request(server.url)}, found.details[0])
@@ -642,9 +595,6 @@ func TestCommentUpdateExitsByWhetherTheWriteMayHaveHappened(t *testing.T) {
 	}
 }
 
-// The border holds where the write is a removal and no read stands before it: a DELETE left whole may
-// well have taken the comment away, and one that never left took none. The comment carries no readable id to
-// read back afterwards, so what the border says is the whole of what the caller has.
 func TestCommentDeleteExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -688,7 +638,7 @@ func TestCommentDeleteExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 
 			got := runWith(t, server.env(), "comment", "delete", "DEV-7", "7-12")
 
-			found := requireRefusalDocument(t, got)
+			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
 			assert.Equal(t, detail{"request", commentDeletionRequest(server.url, "DEV-7", "7-12")},
@@ -698,9 +648,6 @@ func TestCommentDeleteExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 	}
 }
 
-// The table of exit codes over the one write there is. A refusal that leaves the instance as it was exits 1,
-// whatever it is about; a refusal the caller cannot answer by sending the call again — the answer never came,
-// or it came and says the deletion was carried out — exits 2. Nothing but the code is read to tell them apart.
 func TestIssueDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -790,15 +737,12 @@ func TestIssueDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 
 			got := runWith(t, tc.server(t).env(), "issue", "delete", tc.id)
 
-			assert.Equal(t, tc.code, requireRefusalDocument(t, got).code)
+			assert.Equal(t, tc.code, requireFaultDocument(t, got).code)
 			assert.Equal(t, tc.exit, got.code)
 		})
 	}
 }
 
-// The border holds where the deletion stands behind a read: a DELETE left whole may well have taken the
-// file away, and the signed link that was printed for it with it, while anything that goes wrong before the
-// request leaves asks the caller for nothing but the same call again.
 func TestAttachmentDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 	t.Parallel()
 	read := respondWith(http.StatusOK, attachmentOfDEV7())
@@ -827,8 +771,6 @@ func TestAttachmentDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) 
 			name: "the deletion never left",
 			server: func(t *testing.T) *upstream {
 				var server *upstream
-				// Without keep alives the answer to the read ends the connection it came back over, so the
-				// deletion has to dial the server that is no longer there.
 				server = serveWithoutKeepAlive(t, readThenDeletion(func(w http.ResponseWriter, r *http.Request) {
 					server.stopListening(t)
 					read(w, r)
@@ -847,7 +789,7 @@ func TestAttachmentDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) 
 
 			got := runWith(t, server.env(), "attachment", "delete", "DEV-7", "12-5")
 
-			found := requireRefusalDocument(t, got)
+			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
 			assert.Equal(t, detail{"request", attachmentDeletionRequest(server.url, "issues", "DEV-7", "12-5")},
@@ -857,10 +799,6 @@ func TestAttachmentDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) 
 	}
 }
 
-// The border holds where the deletion stands behind a read of ytrack's own making: the DELETE left whole
-// may well have destroyed a tag for its owner and for everyone it was shared with, and one that never left
-// destroyed none. Nothing ytrack could send afterwards tells the two apart — a repeat would destroy a tag
-// somebody has since made under the same name.
 func TestTagDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -890,8 +828,6 @@ func TestTagDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 			name: "the deletion never left",
 			server: func(t *testing.T) *upstream {
 				var server *upstream
-				// Without keep alives the answer to the read ends the connection it came back over, so the
-				// deletion has to dial the server that is no longer there.
 				server = serveWithoutKeepAlive(t, readThenDeletion(func(w http.ResponseWriter, r *http.Request) {
 					server.stopListening(t)
 					respondWith(http.StatusOK, tagsOfTwoOwners())(w, r)
@@ -910,7 +846,7 @@ func TestTagDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 
 			got := runWith(t, server.env(), "tag", "delete", "--name", "ready")
 
-			found := requireRefusalDocument(t, got)
+			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
 			assert.Equal(t, detail{"request", tagDeletionRequest(server.url, "10-5")}, found.details[0])
@@ -919,9 +855,6 @@ func TestTagDeleteExitsByWhetherTheDeletionMayHaveHappened(t *testing.T) {
 	}
 }
 
-// The border holds where two reads stand before the write: a POST left whole may well have hung the tag,
-// and one that never left hung none. Nothing ytrack could send afterwards tells the two apart — the answer to
-// a second tagging reads the same whether the first went through or not.
 func TestTagAddExitsByWhetherTheTaggingMayHaveHappened(t *testing.T) {
 	t.Parallel()
 	owner := respondWith(http.StatusOK, issueNamed("DEV-7"))
@@ -952,8 +885,6 @@ func TestTagAddExitsByWhetherTheTaggingMayHaveHappened(t *testing.T) {
 			name: "the tagging never left",
 			server: func(t *testing.T) *upstream {
 				var server *upstream
-				// Without keep alives the answer to each read ends the connection it came back over, so the
-				// write has to dial the server that is no longer there.
 				server = serveWithoutKeepAlive(t, func(w http.ResponseWriter, r *http.Request) {
 					if r.URL.Path == tagsCollection {
 						server.stopListening(t)
@@ -976,7 +907,7 @@ func TestTagAddExitsByWhetherTheTaggingMayHaveHappened(t *testing.T) {
 
 			got := runWith(t, server.env(), "tag", "add", "DEV-7", "--name", "ready")
 
-			found := requireRefusalDocument(t, got)
+			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
 			assert.Equal(t, taggingRequest(server.url, "issues", "DEV-7", resolvedTagFields),
@@ -987,9 +918,6 @@ func TestTagAddExitsByWhetherTheTaggingMayHaveHappened(t *testing.T) {
 	}
 }
 
-// The border holds where the write is a removal that carries no body at all: a DELETE left whole may well
-// have taken the tag off, and one that never left took none. A page under a 5xx was written by something
-// between ytrack and the instance, which may have passed the removal on.
 func TestTagRemoveExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 	t.Parallel()
 	owner := respondWith(http.StatusOK, issueNamed("DEV-7"))
@@ -1020,8 +948,6 @@ func TestTagRemoveExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 			name: "the removal never left",
 			server: func(t *testing.T) *upstream {
 				var server *upstream
-				// Without keep alives the answer to each read ends the connection it came back over, so the
-				// removal has to dial the server that is no longer there.
 				server = serveWithoutKeepAlive(t, func(w http.ResponseWriter, r *http.Request) {
 					if r.URL.Path == tagsCollection {
 						server.stopListening(t)
@@ -1044,7 +970,7 @@ func TestTagRemoveExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 
 			got := runWith(t, server.env(), "tag", "remove", "DEV-7", "--name", "ready")
 
-			found := requireRefusalDocument(t, got)
+			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
 			assert.Equal(t, tagRemovalRequest(server.url, "issues", "DEV-7", "10-5"), detailNamed(t, found, "request"))
@@ -1054,10 +980,6 @@ func TestTagRemoveExitsByWhetherTheRemovalMayHaveHappened(t *testing.T) {
 	}
 }
 
-// The border holds where the write carries a file rather than a body ytrack built, and the file is what
-// makes it worth holding: a POST left whole may well have attached megabytes nobody can see from here, and one
-// that never left attached none. The bytes are read into the request as it goes out, so a request the server
-// took whole before it stopped answering is a request that left.
 func TestAttachmentCreateExitsByWhetherTheUploadMayHaveHappened(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -1102,7 +1024,7 @@ func TestAttachmentCreateExitsByWhetherTheUploadMayHaveHappened(t *testing.T) {
 
 			got := runWith(t, server.env(), "attachment", "create", "DEV-7", path)
 
-			found := requireRefusalDocument(t, got)
+			found := requireFaultDocument(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, tc.exit, got.code)
 			assert.Equal(t, detail{"request", attachmentWriteRequest(server.url, "DEV-7", attachmentFields)},

@@ -8,7 +8,6 @@ import (
 	"github.com/hakastein/ytrack/internal/render"
 )
 
-// example renders a help's sample answer with the renderer of real answers.
 func example(document *render.Node) string {
 	var out strings.Builder
 	if err := (render.YAML{}).Render(&out, document); err != nil {

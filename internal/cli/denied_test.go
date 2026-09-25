@@ -8,17 +8,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// A token no instance ever issued: a scenario hands it out to be refused, and no document and no cassette may
-// carry it back.
 const bogusToken = "perm-bogus"
 
-// meRequest is the request auth status sends, as a refusal names it.
 func meRequest(address string) string {
 	return "GET " + address + "/api/users/me?fields=login,fullName"
 }
 
-// The server that refused the token knows nothing of the places ytrack looked, and a caller with a record per
-// directory has a token for each of them, so every command with a network says which one went out.
 func TestNoCommandNamesWhereTheTokenTheServerRefusedCameFrom(t *testing.T) {
 	t.Parallel()
 	stated, scope := here(t)
@@ -87,16 +82,14 @@ func TestNoCommandNamesWhereTheTokenTheServerRefusedCameFrom(t *testing.T) {
 					from,
 				},
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assertNoToken(t, got, bogusToken)
 			assert.Len(t, server.requests(), 1)
 		})
 	}
 }
 
-// Every other code says something about what was asked for, and naming the token there would send the caller to
-// look at the wrong thing. The documents themselves are held to in refusal_test.go.
-func TestNoCommandLeavesTheOriginOutOfARefusalThatIsNotAboutTheToken(t *testing.T) {
+func TestNoCommandLeavesTheLoginSourceOutOfAFaultThatIsNotAboutTheToken(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name        string
@@ -145,7 +138,7 @@ func TestNoCommandLeavesTheOriginOutOfARefusalThatIsNotAboutTheToken(t *testing.
 
 			got := runWith(t, server.env(), "project", "show", "DEV")
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, tc.code, found.code)
 			var keys []string
 			for _, held := range found.details {
@@ -173,7 +166,7 @@ func TestAuthStatusRefusesATokenOfTheEnvironmentTheDevInstanceDoesNotKnow(t *tes
 			authFromEnv(),
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assertNoToken(t, got, bogusToken)
 	assert.Len(t, dev.requests(), 1)
 }
@@ -195,7 +188,7 @@ func TestProjectShowRefusesATokenOfTheGlobalRecordTheDevInstanceDoesNotKnow(t *t
 			authFromSettings(),
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assertNoToken(t, got, bogusToken)
 	assert.Len(t, dev.requests(), 1)
 }

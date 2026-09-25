@@ -9,40 +9,24 @@ import (
 	"github.com/hakastein/ytrack/internal/render"
 )
 
-// What a work item holds where the caller writes no expression of their own. The id comes first: it is what
-// ytrack update and ytrack delete address a work item by. The issue it hangs from is left out — the caller
-// named it in the argument — and so are creator, created and updated, and textPreview, which is the same text
-// in HTML and would be paid for twice.
 const WorkItemListFields = "id,duration,type(name),attributes,author(login),date,text"
 
-// What the answer to a write holds where the caller writes no expression of their own: the record time list
-// prints, and with it the issue as it stands afterwards. The time spent on an issue is a custom field YouTrack
-// recomputes from its work items, so the write that moved it is where it is read — asking for it costs nothing
-// here and a second request anywhere else.
 const WorkItemWriteFields = "id,duration,type(name),attributes,author(login),date,issue(idReadable,customFields),text"
 
 const (
-	workItemSchema   = "IssueWorkItem"
-	workItemsPlural  = "workItems"
-	workItemsListing = "[]" + workItemSchema
-	durationKey      = "duration"
-	dateKey          = "date"
-	typeKey          = "type"
-	// What a refusal about the id of a work item calls the thing the command was given.
-	workItemNoun = "work item"
-	// Where that refusal sends the caller to read the id off: time is written against an issue and against
-	// nothing else, so an article holds no work item to print one under.
-	workItemOwnerNoun = "the issue"
-	// Where a project keeps the types of work its issues are written against. Neither key is declared by the
-	// specification, and the server sends both all the same.
+	workItemSchema          = "IssueWorkItem"
+	workItemsPlural         = "workItems"
+	workItemsListing        = "[]" + workItemSchema
+	durationKey             = "duration"
+	dateKey                 = "date"
+	typeKey                 = "type"
+	workItemNoun            = "work item"
+	workItemOwnerNoun       = "the issue"
 	pluginsKey              = "plugins"
 	timeTrackingSettingsKey = "timeTrackingSettings"
 	workItemTypesKey        = "workItemTypes"
 )
 
-// ListWorkItems is the call for one page of the work items of the issue of that readable id, with the fields of
-// expression, or with them added to WorkItemListFields when it starts with +; nil is the caller leaning on the
-// default whole.
 func ListWorkItems(id string, expression *string, page Page) (Call, *diag.Fault) {
 	id, fault := parseIssueID(id)
 	if fault != nil {
@@ -61,10 +45,6 @@ func ListWorkItems(id string, expression *string, page Page) (Call, *diag.Fault)
 	}, nil
 }
 
-// CreateWorkItem is the call that writes spent against the issue of that readable id, on day where the call
-// names one, against the type of work workType names, with the attributes set as Name=value and carrying text
-// where it does, and prints the work item as the server kept it, with the fields of expression, or with them
-// added to WorkItemWriteFields when it starts with +; nil is the caller leaning on the default whole.
 func CreateWorkItem(id, spent string, day, text, workType *string, attributes []string, expression *string) (Call, *diag.Fault) {
 	id, fault := parseIssueID(id)
 	if fault != nil {
@@ -84,12 +64,6 @@ func CreateWorkItem(id, spent string, day, text, workType *string, attributes []
 	}, nil
 }
 
-// A named type of work and named attributes are the one thing read before the write: YouTrack takes a type by id
-// alone and refuses one that is no setting of the project, so the names are resolved against the settings of the
-// project the issue is filed in and nothing of them reaches the server. Where the call names none, one POST
-// is the whole command — an issue the instance has none of, and one the token may not see, are both answered 404 by the
-// server itself with nothing written, and the answer carries the work item that was added and the issue it
-// moved, so nothing is read back afterwards.
 func (c *Client) createWorkItem(ctx context.Context, spec *schemas, id string, written workItemCreateInput, named *string, requested []requestedField) (*render.Node, *diag.Fault) {
 	at, workType, attributes, fault := c.resolveWorkItemSettings(ctx, spec, id, named, written.attributes, nil)
 	if fault != nil {
@@ -105,9 +79,6 @@ func (c *Client) createWorkItem(ctx context.Context, spec *schemas, id string, w
 	}, filed.verify, writeResultNode(requested))
 }
 
-// resolveWorkItemSettings is the type of work and the attributes the call named, resolved against the settings of the
-// project the issue is filed in, beside the issue the write is then addressed to: the readable id that read
-// gave, and the argument the caller wrote where nothing was read at all.
 func (c *Client) resolveWorkItemSettings(ctx context.Context, spec *schemas, id string, named *string, set []namedValue, cleared []string) (string, *resolvedWorkType, []resolvedAttribute, *diag.Fault) {
 	withAttributes := len(set) > 0 || len(cleared) > 0
 	if named == nil && !withAttributes {
@@ -132,13 +103,6 @@ func (c *Client) resolveWorkItemSettings(ctx context.Context, spec *schemas, id 
 	return readable.String(), workType, attributes, nil
 }
 
-// UpdateWorkItem is the call that writes the parts given into the work item of that id on the issue of that
-// readable id: how long it is where spent names a length, the type of work where workType names one, the day
-// where day names one, the text where text names one, the attributes set as Name=value, and an empty value into
-// each part or attribute cleared names. A part
-// the call does not give is left as the work item holds it. It prints the work item as the server kept it, with
-// the fields of expression, or with them added to WorkItemWriteFields when it starts with +; nil is the caller
-// leaning on the default whole.
 func UpdateWorkItem(id, item string, spent, day, text, workType *string, attributes, cleared []string, expression *string) (Call, *diag.Fault) {
 	id, fault := parseIssueID(id)
 	if fault != nil {
@@ -162,11 +126,6 @@ func UpdateWorkItem(id, item string, spent, day, text, workType *string, attribu
 	}, nil
 }
 
-// The pair is not read before the write: YouTrack checks itself that the work item hangs from the issue in the
-// path, and answers 404 for a work item of somebody else's issue, for one the instance has none of and for an
-// issue the token may not see alike, with nothing written. So the only read there is stands here for the
-// same reason as in a creation — a type of work and an attribute are taken by id, and the id comes from the
-// project.
 func (c *Client) updateWorkItem(ctx context.Context, spec *schemas, id string, at childID, written workItemUpdateInput, named *string, requested []requestedField) (*render.Node, *diag.Fault) {
 	issue, workType, attributes, fault := c.resolveWorkItemSettings(ctx, spec, id, named, written.attributes, written.clearsAttributes)
 	if fault != nil {
@@ -182,8 +141,6 @@ func (c *Client) updateWorkItem(ctx context.Context, spec *schemas, id string, a
 	}, changed.verify, writeResultNode(requested))
 }
 
-// DeleteWorkItem is the call that takes the work item of that id away from the issue of that readable id for
-// good, and prints the pair it was known by.
 func DeleteWorkItem(id, item string) (Call, *diag.Fault) {
 	id, fault := parseIssueID(id)
 	if fault != nil {
@@ -199,8 +156,6 @@ func DeleteWorkItem(id, item string) (Call, *diag.Fault) {
 	}, nil
 }
 
-// What the read before the removal asks for, and the whole of what a removal prints: a work item carries no
-// readable id of its own, so the pair it is addressed by is its identity.
 func removedWorkItemFields() []requestedField {
 	return []requestedField{
 		{name: idKey},
@@ -208,10 +163,6 @@ func removedWorkItemFields() []requestedField {
 	}
 }
 
-// The work item is read before it is destroyed, unlike a comment: the removal answers 200 with an empty
-// body, so what is printed has to be read while the work item is still there, and that read is what turns a
-// work item the issue has none of into a not_found before anything is destroyed. The server checks the pair
-// itself, on the read as on the removal, so nothing here holds the work item against the issue.
 func (c *Client) deleteWorkItem(ctx context.Context, spec *schemas, id string, at childID) (*render.Node, *diag.Fault) {
 	requested := removedWorkItemFields()
 	a, fault := c.request(ctx, spec, workItemSchema, requested, func(ctx context.Context, fields string) (*http.Response, error) {
@@ -236,9 +187,6 @@ func (c *Client) deleteWorkItem(ctx context.Context, spec *schemas, id string, a
 	return objectNode(a, requested, a.objects[0], nil)
 }
 
-// The issue the work item hangs from, as the read gave it and held to the form ytrack sends before the removal
-// goes out: what arrived becomes a path segment, and "..", a slash or an empty string would reach an endpoint
-// other than the work item that was read.
 func owningIssueID(a decodedResponse) (readableID, *diag.Fault) {
 	issue, isObject := a.objects[0][issueOwner.String()].(map[string]any)
 	if !isObject {
@@ -247,8 +195,6 @@ func owningIssueID(a decodedResponse) (readableID, *diag.Fault) {
 	return readableIDAt(a, issue, issueOwner, "a removal")
 }
 
-// The id the work item goes by, held to the same form the argument was held to: it is the other path segment of
-// the removal, and an empty one there would reach the work items of the issue whole.
 func workItemID(a decodedResponse) (childID, *diag.Fault) {
 	id, isText := a.objects[0][idKey].(string)
 	if !isText {
@@ -263,8 +209,6 @@ func workItemID(a decodedResponse) (childID, *diag.Fault) {
 	return known, nil
 }
 
-// The types of work the project of an issue writes work items against, as the read before a write found them,
-// beside the code of that project, which is what a refusal names the types were held against.
 type projectWorkItemTypes struct {
 	project    string
 	types      []workItemType
@@ -272,16 +216,11 @@ type projectWorkItemTypes struct {
 	response   decodedResponse
 }
 
-// One type of work: the id the body of a write carries and the name a caller addresses it by.
 type workItemType struct {
 	id   string
 	name string
 }
 
-// What the read before a write asks of the issue: the readable id the write is addressed by, and the types of
-// work of the project it is filed in. The set comes from the project rather than from the global catalogue —
-// the instance has seventeen types and DEV writes against fifteen of them — and reading it off the issue costs
-// the one request that settles the id as well.
 func workItemTypesFields(withAttributes bool) []requestedField {
 	settings := []requestedField{{name: workItemTypesKey, children: []requestedField{{name: idKey}, {name: nameKey}}}}
 	if withAttributes {
@@ -373,9 +312,6 @@ func timeTrackingSettingsOf(a decodedResponse, project map[string]any) (map[stri
 
 const brokenWorkItemType = "the id or the name of a type of work of the project is not text"
 
-// resolve is the type of work a name answers to, by the rule every name a caller writes is resolved by:
-// letter case aside, and, where several answer, the one whose name was written byte for byte, so the name a
-// type is printed under stays the address.
 func (p projectWorkItemTypes) resolve(name string) (resolvedWorkType, *diag.Fault) {
 	catalogue := p.catalogue()
 	at, found := matchName(name, catalogue)
@@ -385,7 +321,6 @@ func (p projectWorkItemTypes) resolve(name string) (resolvedWorkType, *diag.Faul
 	return resolvedWorkType{id: p.types[at].id, name: name}, nil
 }
 
-// A type of work is addressed by the one name it carries: a project translates none of them.
 func (p projectWorkItemTypes) catalogue() []fieldInfo {
 	catalogue := make([]fieldInfo, 0, len(p.types))
 	for _, found := range p.types {
@@ -394,9 +329,6 @@ func (p projectWorkItemTypes) catalogue() []fieldInfo {
 	return catalogue
 }
 
-// A name that answers to no one type is handed back with the names nearest it, which are every name the project
-// has where none is near. The request the refusal names is the read of the issue: it is the only one that went
-// out, and nothing is written.
 func (p projectWorkItemTypes) fault(name string, catalogue []fieldInfo) *diag.Fault {
 	entry := render.NewMap(
 		render.Pair{Key: typeKey, Value: render.NewString(name)},
@@ -406,9 +338,6 @@ func (p projectWorkItemTypes) fault(name string, catalogue []fieldInfo) *diag.Fa
 		"unknown", message, []*render.Node{entry})
 }
 
-// The work items of an issue arrive under a path of their own rather than as a member of the issue, so $top
-// works on them and the count is read off a second pass over ids alone: YouTrack keeps no counter of them, and
-// the subresource cuts a page down to 42 where no $top goes out at all.
 func (c *Client) listWorkItems(ctx context.Context, spec *schemas, id string, requested []requestedField, page Page) (*render.Node, *diag.Fault) {
 	ask := func(ctx context.Context, fields string, w window) (*http.Response, error) {
 		return c.apiGetIssueWorkItems(ctx, id, fields, w)
@@ -417,9 +346,6 @@ func (c *Client) listWorkItems(ctx context.Context, spec *schemas, id string, re
 	return selection.fetch(ctx)
 }
 
-// workItemRequestFields is what goes out for a record: the caller's expression with the minutes filled in under
-// every duration they asked for, since a bare duration answers with its type and nothing else, and with the
-// blocks of any issue they reached through it composed the way a show of one composes them.
 func workItemRequestFields(spec *schemas, requested []requestedField) []requestedField {
 	asked := cloneFields(requested)
 	fillInDurations(spec, workItemSchema, asked)
@@ -427,8 +353,6 @@ func workItemRequestFields(spec *schemas, requested []requestedField) []requeste
 	return asked
 }
 
-// workItemFields is an expression of a command that prints work items, held to what one may be asked for. A nil
-// expression is the caller leaning on the default whole, and then nothing in the tree is theirs to answer for.
 func workItemFields(spec *schemas, expression *string, defaults string) ([]requestedField, *diag.Fault) {
 	written := defaults
 	requested, fault := parseDefault(defaults, false)

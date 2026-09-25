@@ -10,9 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A login of no characters names no user YouTrack keeps, so the flag is refused where it is written empty,
-// before anything is sent; the verbs that name no one tag have no such flag at all, since there is nothing for
-// it to settle.
 func TestTagRefusesAnOwnerOfNoLogin(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -36,16 +33,12 @@ func TestTagRefusesAnOwnerOfNoLogin(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The owner settles a name more than one tag answers to, and it settles it before the byte for byte rule
-// does: Case names two tags, and the login leaves one of them standing whichever way it was spelled. The login
-// is folded the way the name is, since that is how the server keeps logins. The catalogue was read once either
-// way, so the flag costs nothing on the wire.
 func TestTagDeleteNarrowsTheNameByTheOwnerOfTheTag(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -59,8 +52,6 @@ func TestTagDeleteNarrowsTheNameByTheOwnerOfTheTag(t *testing.T) {
 		{name: "a login in another letter case", written: "amb", owner: "ADMIN", id: "10-22"},
 		{name: "a name neither of the two is spelled as", written: "Case", owner: "admin", id: "10-20"},
 		{name: "the other owner of that name", written: "Case", owner: "dev.limited", id: "10-19"},
-		// The name is spelled exactly as the tag of the other owner: the login wins, since it settles the
-		// candidates before the name that stands byte for byte is looked for among them.
 		{name: "a name spelled as the other owner's tag", written: "case", owner: "admin", id: "10-20"},
 		{name: "the same the other way round", written: "CASE", owner: "dev.limited", id: "10-19"},
 		{name: "a name one tag carries, of its owner", written: "ready", owner: "admin", id: "10-5"},
@@ -83,9 +74,6 @@ func TestTagDeleteNarrowsTheNameByTheOwnerOfTheTag(t *testing.T) {
 	}
 }
 
-// A login none of the tags of that name belongs to leaves nothing to destroy, and the refusal carries the
-// candidates as they stood before the flag: the name resolved, so what the caller has to correct is the login
-// beside it. Nothing was destroyed, and only the catalogue was read.
 func TestTagDeleteRefusesANameNoTagOfThatOwnerCarries(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -128,15 +116,12 @@ func TestTagDeleteRefusesANameNoTagOfThatOwnerCarries(t *testing.T) {
 					}}},
 				},
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 		})
 	}
 }
 
-// The three verbs share one resolver, so the flag settles the name for the two that hang a tag and take it
-// off as well, and it leaves the journal of either exactly as it was: the owner is read, the catalogue after
-// it, and the write goes to the id the login settled on.
 func TestTagAddAndRemoveNarrowTheNameByTheOwnerOfTheTag(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -178,9 +163,6 @@ func TestTagAddAndRemoveNarrowTheNameByTheOwnerOfTheTag(t *testing.T) {
 	}
 }
 
-// The scenario of a name shared by two tags, with the flag: the limited token owns a tag, the admin shares one of the very same
-// name with the group it stands in, and the name that resolved to neither resolves again once the owner is
-// named. What goes is the limited token's own, and the admin's stands in their list afterwards.
 func TestTagDeleteDestroysTheTagOfTheNamedOwnerOnTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -191,8 +173,8 @@ func TestTagDeleteDestroysTheTagOfTheNamedOwnerOnTheDevInstance(t *testing.T) {
 	require.Equal(t, 0, own.code, "stderr: %s", own.stderr)
 	t.Cleanup(func() { removeTagIfPresent(t, limited, name, "dev.limited") })
 
-	shared := runWith(t, dev.env(), "tag", "create", "--name", name, "--visible-for", everyoneRegistered)
-	require.Equal(t, 0, shared.code, "stderr: %s", shared.stderr)
+	ambiguousForTheLimited := runWith(t, dev.env(), "tag", "create", "--name", name, "--visible-for", everyoneRegistered)
+	require.Equal(t, 0, ambiguousForTheLimited.code, "stderr: %s", ambiguousForTheLimited.stderr)
 	t.Cleanup(func() { removeTag(t, dev.env(), name, "admin") })
 	before := len(dev.requests())
 
@@ -204,9 +186,6 @@ func TestTagDeleteDestroysTheTagOfTheNamedOwnerOnTheDevInstance(t *testing.T) {
 	assert.True(t, tagIsListed(t, dev, name), "the admin's tag went with the one of the token that named it")
 }
 
-// removeTagIfPresent is the cleanup of a scenario whose own body destroys the tag: it runs where the body
-// never got that far, and a tag already gone is the resolver answering unknown_name, which is what was wanted.
-// The owner is named because the name is one two tokens carry until then.
 func removeTagIfPresent(t *testing.T, env []string, name, owner string) {
 	t.Helper()
 	got := runInContext(t, context.Background(), env, "tag", "delete", "--name", name, "--owned-by", owner)

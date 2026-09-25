@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// statusFromEnv is the document auth status prints when env holds both the address and the token.
 func statusFromEnv(address, login, fullName string) string {
 	return status(address, "environment", login, fullName)
 }
@@ -27,8 +26,8 @@ func TestAuthRefusesACallThatDoesNotAssemble(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "the group with no command", argv: []string{"auth"}},
-		{name: "a command the group does not have", argv: []string{"auth", "bogus"}},
+		{name: "the command with no subcommand", argv: []string{"auth"}},
+		{name: "a subcommand the command does not have", argv: []string{"auth", "bogus"}},
 		{name: "an argument to status", argv: []string{"auth", "status", "extra"}},
 	}
 	for _, tc := range tests {
@@ -38,7 +37,7 @@ func TestAuthRefusesACallThatDoesNotAssemble(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, "bad_usage", requireRefusal(t, got).code)
+			assert.Equal(t, "bad_usage", requireFault(t, got).code)
 			assertNoToken(t, got, token)
 		})
 	}
@@ -65,15 +64,13 @@ func TestNoCommandTakesTheAddressOrTheTokenAsAFlag(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, "bad_usage", requireRefusal(t, got).code)
+			assert.Equal(t, "bad_usage", requireFault(t, got).code)
 			assertNoToken(t, got, token)
 		})
 	}
 }
 
-// A command listed without a word about it reads as one left half-made, so the caller goes to the source for what
-// the list was there to say.
-func TestAuthHelpSaysWhatEveryCommandOfTheGroupDoes(t *testing.T) {
+func TestAuthHelpSaysWhatEverySubcommandDoes(t *testing.T) {
 	t.Parallel()
 	server := serveNothing(t)
 
@@ -103,9 +100,8 @@ func TestAuthStatusHelpPrintsNoToken(t *testing.T) {
 	}
 }
 
-func TestAuthStatusPrintsTheAddressTheOriginsAndTheUserFromEnv(t *testing.T) {
+func TestAuthStatusPrintsTheAddressTheLoginSourcesAndTheUserFromEnv(t *testing.T) {
 	t.Parallel()
-	// The keys in an order other than asked: the server keeps an order of its own.
 	server := serve(t, respondWith(http.StatusOK, `{"fullName":"Administrator","$type":"Me","login":"admin"}`))
 
 	got := runWith(t, server.env(), "auth", "status")
@@ -124,14 +120,12 @@ func TestAuthStatusPrintsTheAddressTheOriginsAndTheUserFromEnv(t *testing.T) {
 func TestAuthStatusPrintsTheAddressInOneSpelling(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		// The address and what is printed of it are formats of the port the server listens on.
+		name    string
 		address string
 		printed string
 		path    string
 	}{
 		{name: "a scheme in capitals and a slash at the end", address: "HTTP://127.0.0.1:%s/", printed: "http://127.0.0.1:%s", path: "/api/users/me"},
-		// An IPv4-mapped address reaches the server's IPv4 listener and has letters to write in capitals.
 		{name: "a host in capitals", address: "http://[::FFFF:127.0.0.1]:%s", printed: "http://[::ffff:127.0.0.1]:%s", path: "/api/users/me"},
 		{name: "slashes at the end of a path", address: "http://127.0.0.1:%s/ctx//", printed: "http://127.0.0.1:%s/ctx", path: "/ctx/api/users/me"},
 		{name: "escaped slashes in a path that ends in slashes", address: "http://127.0.0.1:%s/a%%2Fb%%2F//", printed: "http://127.0.0.1:%s/a%%2Fb%%2F", path: "/a%2Fb%2F/api/users/me"},
@@ -182,7 +176,7 @@ func TestAuthStatusRefusesAUserWithoutTheFullName(t *testing.T) {
 			{"missing", []any{missingEntry("fullName", "Me")}},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assertNoToken(t, got, token)
 	assert.Len(t, server.requests(), 1)
 }

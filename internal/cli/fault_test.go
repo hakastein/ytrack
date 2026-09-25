@@ -21,15 +21,11 @@ import (
 	"github.com/hakastein/ytrack/internal/cli"
 )
 
-// A refusal names the request project show sends, with its fields= expression as it was written.
 func showRequest(address, code string) string {
 	return "GET " + address + "/api/admin/projects/" + code + "?fields=" + defaultProjectFields
 }
 
-// The request a refusal names is the one that was sent: an agent that sends the printed address again reaches
-// the same endpoint and asks the same question. user show and user list are where the caller's own text reaches
-// the path and the query, so they are where an address unescaped whole stops being the request it names.
-func TestARefusalNamesTheRequestThatWasSent(t *testing.T) {
+func TestAFaultNamesTheRequestThatWasSent(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name   string
@@ -65,7 +61,7 @@ func TestARefusalNamesTheRequestThatWasSent(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			require.Equal(t, detail{"request", "GET " + server.url + tc.target}, found.details[0])
 			printed, err := url.Parse(server.url + tc.target)
 			require.NoError(t, err)
@@ -80,20 +76,19 @@ func TestARefusalNamesTheRequestThatWasSent(t *testing.T) {
 func TestProjectShowRefusesByTheStatusOfTheAnswer(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name   string
-		status int
-		header http.Header
-		body   string
-		code   string
-		// What follows the request.
-		details []detail
+		name                string
+		status              int
+		header              http.Header
+		body                string
+		code                string
+		detailsAfterRequest []detail
 	}{
 		{
 			name:   "203 with the project",
 			status: http.StatusNonAuthoritativeInfo,
 			body:   projectDEV,
 			code:   "upstream_failed",
-			details: []detail{
+			detailsAfterRequest: []detail{
 				{"upstream_status", 203},
 				{"upstream_body", projectDEV},
 			},
@@ -104,7 +99,7 @@ func TestProjectShowRefusesByTheStatusOfTheAnswer(t *testing.T) {
 			header: http.Header{"Location": {"https://sso.example/login"}},
 			body:   `{"location":"https://sso.example/login"}`,
 			code:   "upstream_failed",
-			details: []detail{
+			detailsAfterRequest: []detail{
 				{"upstream_status", 302},
 				{"upstream_body", `{"location":"https://sso.example/login"}`},
 			},
@@ -114,7 +109,7 @@ func TestProjectShowRefusesByTheStatusOfTheAnswer(t *testing.T) {
 			status: http.StatusBadRequest,
 			body:   `{"error":"bad_request","error_description":"Query string has invalid syntax"}`,
 			code:   "rejected",
-			details: []detail{
+			detailsAfterRequest: []detail{
 				{"upstream_status", 400},
 				{"upstream_error", "bad_request"},
 				{"upstream_message", "Query string has invalid syntax"},
@@ -125,7 +120,7 @@ func TestProjectShowRefusesByTheStatusOfTheAnswer(t *testing.T) {
 			status: http.StatusForbidden,
 			body:   `{"error":"Forbidden","error_description":"Access to the project is denied"}`,
 			code:   "denied",
-			details: []detail{
+			detailsAfterRequest: []detail{
 				{"upstream_status", 403},
 				{"upstream_error", "Forbidden"},
 				{"upstream_message", "Access to the project is denied"},
@@ -137,7 +132,7 @@ func TestProjectShowRefusesByTheStatusOfTheAnswer(t *testing.T) {
 			status: http.StatusNotFound,
 			body:   `{"error":"Not Found","reason":"project archived"}`,
 			code:   "not_found",
-			details: []detail{
+			detailsAfterRequest: []detail{
 				{"upstream_status", 404},
 				{"upstream_error", "Not Found"},
 				{"upstream_body", `{"error":"Not Found","reason":"project archived"}`},
@@ -149,8 +144,7 @@ func TestProjectShowRefusesByTheStatusOfTheAnswer(t *testing.T) {
 			header: http.Header{"Retry-After": {"1"}},
 			body:   `{"error":"Conflict","error_description":"The project was changed"}`,
 			code:   "upstream_failed",
-			// A status ADR-0005 does not name carries its body whole, whatever its shape.
-			details: []detail{
+			detailsAfterRequest: []detail{
 				{"upstream_status", 409},
 				{"upstream_error", "Conflict"},
 				{"upstream_message", "The project was changed"},
@@ -163,7 +157,7 @@ func TestProjectShowRefusesByTheStatusOfTheAnswer(t *testing.T) {
 			header: http.Header{"Retry-After": {"1"}},
 			body:   `{"error":"Too Many Requests","error_description":"Slow down"}`,
 			code:   "upstream_failed",
-			details: []detail{
+			detailsAfterRequest: []detail{
 				{"upstream_status", 429},
 				{"upstream_error", "Too Many Requests"},
 				{"upstream_message", "Slow down"},
@@ -175,7 +169,7 @@ func TestProjectShowRefusesByTheStatusOfTheAnswer(t *testing.T) {
 			status: http.StatusInternalServerError,
 			body:   `{"error":"server_error","error_description":"java.lang.NullPointerException","error_developer_message":"at jetbrains.gap"}`,
 			code:   "upstream_failed",
-			details: []detail{
+			detailsAfterRequest: []detail{
 				{"upstream_status", 500},
 				{"upstream_error", "server_error"},
 				{"upstream_message", "java.lang.NullPointerException"},
@@ -186,7 +180,7 @@ func TestProjectShowRefusesByTheStatusOfTheAnswer(t *testing.T) {
 			name:   "503 with no body",
 			status: http.StatusServiceUnavailable,
 			code:   "upstream_failed",
-			details: []detail{
+			detailsAfterRequest: []detail{
 				{"upstream_status", 503},
 				{"upstream_body", ""},
 			},
@@ -204,9 +198,9 @@ func TestProjectShowRefusesByTheStatusOfTheAnswer(t *testing.T) {
 
 			want := faultDocument{
 				code:    tc.code,
-				details: slices.Concat([]detail{{"request", showRequest(server.url, "DEV")}}, tc.details),
+				details: slices.Concat([]detail{{"request", showRequest(server.url, "DEV")}}, tc.detailsAfterRequest),
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Len(t, server.requests(), 1)
 		})
 	}
@@ -227,7 +221,7 @@ func TestProjectShowRefusesACodeTheDevInstanceDoesNotHave(t *testing.T) {
 			{"upstream_message", "Entity with id NOPE not found"},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Len(t, dev.requests(), 1)
 }
 
@@ -247,7 +241,7 @@ func TestProjectShowRefusesATokenTheDevInstanceDoesNotKnow(t *testing.T) {
 			authFromEnv(),
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assertNoToken(t, got, bogusToken)
 	assert.Len(t, dev.requests(), 1)
 }
@@ -267,7 +261,7 @@ func TestProjectShowRefusesAProjectHiddenFromTheLimitedUser(t *testing.T) {
 			{"upstream_message", "Entity with id DEV not found"},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Len(t, dev.requests(), 1)
 }
 
@@ -348,7 +342,7 @@ func TestProjectShowRefusesAnAnswerOfAnotherShape(t *testing.T) {
 					{"upstream_body", tc.body},
 				},
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Len(t, server.requests(), 1)
 		})
 	}
@@ -357,7 +351,6 @@ func TestProjectShowRefusesAnAnswerOfAnotherShape(t *testing.T) {
 func TestProjectShowDoesNotFollowARedirect(t *testing.T) {
 	t.Parallel()
 	server := serve(t, func(w http.ResponseWriter, r *http.Request) {
-		// Followed, the redirect would print DEV as if nothing had happened.
 		if r.URL.Path == "/moved" {
 			respondWith(http.StatusOK, projectDEV)(w, r)
 			return
@@ -376,24 +369,24 @@ func TestProjectShowDoesNotFollowARedirect(t *testing.T) {
 			{"upstream_body", ""},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Len(t, server.requests(), 1)
 }
 
 func TestProjectShowRefusesTheWebPageTheDevInstanceServesOutsideTheAPI(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
-	// Under a path it does not route, YouTrack answers 200 with the page of its web application.
-	address := dev.url + "/youtrack"
+	addressOutsideTheAPI := dev.url + "/youtrack"
 
-	got := runWith(t, []string{"YTRACK_URL=" + address, "YTRACK_TOKEN=" + dev.token}, "project", "show", "DEV")
+	got := runWith(t, []string{"YTRACK_URL=" + addressOutsideTheAPI, "YTRACK_TOKEN=" + dev.token},
+		"project", "show", "DEV")
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "upstream_invalid", found.code)
 	require.Len(t, found.details, 3, "details: %v", found.details)
-	assert.Equal(t, []detail{{"request", showRequest(address, "DEV")}, {"upstream_status", 200}}, found.details[:2])
+	assert.Equal(t, []detail{{"request", showRequest(addressOutsideTheAPI, "DEV")}, {"upstream_status", 200}},
+		found.details[:2])
 	assert.Equal(t, "upstream_body", found.details[2].key)
-	// The page belongs to the instance, so it is held to being HTML rather than to its bytes.
 	assert.Contains(t, found.details[2].value, "<html")
 	assert.Len(t, dev.requests(), 1)
 }
@@ -414,18 +407,16 @@ func TestProjectShowRefusesAnAnswerCutShort(t *testing.T) {
 			{"upstream_status", 200},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 }
 
 func TestProjectShowRefusesWhenNothingListens(t *testing.T) {
 	t.Parallel()
-	// Nothing can listen on port 0, while a port a closed server frees can go to a server of another test.
 	const nowhere = "http://127.0.0.1:0"
 
 	got := runWith(t, []string{"YTRACK_URL=" + nowhere, "YTRACK_TOKEN=" + token}, "project", "show", "DEV")
 
-	// The message is the kernel's word for the failed connection, and that word differs between kernels.
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "upstream_failed", found.code)
 	assert.Equal(t, []detail{{"request", showRequest(nowhere, "DEV")}}, found.details)
 	assert.NotContains(t, got.stderr, token)
@@ -439,23 +430,19 @@ func TestProjectShowDoesNotOfferHTTP2ToAServerThatSpeaksIt(t *testing.T) {
 		assert.Fail(t, "a request reached the server", "%s %s", r.Proto, r.URL)
 	}))
 	server.EnableHTTP2 = true
-	// ytrack trusts no certificate a test can make, so the protocols are read off the handshake, where they are
-	// offered before the certificate is refused.
 	server.TLS = &tls.Config{GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		offered = append(offered, hello.SupportedProtos)
 		return nil, nil
 	}}
-	// The server logs every handshake a client breaks off.
 	server.Config.ErrorLog = log.New(io.Discard, "", 0)
 	server.StartTLS()
 	t.Cleanup(server.Close)
 
 	got := runWith(t, []string{"YTRACK_URL=" + server.URL, "YTRACK_TOKEN=" + token}, "project", "show", "DEV")
 
-	// The words for a certificate refused differ between the verifiers of operating systems.
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "upstream_failed", found.code)
 	assert.Equal(t, []detail{{"request", showRequest(server.URL, "DEV")}}, found.details)
 	mu.Lock()
@@ -480,5 +467,5 @@ func TestProjectShowRefusesWhenNoResponseComesInTime(t *testing.T) {
 		code:    "upstream_failed",
 		details: []detail{{"request", showRequest(server.url, "DEV")}},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 }

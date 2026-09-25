@@ -12,26 +12,21 @@ import (
 	"github.com/hakastein/ytrack/internal/diag"
 )
 
-// The one thing ytrack asks stdin is whether it is a terminal; a pipe, a file or /dev/null is refused here, before a
-// byte of it is read, so a token cannot be given by piping it in.
 const notATerminal = "auth login asks for the token on a terminal and stdin is not one, so nothing was read from it: " +
 	"where there is no terminal the address and the token are given in YTRACK_URL and YTRACK_TOKEN, or by a login saved on a terminal"
 
 const (
-	addressPrompt = "YouTrack URL: "
-	tokenPrompt   = "Token: "
+	addressPrompt  = "YouTrack URL: "
+	tokenPrompt    = "Token: "
+	unechoedReturn = "\n"
 
 	dialogueStopped = "auth login stopped before it had a token to check, and nothing was kept"
 )
 
-// console is the terminal the dialogue is held on: the file it reads the answers from and the file it prompts on. A
-// prompt belongs on the terminal that was answered, not on stdout, which carries one document, or on stderr, which
-// carries the stream of refusals.
 type console struct {
 	in, out *os.File
 }
 
-// Close lets go of the file the prompts went to when it was opened for them; stdin belongs to the caller.
 func (c console) Close() {
 	if c.out != c.in {
 		_ = c.out.Close()
@@ -39,7 +34,6 @@ func (c console) Close() {
 }
 
 func terminal(stdin *os.File) (console, *diag.Fault) {
-	// A nil file answers with a descriptor no call owns, so a caller who handed none is refused rather than crashing.
 	if !term.IsTerminal(int(stdin.Fd())) {
 		return console{}, &diag.Fault{Code: diag.BadUsage, Message: notATerminal}
 	}
@@ -50,20 +44,16 @@ func terminal(stdin *os.File) (console, *diag.Fault) {
 	return console{in: stdin, out: out}, nil
 }
 
-// promptAddress is the line typed after the first prompt, which the terminal echoes as any other.
 func promptAddress(ctx context.Context, tty console) (string, *diag.Fault) {
 	if fault := prompt(tty.out, addressPrompt); fault != nil {
 		return "", fault
 	}
-	return readLineContext(ctx, func() ([]byte, error) { return readLine(tty.in) })
+	return readLineContext(ctx, func() ([]byte, error) { return readLineWithoutReadAhead(tty.in) })
 }
 
-// promptToken is the line after the second prompt, which the terminal does not echo. ReadPassword takes the echo
-// off after the prompt is written and puts it back on its way out; the state taken before it is what puts the echo
-// back when the context is done instead and ReadPassword is left waiting.
 func promptToken(ctx context.Context, tty console) (string, *diag.Fault) {
 	descriptor := int(tty.in.Fd())
-	state, err := term.GetState(descriptor)
+	echoing, err := term.GetState(descriptor)
 	if err != nil {
 		return "", unreadable(err)
 	}
@@ -72,11 +62,10 @@ func promptToken(ctx context.Context, tty console) (string, *diag.Fault) {
 	}
 	secret, fault := readLineContext(ctx, func() ([]byte, error) { return term.ReadPassword(descriptor) })
 	if fault != nil {
-		_ = term.Restore(descriptor, state)
+		_ = term.Restore(descriptor, echoing)
 	}
-	// The return key was not echoed either, so the line the prompt stands on is ended here.
-	if said := prompt(tty.out, "\n"); fault == nil {
-		fault = said
+	if returnFault := prompt(tty.out, unechoedReturn); fault == nil {
+		fault = returnFault
 	}
 	if fault != nil {
 		return "", fault
@@ -89,8 +78,6 @@ type readResult struct {
 	err  error
 }
 
-// A read of a terminal returns for a line and for nothing else — not for a context that was cancelled — so it waits
-// on a goroutine of its own, which is what lets one interrupt end auth login rather than leave it asking.
 func readLineContext(ctx context.Context, read func() ([]byte, error)) (string, *diag.Fault) {
 	answered := make(chan readResult, 1)
 	go func() {
@@ -101,7 +88,6 @@ func readLineContext(ctx context.Context, read func() ([]byte, error)) (string, 
 	case <-ctx.Done():
 		return "", &diag.Fault{Code: diag.UpstreamFailed, Message: dialogueStopped}
 	case got := <-answered:
-		// A terminal at its end has said all it is going to, and what was typed before that end stands as the line.
 		if got.err != nil && !errors.Is(got.err, io.EOF) {
 			return "", unreadable(got.err)
 		}
@@ -109,9 +95,7 @@ func readLineContext(ctx context.Context, read func() ([]byte, error)) (string, 
 	}
 }
 
-// The line is read a byte at a time so that nothing typed past it is taken out of the terminal: what follows the
-// return key belongs to whatever runs next, not to ytrack.
-func readLine(tty *os.File) ([]byte, error) {
+func readLineWithoutReadAhead(tty *os.File) ([]byte, error) {
 	var line []byte
 	var read [1]byte
 	for {
@@ -136,7 +120,6 @@ func prompt(screen *os.File, words string) *diag.Fault {
 	return nil
 }
 
-// ADR-0005 has no code for a terminal that broke, and upstream_failed is where what it does not name goes.
 func unwritable(err error) *diag.Fault {
 	return &diag.Fault{Code: diag.UpstreamFailed, Message: "the terminal cannot be written to: " + err.Error()}
 }

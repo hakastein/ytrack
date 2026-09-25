@@ -1,7 +1,6 @@
 .PHONY: go build dist openapi generate ytapi contract
 
 YTRACK_DEV_STATE ?= $(CURDIR)/dev/.state
-# Календарная версия релиза, v<ГГ>.<М>.<Д>.<номер запуска CI>. Пустая оставляет версию, которую ставит go build.
 VERSION ?=
 
 go:

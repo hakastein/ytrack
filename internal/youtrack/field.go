@@ -11,19 +11,12 @@ import (
 	"github.com/hakastein/ytrack/internal/render"
 )
 
-// What a field is called, what kind of value it holds and whether it may be left empty. The values it allows
-// belong to one field, not to a page of them, so no bundle is asked for here.
 const FieldListFields = "field(name,localizedName,fieldType(valueType,isMultiValue)),canBeEmpty"
 
-// The right a token needs on a project to be sent its custom fields at all.
 const projectRead = "jetbrains.jetpass.project-read"
 
-// ordinal is where the project was told to put the field. The array itself comes in the order of the ids the
-// attachments were given, which groups the fields by class and is nobody's configured order.
-const ordinal = "ordinal"
+const ordinalKey = "ordinal"
 
-// ListFields is the call for the custom fields of a project with the fields of expression, or with them added to
-// FieldListFields when it starts with +.
 func ListFields(code, expression string) (Call, *diag.Fault) {
 	code, fault := parseProjectCode(code)
 	if fault != nil {
@@ -39,9 +32,6 @@ func ListFields(code, expression string) (Call, *diag.Fault) {
 	}, nil
 }
 
-// ShowField is the call for the one custom field of a project the caller named, with the fields of expression,
-// or with them added to the default of the field's own type when it starts with +. A nil expression is the
-// caller who wrote no --fields at all, and what they asked for is that default and nothing besides.
 func ShowField(code, name string, expression *string) (Call, *diag.Fault) {
 	code, fault := parseProjectCode(code)
 	if fault != nil {
@@ -50,12 +40,8 @@ func ShowField(code, name string, expression *string) (Call, *diag.Fault) {
 	if name == "" {
 		return nil, &diag.Fault{Code: diag.BadUsage, Message: "the name of a custom field is empty"}
 	}
-	// Which default the expression is read against is settled only once the field is resolved, so here it is
-	// held to the grammar alone and a call that cannot be sent is still refused before any request.
-	if expression != nil {
-		if _, fault := parseFields(*expression, FieldListFields); fault != nil {
-			return nil, fault
-		}
+	if fault := checkFieldsSyntax(expression); fault != nil {
+		return nil, fault
 	}
 	spec := loadSchemas()
 	return func(ctx context.Context, c *Client) (*render.Node, *diag.Fault) {
@@ -63,13 +49,19 @@ func ShowField(code, name string, expression *string) (Call, *diag.Fault) {
 	}, nil
 }
 
-// The metadata kept on disk may be behind the server, so it is asked first and refuses nothing: where it turns
-// out to be behind, the metadata is read again and the name resolved against that (ADR-0002).
+func checkFieldsSyntax(expression *string) *diag.Fault {
+	if expression == nil {
+		return nil
+	}
+	_, fault := parseFields(*expression, FieldListFields)
+	return fault
+}
+
 func (c *Client) showField(ctx context.Context, spec *schemas, code, name string, expression *string) (*render.Node, *diag.Fault) {
 	target := metadataTarget(code)
 	if cached, hit := c.cache.load(target); hit {
-		node, fault, behind := c.showFieldFrom(ctx, spec, code, name, expression, fromDisk(cached))
-		if !behind {
+		node, fault, cacheStale := c.showFieldFrom(ctx, spec, code, name, expression, fromDisk(cached))
+		if !cacheStale {
 			return node, fault
 		}
 	}
@@ -91,10 +83,6 @@ func (c *Client) showField(ctx context.Context, spec *schemas, code, name string
 	return node, fault
 }
 
-// A metadataSource is the metadata one showing of a field is built from, and what a step that does not carry through
-// means for it. Metadata off the disk may be older than the server, so such a step prints nothing and sends the
-// call back for the metadata; metadata the server has just sent is the last word, so the same step refuses over
-// the answer it arrived in (ADR-0002).
 type metadataSource struct {
 	fields   []customField
 	response *decodedResponse
@@ -119,10 +107,6 @@ func (s metadataSource) handleStale(reject func(decodedResponse) *diag.Fault) (*
 	return nil, reject(*s.response), false
 }
 
-// showFieldFrom is the whole of field show over one set of metadata: the name resolved, the id held to the form
-// a path takes, what to print settled against what the field holds, the field asked for by that id and the
-// answer confirmed against the naming the name resolved to. The steps are the same whichever metadata they run
-// over, and the source alone says what a step that does not carry through comes to.
 func (c *Client) showFieldFrom(ctx context.Context, spec *schemas, code, name string, expression *string, from metadataSource) (*render.Node, *diag.Fault, bool) {
 	found, ok := lookUp(name, from.fields)
 	if !ok {
@@ -133,7 +117,6 @@ func (c *Client) showFieldFrom(ctx context.Context, spec *schemas, code, name st
 	}
 	requested, modelled, fault := fieldsToPrint(expression, found.info)
 	if fault != nil {
-		// The grammar of the expression is the caller's own, and reading the metadata again would not mend it.
 		return nil, fault, false
 	}
 	if !modelled {
@@ -150,25 +133,19 @@ func (c *Client) showFieldFrom(ctx context.Context, spec *schemas, code, name st
 	return node, fault, false
 }
 
-// isStale is whether what the server said about one field says the metadata the request was built from is
-// older than the server: the id addresses nothing any more, or what arrived is not shaped as the type kept on
-// disk said it would be. Anything else stands, since reading the metadata again would not change it.
 func isStale(fault *diag.Fault) bool {
 	return fault.Code == diag.NotFound || fault.Code == diag.UpstreamInvalid
 }
 
 func (c *Client) getField(ctx context.Context, spec *schemas, code, id string, requested []requestedField) (decodedResponse, *diag.Fault) {
-	// The naming goes out beside what the caller asked for, and only what the caller asked for is printed.
 	asked := withFields(requested, fieldInfoFields())
 	return c.request(ctx, spec, "ProjectCustomField", asked, func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.apiGetProjectCustomField(ctx, code, id, fields)
 	})
 }
 
-// The whole project is read and ordered, and printed whole: $top and $skip count the fields of the array, which
-// is not the order of the project, so no page of it is a page of the list.
 func (c *Client) listFields(ctx context.Context, spec *schemas, code string, requested []requestedField) (*render.Node, *diag.Fault) {
-	asked := withFields(requested, requestedField{name: ordinal})
+	asked := withFields(requested, requestedField{name: ordinalKey})
 	decoded, fault := c.request(ctx, spec, "[]ProjectCustomField", asked, func(ctx context.Context, fields string) (*http.Response, error) {
 		return c.apiGetProjectCustomFields(ctx, code, fields, topAll)
 	})
@@ -178,7 +155,7 @@ func (c *Client) listFields(ctx context.Context, spec *schemas, code string, req
 	if len(decoded.objects) == 0 {
 		return nil, noFields(decoded.httpResponse, code)
 	}
-	ordered, fault := inOrder(decoded)
+	ordered, fault := sortedByOrdinal(decoded)
 	if fault != nil {
 		return nil, fault
 	}
@@ -194,10 +171,10 @@ type orderedField struct {
 	field    map[string]any
 }
 
-func inOrder(decoded decodedResponse) ([]map[string]any, *diag.Fault) {
+func sortedByOrdinal(decoded decodedResponse) ([]map[string]any, *diag.Fault) {
 	placed := make([]orderedField, 0, len(decoded.objects))
 	for _, field := range decoded.objects {
-		number, isNumber := field[ordinal].(json.Number)
+		number, isNumber := field[ordinalKey].(json.Number)
 		if !isNumber {
 			return nil, shapeFailure(decoded.httpResponse, decoded.body, "the ordinal of a custom field is not a number")
 		}
@@ -207,7 +184,6 @@ func inOrder(decoded decodedResponse) ([]map[string]any, *diag.Fault) {
 		}
 		placed = append(placed, orderedField{position: position, field: field})
 	}
-	// Fields of one ordinal keep the order the server sent them in, which is the order of their attachment ids.
 	slices.SortStableFunc(placed, func(a, b orderedField) int { return cmp.Compare(a.position, b.position) })
 	ordered := make([]map[string]any, 0, len(placed))
 	for _, p := range placed {
@@ -216,8 +192,6 @@ func inOrder(decoded decodedResponse) ([]map[string]any, *diag.Fault) {
 	return ordered, nil
 }
 
-// A token without projectRead on the project is sent an empty list rather than a refusal, so nothing arriving
-// says the caller cannot read the project, not that the project has no fields.
 func noFields(response *http.Response, code string) *diag.Fault {
 	details := []render.Pair{
 		requestDetail(response.Request.Method, response.Request.URL.Redacted()),

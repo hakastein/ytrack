@@ -12,8 +12,6 @@ import (
 
 const devInstanceMembers = "Участники полигона"
 
-// The third flag is refused an empty value where the other two are, and for the same reason: YouTrack keeps
-// no group under an empty name, so nothing is sent.
 func TestTagCreateRefusesAGroupOfNoNameForTagging(t *testing.T) {
 	t.Parallel()
 	server := serveNothing(t)
@@ -21,24 +19,21 @@ func TestTagCreateRefusesAGroupOfNoNameForTagging(t *testing.T) {
 	got := runWith(t, server.env(), "tag", "create", "--name", "карта", "--taggable-by", "")
 
 	want := faultDocument{code: "bad_usage"}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Empty(t, server.requests())
 }
 
-// The names of the groups become the third set of the body, which is the one YouTrack reads the right to
-// hang a tag out of. A group that may hang the tag and one that is shown it are written apart, since the two
-// rights are apart on the server.
 func TestTagCreateWritesTheGroupsThatMayAddTheTag(t *testing.T) {
 	t.Parallel()
 	const name = "карта"
 	server := sharingATag(t, groupsOfTheInstance(), respondWith(http.StatusOK, taggableTag(name,
 		[]sharedGroup{{id: "6-1", name: "DEVELOPMENT Team"}},
-		[]sharedGroup{{id: "6-1", name: "DEVELOPMENT Team"}, {id: "101-0", name: `ООО "РОМАШКА", Москва`}})))
+		[]sharedGroup{{id: "6-1", name: "DEVELOPMENT Team"}, {id: "101-0", name: groupWithAComma}})))
 
 	got := runWith(t, server.env(), "tag", "create", "--name", name,
 		"--visible-for", "development team",
 		"--taggable-by", "DEVELOPMENT TEAM",
-		"--taggable-by", `ООО "РОМАШКА", Москва`,
+		"--taggable-by", groupWithAComma,
 		"--taggable-by", "DEVELOPMENT Team")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
@@ -57,8 +52,6 @@ func TestTagCreateWritesTheGroupsThatMayAddTheTag(t *testing.T) {
 			"tagSharingSettings(permittedGroups(name,id),permittedUsers(login))"}, server.sentFields())
 }
 
-// A tag nobody may hang is the tag the flag was never written for: the set stays out of the body, and
-// YouTrack is left to settle it, exactly as the other two are.
 func TestTagCreateWritesNoTagSharingWhereNobodyMayAddIt(t *testing.T) {
 	t.Parallel()
 	server := sharingATag(t, groupsOfTheInstance(), respondWith(http.StatusOK, sharedTag("карта",
@@ -70,8 +63,6 @@ func TestTagCreateWritesNoTagSharingWhereNobodyMayAddIt(t *testing.T) {
 	assert.Equal(t, []string{"name", "readSharingSettings"}, slices.Sorted(maps.Keys(sentBody(t, server))))
 }
 
-// The names of all three flags are read before any of them is refused, so a call that names one group
-// nobody has under either right is answered once.
 func TestTagCreateRefusesEveryGroupOfTheThreeFlagsAtOnce(t *testing.T) {
 	t.Parallel()
 	server := sharingATag(t, groupsOfTheInstance(), noCreation(t))
@@ -89,13 +80,10 @@ func TestTagCreateRefusesEveryGroupOfTheThreeFlagsAtOnce(t *testing.T) {
 			}},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 }
 
-// The third set is held against what went out the way the other two are: a 200 says the server took the
-// body, not that the groups it kept are the groups that were written, and a tag anyone may hang where the call
-// named one group is a refusal over a tag that by then exists.
 func TestTagCreateChecksTheTagSharingItWroteAgainstTheOneThatCameBack(t *testing.T) {
 	t.Parallel()
 	const name = "карта"
@@ -106,7 +94,7 @@ func TestTagCreateChecksTheTagSharingItWroteAgainstTheOneThatCameBack(t *testing
 	}{
 		{
 			name: "the same two the other way round",
-			kept: []sharedGroup{{id: "101-0", name: `ООО "РОМАШКА", Москва`}, {id: "6-1", name: "DEVELOPMENT Team"}},
+			kept: []sharedGroup{{id: "101-0", name: groupWithAComma}, {id: "6-1", name: "DEVELOPMENT Team"}},
 		},
 		{
 			name: "a group nobody wrote left in the set",
@@ -125,7 +113,7 @@ func TestTagCreateChecksTheTagSharingItWroteAgainstTheOneThatCameBack(t *testing
 				respondWith(http.StatusOK, taggableTag(name, nil, tc.kept)))
 
 			got := runWith(t, server.env(), "tag", "create", "--name", name,
-				"--taggable-by", "DEVELOPMENT Team", "--taggable-by", `ООО "РОМАШКА", Москва`)
+				"--taggable-by", "DEVELOPMENT Team", "--taggable-by", groupWithAComma)
 
 			if tc.mismatch == nil {
 				require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
@@ -139,8 +127,6 @@ func TestTagCreateChecksTheTagSharingItWroteAgainstTheOneThatCameBack(t *testing
 	}
 }
 
-// taggableTag is the answer of the server to a creation that named who may hang the tag: the third set stands
-// beside the two a creation prints by default, and it is asked for only because it was written.
 func taggableTag(name string, read, hang []sharedGroup) string {
 	return `{"$type":"Tag","name":` + asJSON(name) + `,"owner":{"$type":"User","login":"admin"},` +
 		`"readSharingSettings":` + sharingOf(read) + `,"updateSharingSettings":` + sharingOf(nil) +
@@ -167,8 +153,6 @@ func TestTagAddHangsTheTagAMemberOfThePolygonMayHang(t *testing.T) {
 	at := slices.IndexFunc(listed.Tags, func(record map[string]any) bool { return record["name"] == hangs })
 	require.GreaterOrEqual(t, at, 0, "the shared tag stands in no list of the token it was shared with")
 	assert.Equal(t, "admin", ownerOf(t, listed.Tags[at]))
-	// The one measurement of what a token is shown of a tag it does not own: a key the server withholds there
-	// is one the default of the list cannot carry.
 	assert.Equal(t, []string{"name", "owner", "readSharingSettings"}, slices.Sorted(maps.Keys(listed.Tags[at])))
 
 	hung := runWith(t, member, "tag", "add", issue, "--name", hangs)
@@ -177,7 +161,7 @@ func TestTagAddHangsTheTagAMemberOfThePolygonMayHang(t *testing.T) {
 	assert.Equal(t, []string{hangs}, tagsOfTheIssue(t, dev, issue))
 
 	refused := runWith(t, member, "tag", "add", issue, "--name", shown)
-	found := requireRefusal(t, refused)
+	found := requireFault(t, refused)
 	assert.Equal(t, "denied", found.code)
 	assert.Equal(t, 403, detailNamed(t, found, "upstream_status"))
 	assert.Equal(t, []string{hangs}, tagsOfTheIssue(t, dev, issue), "a tag the token may not hang was hung")
@@ -190,7 +174,7 @@ func TestTagCreateRefusesTheMemberTheGroupsOfTheDevInstance(t *testing.T) {
 
 	got := runWith(t, member, "tag", "create", "--name", contractTagName(t), "--taggable-by", devInstanceMembers)
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "denied", found.code)
 	assert.Equal(t, 403, detailNamed(t, found, "upstream_status"))
 	assert.Equal(t, []string{http.MethodGet}, sentMethods(dev))

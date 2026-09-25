@@ -11,10 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The expression ytrack writes for itself: every custom field of the project with the id it is addressed by.
 const metadataSent = "customFields(id,field(name,localizedName,fieldType(valueType,isMultiValue)))"
 
-// A refusal of a name names the request the metadata came from.
 func metadataRequest(address, project string) string {
 	return "GET " + address + "/api/admin/projects/" + project + "?fields=" + metadataSent
 }
@@ -23,7 +21,6 @@ func fieldRequest(address, project, id, fields string) string {
 	return "GET " + address + "/api/admin/projects/" + project + "/customFields/" + id + "?fields=" + fields
 }
 
-// What field show prints for Type of DEV, whatever of its names it was asked by.
 const typeOfDEV = `field:
   name: "Type"
   localizedName: "Тип"
@@ -48,34 +45,29 @@ func requireTheTwoRequests(t *testing.T, u *upstream, project string) {
 	assert.Regexp(t, `^/api/admin/projects/`+project+`/customFields/[0-9]+-[0-9]+$`, paths[1])
 }
 
-// One record of the metadata of a project; a project that calls a field nothing of its own sends null.
-func projectField(id, name, localized string) string {
-	localizedName := "null"
-	if localized != "" {
-		localizedName = strconv.Quote(localized)
+func localizedNameOrNull(localized string) string {
+	if localized == "" {
+		return "null"
 	}
+	return strconv.Quote(localized)
+}
+
+func projectField(id, name, localized string) string {
 	return fmt.Sprintf(`{"$type":"EnumProjectCustomField","id":%q,"field":{"$type":"CustomField","name":%q,`+
 		`"localizedName":%s,"fieldType":{"$type":"FieldType","valueType":"enum","isMultiValue":false}}}`,
-		id, name, localizedName)
+		id, name, localizedNameOrNull(localized))
 }
 
 func projectMetadata(fields ...string) string {
 	return `{"$type":"Project","customFields":[` + strings.Join(fields, ",") + `]}`
 }
 
-// The answer to the second request: the field as the default asks for it, bundle and all, since an enum keeps
-// the values it allows there and a key asked for that does not arrive is refused.
 func oneField(name, localized string, canBeEmpty bool) string {
-	localizedName := "null"
-	if localized != "" {
-		localizedName = strconv.Quote(localized)
-	}
 	return fmt.Sprintf(`{"$type":"EnumProjectCustomField","field":{"$type":"CustomField","name":%q,`+
 		`"localizedName":%s,"fieldType":{"$type":"FieldType","valueType":"enum","isMultiValue":false}},`+
-		`"canBeEmpty":%t,"bundle":{"$type":"EnumBundle","values":[]}}`, name, localizedName, canBeEmpty)
+		`"canBeEmpty":%t,"bundle":{"$type":"EnumBundle","values":[]}}`, name, localizedNameOrNull(localized), canBeEmpty)
 }
 
-// serveTheProject answers the metadata of a project and hands the request for one field to field.
 func serveTheProject(t *testing.T, metadata string, field http.HandlerFunc) *upstream {
 	t.Helper()
 	return serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -87,7 +79,6 @@ func serveTheProject(t *testing.T, metadata string, field http.HandlerFunc) *ups
 	})
 }
 
-// noField stands for the second request a refusal over the metadata must not reach.
 func noField(t *testing.T) http.HandlerFunc {
 	t.Helper()
 	return func(_ http.ResponseWriter, r *http.Request) {
@@ -113,8 +104,6 @@ func TestFieldShowRefusesACallItCannotSend(t *testing.T) {
 			argv: []string{"field", "show", "..", "Type"},
 		},
 		{
-			// Which default the expression is read against is a function of the field, but the grammar is not,
-			// so an expression that parses nowhere is refused before the metadata is read.
 			name: "an expression with nothing in it",
 			argv: []string{"field", "show", "DEV", "Type", "--fields", ""},
 		},
@@ -130,13 +119,11 @@ func TestFieldShowRefusesACallItCannotSend(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 		})
 	}
 }
 
-// The default of one field is not the default of the next, so the help has to name the base and both places a
-// field's values may arrive from.
 func TestFieldShowHelpNamesTheUsage(t *testing.T) {
 	t.Parallel()
 
@@ -158,13 +145,10 @@ func TestFieldShowPrintsAFieldOfTheDevInstance(t *testing.T) {
 	assert.Equal(t, []string{metadataSent, fieldShowDefault(bundleValues)}, dev.sentFields())
 }
 
-// A field answers to either of its names in any letter case, and the name itself never leaves: it is the
-// cyrillic тип that must be absent, since the latin type sits inside fieldType.
 func TestFieldShowResolvesANameOfTheDevInstanceWhateverTheCase(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		// asked is the name given on the command line.
+		name  string
 		asked string
 	}{
 		{name: "the localized name", asked: "тип"},
@@ -208,7 +192,6 @@ bundle:
 	requireTheTwoRequests(t, dev, "DEV")
 }
 
-// A field name belongs to a project, so the same name is a different field, or none, in another one.
 func TestFieldShowPrintsAFieldOfASecondProjectOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -238,7 +221,6 @@ func TestFieldShowRefusesAFieldASecondProjectOfTheDevInstanceDoesNotHave(t *test
 
 	got := runWith(t, dev.env(), "field", "show", "DEMO", "Причина отклонения")
 
-	// DEV has the field and DEMO names nothing near it, so every name DEMO does have is offered instead.
 	want := faultDocument{
 		code: "unknown_name",
 		details: []detail{
@@ -248,7 +230,7 @@ func TestFieldShowRefusesAFieldASecondProjectOfTheDevInstanceDoesNotHave(t *test
 				"Fixed in build", "Priority", "State", "Subsystem", "Type", "Затраченное время", "Оценка")}},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{"/api/admin/projects/DEMO"}, dev.sentPaths())
 }
 
@@ -263,30 +245,23 @@ func TestFieldShowRefusesANameOneFieldOfTheDevInstanceIsNear(t *testing.T) {
 		details: []detail{
 			{"request", metadataRequest(dev.url, "DEV")},
 			{"project", "DEV"},
-			// One edit from Тип, the name DEV translates Type into.
 			{"unknown", []any{unknownEntry("Типп", "Type")}},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{"/api/admin/projects/DEV"}, dev.sentPaths())
 }
 
-// A refusal over a name is a place to look next, not a listing of the project, so it holds five names at most
-// and only the ones within two edits — nearest first, and by name where two are equally near.
 func TestFieldShowOffersFiveOfTheNearestNamesAtMost(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		// held is the project the name is resolved against, and nearest what the refusal is to offer.
+		name    string
 		held    []string
 		nearest []any
 	}{
 		{
-			name: "seven names one edit away and one two edits away",
-			// The project sends them in an order of its own, so the five offered are the five the rule picks
-			// rather than the five that happened to arrive first.
-			held: []string{"Typl", "Typi", "Typf", "Ty", "Typk", "Typg", "Typj", "Typh"},
-			// Ty is two edits away and stands before every Typ- by name, so it is the distance that puts it out.
+			name:    "seven names one edit away and one two edits away",
+			held:    []string{"Typl", "Typi", "Typf", "Ty", "Typk", "Typg", "Typj", "Typh"},
 			nearest: []any{"Typf", "Typg", "Typh", "Typi", "Typj"},
 		},
 		{
@@ -314,7 +289,7 @@ func TestFieldShowOffersFiveOfTheNearestNamesAtMost(t *testing.T) {
 					{"unknown", []any{unknownEntry("Type", tc.nearest...)}},
 				},
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Len(t, server.requests(), 1)
 		})
 	}
@@ -335,12 +310,10 @@ func TestFieldShowRefusesTheProjectTheLimitedUserCannotSee(t *testing.T) {
 			{"upstream_message", "Entity with id DEV not found"},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{"/api/admin/projects/DEV"}, dev.sentPaths())
 }
 
-// The member is sent the project with an empty list of custom fields, and a name cannot be resolved against
-// nothing: the refusal names the right that is missing rather than the name.
 func TestFieldShowRefusesTheEmptyMetadataTheMemberIsSent(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -356,13 +329,10 @@ func TestFieldShowRefusesTheEmptyMetadataTheMemberIsSent(t *testing.T) {
 			authFromEnv(),
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Equal(t, []string{"/api/admin/projects/DEV"}, dev.sentPaths())
 }
 
-// Срок is the name of one field and what the project calls another, so the two are told apart by the name
-// itself and nothing else is. The name wins whatever letter case it is written in: a name is matched case
-// aside, and the field a name names is never the field it merely translates.
 func TestFieldShowTakesANameOverTheTranslationOfAnotherField(t *testing.T) {
 	t.Parallel()
 	for _, asked := range []string{"Срок", "СРОК"} {
@@ -392,8 +362,7 @@ bundle:
 func TestFieldShowRefusesANameMoreThanOneFieldAnswersTo(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		// asked is the name given on the command line, and metadata the project it is resolved against.
+		name     string
 		asked    string
 		metadata string
 		nearest  []any
@@ -426,14 +395,12 @@ func TestFieldShowRefusesANameMoreThanOneFieldAnswersTo(t *testing.T) {
 					{"unknown", []any{unknownEntry(tc.asked, tc.nearest...)}},
 				},
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Len(t, server.requests(), 1)
 		})
 	}
 }
 
-// pflag reads a leading dash as flags, so a field named that way is written after --; the name resolves like
-// any other and is refused by the project, not by the grammar of the call.
 func TestFieldShowTakesANameWithALeadingDashAfterTheDoubleDash(t *testing.T) {
 	t.Parallel()
 	server := serveTheProject(t, projectMetadata(projectField("180-1", "Type", "Тип")), noField(t))
@@ -448,12 +415,10 @@ func TestFieldShowTakesANameWithALeadingDashAfterTheDoubleDash(t *testing.T) {
 			{"unknown", []any{unknownEntry("-x", "Type")}},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Len(t, server.requests(), 1)
 }
 
-// The generated client turns "." and ".." into another endpoint, so an id of any other shape is refused before
-// it reaches a path.
 func TestFieldShowRefusesAnIdItCannotAddress(t *testing.T) {
 	t.Parallel()
 	metadata := projectMetadata(projectField("..", "Type", "Тип"))
@@ -469,12 +434,10 @@ func TestFieldShowRefusesAnIdItCannotAddress(t *testing.T) {
 			{"upstream_body", metadata},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Len(t, server.requests(), 1)
 }
 
-// One record of the metadata of a project with every member written out, so a scenario can put anything under
-// any of them.
 func fieldRecordOf(id, field string) string {
 	return `{"$type":"EnumProjectCustomField","id":` + id + `,"field":` + field + `}`
 }
@@ -493,7 +456,6 @@ func TestFieldShowRefusesMetadataOfAShapeItCannotRead(t *testing.T) {
 	naming := namingOf(`"Type"`, `null`, enum)
 	tests := []struct {
 		name string
-		// held is what arrives under customFields.
 		held string
 	}{
 		{name: "custom fields that are not an array", held: fieldRecordOf(`"180-1"`, naming)},
@@ -522,7 +484,7 @@ func TestFieldShowRefusesMetadataOfAShapeItCannotRead(t *testing.T) {
 					{"upstream_body", metadata},
 				},
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Len(t, server.requests(), 1)
 		})
 	}
@@ -545,7 +507,7 @@ func TestFieldShowRefusesAFieldOfAShapeItCannotCompare(t *testing.T) {
 			{"upstream_body", field},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Len(t, server.requests(), 2)
 }
 
@@ -566,12 +528,10 @@ func TestFieldShowRefusesAFieldGoneBetweenTheTwoRequests(t *testing.T) {
 			{"upstream_message", "Entity with id 180-1 not found"},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Len(t, server.requests(), 2)
 }
 
-// The id was chosen off the metadata, so an answer that names another field says the project changed under
-// the two requests and the field printed would not be the one asked for.
 func TestFieldShowRefusesAFieldRenamedBetweenTheTwoRequests(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -600,14 +560,12 @@ func TestFieldShowRefusesAFieldRenamedBetweenTheTwoRequests(t *testing.T) {
 					{"upstream_body", tc.field},
 				},
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Len(t, server.requests(), 2)
 		})
 	}
 }
 
-// The answer is held to the field the name resolved to whatever the caller asked to see, so the naming goes
-// out beside the caller's expression and is printed only where the caller asked for it.
 func TestFieldShowSendsTheNamingBesideWhatTheCallerAsksFor(t *testing.T) {
 	t.Parallel()
 	metadata := projectMetadata(projectField("180-1", "Type", "Тип"))

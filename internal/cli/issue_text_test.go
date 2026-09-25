@@ -12,8 +12,6 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// A text a literal block has to carry, or, where quoted is set, one it cannot: the round-trip is what the
-// scenario holds, so the value that comes back has to be the value that went out either way.
 type textCase struct {
 	name   string
 	text   string
@@ -143,7 +141,6 @@ func TestIssueShowPrintsTextUnderANestedKeyAndInsideARecord(t *testing.T) {
 	}
 }
 
-// A description that was asked for and is empty is printed empty, as every named field is.
 func TestIssueShowPrintsADescriptionThatIsNotThereAsNull(t *testing.T) {
 	t.Parallel()
 	server := serve(t, respondWith(http.StatusOK, `{"$type":"Issue","idReadable":"DEV-1","description":null}`))
@@ -217,8 +214,6 @@ func TestIssueShowPrintsTheEmptyDescriptionOfTheDevInstanceAsNull(t *testing.T) 
 	assert.Equal(t, []detail{{"idReadable", "DEV-2"}, {"description", nil}}, requireDocument(t, got.stdout))
 }
 
-// issueWith is the answer for an issue carrying keys, encoded the way the server encodes it: a control
-// character arrives escaped rather than raw, and a character outside the basic plane as a surrogate pair.
 func issueWith(t *testing.T, keys map[string]any) string {
 	t.Helper()
 	object := map[string]any{"$type": "Issue", "idReadable": "DEV-1"}
@@ -230,7 +225,6 @@ func issueWith(t *testing.T, keys map[string]any) string {
 	return string(encoded)
 }
 
-// sentDescription is the description of the one answer the server sent, as JSON read it.
 func sentDescription(t *testing.T, u *upstream) any {
 	t.Helper()
 	answers := u.answers()
@@ -240,7 +234,6 @@ func sentDescription(t *testing.T, u *upstream) any {
 	return body["description"]
 }
 
-// nodeAt is the node under the keys of path, a list on the way being taken by its one item.
 func nodeAt(t *testing.T, mapping *yaml.Node, path ...string) *yaml.Node {
 	t.Helper()
 	node := mapping

@@ -11,22 +11,19 @@ import (
 )
 
 type fieldNode struct {
-	parent   *fieldNode
-	field    requestedField
-	children []*fieldNode
-	// Each $type the server named on the objects that stood here, once.
-	named []string
+	parent    *fieldNode
+	field     requestedField
+	children  []*fieldNode
+	seenTypes []string
 }
 
 type missingField struct {
-	at   *fieldNode
-	name string
-	// The $type named on the object; typed is false where the object named none or a scalar stood there.
-	named  string
-	typed  bool
-	scalar bool
-	// ytrack asked for the name itself, so no caller can be told to fix it.
-	internal bool
+	at             *fieldNode
+	name           string
+	objectType     string
+	hasType        bool
+	scalar         bool
+	askedByDefault bool
 }
 
 type schemaSet struct {
@@ -40,8 +37,8 @@ type schemaResolver struct {
 	schemaSets map[*fieldNode]schemaSet
 }
 
-// checkMissingFields refuses the names absent from the answer, unless the $type the server named shows a name to
-// belong to another schema of its place.
+const absenceAccepted diag.Code = ""
+
 func checkMissingFields(spec *schemas, response *http.Response, responseSchema string, requested []requestedField, tree any) *diag.Fault {
 	root, absences := findMissingFields(requested, tree)
 	if len(absences) == 0 {
@@ -52,7 +49,7 @@ func checkMissingFields(spec *schemas, response *http.Response, responseSchema s
 	listed := map[string]bool{}
 	for _, a := range absences {
 		code := j.classify(a)
-		if code == "" {
+		if code == absenceAccepted {
 			continue
 		}
 		field := fieldPath(a.at.path(), a.name)
@@ -70,7 +67,6 @@ func checkMissingFields(spec *schemas, response *http.Response, responseSchema s
 		requestDetail(response.Request.Method, response.Request.URL.Redacted()),
 		{Key: "fields", Value: render.NewString(formatFields(requested))},
 	}
-	// A field the server did not send stays unsent whatever name is fixed.
 	if len(missing) > 0 {
 		message := "the fields under missing were asked for and did not arrive: the caller's rights may hide them"
 		details = append(details, render.Pair{Key: "missing", Value: render.NewList(missing...)})
@@ -111,7 +107,6 @@ func (p *fieldNode) path() []string {
 	return append(p.parent.path(), p.field.name)
 }
 
-// visit walks the fields asked of p over the value standing there and stops where it is null or [].
 func (s *missingFieldCollector) visit(p *fieldNode, value any) {
 	switch value := value.(type) {
 	case nil:
@@ -120,22 +115,22 @@ func (s *missingFieldCollector) visit(p *fieldNode, value any) {
 			s.visit(p, item)
 		}
 	case map[string]any:
-		named, typed := value["$type"].(string)
-		if typed && !slices.Contains(p.named, named) {
-			p.named = append(p.named, named)
+		objectType, hasType := value["$type"].(string)
+		if hasType && !slices.Contains(p.seenTypes, objectType) {
+			p.seenTypes = append(p.seenTypes, objectType)
 		}
 		for i, field := range p.field.children {
 			child, ok := value[field.name]
 			switch {
 			case !ok:
-				s.add(missingField{at: p, name: field.name, named: named, typed: typed, internal: fromDefault(field)})
+				s.add(missingField{at: p, name: field.name, objectType: objectType, hasType: hasType, askedByDefault: fromDefault(field)})
 			case field.children != nil && !field.normalized:
 				s.visit(p.children[i], child)
 			}
 		}
 	default:
 		for _, field := range p.field.children {
-			s.add(missingField{at: p, name: field.name, scalar: true, internal: fromDefault(field)})
+			s.add(missingField{at: p, name: field.name, scalar: true, askedByDefault: fromDefault(field)})
 		}
 	}
 }
@@ -174,7 +169,7 @@ func (j schemaResolver) childSchemas(parentSet schemaSet, p *fieldNode) schemaSe
 		}
 	}
 	if untyped || schemas == nil {
-		schemas = append(schemas, j.schemas.hierarchies(p.named)...)
+		schemas = append(schemas, j.schemas.hierarchies(p.seenTypes)...)
 	}
 	for _, schema := range p.field.extraSchemas {
 		schemas = append(schemas, j.schemas.subtree(schema)...)
@@ -183,21 +178,18 @@ func (j schemaResolver) childSchemas(parentSet schemaSet, p *fieldNode) schemaSe
 }
 
 func (j schemaResolver) classify(a missingField) diag.Code {
-	f := j.schemaSets[a.at]
-	member := slices.Contains(f.schemas, a.named)
+	here := j.schemaSets[a.at]
+	typeBelongsHere := slices.Contains(here.schemas, a.objectType)
 	switch {
-	case member && j.declares(a.named, a.name):
+	case typeBelongsHere && j.declares(a.objectType, a.name):
 		return diag.UpstreamInvalid
-	case !slices.Contains(f.names, a.name):
-		// unknown_name hands the caller a name of theirs to fix, and a name of ytrack's own is none: the
-		// specification declares neither styleRanges nor the members of a range, and the request asks for
-		// them all the same.
-		if a.internal {
+	case !slices.Contains(here.names, a.name):
+		if a.askedByDefault {
 			return diag.UpstreamInvalid
 		}
 		return diag.UnknownName
-	case member, a.scalar && f.untyped:
-		return ""
+	case typeBelongsHere, a.scalar && here.untyped:
+		return absenceAccepted
 	}
 	return diag.UpstreamInvalid
 }
@@ -207,15 +199,14 @@ func (j schemaResolver) declares(schema, name string) bool {
 	return ok
 }
 
-// A nested name is written the way fields= nests it: leader(login).
 func fieldPath(parents []string, name string) string {
 	return strings.Join(append(slices.Clip(parents), name), "(") + strings.Repeat(")", len(parents))
 }
 
 func missingEntry(field string, a missingField) *render.Node {
 	schema := render.NewNull()
-	if a.typed {
-		schema = render.NewString(a.named)
+	if a.hasType {
+		schema = render.NewString(a.objectType)
 	}
 	return render.NewMap(render.Pair{Key: "field", Value: render.NewString(field)}, render.Pair{Key: "type", Value: schema})
 }
@@ -224,8 +215,6 @@ func unknownEntry(field string, nearest []string) *render.Node {
 	return nearestEntry("field", field, nearest)
 }
 
-// nearestEntry is a name that resolved to nothing and the names to write instead, standing under the key the
-// name was written by: a field of a fields= expression, a category of --category.
 func nearestEntry(key, written string, nearest []string) *render.Node {
 	names := make([]*render.Node, 0, len(nearest))
 	for _, name := range nearest {
@@ -234,8 +223,6 @@ func nearestEntry(key, written string, nearest []string) *render.Node {
 	return render.NewMap(render.Pair{Key: key, Value: render.NewString(written)}, render.Pair{Key: "nearest", Value: render.NewList(names...)})
 }
 
-// A name the caller may have meant, and the other forms it answers to: a custom field answers to what the
-// project calls it as well. Whichever form is nearest, the name is what the caller is handed.
 type suggestion struct {
 	name string
 	also []string
@@ -270,8 +257,6 @@ func nearest(asked string, among []suggestion, fallback []string) []string {
 	return names
 }
 
-// A name declared by a schema goes by itself alone, and a caller near none of them is shown every name the
-// place declares.
 func nearestNames(asked string, names []string) []string {
 	among := make([]suggestion, 0, len(names))
 	for _, name := range names {

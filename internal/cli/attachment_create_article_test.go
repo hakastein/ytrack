@@ -12,19 +12,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The request an upload to an article goes out as, which is the one a refusal about it names.
 func articleAttachmentWriteRequest(address, owner, fields string) string {
 	return "POST " + address + "/api/articles/" + owner + "/attachments?fields=" + fields
 }
 
-// filedByAnArticle is what the knowledge base answers an upload with: the array of what the write filed, at
-// the schema of its own, holding the one attachment.
 func filedByAnArticle(name string, size int) string {
 	return `[` + theArticleAttachment(name, size) + `]`
 }
 
-// theArticleAttachment is the single object the specification declares the answer to be, which the instance
-// never sends: it answers the array an issue's upload is answered with.
 func theArticleAttachment(name string, size int) string {
 	return `{"$type":"ArticleAttachment","id":"522-9","name":` + strconv.Quote(name) +
 		`,"size":` + strconv.Itoa(size) + `,"mimeType":"image/png",` +
@@ -39,9 +34,6 @@ func onePixelPNG() []byte {
 		"\x4e\x44\xae\x42\x60\x82")
 }
 
-// The specification declares an upload to an article to be JSON carrying the bytes encoded,
-// and the instance answers every form of that JSON 500, so the file goes out the way an issue's does: one
-// multipart part and no JSON anywhere in the body.
 func TestAttachmentCreateSendsAnArticleTheSameMultipartAsAnIssue(t *testing.T) {
 	t.Parallel()
 	const name = "кот.png"
@@ -72,9 +64,6 @@ func TestAttachmentCreateSendsAnArticleTheSameMultipartAsAnIssue(t *testing.T) {
 	assert.NotContains(t, body, "base64Content")
 }
 
-// The specification declares this one answer to be a single attachment where an issue's is an array of
-// them, and the instance sends the array for both. An object is therefore an answer of something other than
-// the endpoint that was asked, and the file is attached by the time it arrives.
 func TestAttachmentCreateRefusesTheSingleObjectTheSpecificationDeclaresForAnArticle(t *testing.T) {
 	t.Parallel()
 	const name = "кот.png"
@@ -136,18 +125,12 @@ func TestAttachmentCreateAttachesAPictureToAnArticleOfTheDevInstance(t *testing.
 	assert.Equal(t, filed.Name, read.Name)
 	assert.Equal(t, filed.Size, read.Size)
 	assert.Equal(t, filed.MimeType, read.MimeType)
-	// The signature names whoever it was issued to, so the same file signed for a member is a link of its
-	// own; what holds across the two readers is its form and the file it opens.
 	theirs, whole := strings.CutPrefix(read.URL, dev.url)
 	require.True(t, whole, "%q does not begin with the address ytrack was given", read.URL)
 	assert.Regexp(t, signedLinkForm, theirs)
 	assert.NotEqual(t, filed.URL, read.URL)
 }
 
-// An article nobody wrote is answered 404 by the server itself, and nothing about the owner was asked
-// beforehand: one request is the whole call, and it went to the knowledge base and nowhere else. The words of
-// that 404 are the knowledge base's own — an issue is refused "Entity with id … not found" — and they pass on
-// as they came.
 func TestAttachmentCreateRefusesAnArticleTheDevInstanceHasNoneOf(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -155,19 +138,16 @@ func TestAttachmentCreateRefusesAnArticleTheDevInstanceHasNoneOf(t *testing.T) {
 
 	got := runWith(t, dev.env(), "attachment", "create", "DEV-A-99999", path)
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "not_found", found.code)
 	assert.Equal(t, "Can't find article with id DEV-A-99999", detailNamed(t, found, "upstream_message"))
 	require.Len(t, dev.requests(), 1)
 	assert.Equal(t, "/api/articles/DEV-A-99999/attachments", dev.sentPaths()[0])
 }
 
-// attachedArticle is the fixture of a contract test that needs an article of its own to attach files to: it is
-// filed by the command that files articles and taken away afterwards with everything hanging from it.
 func attachedArticle(t *testing.T, dev *upstream) string {
 	t.Helper()
 	readable := fileArticle(t, dev, "ytrack contract "+t.Name())
-	// Registered after the recorder's own cleanup, so the deletion runs first and the cassette records it.
 	t.Cleanup(func() { removeArticle(t, dev, readable) })
 	return readable
 }

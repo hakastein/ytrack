@@ -10,13 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// What an update reads before it writes: the id it is addressed by, the class the server names each field the
-// issue already holds by, and the project whole, which is where the names are resolved.
 const issueWriteFields = "idReadable,customFields($type,name,projectCustomField(id))," +
 	"project(" + projectWriteFields + ")"
 
-// A custom field as that read sees it on the issue. Nothing of what it holds is asked for: an update writes
-// values and the check of it reads them out of the answer to the write.
 type currentField struct {
 	name    string
 	kind    string
@@ -28,7 +24,6 @@ func (f currentField) sent() string {
 		`,"projectCustomField":{"$type":"ProjectCustomField","id":` + strconv.Quote(f.binding) + `}}`
 }
 
-// The issue an update reads, with the project it stands in and the fields it already carries.
 func issueToUpdate(readable, project string, held ...currentField) string {
 	fields := make([]string, 0, len(held))
 	for _, field := range held {
@@ -38,8 +33,6 @@ func issueToUpdate(readable, project string, held ...currentField) string {
 		`,"customFields":[` + strings.Join(fields, ",") + `],"project":` + project + `}`
 }
 
-// updating is the server of an update: read answers the GET that settles the id, the project and the classes,
-// and update the POST that writes, so a scenario says what each half of the command was told.
 func updating(t *testing.T, read, update http.HandlerFunc) *upstream {
 	t.Helper()
 	return serve(t, readThenUpdate(read, update))
@@ -55,7 +48,6 @@ func readThenUpdate(read, update http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// noUpdate stands for the request a refusal before the write must not send.
 func noUpdate(t *testing.T) http.HandlerFunc {
 	t.Helper()
 	return func(_ http.ResponseWriter, r *http.Request) {
@@ -67,9 +59,6 @@ func updateRequest(address, readable, fields string) string {
 	return "POST " + address + "/api/issues/" + readable + "?fields=" + fields
 }
 
-// What an update takes: one issue, and at least one part to write into it. Free text YouTrack would keep
-// as something other than what was written never goes out, as it does not on a creation — there the write
-// would have happened and the document would disagree with it.
 func TestIssueUpdateRefusesBeforeAnyRequest(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -94,7 +83,7 @@ func TestIssueUpdateRefusesBeforeAnyRequest(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
@@ -111,10 +100,6 @@ func TestIssueUpdateHelpNamesTheDefaultAndNoFile(t *testing.T) {
 	assert.NotContains(t, got.stdout, "-file")
 }
 
-// The class of a field the issue already carries is copied off the read word for word, and a field the
-// issue does not carry gets the class of the table: the server knows of a StateMachineIssueCustomField, which
-// no table of ytrack's can, and where the issue carries nothing for a field there is nothing to copy. The
-// write goes out to the readable id that read gave, whatever letter case the caller typed.
 func TestIssueUpdateNamesEachFieldTheClassItWasReceivedUnder(t *testing.T) {
 	t.Parallel()
 	project := projectResponse(
@@ -122,8 +107,6 @@ func TestIssueUpdateNamesEachFieldTheClassItWasReceivedUnder(t *testing.T) {
 			canBeEmpty: true, defaults: []string{"Новая"}},
 		writableField{id: "180-23", name: "Причина отклонения", valueType: "enum", canBeEmpty: true},
 	)
-	// A state-machine workflow on the project turns State into a class of its own, and the issue carries no
-	// Причина отклонения at all: a condition kept it off.
 	read := issueToUpdate("DEV-1", project,
 		currentField{name: "State", kind: "StateMachineIssueCustomField", binding: "180-14"})
 	held := receivedFields(
@@ -150,10 +133,6 @@ func TestIssueUpdateNamesEachFieldTheClassItWasReceivedUnder(t *testing.T) {
 	assert.JSONEq(t, want, server.asks()[1])
 }
 
-// A period goes out as the minutes it holds and nothing else: the ISO duration beside them is the id of
-// the value, and a write carrying that is answered 200 while the field is left empty. What came back empty
-// where the write filled it is the answer disagreeing with the write, and the issue holds it by then, which
-// is what the exit code of a write that happened says.
 func TestIssueUpdateRefusesAnAnswerThatEmptiedWhatTheWriteFilled(t *testing.T) {
 	t.Parallel()
 	project := projectResponse(writableField{id: "187-2", kind: "PeriodProjectCustomField", name: "Оценка",
@@ -180,8 +159,6 @@ func TestIssueUpdateRefusesAnAnswerThatEmptiedWhatTheWriteFilled(t *testing.T) {
 		server.asks()[1])
 }
 
-// The class the server named a field the issue already holds by goes into the body word for word, so it is
-// held to its shape before anything is sent: read as an empty string, it would be a $type of nobody's.
 func TestIssueUpdateRefusesTheClassesOfTheIssueOfAnotherShape(t *testing.T) {
 	t.Parallel()
 	project := projectResponse(writableField{id: "180-14", kind: "StateProjectCustomField", name: "State",
@@ -215,15 +192,12 @@ func TestIssueUpdateRefusesTheClassesOfTheIssueOfAnotherShape(t *testing.T) {
 					{"upstream_body", read},
 				},
 			}
-			assert.Equal(t, want, requireRefusal(t, got))
+			assert.Equal(t, want, requireFault(t, got))
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 		})
 	}
 }
 
-// The expression of an update is the expression of a creation: the check of the write reads every value that
-// went out whatever the caller asked to print, a name of a custom field is picked out of the answer rather
-// than by the server, and the comments are no part of a write.
 func TestIssueUpdateTakesTheExpressionOfAWrite(t *testing.T) {
 	t.Parallel()
 	project := projectResponse(
@@ -281,13 +255,11 @@ func TestIssueUpdateTakesTheExpressionOfAWrite(t *testing.T) {
 		got := runWith(t, server.env(), "issue", "update", "DEV-1", "--summary", "x",
 			"--fields", "+comments(text)")
 
-		assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+		assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 		assert.Empty(t, server.requests())
 	})
 }
 
-// The write of an update is as much a write as a creation, and the document of it is raised after the same
-// 2xx: the issue holds the title by then, whatever the block of custom fields came back as.
 func TestIssueUpdateIsUncertainWhereTheAnswerCannotBePrinted(t *testing.T) {
 	t.Parallel()
 	project := projectResponse(writableField{id: "180-14", kind: "StateProjectCustomField", name: "State",
@@ -315,9 +287,6 @@ func filedForUpdate(t *testing.T, dev *upstream, filled ...string) string {
 	return readable
 }
 
-// The values a field holds are replaced by the ones the call writes rather than added to: the issue was
-// filed holding ACME and the update names two others, so ACME is gone. The server answers in the order of
-// the bundle, which is neither the order of the flags nor anything the call said.
 func TestIssueUpdateReplacesWhatAFieldOfTheDevInstanceHeld(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -332,9 +301,6 @@ func TestIssueUpdateReplacesWhatAFieldOfTheDevInstanceHeld(t *testing.T) {
 	assert.Equal(t, []string{"АЛЬФА", "ГАММА"}, valuesAt(t, mapping, "customFields", "Клиент"))
 }
 
-// A field a condition hides is the server's to refuse, and it refuses word for word; the same write that
-// uncovers it writes it. It is also the one live place the table settles a class on an update: the read before
-// the write found the field nowhere on the issue, so there was no class of the server's to copy.
 func TestIssueUpdateWritesTheFieldOfTheDevInstanceTheSameWriteUncovers(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -342,7 +308,7 @@ func TestIssueUpdateWritesTheFieldOfTheDevInstanceTheSameWriteUncovers(t *testin
 
 	refused := runWith(t, dev.env(), "issue", "update", readable, "--field", "Причина отклонения=Дубль")
 
-	found := requireRefusal(t, refused)
+	found := requireFault(t, refused)
 	assert.Equal(t, "rejected", found.code)
 	assert.Contains(t, found.details, detail{"upstream_message", "Вы можете обновлять значение поля Причина " +
 		"отклонения, только когда значение поля State равно Отклонена"})
@@ -377,8 +343,6 @@ func TestIssueUpdateWritesTheTextOfTheDevInstanceByteForByte(t *testing.T) {
 	assert.Equal(t, text, nodeAt(t, mapping, "description").Value)
 }
 
-// A field the instance computes for itself takes no value from anybody, and what it says about that
-// passes on word for word.
 func TestIssueUpdateRefusesTheFieldTheDevInstanceComputesItself(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -386,7 +350,7 @@ func TestIssueUpdateRefusesTheFieldTheDevInstanceComputesItself(t *testing.T) {
 
 	got := runWith(t, dev.env(), "issue", "update", readable, "--field", "Затраченное время=PT1H")
 
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "rejected", found.code)
 	said, isText := detailNamed(t, found, "upstream_message").(string)
 	require.True(t, isText, "upstream_message: %v", found.details)

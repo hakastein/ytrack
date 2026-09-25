@@ -9,8 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The limited user under the default expression, with $type, an id and the name the server sends although the
-// schema declares none, and the keys in an order other than the one asked for.
 const userLimited = `{"banned":false,"$type":"User","email":"dev.limited@ytrack.local","id":"1-2",` +
 	`"name":"Ограниченный","fullName":"Ограниченный","login":"dev.limited"}`
 
@@ -37,12 +35,10 @@ banned: false
 `
 )
 
-// A refusal names the request user show sends: the login stands in the path escaped, the way it went out.
 func userRequest(address, login, fields string) string {
 	return "GET " + address + "/api/users/" + url.PathEscape(login) + "?fields=" + fields
 }
 
-// The whole refusal a 404 for a login becomes, with what the server said about it word for word.
 func noSuchUser(address, login string) faultDocument {
 	return faultDocument{
 		code: "not_found",
@@ -72,8 +68,6 @@ func TestUserShowPrintsTheFieldsAskedInTheOrderAsked(t *testing.T) {
 	assert.Equal(t, "application/json", request.Header.Get("Accept"))
 }
 
-// The + of an expression adds to the default of this command: what user show prints without a flag stays in the
-// document, and the name asked for follows it.
 func TestUserShowAddsFieldsToTheDefaultOfTheCommand(t *testing.T) {
 	t.Parallel()
 	server := serve(t, respondWith(http.StatusOK, userLimited))
@@ -84,19 +78,16 @@ func TestUserShowAddsFieldsToTheDefaultOfTheCommand(t *testing.T) {
 	assert.Equal(t, []url.Values{{"fields": {"login,fullName,email,banned,id"}}}, server.sentQueries())
 }
 
-// An expression that does not parse is refused before the network here too: sent on, a "+" of its own would ask
-// the server for the empty selection of fields, which it answers with a record of its choosing.
 func TestUserShowRefusesFieldsThatDoNotParse(t *testing.T) {
 	t.Parallel()
 	server := serveNothing(t)
 
 	got := runWith(t, server.env(), "user", "show", "admin", "--fields", "+")
 
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 	assert.Empty(t, server.requests())
 }
 
-// A login the server would read as a path of its own reaches it escaped, as the one segment it is.
 func TestUserShowSendsALoginThatLooksLikeAPathAsOneSegment(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -142,7 +133,7 @@ func TestUserShowTakesExactlyOneLogin(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 		})
 	}
 }
@@ -153,7 +144,7 @@ func TestUserRefusesACallThatNamesNoCommandOfIts(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "the group alone", argv: []string{"user"}},
+		{name: "the command alone", argv: []string{"user"}},
 		{name: "a command it does not have", argv: []string{"user", "bogus"}},
 	}
 	for _, tc := range tests {
@@ -163,7 +154,7 @@ func TestUserRefusesACallThatNamesNoCommandOfIts(t *testing.T) {
 
 			got := runWith(t, server.env(), tc.argv...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 		})
 	}
 }
@@ -185,14 +176,12 @@ func TestUserShowRefusesALoginThatWouldReachAnotherEndpoint(t *testing.T) {
 
 			got := runWith(t, server.env(), "user", "show", tc.login)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// Every string the server reads as something other than a login is refused before any request: sent, it would
-// answer about another user, and the answer would look like the one that was asked for.
 func TestUserShowRefusesEveryFormTheServerReadsAsSomethingOtherThanALogin(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -217,14 +206,12 @@ func TestUserShowRefusesEveryFormTheServerReadsAsSomethingOtherThanALogin(t *tes
 
 			got := runWith(t, server.env(), "user", "show", tc.login)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The forms refused before a request are no wider than what the server was measured to read as something else:
-// each of these it reads as a login of its own, so each goes out and comes back a plain 404.
 func TestUserShowSendsAFormThatOnlyLooksLikeOneOfTheRefused(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -245,7 +232,7 @@ func TestUserShowSendsAFormThatOnlyLooksLikeOneOfTheRefused(t *testing.T) {
 
 			got := runWith(t, server.env(), "user", "show", tc.login)
 
-			assert.Equal(t, noSuchUser(server.url, tc.login), requireRefusal(t, got))
+			assert.Equal(t, noSuchUser(server.url, tc.login), requireFault(t, got))
 			requests := server.requests()
 			require.Len(t, requests, 1)
 			assert.Equal(t, "/api/users/"+tc.login, requests[0].URL.Path)
@@ -253,15 +240,13 @@ func TestUserShowSendsAFormThatOnlyLooksLikeOneOfTheRefused(t *testing.T) {
 	}
 }
 
-// pflag reads a leading dash as flags wherever the word stands, so the separator is the only way in and the
-// help of the command says so.
 func TestUserShowRefusesALoginOfALeadingDashWithoutTheSeparator(t *testing.T) {
 	t.Parallel()
 	server := serveNothing(t)
 
 	got := runWith(t, server.env(), "user", "show", "-x")
 
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 	assert.Empty(t, server.requests())
 }
 
@@ -271,7 +256,7 @@ func TestUserShowSendsALoginOfALeadingDashAfterTheSeparator(t *testing.T) {
 
 	got := runWith(t, server.env(), "user", "show", "--", "-x")
 
-	assert.Equal(t, noSuchUser(server.url, "-x"), requireRefusal(t, got))
+	assert.Equal(t, noSuchUser(server.url, "-x"), requireFault(t, got))
 	requests := server.requests()
 	require.Len(t, requests, 1)
 	assert.Equal(t, "/api/users/-x", requests[0].URL.Path)
@@ -283,7 +268,7 @@ func TestUserShowRefusesWithoutAToken(t *testing.T) {
 
 	got := runWith(t, []string{"YTRACK_URL=" + server.url}, "user", "show", "admin")
 
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 	assert.Empty(t, server.requests())
 }
 
@@ -307,8 +292,6 @@ func TestUserShowPrintsTheLimitedUserOfTheDevInstance(t *testing.T) {
 	assert.Len(t, dev.requests(), 1)
 }
 
-// Logins are unique whatever the case, so the server resolves one in any case and the printed login is the
-// one it keeps rather than the one the caller wrote.
 func TestUserShowPrintsTheLoginTheDevInstanceKeepsForALoginInAnotherCase(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -319,8 +302,6 @@ func TestUserShowPrintsTheLoginTheDevInstanceKeepsForALoginInAnotherCase(t *test
 	assert.Len(t, dev.requests(), 1)
 }
 
-// A user with no email and a ban on the account: null says the email is not set, and banned is in the default
-// because a banned user is still found and still allowed by a field.
 func TestUserShowPrintsTheGuestOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -331,8 +312,6 @@ func TestUserShowPrintsTheGuestOfTheDevInstance(t *testing.T) {
 	assert.Len(t, dev.requests(), 1)
 }
 
-// The catalogue of users is not filtered by the rights a token holds on projects: the limited token, which the
-// dev instance answers 404 for the project DEV, is sent the same user as the admin, byte for byte.
 func TestUserShowPrintsTheAdminOfTheDevInstanceToTheLimitedTokenAsWell(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -341,12 +320,10 @@ func TestUserShowPrintsTheAdminOfTheDevInstanceToTheLimitedTokenAsWell(t *testin
 	asLimited := runWith(t, []string{"YTRACK_URL=" + dev.url, "YTRACK_TOKEN=" + devTokens(t).limited}, "user", "show", "admin")
 
 	assert.Equal(t, outcome{stdout: printedAdmin}, asAdmin)
-	assert.Equal(t, asAdmin, asLimited)
+	assert.Equal(t, asAdmin, asLimited, "the server does not filter users by project rights")
 	assert.Len(t, dev.requests(), 2)
 }
 
-// Rights hide no email of another user: the member's own email arrives as a string for the admin, for a user
-// with no role at all and for the member, so email in the default costs no reader a key.
 func TestUserShowPrintsTheEmailOfTheMemberOfTheDevInstanceToEveryToken(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -362,50 +339,44 @@ func TestUserShowPrintsTheEmailOfTheMemberOfTheDevInstanceToEveryToken(t *testin
 	assert.Len(t, dev.requests(), 3)
 }
 
-// A full name of one word holds no space, so the form lets it through and the server settles it: the refusal
-// names the login the caller should have written and the command that finds it.
 func TestUserShowRefusesTheFullNameOfTheLimitedUserOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
 	got := runWith(t, dev.env(), "user", "show", "Ограниченный")
 
-	assert.Equal(t, noSuchUser(dev.url, "Ограниченный"), requireRefusal(t, got))
+	assert.Equal(t, noSuchUser(dev.url, "Ограниченный"), requireFault(t, got))
 	assert.Len(t, dev.requests(), 1)
 }
 
-// An email address is no alias of a login, although a login may look like one.
 func TestUserShowRefusesTheEmailOfTheLimitedUserOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
 	got := runWith(t, dev.env(), "user", "show", "dev.limited@ytrack.local")
 
-	assert.Equal(t, noSuchUser(dev.url, "dev.limited@ytrack.local"), requireRefusal(t, got))
+	assert.Equal(t, noSuchUser(dev.url, "dev.limited@ytrack.local"), requireFault(t, got))
 	assert.Len(t, dev.requests(), 1)
 }
 
-// The path resolves a login whole, while the search of user list takes the start of one: dev finds dev.limited
-// and dev.member there and addresses nobody here.
 func TestUserShowRefusesTheStartOfALoginOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
 	got := runWith(t, dev.env(), "user", "show", "dev")
 
-	assert.Equal(t, noSuchUser(dev.url, "dev"), requireRefusal(t, got))
+	assert.Equal(t, noSuchUser(dev.url, "dev"), requireFault(t, got))
 	assert.Len(t, dev.requests(), 1)
 }
 
-// An escaped slash stays one segment for the server too: it reads the login back whole instead of routing the
-// request to a path of its own.
 func TestUserShowRefusesALoginWithASlashOnTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
 
 	got := runWith(t, dev.env(), "user", "show", "a/b")
 
-	assert.Equal(t, noSuchUser(dev.url, "a/b"), requireRefusal(t, got))
+	assert.Equal(t, noSuchUser(dev.url, "a/b"), requireFault(t, got),
+		"the server does not decode an escaped slash into a path separator")
 	assert.Len(t, dev.requests(), 1)
 }
 
@@ -423,6 +394,6 @@ func TestUserShowRefusesANameTheSchemasOfTheDevInstanceDoNotDeclare(t *testing.T
 			{"unknown", []any{unknownEntry("fullNme", "fullName")}},
 		},
 	}
-	assert.Equal(t, want, requireRefusal(t, got))
+	assert.Equal(t, want, requireFault(t, got))
 	assert.Len(t, dev.requests(), 1)
 }

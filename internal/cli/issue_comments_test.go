@@ -10,14 +10,10 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// What the tool asks of every comment, whatever the caller asked of the issue: deleted is read to leave a
-// deleted comment out and is printed nowhere.
 const commentFields = "comments(id,author(login),created,text,deleted)"
 
-// The form of a comment's id, which the server gives it and ytrack passes on.
 const commentIDForm = `^[0-9]+-[0-9]+$`
 
-// A comment of the server, with $type on every object as the server sends it.
 func receivedComment(id string, created int64, login, text string) map[string]any {
 	return map[string]any{
 		"$type":   "IssueComment",
@@ -29,7 +25,6 @@ func receivedComment(id string, created int64, login, text string) map[string]an
 	}
 }
 
-// A comment whose author took it back: YouTrack keeps it in the list and takes its text away.
 func deletedComment(id string, created int64) map[string]any {
 	comment := receivedComment(id, created, "admin", "")
 	comment["text"] = nil
@@ -37,7 +32,6 @@ func deletedComment(id string, created int64) map[string]any {
 	return comment
 }
 
-// commentDetails is one comment as the document prints it.
 func commentDetails(id, created, login, text string) []detail {
 	return []detail{
 		{"id", id},
@@ -76,14 +70,12 @@ func TestIssueShowRefusesACommentsFlagThatIsNeitherAllNorACount(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"issue", "show", "DEV-1"}, tc.argv...)...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// Comments are asked for one way, and --fields is not it: the tool fills them wherever an issue stands, so an
-// expression naming them there is refused before any request and the refusal says what to write instead.
 func TestIssueShowRefusesCommentsAskedForInTheExpression(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -101,14 +93,12 @@ func TestIssueShowRefusesCommentsAskedForInTheExpression(t *testing.T) {
 
 			got := runWith(t, server.env(), "issue", "show", "DEV-1", "--fields", tc.expression)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The order is ytrack's own: the server sends the comments in an order of its own, the deleted one among them,
-// and what is printed is the rest oldest first, cut to the last the caller asked for.
 func TestIssueShowPrintsTheCommentsAskedForOldestFirst(t *testing.T) {
 	t.Parallel()
 	first := commentDetails("7-1", "2026-09-10T10:16:50Z", "admin", "первый")
@@ -147,8 +137,6 @@ func TestIssueShowPrintsTheCommentsAskedForOldestFirst(t *testing.T) {
 	}
 }
 
-// None asked for is not the same as none there: at zero nothing about comments goes out and the key is absent,
-// while an issue that has none prints the key empty.
 func TestIssueShowAsksForNoCommentsAtZero(t *testing.T) {
 	t.Parallel()
 	server := serve(t, respondWith(http.StatusOK, `{"$type":"Issue","idReadable":"DEV-1"}`))
@@ -193,8 +181,6 @@ func TestIssueShowPrintsTheTextOfACommentAsReceived(t *testing.T) {
 	}
 }
 
-// A comment is read before it is printed, to leave the deleted out and to put the rest in order, so an answer
-// that is not shaped as the specification says is refused there rather than sorted on.
 func TestIssueShowRefusesCommentsTheServerShapedOtherwise(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -227,7 +213,7 @@ func TestIssueShowRefusesCommentsTheServerShapedOtherwise(t *testing.T) {
 					{"upstream_status", 200},
 					{"upstream_body", body},
 				},
-			}, requireRefusal(t, got))
+			}, requireFault(t, got))
 		})
 	}
 }
@@ -279,8 +265,6 @@ func TestIssueShowAsksTheDevInstanceForNoCommentsAtZero(t *testing.T) {
 	assert.Equal(t, []string{askedIssueFields}, dev.sentFields())
 }
 
-// The two comments of DEV-7 were written by two users one after the other, so they say both that the order is
-// the order they were written in and that the count takes the last of them.
 func TestIssueShowPrintsTheCommentsOfTheDevInstanceOldestFirst(t *testing.T) {
 	t.Parallel()
 	admin := commentDetails("7-2", "", "admin", "Комментарий администратора после правки.")
@@ -318,7 +302,6 @@ func TestIssueShowPrintsTheCommentsOfTheDevInstanceOldestFirst(t *testing.T) {
 	}
 }
 
-// sentComments is the comments of the one answer the server sent, as JSON read them.
 func sentComments(t *testing.T, u *upstream) []map[string]any {
 	t.Helper()
 	answers := u.answers()

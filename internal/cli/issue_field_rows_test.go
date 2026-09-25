@@ -10,17 +10,14 @@ import (
 )
 
 type liveRow struct {
-	row   string
-	field string
-	given []string
-	sent  string
-	// The value of the element of the body, as JSON.
-	value string
-	// What issue show prints for the field: one value, or the values of a field that holds several.
+	row     string
+	field   string
+	given   []string
+	sent    string
+	value   string
 	printed []string
 	multi   bool
-	// Whether the value is printed as a literal block rather than as a double-quoted string.
-	block bool
+	block   bool
 }
 
 func liveRows() []liveRow {
@@ -73,20 +70,13 @@ func liveRows() []liveRow {
 	}
 }
 
-// The text the update writes over the note: the other two lines, ended the other way. YouTrack keeps a text byte for
-// byte, carriage return and all, so what is written here is what comes back.
 const rewrittenNote = "другой\r\nтекст"
 
-// The second value of every row, which the update writes over the first: another value of the same type, given to the
-// same field. No class stands here — that the two writes name the field the same is the whole of the scenario,
-// and it is read off the two bodies rather than out of a table.
 type rewrittenRow struct {
-	row   string
-	field string
-	given []string
-	// The value of the element of the body of the update, as JSON.
-	value string
-	// What issue show prints for the field once the update went through.
+	row     string
+	field   string
+	given   []string
+	value   string
 	printed []string
 	multi   bool
 }
@@ -136,7 +126,6 @@ func rewrittenRows() []rewrittenRow {
 	}
 }
 
-// The element the body of a creation carried for each field, by the name of that field.
 type sentElement struct {
 	Type  string          `json:"$type"`
 	Name  string          `json:"name"`
@@ -156,8 +145,6 @@ func sentElements(t *testing.T, body string) map[string]sentElement {
 	return elements
 }
 
-// The call that fills every row of the table at once: the fields DEV requires beside them, and Priority, which
-// the project fills itself where the call names it none.
 func creationOfEveryRow(t *testing.T, rows []liveRow) []string {
 	t.Helper()
 	argv := []string{"issue", "create", "DEV", "--summary", contractTitle(t),
@@ -185,7 +172,6 @@ func TestIssueCreateFillsEveryRowOfTheTableOfTypes(t *testing.T) {
 	filed := requireMapping(t, "stdout", got.stdout)
 	readable := nodeAt(t, filed, "idReadable").Value
 	require.Regexp(t, `^DEV-[0-9]+$`, readable)
-	// Registered after the recorder's own cleanup, so the deletion runs first and the cassette records it.
 	t.Cleanup(func() { removeIssue(t, dev, readable) })
 
 	elements := sentElements(t, dev.asks()[1])
@@ -216,11 +202,6 @@ func TestIssueCreateFillsEveryRowOfTheTableOfTypes(t *testing.T) {
 	}
 }
 
-// The two branches of the class agree, row by row. A creation has no issue to read a class off, so every
-// element of its body is named out of the table; an update reads the issue first and copies the class the
-// server named the field by. The same twenty fields are written twice over, and what the second body says of
-// each is what the first said — which is what makes the table a measurement of the instance rather than of
-// itself, since the server checks nothing of a class but whether it holds one value or several.
 func TestIssueUpdateNamesEveryRowTheClassTheCreationDid(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -230,9 +211,8 @@ func TestIssueUpdateNamesEveryRowTheClassTheCreationDid(t *testing.T) {
 	require.Equal(t, 0, filed.code, "stderr: %s", filed.stderr)
 	readable := nodeAt(t, requireMapping(t, "stdout", filed.stdout), "idReadable").Value
 	require.Regexp(t, `^DEV-[0-9]+$`, readable)
-	// Registered after the recorder's own cleanup, so the deletion runs first and the cassette records it.
 	t.Cleanup(func() { removeIssue(t, dev, readable) })
-	named := sentElements(t, lastAsk(dev))
+	typedByTheTable := sentElements(t, lastAsk(dev))
 
 	rows := rewrittenRows()
 	argv := []string{"issue", "update", readable}
@@ -246,13 +226,14 @@ func TestIssueUpdateNamesEveryRowTheClassTheCreationDid(t *testing.T) {
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Empty(t, got.stderr)
-	copied := sentElements(t, lastAsk(dev))
+	typedLikeTheIssue := sentElements(t, lastAsk(dev))
 	for _, row := range rows {
 		t.Run(row.row, func(t *testing.T) {
-			element, sent := copied[row.field]
+			element, sent := typedLikeTheIssue[row.field]
 			require.True(t, sent, "the body of the update carries nothing for %q", row.field)
-			require.NotEmpty(t, named[row.field].Type, "the body of the creation carries nothing for %q", row.field)
-			assert.Equal(t, named[row.field].Type, element.Type)
+			require.NotEmpty(t, typedByTheTable[row.field].Type,
+				"the body of the creation carries nothing for %q", row.field)
+			assert.Equal(t, typedByTheTable[row.field].Type, element.Type)
 			assert.JSONEq(t, row.value, string(element.Value))
 		})
 	}

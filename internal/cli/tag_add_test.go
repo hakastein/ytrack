@@ -11,15 +11,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The collection every tag of a token stands in, which is where the resolver reads and where nothing a tagging
-// sends ever goes.
 const tagsCollection = "/api/tags"
 
-// The one name the read before a tagging asks for: the readable id the write is addressed by and the document
-// prints.
 const taggedOwnerFields = "idReadable"
 
-// Where the tags of an owner stand, which is the path of every tagging and of every removal.
 func tagsOfOwnerPath(collection, readable string) string {
 	return "/api/" + collection + "/" + readable + "/tags"
 }
@@ -28,8 +23,6 @@ func taggingRequest(address, collection, readable, fields string) string {
 	return "POST " + address + tagsOfOwnerPath(collection, readable) + "?fields=" + fields
 }
 
-// addingATag is the server of a tagging: owner answers the read that settles the readable id, catalogue the
-// read that resolves the name, and tagging the POST that follows the two.
 func addingATag(t *testing.T, owner, catalogue, tagging http.HandlerFunc) *upstream {
 	t.Helper()
 	return serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -48,7 +41,6 @@ func shownTags() http.HandlerFunc {
 	return respondWith(http.StatusOK, tagsOfTwoOwners())
 }
 
-// noTagging stands for the write a refusal before it must not send.
 func noTagging(t *testing.T) http.HandlerFunc {
 	t.Helper()
 	return func(_ http.ResponseWriter, r *http.Request) {
@@ -56,9 +48,6 @@ func noTagging(t *testing.T) http.HandlerFunc {
 	}
 }
 
-// A tagging names the owner by the one argument and the tag by --name, and takes nothing else: a second
-// argument would swallow a name beginning with a dash, and no flag of another verb stands here. An empty name
-// and no name at all are different mistakes, and only the flag tells them apart.
 func TestTagAddRefusesACallOfAnyOtherShape(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -72,7 +61,6 @@ func TestTagAddRefusesACallOfAnyOtherShape(t *testing.T) {
 		{name: "an empty name", argv: []string{"DEV-7", "--name", ""}},
 		{name: "a name that is no UTF-8", argv: []string{"DEV-7", "--name", "\xff"}},
 		{name: "the name given twice", argv: []string{"DEV-7", "--name", "a", "--name", "b"}},
-		// The document is the owner and the tag that was hung, so there is no tree for a caller to choose.
 		{name: "an expression of fields", argv: []string{"DEV-7", "--name", "x", "--fields", "name"}},
 	}
 	for _, tc := range tests {
@@ -82,16 +70,12 @@ func TestTagAddRefusesACallOfAnyOtherShape(t *testing.T) {
 
 			got := runWith(t, server.env(), append([]string{"tag", "add"}, tc.argv...)...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The whole of the call on the wire, for each kind of owner: the owner is read first, the catalogue after
-// it, and the write goes to the readable id the server gave rather than to the argument the caller typed. The
-// body is the id the name resolved to and not one key more — {name} there is answered 400 — and no request of
-// either kind ever reaches the API of the other.
 func TestTagAddReadsTheOwnerThenResolvesTheNameThenWrites(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -140,17 +124,14 @@ func TestTagAddReadsTheOwnerThenResolvesTheNameThenWrites(t *testing.T) {
 				tagsOfOwnerPath(tc.collection, tc.readable),
 			}, server.sentPaths())
 			assert.Equal(t, []string{taggedOwnerFields, resolvedTagFields, resolvedTagFields}, server.sentFields())
-			assert.Equal(t, []string{"", "", `{"id":"10-5"}`}, server.asks())
+			assert.Equal(t, []string{"", "", `{"id":"10-5"}`}, server.asks(),
+				"the server answers 400 to a body with the name")
 			assert.NotContains(t, strings.Join(server.sentPaths(), " "), tc.apart)
 			requireResolvedWithoutTheServer(t, server, "ready")
 		})
 	}
 }
 
-// What is printed is the tag the write answered with and never the one the read before it found: the id is
-// the whole of what the answer is held to, and the name and the owner beside it are the server's own word about
-// that id. A tag renamed or handed to another owner between the two requests prints as the server has it, and
-// the document the caller keeps is about the moment the tag went on.
 func TestTagAddPrintsTheTagTheWriteAnsweredWith(t *testing.T) {
 	t.Parallel()
 	server := addingATag(t, respondWith(http.StatusOK, issueNamed("DEV-7")), shownTags(),
@@ -163,9 +144,6 @@ func TestTagAddPrintsTheTagTheWriteAnsweredWith(t *testing.T) {
 	assert.Equal(t, want, got.stdout, "the document was built from the read that resolved the name")
 }
 
-// A 200 says the server took the body, not that the tag it hung is the tag the name resolved to. The owner
-// carries something by then, which is what the exit code of 2 says, and the refusal names both halves of the
-// call: the owner by the id the read gave and the tag by the name that was written.
 func TestTagAddRefusesATagOtherThanTheOneResolved(t *testing.T) {
 	t.Parallel()
 	server := addingATag(t, respondWith(http.StatusOK, issueNamed("DEV-7")), shownTags(),
@@ -184,9 +162,6 @@ func TestTagAddRefusesATagOtherThanTheOneResolved(t *testing.T) {
 	}, found.details)
 }
 
-// What the server answers the write with is read the way a status is read everywhere, and the words it
-// used pass on as they stand: being shown a tag is not being allowed to hang it, and YouTrack keeps a set of
-// its own for that right. Every one of these names the owner and the tag the call was about.
 func TestTagAddReadsWhatTheServerAnsweredTheWriteWith(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -226,7 +201,7 @@ func TestTagAddReadsWhatTheServerAnsweredTheWriteWith(t *testing.T) {
 
 			got := runWith(t, server.env(), "tag", "add", "DEV-7", "--name", "ready")
 
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, tc.code, found.code)
 			assert.Equal(t, detail{"request", taggingRequest(server.url, "issues", "DEV-7", resolvedTagFields)},
 				found.details[0])
@@ -236,9 +211,6 @@ func TestTagAddReadsWhatTheServerAnsweredTheWriteWith(t *testing.T) {
 	}
 }
 
-// Each read stands before the next, and a refusal from either leaves the owner exactly as it was: an owner
-// the token cannot see is answered before a catalogue of tags is ever asked for, and a name that resolves to no
-// one tag is answered before anything is written.
 func TestTagAddSendsNoWriteWhereAReadBeforeItRefused(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -273,7 +245,7 @@ func TestTagAddSendsNoWriteWhereAReadBeforeItRefused(t *testing.T) {
 
 			got := runWith(t, server.env(), "tag", "add", "DEV-7", "--name", tc.written)
 
-			assert.Equal(t, tc.code, requireRefusal(t, got).code)
+			assert.Equal(t, tc.code, requireFault(t, got).code)
 			assert.Equal(t, tc.methods, sentMethods(server))
 			assert.Equal(t, tc.paths, server.sentPaths())
 		})
@@ -315,13 +287,10 @@ func TestTagAddRefusesANameThePolygonHasNoTagUnder(t *testing.T) {
 
 	got := runWith(t, dev.env(), "tag", "add", issue, "--name", contractTagName(t)+" nope")
 
-	assert.Equal(t, "unknown_name", requireRefusal(t, got).code)
+	assert.Equal(t, "unknown_name", requireFault(t, got).code)
 	assert.Equal(t, []string{http.MethodGet, http.MethodGet}, sentMethodsFrom(dev, before))
 }
 
-// The read before the write is what turns an owner the token cannot reach into one refusal and one
-// request: an issue the limited token may not see and an issue nobody filed are answered the same way, and
-// neither costs a catalogue of tags.
 func TestTagAddRefusesAnOwnerTheTokenCannotReachOnTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -344,14 +313,12 @@ func TestTagAddRefusesAnOwnerTheTokenCannotReachOnTheDevInstance(t *testing.T) {
 
 			got := runWith(t, limited, "tag", "add", tc.owner, "--name", name)
 
-			assert.Equal(t, "not_found", requireRefusal(t, got).code)
+			assert.Equal(t, "not_found", requireFault(t, got).code)
 			assert.Equal(t, []string{http.MethodGet}, sentMethodsFrom(dev, before))
 		})
 	}
 }
 
-// issueToTag is the fixture of a contract test that needs an issue of its own to hang tags on: it is filed by
-// the command that files issues, with the custom fields DEV requires, and taken away again afterwards.
 func issueToTag(t *testing.T, dev *upstream) string {
 	t.Helper()
 	argv := append([]string{"issue", "create", "DEV", "--summary", contractTagName(t)}, devRequired()...)
@@ -359,12 +326,10 @@ func issueToTag(t *testing.T, dev *upstream) string {
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	readable := nodeAt(t, requireMapping(t, "stdout", got.stdout), "idReadable").Value
 	require.Regexp(t, `^DEV-[0-9]+$`, readable)
-	// Registered after the recorder's own cleanup, so the deletion runs first and the cassette records it.
 	t.Cleanup(func() { removeIssue(t, dev, readable) })
 	return readable
 }
 
-// articleToTag is the same fixture for the knowledge base.
 func articleToTag(t *testing.T, dev *upstream) string {
 	t.Helper()
 	article := fileArticle(t, dev, contractTagName(t))

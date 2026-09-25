@@ -14,12 +14,8 @@ import (
 
 const signedLinkForm = `^/api/files/[0-9]+-[0-9]+\?sign=[A-Za-z0-9_-]+&updated=[0-9]+$`
 
-// The form a preview link takes, which is the same one without the moment: a preview is a file of its own,
-// made once from the attachment and never written again.
 const previewLinkForm = `^/api/files/[0-9]+-[0-9]+\?sign=[A-Za-z0-9_-]+$`
 
-// An issue carrying two attachments: one without a preview, one with the placeholder the web
-// interface shows for a file it cannot draw.
 const issueWithAttachments = `{"$type":"Issue","attachments":[` +
 	`{"$type":"IssueAttachment","id":"12-2","url":"/api/files/12-2?sign=Ab-_9&updated=1","thumbnailURL":null},` +
 	`{"$type":"IssueAttachment","id":"12-3","url":"/api/files/12-3?sign=x","thumbnailURL":"/noPreview.svg"}]}`
@@ -37,9 +33,6 @@ func TestIssueShowPrintsTheLinksOfAnAttachmentWhole(t *testing.T) {
 	assert.Equal(t, outcome{stdout: want}, got)
 }
 
-// A deployment under a path prefix reaches the API under that prefix, and the link the server sends stands at
-// the root of the host: YouTrack writes the prefix into the link itself, so resolving one against the other
-// would write it twice.
 func TestIssueShowResolvesAnAttachmentLinkAgainstTheHostAndNotThePathOfTheAddress(t *testing.T) {
 	t.Parallel()
 	server := serve(t, respondWith(http.StatusOK, issueWithAttachments))
@@ -55,8 +48,6 @@ func TestIssueShowResolvesAnAttachmentLinkAgainstTheHostAndNotThePathOfTheAddres
 	assert.Equal(t, []string{"/ctx/api/issues/DEV-1"}, server.sentPaths())
 }
 
-// The knowledge base sends its own schema, and thumbnailURL arrives on it although the specification declares
-// the name only for an attachment of an issue.
 func TestArticleShowPrintsTheLinksOfAnAttachmentWhole(t *testing.T) {
 	t.Parallel()
 	const body = `{"$type":"Article","attachments":[{"$type":"ArticleAttachment",` +
@@ -80,8 +71,6 @@ func TestIssueShowRefusesAnAttachmentLinkThatIsNoAbsolutePath(t *testing.T) {
 	}{
 		{name: "a host of its own", received: "https://evil/api/files/1"},
 		{name: "an authority and no scheme", received: "//evil/x"},
-		// An authority naming a user and no host at all: resolved, it would print as http://u@/p under a name
-		// that means this instance.
 		{name: "a user and no host", received: "//u@/p"},
 		{name: "a relative path", received: "api/files/1"},
 		{name: "an opaque reference", received: "mailto:a@b"},
@@ -105,15 +94,11 @@ func TestIssueShowRefusesAnAttachmentLinkThatIsNoAbsolutePath(t *testing.T) {
 					{"field", "attachments(url)"},
 					{"upstream_value", tc.received},
 				},
-			}, requireRefusal(t, got))
+			}, requireFault(t, got))
 		})
 	}
 }
 
-// An object the server named nothing still stands somewhere, and where the tool knows the schema of that place
-// it reads the link by it: attachment list settles which API answers it before it asks, so an attachment that
-// arrived without $type is resolved like any other. A path printed as it came is no link, and the caller could
-// not tell it from one they may follow.
 func TestAttachmentListPrintsTheLinkOfAnAttachmentTheServerNamedNothing(t *testing.T) {
 	t.Parallel()
 	const records = `[{"id":"12-2","name":"a.txt","size":1,"mimeType":"text/plain",` +
@@ -168,14 +153,11 @@ func TestAttachmentListRefusesALinkOfAnAttachmentTheServerNamedNothing(t *testin
 					{"field", "url"},
 					{"upstream_value", tc.received},
 				},
-			}, requireRefusal(t, got))
+			}, requireFault(t, got))
 		})
 	}
 }
 
-// Х. The schema of the place is the specification's own wherever the object stands, and one nested under a
-// name of an expression is no different: the attachments of an issue are declared IssueAttachment, so an
-// object that arrived nameless there is read by that.
 func TestIssueShowPrintsTheLinkOfAnAttachmentTheServerNamedNothing(t *testing.T) {
 	t.Parallel()
 	const body = `{"$type":"Issue","attachments":[{"url":"/api/files/12-2?sign=Ab-_9&updated=1"}]}`
@@ -188,9 +170,6 @@ func TestIssueShowPrintsTheLinkOfAnAttachmentTheServerNamedNothing(t *testing.T)
 	assert.Equal(t, outcome{stdout: want}, got)
 }
 
-// Х. Where the specification names no schema for a place — Project.customFields holds an object of none — the
-// server's own name is all there is, and an object that carries neither is left as it arrived: nothing says
-// what stands there, and resolving it would be a guess.
 func TestProjectShowReadsALinkOfANodeOfNoSchemaByTheNameTheServerGaveIt(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -223,8 +202,6 @@ func TestProjectShowReadsALinkOfANodeOfNoSchemaByTheNameTheServerGaveIt(t *testi
 	}
 }
 
-// url is declared on sixteen schemas of the specification, and on some of them the server sends an address of
-// another host altogether: only the schemas of the table are resolved against the instance.
 func TestIssueShowPrintsTheLinkOfAnotherSchemaAsReceived(t *testing.T) {
 	t.Parallel()
 	const body = `{"$type":"Issue","externalIssue":{"$type":"ExternalIssue","url":"https://jira.example/X-1"}}`
@@ -235,8 +212,6 @@ func TestIssueShowPrintsTheLinkOfAnotherSchemaAsReceived(t *testing.T) {
 	assert.Equal(t, outcome{stdout: "externalIssue:\n  url: \"https://jira.example/X-1\"\n"}, got)
 }
 
-// The avatar of a user is relative too, and the subtypes the server answers with carry it: Me is what the
-// current user arrives as.
 func TestIssueShowPrintsTheAvatarOfAUserWhole(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -283,8 +258,6 @@ func TestProjectShowPrintsTheIconOfTheProjectWhole(t *testing.T) {
 	}
 }
 
-// A record of a list is one line, and the link on it is whole: the normalisation is one for every place an
-// answer is printed from.
 func TestIssueListPrintsAnAttachmentLinkWholeInARecord(t *testing.T) {
 	t.Parallel()
 	record := listedRecord("DEV-1", namedFieldsOfTheDefault(),
@@ -332,10 +305,6 @@ func TestUserShowPrintsTheAvatarOfTheDevInstanceWhole(t *testing.T) {
 	assert.Len(t, dev.requests(), 1)
 }
 
-// The link ytrack prints is a pass of its own, good for as long as the signature it carries: it
-// gives the file to a client that holds nothing else, and it is the signature that is read rather than the
-// caller, so the same address without one is refused to the admin too. ytrack never walks in here itself —
-// during the call there is no request for the bytes of a file at all.
 func TestTheSignedLinkOfTheDevInstanceGivesTheFileWithoutAnAuthorizationHeader(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -396,9 +365,6 @@ func TestTheSignedLinkOfTheDevInstanceGivesTheFileWithoutAnAuthorizationHeader(t
 		}
 	})
 
-	// A signature that does not hold is answered with the page the web interface shows instead of the file,
-	// and a signature is read byte for byte: the same text in upper case is another signature and no signature
-	// at all. The move is not made, so what the holder of the link is left with is the refusal itself.
 	t.Run("spoiled", func(t *testing.T) {
 		for _, sign := range []string{"abc", "ABC"} {
 			t.Run(sign, func(t *testing.T) {
@@ -417,31 +383,20 @@ func TestTheSignedLinkOfTheDevInstanceGivesTheFileWithoutAnAuthorizationHeader(t
 	})
 }
 
-// Where the bytes of a file live. ytrack builds no address under it and asks for nothing there: the link is
-// printed and whoever holds it fetches the file themselves.
 const filesPath = "/api/files/"
 
-// How the server names the file it hands over: the name of the attachment percent-encoded, which is what the
-// holder of the link saves it under.
 const contentDisposition = `attachment; filename*=UTF-8''`
 
-// A printed attachment, read back off stdout: every key of the default of attachment list, of which a
-// scenario that asked for fewer leaves the rest empty.
 type printedAttachment struct {
-	ID       string `yaml:"id"`
-	Name     string `yaml:"name"`
-	Size     int    `yaml:"size"`
-	MimeType string `yaml:"mimeType"`
-	URL      string `yaml:"url"`
-	// Not of the default and not declared for an article at all: a scenario that asked for it reads it here,
-	// and one that did not leaves it empty.
-	ThumbnailURL string `yaml:"thumbnailURL"`
-	// Which comment the file hangs from, where a scenario asked for it: nil both for an attachment of the
-	// issue itself, which the server answers comment: null for, and for a scenario that never asked.
-	Comment *printedOwner `yaml:"comment"`
+	ID           string        `yaml:"id"`
+	Name         string        `yaml:"name"`
+	Size         int           `yaml:"size"`
+	MimeType     string        `yaml:"mimeType"`
+	URL          string        `yaml:"url"`
+	ThumbnailURL string        `yaml:"thumbnailURL"`
+	Comment      *printedOwner `yaml:"comment"`
 }
 
-// A comment named by its internal id alone, which is what +comment(id) brings back.
 type printedOwner struct {
 	ID string `yaml:"id"`
 }
@@ -457,8 +412,6 @@ func requireAttachmentsPrinted(t *testing.T, stdout string) []printedAttachment 
 	return printed.Attachments
 }
 
-// sentAttachmentLinks is the url of each attachment of the first answer the server sent, as the server wrote
-// it: what the printed link is held against comes from the wire and not from a copy of it in the test.
 func sentAttachmentLinks(t *testing.T, u *upstream) []string {
 	t.Helper()
 	answers := u.answers()

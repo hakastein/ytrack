@@ -13,38 +13,26 @@ const (
 	rejectionValue = "Дубль"
 )
 
-// The value of a state field as the server sends it back.
 func stateElement(name string) string {
 	return `{"$type":"StateBundleElement","name":"` + name + `","isResolved":false,"localizedName":null}`
 }
 
-// A condition of the base kind, which declares none of the members FieldBasedCondition does: a subtype the
-// specification gives no values and no null to show for is read as far as its kind and no further.
 func conditionOfAnotherKind() string {
 	return `{"$type":"CustomFieldCondition","id":"98-1"}`
 }
 
-// A FieldBasedCondition watching no field at all, which the specification allows and which hides nothing.
 func watchingNothing() string {
 	return `{"$type":"FieldBasedCondition","showForNullValue":false,"field":null,"values":[]}`
 }
 
-// A value written into a custom field a condition keeps off the issue the body would file never goes out:
-// YouTrack answers such a creation 200 and files the issue without the value, so the one thing the call got
-// wrong is the one thing it would be told nothing about. The condition is held against the
-// body — the value the call writes into the field it watches, or the value the project files there unasked.
 func TestIssueCreateSendsNoValueAConditionHides(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		state writableField
-		// The condition on Причина отклонения, as the metadata of the project sends it.
+		name      string
+		state     writableField
 		condition string
-		// What the call writes besides the hidden field.
-		writes []string
-		// hidden is whether the value under rejection is one the condition keeps off the issue, so the call is
-		// refused rather than sent.
-		hidden bool
+		writes    []string
+		hidden    bool
 	}{
 		{
 			name:      "the project files the field it watches with a value it does not show at",
@@ -130,19 +118,17 @@ func TestIssueCreateSendsNoValueAConditionHides(t *testing.T) {
 				assert.Contains(t, sentFieldTypes(t, server.asks()[1]), rejection)
 				return
 			}
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "bad_usage", found.code)
 			assert.Equal(t, writeMetadataRequest(server.url, "DEV"), detailNamed(t, found, "request"))
 			assert.Equal(t, "DEV", detailNamed(t, found, "project"))
-			requireInvalidField(t, found, rejection, rejectionValue)
+			requireInvalidFieldWithAnyReason(t, found, rejection, rejectionValue)
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
 		})
 	}
 }
 
-// requireInvalidField is the one row a refusal over a field a condition hides prints under invalid: which field
-// and value the call gave, and that a reason came with them — its wording is not part of the contract.
-func requireInvalidField(t *testing.T, found faultDocument, field, value string) {
+func requireInvalidFieldWithAnyReason(t *testing.T, found faultDocument, field, value string) {
 	t.Helper()
 	invalid, ok := detailNamed(t, found, "invalid").([]any)
 	require.True(t, ok, "invalid: %v", detailNamed(t, found, "invalid"))
@@ -156,14 +142,10 @@ func requireInvalidField(t *testing.T, found faultDocument, field, value string)
 	assert.NotEmpty(t, row[2].value)
 }
 
-// What the body leaves in the field a condition watches settles whether the field it hides is required of
-// the caller: a field the issue cannot hold is asked of nobody, and the same field is required as soon as the
-// same body uncovers it.
 func TestIssueCreateRequiresTheFieldTheBodyUncovers(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		// What the call writes besides its title.
+		name    string
 		writes  []string
 		missing []any
 	}{
@@ -214,7 +196,7 @@ func TestIssueCreateRequiresTheFieldTheBodyUncovers(t *testing.T) {
 				assert.Equal(t, []string{http.MethodGet, http.MethodPost}, sentMethods(server))
 				return
 			}
-			found := requireRefusal(t, got)
+			found := requireFault(t, got)
 			assert.Equal(t, "missing_required", found.code)
 			assert.Equal(t, tc.missing, detailNamed(t, found, "missing"))
 			assert.Equal(t, []string{http.MethodGet}, sentMethods(server))
@@ -232,9 +214,9 @@ func TestIssueCreateHoldsTheDevProjectToItsCondition(t *testing.T) {
 
 		got := runWith(t, dev.env(), argv...)
 
-		found := requireRefusal(t, got)
+		found := requireFault(t, got)
 		assert.Equal(t, "bad_usage", found.code)
-		requireInvalidField(t, found, rejection, rejectionValue)
+		requireInvalidFieldWithAnyReason(t, found, rejection, rejectionValue)
 		assert.Equal(t, []string{http.MethodGet}, sentMethods(dev))
 	})
 	t.Run("the field the same call uncovers and fills with nothing", func(t *testing.T) {
@@ -245,7 +227,7 @@ func TestIssueCreateHoldsTheDevProjectToItsCondition(t *testing.T) {
 
 		got := runWith(t, dev.env(), argv...)
 
-		found := requireRefusal(t, got)
+		found := requireFault(t, got)
 		assert.Equal(t, "missing_required", found.code)
 		assert.Equal(t, []any{rejection}, detailNamed(t, found, "missing"))
 		assert.Equal(t, []string{http.MethodGet}, sentMethods(dev))
@@ -263,7 +245,6 @@ func TestIssueCreateHoldsTheDevProjectToItsCondition(t *testing.T) {
 		mapping := requireMapping(t, "stdout", got.stdout)
 		readable := nodeAt(t, mapping, "idReadable").Value
 		require.Regexp(t, `^DEV-[0-9]+$`, readable)
-		// Registered after the recorder's own cleanup, so the deletion runs first and the cassette records it.
 		t.Cleanup(func() { removeIssue(t, dev, readable) })
 
 		assert.Equal(t, "Отклонена", nodeAt(t, mapping, "customFields", "State").Value)

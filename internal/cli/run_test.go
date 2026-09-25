@@ -13,9 +13,7 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// pflag names an unknown flag in its error as is, while an unknown command is quoted in
-// backticks: only a flag carries raw bytes into the document.
-const bait = "--q\" b\\ n\n t\t r\r soh\x01 esc\x1b del\x7f nel\xc2\x85 csi\xc2\x9b ls\xe2\x80\xa8 ps\xe2\x80\xa9 bom\xef\xbb\xbf fffe\xef\xbf\xbe ffff\xef\xbf\xbf Статус 😀"
+const unknownFlagOfEveryEscape = "--q\" b\\ n\n t\t r\r soh\x01 esc\x1b del\x7f nel\xc2\x85 csi\xc2\x9b ls\xe2\x80\xa8 ps\xe2\x80\xa9 bom\xef\xbb\xbf fffe\xef\xbf\xbe ffff\xef\xbf\xbf Статус 😀"
 
 type outcome struct {
 	code   int
@@ -39,30 +37,24 @@ func TestRunRefusesAnyCommand(t *testing.T) {
 		{name: "unknown flag", argv: []string{"project", "list", "--bogus"}},
 		{name: "help command", argv: []string{"help"}},
 		{name: "help command with a topic", argv: []string{"help", "project"}},
-		// cobra insists on a help command, so it is given one that refuses; it is called no-help because a
-		// command called help is listed in the help even when it is hidden.
 		{name: "the stand-in cobra is given for a help command", argv: []string{"no-help"}},
-		{name: "group with no command", argv: []string{"project"}},
-		{name: "unknown command of a group", argv: []string{"project", "bogus"}},
-		// Run answers the protocol where a shell writes it, first in argv; behind a flag it reaches cobra, and no
-		// shell writes such a call. What the protocol answers stands in completion_test.go.
+		{name: "command with no subcommand", argv: []string{"project"}},
+		{name: "unknown subcommand of a command", argv: []string{"project", "bogus"}},
 		{name: "completion protocol behind a flag", argv: []string{"--limit=5", "__complete", "issue"}},
-		{name: "flag with characters YAML must escape", argv: []string{bait}},
+		{name: "flag with characters YAML must escape", argv: []string{unknownFlagOfEveryEscape}},
 		{name: "flag with invalid UTF-8", argv: []string{"--\xff"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, run(t, tc.argv)))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, run(t, tc.argv)))
 		})
 	}
 }
 
-// A decoder takes a BOM as it stands and hides which form a character was printed in, so
-// the forms are checked on the bytes of stderr.
 func TestRunEscapesTheUnprintableAndLeavesTextRaw(t *testing.T) {
 	t.Parallel()
-	stderr := run(t, []string{bait}).stderr
+	stderr := run(t, []string{unknownFlagOfEveryEscape}).stderr
 	for _, r := range []rune{0xFEFF, 0xFFFE, 0xFFFF} {
 		assert.NotContains(t, stderr, string(r), "U+%04X stands raw", r)
 	}
@@ -71,8 +63,6 @@ func TestRunEscapesTheUnprintableAndLeavesTextRaw(t *testing.T) {
 	}
 }
 
-// Given nil, cobra reads the process's arguments, so the test puts a word there; that is
-// also why it does not run in parallel.
 func TestRunTakesNilArgvAsEmpty(t *testing.T) {
 	args := os.Args
 	t.Cleanup(func() { os.Args = args })
@@ -89,36 +79,28 @@ func TestRunHelpIsNotACommand(t *testing.T) {
 }
 
 type faultDocument struct {
-	code string
-	// The keys after message, in the order printed.
+	code    string
 	details []detail
 }
 
-// A value quoted in the document reads back as a string, a bare integer as an int, null as nil, a list
-// as []any and a mapping as its details in order.
 type detail struct {
 	key   string
 	value any
 }
 
-// requireRefusal is a refusal that leaves the instance as it was, which every refusal but a write's is: the
-// exit code is 1, and the caller may send the call again once they have fixed what it says.
-func requireRefusal(t *testing.T, got outcome) faultDocument {
+func requireFault(t *testing.T, got outcome) faultDocument {
 	t.Helper()
 	assert.Equal(t, 1, got.code)
-	return requireRefusalDocument(t, got)
+	return requireFaultDocument(t, got)
 }
 
-// requireUncertainty is a refusal the caller cannot answer by sending the call again: the write may have
-// happened, or the answer that came back says it did, and the exit code is where that stands.
 func requireUncertainty(t *testing.T, got outcome) faultDocument {
 	t.Helper()
 	assert.Equal(t, 2, got.code)
-	return requireRefusalDocument(t, got)
+	return requireFaultDocument(t, got)
 }
 
-// requireRefusalDocument is the document a refusal printed, whatever exit code it came with.
-func requireRefusalDocument(t *testing.T, got outcome) faultDocument {
+func requireFaultDocument(t *testing.T, got outcome) faultDocument {
 	t.Helper()
 	assert.Empty(t, got.stdout)
 
@@ -138,8 +120,6 @@ func requireRefusalDocument(t *testing.T, got outcome) faultDocument {
 	return found
 }
 
-// detailNamed is what the refusal printed under that key, for a scenario that holds one key to something
-// while the rest of the document is the server's word and not worth writing out.
 func detailNamed(t *testing.T, found faultDocument, key string) any {
 	t.Helper()
 	for _, printed := range found.details {
@@ -181,8 +161,6 @@ func requireValue(t *testing.T, node *yaml.Node) any {
 	return number
 }
 
-// requireMapping is the one document text holds, as the mapping at its root; what names it stands in the
-// message of a scenario that printed something else.
 func requireMapping(t *testing.T, what, text string) *yaml.Node {
 	t.Helper()
 	decoder := yaml.NewDecoder(strings.NewReader(text))

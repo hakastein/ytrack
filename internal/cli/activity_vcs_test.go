@@ -15,14 +15,11 @@ const capturedCommits = `[` +
 	`{"removed":[],"added":[{"urls":["https://gitlab.example.com/example/app/-/commit/e0996a37c13d44c3b06074939d43fa3759bd32c1"],"version":"e0996a37c13d44c3b06074939d43fa3759bd32c1","text":"DEV-451: отмена заказа, событие отправляется после сохранения заказа\n","date":1761829190000,"id":"229-162","$type":"VcsChange"}],"id":"229-162.0-0","author":{"login":"system_user@","$type":"VcsUnresolvedUser"},"field":null,"timestamp":1761829190000,"category":{"id":"VcsChangeCategory","$type":"ActivityCategory"},"$type":"VcsChangeActivityItem"}` +
 	`]`
 
-// A commit is printed by the link to it, which is what the default asks of every value and what a commit has
-// among those names; its author is the user YouTrack matched the committer to, or system_user@ where it
-// matched nobody.
 func TestActivityPrintsTheCommitsOfAnIssueByTheirLinks(t *testing.T) {
 	t.Parallel()
-	server := journal(t, respondWith(http.StatusOK, capturedCommits))
+	server := activityServer(t, respondWith(http.StatusOK, capturedCommits))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue, "--category", "vcschangecategory")
+	got := runWith(t, server.env(), "activity", "list", activityIssue, "--category", "vcschangecategory")
 
 	want := "total: 3\nreturned: 3\ntruncated: false\nactivities:\n" +
 		`  - {timestamp: "2025-10-31T02:31:39Z", author: {login: "Петров.Пётр"}, category: "VcsChangeCategory", ` +
@@ -38,17 +35,14 @@ func TestActivityPrintsTheCommitsOfAnIssueByTheirLinks(t *testing.T) {
 	sent := activitySent(t, server)
 	assert.Equal(t, []string{"VcsChangeCategory"}, sent["categories"])
 	assert.Equal(t, []string{sentActivityFields}, sent["fields"])
-	// A commit stands for no one field of the issue, so no link types are read for it.
 	assert.Equal(t, 0, sentTo(server, linkTypesPath))
 }
 
-// The commits stand in the journal of every category, since the default asks for all of them: the chronology of
-// an issue is whole without a flag.
 func TestActivityAsksForTheCommitsWithEveryOtherCategory(t *testing.T) {
 	t.Parallel()
-	server := journal(t, respondWith(http.StatusOK, capturedCommits))
+	server := activityServer(t, respondWith(http.StatusOK, capturedCommits))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue)
+	got := runWith(t, server.env(), "activity", "list", activityIssue)
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
 	assert.Contains(t, strings.Split(activitySent(t, server).Get("categories"), ","), "VcsChangeCategory")
@@ -56,13 +50,11 @@ func TestActivityAsksForTheCommitsWithEveryOtherCategory(t *testing.T) {
 	assert.Equal(t, 3, strings.Count(got.stdout, `category: "VcsChangeCategory"`))
 }
 
-// The message and the hash of a commit are asked for by name: a message runs to several lines, and a merge
-// commit, which is what a merged merge request stands as, says so in its message alone.
 func TestActivityPrintsTheMessageAndTheHashOfACommitAskedFor(t *testing.T) {
 	t.Parallel()
-	server := journal(t, respondWith(http.StatusOK, capturedCommits))
+	server := activityServer(t, respondWith(http.StatusOK, capturedCommits))
 
-	got := runWith(t, server.env(), "activity", "list", journalIssue, "--category", "VcsChangeCategory",
+	got := runWith(t, server.env(), "activity", "list", activityIssue, "--category", "VcsChangeCategory",
 		"--limit", "2", "--fields", "+added(text,version,date)")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)

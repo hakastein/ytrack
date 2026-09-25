@@ -9,16 +9,10 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// What the tool asks of every comment of an article, whatever the caller asked of the article. There is no
-// deleted here and none in the request: ArticleComment declares no such property, an article deletes a comment
-// outright, and a name the specification declares nowhere would come back as a refusal of its own.
 const articleCommentFields = "comments(id,author(login),created,text)"
 
-// The default with the comments the flag fills merged in, which is the whole of the request where the caller
-// asks for no --comments of their own.
 const sentArticleFields = articleShowFields + "," + articleCommentFields
 
-// A comment of an article as the server sends it, $type and all.
 func receivedArticleComment(id string, created int64, login, text string) map[string]any {
 	return map[string]any{
 		"$type":   "ArticleComment",
@@ -38,7 +32,6 @@ func articleWithComments(t *testing.T, comments ...map[string]any) string {
 	return articleWith(t, map[string]any{"comments": received})
 }
 
-// The flag takes a word and a count and nothing else, and every mistake in it is caught before any request.
 func TestArticleShowRefusesACommentsFlagThatIsNeitherAllNorACount(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -57,14 +50,12 @@ func TestArticleShowRefusesACommentsFlagThatIsNeitherAllNorACount(t *testing.T) 
 
 			got := runWith(t, server.env(), append([]string{"article", "show", "DEV-A-1"}, tc.argv...)...)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// Comments are asked for one way, and --fields is not it, wherever an article stands in the expression:
-// the article asked for, or one of the articles under it.
 func TestArticleShowRefusesCommentsAskedForInTheExpression(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -82,15 +73,12 @@ func TestArticleShowRefusesCommentsAskedForInTheExpression(t *testing.T) {
 
 			got := runWith(t, server.env(), "article", "show", "DEV-A-1", "--fields", tc.expression)
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireRefusal(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.requests())
 		})
 	}
 }
 
-// The order is ytrack's own: the server sends the comments in an order of its own and what is printed is
-// oldest first, cut to the last the caller asked for. None asked for is not the same as none there, so at zero
-// the key is absent and nothing about comments goes out either.
 func TestArticleShowPrintsTheCommentsAskedForOldestFirst(t *testing.T) {
 	t.Parallel()
 	first := commentDetails("8-0", "2026-09-10T10:16:50Z", "admin", "первый")
@@ -99,9 +87,8 @@ func TestArticleShowPrintsTheCommentsAskedForOldestFirst(t *testing.T) {
 	fourth := commentDetails("8-3", "2026-09-10T10:16:51Z", "admin", "четвёртый")
 	fifth := commentDetails("8-4", "2026-09-10T10:16:52Z", "admin", "пятый")
 	tests := []struct {
-		name string
-		argv []string
-		// nil where no comments key is printed at all.
+		name    string
+		argv    []string
 		printed []any
 		sent    string
 	}{
@@ -133,7 +120,6 @@ func TestArticleShowPrintsTheCommentsAskedForOldestFirst(t *testing.T) {
 			argv := append([]string{"article", "show", "DEV-A-1", "--fields", "idReadable"}, tc.argv...)
 			got := runWith(t, server.env(), argv...)
 
-			// What went out is a fact of the call whatever came back, so it stands before the document does.
 			assert.Equal(t, []string{tc.sent}, server.sentFields())
 			assert.NotContains(t, server.sentFields()[0], "deleted")
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)

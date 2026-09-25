@@ -10,19 +10,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The one place a comment stands under its owner in an address: everything before it names the owner, and
-// everything after it names the comment.
 const underItsOwner = "/comments/"
 
-// What the server answers a path it routes nowhere: a refusal about the address rather than about an entity,
-// which is how a route that is not there is told apart from a comment that is not there.
-const noSuchRoute = "HTTP 404 Not Found"
+const unroutedPathMessage = "HTTP 404 Not Found"
 
-// The collections a comment would live in if YouTrack held comments out from under their owner. Neither
-// stands in the specification, and ytrack addresses neither.
 const (
-	topLevelIssueComments   = "issueComments"
-	topLevelArticleComments = "articleComments"
+	unroutedIssueComments   = "issueComments"
+	unroutedArticleComments = "articleComments"
 )
 
 func topLevel(collection string) func(*url.URL) {
@@ -45,10 +39,10 @@ func markDeleted(r *http.Request, body []byte) []byte {
 
 func requireRoutedNowhere(t *testing.T, got outcome) {
 	t.Helper()
-	found := requireRefusal(t, got)
+	found := requireFault(t, got)
 	assert.Equal(t, "not_found", found.code)
 	assert.Equal(t, 404, detailNamed(t, found, "upstream_status"))
-	assert.Equal(t, noSuchRoute, detailNamed(t, found, "upstream_message"))
+	assert.Equal(t, unroutedPathMessage, detailNamed(t, found, "upstream_message"))
 }
 
 func TestCommentHasNoAddressOfItsOwnOnAnIssueOfTheDevInstance(t *testing.T) {
@@ -58,7 +52,7 @@ func TestCommentHasNoAddressOfItsOwnOnAnIssueOfTheDevInstance(t *testing.T) {
 	comment := commentOn(t, dev, issue, "ytrack contract первая")
 
 	t.Run("toplevel_get", func(t *testing.T) {
-		dev.rewriting(topLevel(topLevelIssueComments))
+		dev.rewriting(topLevel(unroutedIssueComments))
 		defer dev.rewriting(nil)
 		before := len(dev.requests())
 
@@ -68,11 +62,11 @@ func TestCommentHasNoAddressOfItsOwnOnAnIssueOfTheDevInstance(t *testing.T) {
 		sent := dev.requests()[before:]
 		require.Len(t, sent, 1, "the read that found no route was the whole call")
 		assert.Equal(t, http.MethodGet, sent[0].Method)
-		assert.Equal(t, "/api/"+topLevelIssueComments+"/"+comment, sent[0].URL.Path)
+		assert.Equal(t, "/api/"+unroutedIssueComments+"/"+comment, sent[0].URL.Path)
 	})
 
 	t.Run("toplevel_delete", func(t *testing.T) {
-		dev.rewriting(topLevel(topLevelIssueComments))
+		dev.rewriting(topLevel(unroutedIssueComments))
 		defer dev.rewriting(nil)
 		before := len(dev.requests())
 
@@ -82,7 +76,7 @@ func TestCommentHasNoAddressOfItsOwnOnAnIssueOfTheDevInstance(t *testing.T) {
 		sent := dev.requests()[before:]
 		require.Len(t, sent, 1)
 		assert.Equal(t, http.MethodDelete, sent[0].Method)
-		assert.Equal(t, "/api/"+topLevelIssueComments+"/"+comment, sent[0].URL.Path)
+		assert.Equal(t, "/api/"+unroutedIssueComments+"/"+comment, sent[0].URL.Path)
 	})
 
 	t.Run("missing", func(t *testing.T) {
@@ -91,7 +85,7 @@ func TestCommentHasNoAddressOfItsOwnOnAnIssueOfTheDevInstance(t *testing.T) {
 
 		got := runWith(t, dev.env(), "comment", "delete", issue, class+"-999999999")
 
-		refused := requireRefusal(t, got)
+		refused := requireFault(t, got)
 		assert.Equal(t, "not_found", refused.code)
 		assert.Equal(t, "Entity with id "+class+"-999999999 not found",
 			detailNamed(t, refused, "upstream_message"))
@@ -110,9 +104,6 @@ func TestCommentHasNoAddressOfItsOwnOnAnIssueOfTheDevInstance(t *testing.T) {
 	})
 }
 
-// The same on an article, where a write is the whole call: the address without the owner is a route the
-// server has none of there either, and a comment of an article that is really missing is refused in the words
-// it keeps for an entity.
 func TestCommentHasNoAddressOfItsOwnOnAnArticleOfTheDevInstance(t *testing.T) {
 	t.Parallel()
 	dev := devInstance(t)
@@ -120,7 +111,7 @@ func TestCommentHasNoAddressOfItsOwnOnAnArticleOfTheDevInstance(t *testing.T) {
 	comment := commentOn(t, dev, article, "ytrack contract первая")
 
 	t.Run("toplevel_post", func(t *testing.T) {
-		dev.rewriting(topLevel(topLevelArticleComments))
+		dev.rewriting(topLevel(unroutedArticleComments))
 		defer dev.rewriting(nil)
 		before := len(dev.requests())
 
@@ -130,11 +121,11 @@ func TestCommentHasNoAddressOfItsOwnOnAnArticleOfTheDevInstance(t *testing.T) {
 		sent := dev.requests()[before:]
 		require.Len(t, sent, 1)
 		assert.Equal(t, http.MethodPost, sent[0].Method)
-		assert.Equal(t, "/api/"+topLevelArticleComments+"/"+comment, sent[0].URL.Path)
+		assert.Equal(t, "/api/"+unroutedArticleComments+"/"+comment, sent[0].URL.Path)
 	})
 
 	t.Run("toplevel_delete", func(t *testing.T) {
-		dev.rewriting(topLevel(topLevelArticleComments))
+		dev.rewriting(topLevel(unroutedArticleComments))
 		defer dev.rewriting(nil)
 		before := len(dev.requests())
 
@@ -144,7 +135,7 @@ func TestCommentHasNoAddressOfItsOwnOnAnArticleOfTheDevInstance(t *testing.T) {
 		sent := dev.requests()[before:]
 		require.Len(t, sent, 1)
 		assert.Equal(t, http.MethodDelete, sent[0].Method)
-		assert.Equal(t, "/api/"+topLevelArticleComments+"/"+comment, sent[0].URL.Path)
+		assert.Equal(t, "/api/"+unroutedArticleComments+"/"+comment, sent[0].URL.Path)
 	})
 
 	t.Run("missing", func(t *testing.T) {
@@ -153,7 +144,7 @@ func TestCommentHasNoAddressOfItsOwnOnAnArticleOfTheDevInstance(t *testing.T) {
 
 		got := runWith(t, dev.env(), "comment", "delete", article, class+"-999999999")
 
-		refused := requireRefusal(t, got)
+		refused := requireFault(t, got)
 		assert.Equal(t, "not_found", refused.code)
 		assert.Equal(t, "Entity with id "+class+"-999999999 not found",
 			detailNamed(t, refused, "upstream_message"))
@@ -200,7 +191,7 @@ func TestCommentTakenBackOnTheDevInstanceIsRemovedAndNeverWritten(t *testing.T) 
 
 	before := len(dev.requests())
 	written := runWith(t, dev.env(), "comment", "update", issue, comment, "--text", "ytrack contract y")
-	assert.Equal(t, "bad_usage", requireRefusal(t, written).code)
+	assert.Equal(t, "bad_usage", requireFault(t, written).code)
 	sent := dev.requests()[before:]
 	require.Len(t, sent, 1, "the read before the write is the whole call")
 	assert.Equal(t, http.MethodGet, sent[0].Method)
@@ -209,5 +200,5 @@ func TestCommentTakenBackOnTheDevInstanceIsRemovedAndNeverWritten(t *testing.T) 
 	assert.Equal(t, outcome{stdout: "id: \"" + comment + "\"\n"}, removed)
 
 	again := runWith(t, dev.env(), "comment", "update", issue, comment, "--text", "ytrack contract y")
-	assert.Equal(t, "not_found", requireRefusal(t, again).code)
+	assert.Equal(t, "not_found", requireFault(t, again).code)
 }

@@ -12,11 +12,6 @@ import (
 	"github.com/hakastein/ytrack/internal/render"
 )
 
-// When an activity happened, who did it, what kind of change it was, what of the issue it changed and what the
-// change put there and took away. The issue itself is not asked for: the caller named it. A value under added
-// and removed is printed by the id and by whichever of the names its type has — idReadable of an issue, login
-// of a user, name of a value of a bundle, a tag or an attachment, urls of a commit — so the default names a
-// value of any type without the heavy text of a comment or a commit (ADR-0001).
 const ActivityListFields = "timestamp,author(login),category,field," +
 	"added(id,idReadable,login,name,urls),removed(id,idReadable,login,name,urls)"
 
@@ -33,42 +28,30 @@ const (
 	timestampKey      = "timestamp"
 )
 
-// The one category whose records say nothing themselves about the shape of their values: what a change of a
-// custom field put there is the field's to settle, and the field is named by the record.
 const customFieldCategory = "CustomFieldCategory"
 
-// The largest --limit: the request asks for one record past it and $top is an int32.
-const activityLimit = math.MaxInt32 - 1
+const truncationProbe = 1
 
-// A row of the table: the category as YouTrack keeps it and what of the issue a change of it was of.
+const activityLimit = math.MaxInt32 - truncationProbe
+
 type activityCategory struct {
-	id    string
-	field activityFieldKind
-	// How the values of the one record the row was copied for arrive, where the field the record names says so.
-	values fieldValues
+	id        string
+	field     activityFieldKind
+	valueForm valueForm
 }
 
-// What the field of a record names. YouTrack writes a filter on every record whatever its category, and for
-// most categories that filter names the category over again — a filing stands for "создана" — so the field is
-// printed only where the record stands for one field of the issue among others.
 type activityFieldKind int
 
 const (
-	fieldNone activityFieldKind = iota
+	fieldRepeatsCategory activityFieldKind = iota
 	fieldCustom
 	fieldLinkPhrase
 )
 
-// How the values of a change of a custom field arrive, read off the type of the field the record names: a value
-// that carries a name of its own comes as an object and is printed as the tree asked of it, while a value ytrack
-// reads itself — a duration, a day, a moment, a number, a text — comes bare, as a number of minutes or of
-// milliseconds that reads nothing like what the field holds until it is written by the identity of its type.
-type fieldValues struct {
-	// The form was read at all, which is only where the record is a change of a custom field whose values are
-	// going to be printed.
-	read  bool
-	named bool
-	bare  valueKey
+type valueForm struct {
+	fromCustomField bool
+	asObjects       bool
+	bareKey         valueKey
 }
 
 func activityTable() []activityCategory {
@@ -88,8 +71,6 @@ func activityTable() []activityCategory {
 	}
 }
 
-// ActivityCategories is the identifiers of the table, which is what --category is written with and what the help
-// names.
 func ActivityCategories() []string {
 	return categoryIDs(activityTable())
 }
@@ -102,12 +83,7 @@ func categoryIDs(rows []activityCategory) []string {
 	return ids
 }
 
-// ListActivities is the call for one page of the activities of the issue of that readable id, newest first, of the
-// categories asked for, or of every category of the table where none was, and with the fields of expression, or
-// with them added to ActivityListFields when it starts with +; nil is the caller leaning on the default whole.
 func ListActivities(id string, expression *string, page Page, asked []string) (Call, *diag.Fault) {
-	// An article keeps no journal: the API has no activities under /articles, so its id is refused as it is
-	// wherever an issue alone is named.
 	id, fault := parseIssueID(id)
 	if fault != nil {
 		return nil, fault
@@ -129,10 +105,6 @@ func ListActivities(id string, expression *string, page Page, asked []string) (C
 	}, nil
 }
 
-// resolveCategories is the rows that go out for the names --category was written with, each once and in the
-// order of the table; every row of it where no name was written. YouTrack matches a category letter for letter
-// and answers a name it does not know with an empty journal rather than with a refusal, so a misspelling left to
-// the server would read as an issue with no journal at all.
 func resolveCategories(asked []string) ([]activityCategory, *diag.Fault) {
 	table := activityTable()
 	if len(asked) == 0 {
@@ -148,8 +120,6 @@ func resolveCategories(asked []string) ([]activityCategory, *diag.Fault) {
 		switch {
 		case at >= 0:
 			chosen[at] = true
-		// Told apart by the rule that resolves them, so a name written two ways is one name to the tool and
-		// stands in the refusal once, in the letter case it was written in first.
 		case !slices.ContainsFunc(unresolved, func(seen string) bool { return strings.EqualFold(seen, name) }):
 			unresolved = append(unresolved, name)
 		}
@@ -159,7 +129,7 @@ func resolveCategories(asked []string) ([]activityCategory, *diag.Fault) {
 		for _, name := range unresolved {
 			unknown = append(unknown, nearestEntry(categoryKey, name, nearestNames(name, categoryIDs(table))))
 		}
-		message := "the names under unknown are not categories of the journal ytrack asks for"
+		message := "the names under unknown are not activity categories ytrack asks for"
 		details := []render.Pair{{Key: "unknown", Value: render.NewList(unknown...)}}
 		return nil, &diag.Fault{Code: diag.UnknownName, Message: message, Details: details}
 	}
@@ -186,9 +156,6 @@ func activityFields(spec *schemas, expression *string) ([]requestedField, *diag.
 	return requested, nil
 }
 
-// activityValueSchemas is what may stand under added and removed beside what the subtypes of an activity declare
-// there: a change of a custom field holds values of a bundle, and the specification declares its values an
-// object of no schema.
 func activityValueSchemas() []string {
 	return []string{"BundleElement"}
 }
@@ -216,13 +183,10 @@ func rejectUnknownValueNames(spec *schemas, expression string, requested []reque
 		{Key: "fields", Value: render.NewString(expression)},
 		{Key: "unknown", Value: render.NewList(unknown...)},
 	}
-	message := "the names under unknown are declared by no value a change of the journal holds"
+	message := "the names under unknown are declared by no value an activity holds"
 	return &diag.Fault{Code: diag.UnknownName, Message: message, Details: details}
 }
 
-// Neither is printed as the object it arrives as: the category stands as the identifier --category names it
-// with and the field as the name of what was changed, so a name written under either names nothing that reaches
-// the document. added and removed are not among them: a value is printed as the tree asked of it.
 func rejectBlockParts(spec *schemas, expression string, requested []requestedField) *diag.Fault {
 	blocks := []struct{ name, printedAs string }{
 		{categoryKey, "the identifier YouTrack keeps the category under"},
@@ -246,10 +210,6 @@ func hasField(requested []requestedField, name string) bool {
 	return slices.ContainsFunc(requested, func(field requestedField) bool { return field.name == name })
 }
 
-// activityFieldFields is what goes out under the field of a record, and each of the three names is asked for by the one
-// thing that reads it: the label of a link and the name the project gave a custom field are what a printed
-// field stands for, and the type of that field is what says how a bare value of the change reads.
-// $type is not asked for at all: the server names the subtype of every filter it sends, asked or not.
 func activityFieldFields(named, values bool) []requestedField {
 	asked := make([]requestedField, 0, 2)
 	var held []requestedField
@@ -263,18 +223,13 @@ func activityFieldFields(named, values bool) []requestedField {
 	return append(asked, requestedField{name: customFieldKey, children: held})
 }
 
-// activityCount is the whole of a journal whose page came short of the record past the limit: the records passed
-// over and the records that arrived, unless nothing arrived after a skip, which may have passed the end.
 func activityCount(page Page, received int) count {
-	if received == 0 && page.Skip > 0 {
+	if page.mayHaveSkippedPastTheEnd(received) {
 		return count{}
 	}
 	return counted(page.Skip + received)
 }
 
-// The journal is asked for one record past the limit, and that record is what says the rest were cut off: the
-// server counts activities nowhere, and a second pass for the count would read past a hundred thousand records
-// of a live issue, while $top=-1 comes back silently cut to a thousand.
 func (c *Client) listActivities(ctx context.Context, spec *schemas, id string, requested []requestedField, categories []activityCategory, page Page) (*render.Node, *diag.Fault) {
 	own := []requestedField{
 		{name: timestampKey},
@@ -285,16 +240,11 @@ func (c *Client) listActivities(ctx context.Context, spec *schemas, id string, r
 	if values || named {
 		own = append(own, requestedField{name: fieldKey, normalized: true, children: activityFieldFields(named, values)})
 	}
-	// A change of the duration of a work item holds a DurationValue, which is printed out of its minutes and
-	// arrives without them unless they are asked for; on a value of any other type the name is left out.
 	for _, name := range []string{addedKey, removedKey} {
 		if hasField(requested, name) {
-			own = append(own, requestedField{name: name, extraSchemas: activityValueSchemas(),
-				children: []requestedField{{name: minutesKey}}})
+			own = append(own, valuesWithDurationMinutes(name))
 		}
 	}
-	// Read before the journal and only where a record of a link may be printed: how many requests a call makes
-	// follows what was asked of it rather than what comes back.
 	var phrases linkPhrases
 	if named && slices.ContainsFunc(categories, func(row activityCategory) bool { return row.field == fieldLinkPhrase }) {
 		var fault *diag.Fault
@@ -304,16 +254,16 @@ func (c *Client) listActivities(ctx context.Context, spec *schemas, id string, r
 		}
 	}
 	sent := withFields(requested, own...)
-	pastThePage := page.window()
-	pastThePage.top++
+	probing := page.window()
+	probing.top += truncationProbe
 	decoded, fault := c.request(ctx, spec, "[]"+activitySchema, sent, func(ctx context.Context, fields string) (*http.Response, error) {
-		return c.apiGetIssueActivities(ctx, id, strings.Join(categoryIDs(categories), ","), fields, pastThePage)
+		return c.apiGetIssueActivities(ctx, id, strings.Join(categoryIDs(categories), ","), fields, probing)
 	})
 	if fault != nil {
 		return nil, fault
 	}
 	received := decoded.objects
-	if len(received) > page.Limit+1 {
+	if len(received) > page.Limit+truncationProbe {
 		details := []render.Pair{{Key: "limit", Value: intNode(page.Limit)}, {Key: "returned", Value: intNode(len(received))}}
 		message := "more activities arrived than the limit and the one record asked for past it"
 		return nil, &diag.Fault{Code: diag.UpstreamInvalid, Message: message, Details: details}
@@ -338,12 +288,10 @@ func (c *Client) listActivities(ctx context.Context, spec *schemas, id string, r
 	return truncatedListDocument(activitiesPlural, found, left, printed), nil
 }
 
-// activityRows is the row of the table each activity stands under, and it is where the answer is held to the
-// two things the request asked of it rather than to what it hoped for: reverse=true, a parameter that would
-// hand back the oldest activities were it to stop being understood, and categories, which the server answers an
-// unknown name in with an empty journal rather than a refusal. Equal timestamps are lawful — activities of a
-// live instance can share one. printingValues is whether the document carries added or removed, which is the
-// one thing that makes the form of the values of a custom field be read at all.
+func valuesWithDurationMinutes(name string) requestedField {
+	return requestedField{name: name, extraSchemas: activityValueSchemas(), children: []requestedField{{name: minutesKey}}}
+}
+
 func activityRows(a decodedResponse, sent []activityCategory, printingValues bool) ([]activityCategory, *diag.Fault) {
 	rows := make([]activityCategory, 0, len(a.objects))
 	previous := int64(math.MaxInt64)
@@ -373,25 +321,19 @@ func activityRows(a decodedResponse, sent []activityCategory, printingValues boo
 			if reason != "" {
 				return nil, shapeFailure(a.httpResponse, a.body, reason)
 			}
-			row.values = form
+			row.valueForm = form
 		}
 		rows = append(rows, row)
 	}
 	return rows, nil
 }
 
-// activityWriter is the writer of the records of one journal. What a record is read by besides the answer itself —
-// the phrases of the link types of the instance and the row of the table the record stands under — reaches the
-// writer here and nowhere else, so a record cannot be written with either of the two unfilled.
 type activityWriter struct{ writer converter }
 
-// A record of a list is one line, and the phrases are read once for the whole page rather than for each record.
 func newActivityWriter(a decodedResponse, phrases linkPhrases) activityWriter {
 	return activityWriter{writer: converter{response: a, layout: inlineLayout, phrases: phrases}}
 }
 
-// record is the document of one activity under the row it stands on. The rules of the row hold over the record
-// and nowhere below it.
 func (p activityWriter) record(row activityCategory, requested []requestedField, object map[string]any) (*render.Node, *diag.Fault) {
 	n := p.writer
 	n.row = row
@@ -399,9 +341,6 @@ func (p activityWriter) record(row activityCategory, requested []requestedField,
 	return n.object(activitySchema, requested, object)
 }
 
-// customFilter is the filter a record of a change of a custom field stands for, or the reason what arrived is
-// none. It is read wherever such a record is, so that one lie of the server has one diagnosis whether the
-// journal prints the field, the values or both.
 func customFilter(value any) (map[string]any, string) {
 	field, isObject := value.(map[string]any)
 	if !isObject {
@@ -415,28 +354,25 @@ func customFilter(value any) (map[string]any, string) {
 	return field, ""
 }
 
-// customFieldValueForm is how the values of a record of a custom field arrive, read off the field the record names: the
-// category says a custom field changed, and the type of that field says what one value of it looks like.
-// isMultiValue says nothing of it, so the shape is taken from the type alone.
-func customFieldValueForm(value any) (fieldValues, string) {
+func customFieldValueForm(value any) (valueForm, string) {
 	field, reason := customFilter(value)
 	if reason != "" {
-		return fieldValues{}, reason
+		return valueForm{}, reason
 	}
 	named, read := valueTypeOf(field)
 	if !read {
-		return fieldValues{}, fmt.Sprintf("the custom field an activity of %s stands for arrived with no type of "+
+		return valueForm{}, fmt.Sprintf("the custom field an activity of %s stands for arrived with no type of "+
 			"value, which is what says how the change reads", customFieldCategory)
 	}
 	kind, modelled := typeNamed(named)
 	if !modelled {
-		return fieldValues{}, fmt.Sprintf("an activity of %s arrived for a field holding values of the type %s, "+
+		return valueForm{}, fmt.Sprintf("an activity of %s arrived for a field holding values of the type %s, "+
 			"which is none of the custom-field types ytrack models", customFieldCategory, render.Quote(named))
 	}
 	if kind.isNamedValue() {
-		return fieldValues{read: true, named: true}, ""
+		return valueForm{fromCustomField: true, asObjects: true}, ""
 	}
-	return fieldValues{read: true, bare: valueKey{form: kind.valueKey.form}}, ""
+	return valueForm{fromCustomField: true, bareKey: valueKey{form: kind.valueKey.form}}, ""
 }
 
 func valueTypeOf(field map[string]any) (string, bool) {
@@ -452,7 +388,6 @@ func valueTypeOf(field map[string]any) (string, bool) {
 	return named, isText
 }
 
-// categoryID is the identifier of the category an activity stands under, or the reason what arrived is none.
 func categoryID(value any) (id, reason string) {
 	category, isObject := value.(map[string]any)
 	if !isObject {
@@ -465,20 +400,12 @@ func categoryID(value any) (id, reason string) {
 	return id, ""
 }
 
-// category is the block the category of an activity prints as: the identifier alone, since the object holds
-// nothing else and $type is the same one for every category. It is read off the row rather than off the object
-// standing there: activityRows read that very object before anything was printed, and a record whose category it
-// could not read never reaches a document.
 func (n converter) category() *render.Node {
 	return render.NewString(n.row.id)
 }
 
-// changedField is the block the field of an activity prints as: the name of what the change was of. A
-// change of a custom field is printed by the name the project gave that field rather than by the label on the
-// record, which arrives translated; a change of a link, by the untranslated phrase of the end of the link type
-// that label stands for.
 func (n converter) changedField(value any) (*render.Node, *diag.Fault) {
-	if n.row.field == fieldNone {
+	if n.row.field == fieldRepeatsCategory {
 		return render.NewNull(), nil
 	}
 	if n.row.field == fieldCustom {
@@ -499,21 +426,17 @@ func (n converter) changedField(value any) (*render.Node, *diag.Fault) {
 		return nil, n.malformed(fmt.Sprintf("an activity of %s arrived standing for no field of the issue, and a "+
 			"change of that category is a change of one", n.row.id))
 	}
-	label, isText := filter[nameKey].(string)
+	translatedPhrase, isText := filter[nameKey].(string)
 	if !isText {
 		return nil, n.malformed(fmt.Sprintf("an activity of %s arrived with no phrase of the link it stands for", n.row.id))
 	}
-	phrase, reason := n.phrases.phrase(label)
+	phrase, reason := n.phrases.phrase(translatedPhrase)
 	if reason != "" {
 		return nil, n.malformed(reason)
 	}
 	return render.NewString(phrase), nil
 }
 
-// values is the block added and removed print as, and it is always a list: the server sends null for a change
-// that put nothing there, a bare value where one was put and a list where several could be, and one reader of
-// the journal reads every record alike only if all three stand as a list (ADR-0001). held is what the subtype of
-// the record declares there, so a moment, a duration and an entity are each written as they are anywhere else.
 func (n converter) values(decl typeRef, field requestedField, value any) (*render.Node, *diag.Fault) {
 	var items []any
 	switch value := value.(type) {
@@ -536,30 +459,27 @@ func (n converter) values(decl typeRef, field requestedField, value any) (*rende
 	return render.NewList(printed...), nil
 }
 
-// oneValue is one value of a change. A change of a custom field is the one record the specification declares
-// nothing under — an object of no schema — so its bare value is read by the type of the field: 90 of a period
-// field is PT1H30M, and a date arrives as the same kind of number a moment does.
 func (n converter) oneValue(decl typeRef, field requestedField, value any) (*render.Node, *diag.Fault) {
-	form := n.row.values
-	if !form.read {
+	form := n.row.valueForm
+	if !form.fromCustomField {
 		return n.value(decl, field, value)
 	}
 	_, isObject := value.(map[string]any)
 	switch {
-	case form.named && !isObject:
+	case form.asObjects && !isObject:
 		return nil, n.malformed(fmt.Sprintf("a value under the %s of an activity of %s arrived as something other "+
 			"than a JSON object, and the field it stands for holds values that carry names of their own",
 			field.name, n.row.id))
-	case !form.named && isObject:
+	case !form.asObjects && isObject:
 		return nil, n.malformed(fmt.Sprintf("a value under the %s of an activity of %s arrived as a JSON object, and "+
 			"the field it stands for holds values ytrack reads itself", field.name, n.row.id))
 	case isObject:
 		return n.value(decl, field, value)
 	}
-	node, read := n.keyValueNode(form.bare, value)
+	node, read := n.keyValueNode(form.bareKey, value)
 	if !read {
 		return nil, n.malformed(fmt.Sprintf("a value under the %s of an activity of %s is not %s",
-			field.name, n.row.id, form.bare.shape()))
+			field.name, n.row.id, form.bareKey.shape()))
 	}
 	return node, nil
 }
