@@ -177,6 +177,7 @@ func TestShowIssueRefusesLinksOfAnotherShape(t *testing.T) {
 			links: `[` + issueReadLink(issueReadTarget, `"INWARD"`, issueReadLinkType(`"source to target"`, `null`)) + `]`,
 		},
 		{name: "a slot that is no object", links: `[[` + issueReadLink(issueReadTarget, `"BOTH"`, issueReadDirected()) + `]]`},
+		{name: "a slot that is null", links: `[null,` + issueReadLink(issueReadTarget, `"BOTH"`, issueReadDirected()) + `]`},
 		{name: "the issues of a slot are no array", links: `[` + issueReadLink(`null`, `"BOTH"`, issueReadDirected()) + `]`},
 		{name: "an issue at the other end is no object", links: `[` + issueReadLink(`[null]`, `"BOTH"`, issueReadDirected()) + `]`},
 		{name: "the end the issue stands at is no text", links: `[` + issueReadLink(issueReadTarget, `null`, issueReadDirected()) + `]`},
@@ -192,6 +193,30 @@ func TestShowIssueRefusesLinksOfAnotherShape(t *testing.T) {
 
 			target := issueReadPath + "?fields=links(issues(idReadable)," + issueReadPhraseFields + ")"
 			assert.Equal(t, unreadable(requestTo(http.MethodGet, server, target), body), refusal(t, fault))
+		})
+	}
+}
+
+func TestShowIssuePrintsLinksTheServerSentAsNullAsNull(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		expression string
+		body       string
+		key        string
+	}{
+		{name: "the links", expression: "links", body: `{"$type":"Issue","links":null}`, key: "links"},
+		{name: "the parent", expression: "parent", body: `{"$type":"Issue","parent":null}`, key: "parent"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := fake.Serve(t, fake.JSON(http.StatusOK, tc.body))
+
+			node, fault := issueReadShown(t, server, tc.expression, youtrack.Comments{})
+
+			require.Nil(t, fault)
+			assert.Equal(t, render.NewMap(render.Pair{Key: tc.key, Value: render.NewNull()}), node)
 		})
 	}
 }

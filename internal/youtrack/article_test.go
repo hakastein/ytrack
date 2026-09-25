@@ -897,7 +897,6 @@ func TestUpdateArticleRefusesAnAncestorItCannotRead(t *testing.T) {
 }
 
 func TestUpdateArticleRefusesAParentOfAnotherShape(t *testing.T) {
-	t.Skip("issue #4: an array in place of parentArticle passes the field check and reads as the root of the line")
 	t.Parallel()
 	line := `{"$type":"Article","id":"177-9","idReadable":"DEV-A-9","project":{"$type":"Project","shortName":"DEV"},` +
 		`"parentArticle":[]}`
@@ -910,12 +909,7 @@ func TestUpdateArticleRefusesAParentOfAnotherShape(t *testing.T) {
 
 	_, fault = call(t.Context(), client(t, server))
 
-	want := diag.Fault{Code: diag.UpstreamInvalid, Details: []render.Pair{
-		lastRequest(t, server),
-		{Key: "upstream_status", Value: render.NewNumber("200")},
-		{Key: "upstream_body", Value: render.NewString(line)},
-	}}
-	assert.Equal(t, want, refusal(t, fault))
+	assert.Equal(t, unreadable(lastRequest(t, server), line), refusal(t, fault))
 }
 
 func TestUpdateArticleRefusesALineThatRepeatsAnArticle(t *testing.T) {

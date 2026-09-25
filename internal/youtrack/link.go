@@ -250,6 +250,9 @@ func targetOutputFields(callers []requestedField) []requestedField {
 }
 
 func (n converter) links(field requestedField, value any) (*render.Node, *diag.Fault) {
+	if value == nil {
+		return render.NewNull(), nil
+	}
 	links, fault := n.issueLinks(value)
 	if fault != nil {
 		return nil, fault
@@ -296,9 +299,6 @@ func (n converter) issueLinks(value any) ([]map[string]any, *diag.Fault) {
 	}
 	links := make([]map[string]any, 0, len(received))
 	for _, item := range received {
-		if item == nil {
-			continue
-		}
 		link, isObject := item.(map[string]any)
 		if !isObject {
 			return nil, n.malformed("a link of the issue is not a JSON object")

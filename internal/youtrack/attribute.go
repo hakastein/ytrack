@@ -159,9 +159,6 @@ func (p projectWorkItemTypes) resolveAttributes(set []namedValue, cleared []stri
 			unknown = append(unknown, unknownAttribute(name, catalogue))
 			continue
 		}
-		if slices.ContainsFunc(filed, func(f resolvedAttribute) bool { return f.id == p.attributes[at].id }) {
-			return nil, attributeBothWays(p.attributes[at].name)
-		}
 		filed = append(filed, resolvedAttribute{id: p.attributes[at].id, name: p.attributes[at].name})
 	}
 	if len(unknown) > 0 {
