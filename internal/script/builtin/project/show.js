@@ -1,14 +1,19 @@
-const { project } = require("ytrack/v1");
+const { projects } = require("ytrack/v1");
 
-exports.command = {
+exports.definition = {
   short: "Show a project",
   long: "Show a project.\n\nworkItemTypes are what ytrack time create --type takes.",
   args: [
     { name: "code", type: "string", usage: "short name of the project, such as DEV" },
   ],
   flags: [
-    { name: "fields", type: "fields", default: "shortName,name,plugins(timeTrackingSettings(enabled,workItemTypes(name)))" },
+    {
+      name: "fields",
+      type: "fields",
+      default:
+        "shortName,name,plugins(timeTrackingSettings(enabled,workItemTypes(name)))",
+    },
   ],
 };
 
-exports.run = (code, flags) => project.show(code, flags);
+exports.command = (code, flags) => projects.show({ project: code, fields: flags.fields });

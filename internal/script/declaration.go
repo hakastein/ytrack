@@ -34,27 +34,44 @@ func (c *Command) Root() *Root {
 
 type Arg struct {
 	Name  string
-	Path  bool
+	Type  ArgType
 	Usage string
+}
+
+type ArgType string
+
+const (
+	StringArg   ArgType = "string"
+	PathArg     ArgType = "path"
+	DurationArg ArgType = "duration"
+)
+
+func (a Arg) Parse(text string) (any, error) {
+	if a.Type == DurationArg {
+		return durationMinutes(text)
+	}
+	return text, nil
 }
 
 type FlagType string
 
 const (
-	StringFlag  FlagType = "string"
-	IntFlag     FlagType = "int"
-	BoolFlag    FlagType = "bool"
-	StringsFlag FlagType = "strings"
-	FieldsFlag  FlagType = "fields"
+	StringFlag   FlagType = "string"
+	IntFlag      FlagType = "int"
+	BoolFlag     FlagType = "bool"
+	FieldsFlag   FlagType = "fields"
+	PairFlag     FlagType = "pair"
+	DurationFlag FlagType = "duration"
 )
 
-// Default is nil for a flag without one, and otherwise a string, an int, a bool or a []string by the type.
+// Default is nil for a flag without one, and otherwise a string, an int, a bool or a []string.
 type Flag struct {
-	Name    string
-	Type    FlagType
-	Usage   string
-	Choices []string
-	Default any
+	Name     string
+	Type     FlagType
+	Multiple bool
+	Usage    string
+	Choices  []string
+	Default  any
 }
 
 const fieldsUsage = "YouTrack fields `expression`; +expr adds to the default"
@@ -85,7 +102,7 @@ func (u *unreadable) Error() string {
 	return u.message
 }
 
-// declaration reads exports.command of a module; a module without one is a library module, and nil, nil stands for it.
+// declaration reads exports.definition of a module; a module without one is a library module, and nil, nil stands for it.
 func declaration(name, source string) (*Command, error) {
 	program, err := parser.ParseFile(nil, name, source, 0)
 	if err != nil {
@@ -122,7 +139,7 @@ func commandLiteral(program *ast.Program) ast.Expression {
 			continue
 		}
 		target, isDot := assignment.Left.(*ast.DotExpression)
-		if !isDot || target.Identifier.Name != "command" {
+		if !isDot || target.Identifier.Name != "definition" {
 			continue
 		}
 		if exports, isName := target.Left.(*ast.Identifier); isName && exports.Name == "exports" {
@@ -151,7 +168,7 @@ func (r *literalReader) fail(at ast.Node, format string, args ...any) {
 		return
 	}
 	r.fault = &unreadable{
-		message: "exports.command " + fmt.Sprintf(format, args...),
+		message: "exports.definition " + fmt.Sprintf(format, args...),
 		at:      r.file.Position(int(at.Idx0()) - r.file.Base()),
 	}
 }
@@ -187,10 +204,34 @@ func (r *literalReader) value(expression ast.Expression) literal {
 		return items
 	case *ast.ObjectLiteral:
 		return r.object(e)
+	case *ast.BinaryExpression:
+		if joined, isText := r.joined(e); isText {
+			return joined
+		}
 	}
-	r.fail(expression, "is no pure literal: it may hold strings, numbers, true, false, null, arrays and objects, "+
-		"but no names, calls or computations")
+	r.fail(expression, "is no pure literal: it may hold strings, strings joined by +, numbers, true, false, null, "+
+		"arrays and objects, but no names, calls or other computations")
 	return nil
+}
+
+func (r *literalReader) joined(e *ast.BinaryExpression) (string, bool) {
+	if e.Operator != token.PLUS {
+		return "", false
+	}
+	var parts [2]string
+	for i, side := range []ast.Expression{e.Left, e.Right} {
+		switch side.(type) {
+		case *ast.StringLiteral, *ast.TemplateLiteral, *ast.BinaryExpression:
+		default:
+			return "", false
+		}
+		text, isText := r.value(side).(string)
+		if !isText {
+			return "", false
+		}
+		parts[i] = text
+	}
+	return parts[0] + parts[1], true
 }
 
 func (r *literalReader) object(e *ast.ObjectLiteral) *object {
@@ -313,12 +354,12 @@ func (r *literalReader) args(declared *object) []Arg {
 	args := make([]Arg, 0, len(items))
 	for i, arg := range items {
 		name := r.name(arg, at[i])
-		kind := r.text(arg, "type", at[i])
-		if kind != "string" && kind != "path" && r.fault == nil {
-			r.fail(arg.nodes["type"], "gives argument %s the type %s, which is neither string nor path",
-				render.Quote(name), render.Quote(kind))
+		kind := ArgType(r.text(arg, "type", at[i]))
+		if !slices.Contains([]ArgType{StringArg, PathArg, DurationArg}, kind) && r.fault == nil {
+			r.fail(arg.nodes["type"], "gives argument %s the type %s, which is none of string, path, duration",
+				render.Quote(name), render.Quote(string(kind)))
 		}
-		args = append(args, Arg{Name: name, Path: kind == "path", Usage: r.text(arg, "usage", at[i])})
+		args = append(args, Arg{Name: name, Type: kind, Usage: r.text(arg, "usage", at[i])})
 	}
 	return args
 }
@@ -331,10 +372,10 @@ func (r *literalReader) name(declared *object, at ast.Node) string {
 	return name
 }
 
-var flagTypes = []FlagType{StringFlag, IntFlag, BoolFlag, StringsFlag, FieldsFlag}
+var flagTypes = []FlagType{StringFlag, IntFlag, BoolFlag, FieldsFlag, PairFlag, DurationFlag}
 
 func (r *literalReader) flags(declared *object) []Flag {
-	items, at := r.items(declared, "flags", "name", "type", "usage", "choices", "default")
+	items, at := r.items(declared, "flags", "name", "type", "multiple", "usage", "choices", "default")
 	flags := make([]Flag, 0, len(items))
 	for i, held := range items {
 		flag := Flag{Name: r.name(held, at[i]), Type: FlagType(r.text(held, "type", at[i]))}
@@ -345,6 +386,7 @@ func (r *literalReader) flags(declared *object) []Flag {
 		if _, given := held.values["usage"]; flag.Type == FieldsFlag && given {
 			r.fail(held.nodes["usage"], "gives --%s a usage, and the usage of a fields flag is the rule of +", flag.Name)
 		}
+		flag.Multiple = r.multiple(held, flag)
 		flag.Usage = fieldsUsage
 		if flag.Type != FieldsFlag {
 			flag.Usage = r.text(held, "usage", at[i])
@@ -354,6 +396,22 @@ func (r *literalReader) flags(declared *object) []Flag {
 		flags = append(flags, flag)
 	}
 	return flags
+}
+
+func (r *literalReader) multiple(held *object, flag Flag) bool {
+	value, given := held.values["multiple"]
+	if !given {
+		return false
+	}
+	multiple, isBool := value.(bool)
+	switch {
+	case !isBool:
+		r.fail(held.nodes["multiple"], "gives --%s a multiple that is neither true nor false", flag.Name)
+	case multiple && flag.Type != StringFlag && flag.Type != PairFlag:
+		r.fail(held.nodes["multiple"], "gives --%s multiple, and only a string or a pair flag is given more than once",
+			flag.Name)
+	}
+	return multiple
 }
 
 func joined(types []FlagType) string {
@@ -370,8 +428,8 @@ func (r *literalReader) choices(held *object, flag Flag) []string {
 		return nil
 	}
 	at := held.nodes["choices"]
-	if flag.Type != StringFlag && flag.Type != StringsFlag {
-		r.fail(at, "gives choices to --%s, which is neither string nor strings", flag.Name)
+	if flag.Type != StringFlag {
+		r.fail(at, "gives choices to --%s, which is no string flag", flag.Name)
 		return nil
 	}
 	choices, isStrings := stringsOf(value)
@@ -402,8 +460,14 @@ func (r *literalReader) flagDefault(held *object, flag Flag, at ast.Node) any {
 		}
 		return nil
 	}
-	read, fits := defaultOf(flag.Type, value)
+	if flag.Type == PairFlag || flag.Type == DurationFlag {
+		r.fail(held.nodes["default"], "gives --%s a default, and a %s flag has none", flag.Name, flag.Type)
+		return nil
+	}
+	read, fits := defaultOf(flag, value)
 	switch {
+	case !fits && flag.Multiple:
+		r.fail(held.nodes["default"], "gives --%s a default that is no array of strings", flag.Name)
 	case !fits:
 		r.fail(held.nodes["default"], "gives --%s a default that is no %s", flag.Name, flag.Type)
 	case !chosen(flag.Choices, read):
@@ -412,7 +476,11 @@ func (r *literalReader) flagDefault(held *object, flag Flag, at ast.Node) any {
 	return read
 }
 
-func defaultOf(kind FlagType, value literal) (any, bool) {
+func defaultOf(flag Flag, value literal) (any, bool) {
+	if flag.Multiple {
+		return stringsOf(value)
+	}
+	kind := flag.Type
 	switch kind {
 	case StringFlag, FieldsFlag:
 		text, isString := value.(string)
@@ -424,7 +492,7 @@ func defaultOf(kind FlagType, value literal) (any, bool) {
 		set, isBool := value.(bool)
 		return set, isBool
 	}
-	return stringsOf(value)
+	return nil, false
 }
 
 func chosen(choices []string, value any) bool {

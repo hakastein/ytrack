@@ -9,24 +9,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const checkDeclaration = `exports.command = { short: "Check an issue", long: "Check an issue against a report.", ` +
+const checkDeclaration = `exports.definition = { short: "Check an issue", long: "Check an issue " + "against a report.", ` +
 	`args: [{ name: "id", type: "string", usage: "the issue" }, { name: "report", type: "path", usage: "the report" }],` +
 	` flags: [` +
 	` { name: "mode", type: "string", usage: "a ` + "`mode`" + `", choices: ["fast", "slow"], default: "fast" },` +
 	` { name: "count", type: "int", usage: "how many" },` +
 	` { name: "verbose", type: "bool", usage: "say more" },` +
-	` { name: "tag", type: "strings", usage: "a tag; repeatable", choices: ["a", "b", "c"] },` +
+	` { name: "tag", type: "string", multiple: true, usage: "a tag; repeatable", choices: ["a", "b", "c"] },` +
+	` { name: "set", type: "pair", multiple: true, usage: "a ` + "`Name=value`" + `; repeatable" },` +
+	` { name: "spent", type: "duration", usage: "how long" },` +
 	` { name: "fields", type: "fields", default: "id,summary" } ] };`
 
 var checkReaching = lines(
-	`const { project } = require("ytrack/v1");`,
+	`const { projects } = require("ytrack/v1");`,
 	checkDeclaration,
-	`exports.run = () => project.list({ fields: "shortName", limit: 1, skip: 0 });`,
+	`exports.command = () => projects.list({ fields: "shortName", limit: 1, skip: 0 });`,
 )
 
 var checkEchoing = lines(
 	checkDeclaration,
-	`exports.run = (id, report, flags) => ({ id, report, flags });`,
+	`exports.command = (id, report, flags) => ({ id, report, flags });`,
 )
 
 func TestScriptCallIsRefusedByItsDeclarationBeforeItRuns(t *testing.T) {
@@ -43,6 +45,9 @@ func TestScriptCallIsRefusedByItsDeclarationBeforeItRuns(t *testing.T) {
 		{name: "an int that is no number", argv: []string{"check", "DEV-1", "r.txt", "--count", "two"}},
 		{name: "an int wider than 32 bits", argv: []string{"check", "DEV-1", "r.txt", "--count", "3000000000"}},
 		{name: "a flag given twice", argv: []string{"check", "DEV-1", "r.txt", "--mode", "fast", "--mode", "slow"}},
+		{name: "a pair with no =", argv: []string{"check", "DEV-1", "r.txt", "--set", "A"}},
+		{name: "a pair with no name", argv: []string{"check", "DEV-1", "r.txt", "--set", "=1"}},
+		{name: "a duration of days", argv: []string{"check", "DEV-1", "r.txt", "--spent", "P1D"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -72,9 +77,10 @@ func TestScriptRunIsGivenTheArgumentsInOrderAndTheFlagsLast(t *testing.T) {
 		{
 			name: "every flag",
 			argv: []string{"check", "DEV-1", "r.txt", "--mode", "slow", "--count", "3", "--verbose", "--tag", "b", "--tag", "a",
-				"--fields", "key"},
+				"--set", "A=1", "--set", "B=x=y", "--set", "A=2", "--spent", "PT1H30M", "--fields", "key"},
 			want: "id: \"DEV-1\"\nreport: \"r.txt\"\nflags:\n  mode: \"slow\"\n  count: 3\n  verbose: true\n  tag:\n" +
-				"    - \"b\"\n    - \"a\"\n  fields: \"key\"",
+				"    - \"b\"\n    - \"a\"\n  set:\n    A:\n      - \"1\"\n      - \"2\"\n    B: \"x=y\"\n  spent: 90\n" +
+				"  fields: \"key\"",
 		},
 	}
 	for _, tc := range tests {
@@ -89,7 +95,7 @@ func TestScriptRunIsGivenTheArgumentsInOrderAndTheFlagsLast(t *testing.T) {
 
 func TestFieldsFlagAddsToItsDefault(t *testing.T) {
 	t.Parallel()
-	source := lines(checkDeclaration, `exports.run = (id, report, flags) => ({ fields: flags.fields });`)
+	source := lines(checkDeclaration, `exports.command = (id, report, flags) => ({ fields: flags.fields });`)
 	tests := []struct {
 		name  string
 		given []string
@@ -126,7 +132,7 @@ func TestCompleteOffersWhatTheDeclarationOfAScriptTakes(t *testing.T) {
 		{name: "the script under its word", words: []string{"acme", ""}, names: []string{"check"},
 			directive: shellOffersNoFileNames},
 		{name: "its flags", words: []string{"acme", "check", "--"},
-			names: []string{"--count", "--fields", "--help", "--mode", "--tag", "--verbose"}, directive: shellOffersNoFileNames},
+			names: []string{"--count", "--fields", "--help", "--mode", "--set", "--spent", "--tag", "--verbose"}, directive: shellOffersNoFileNames},
 		{name: "the choices of a flag", words: []string{"acme", "check", "--mode", ""}, names: []string{"fast", "slow"},
 			directive: shellOffersNoFileNames},
 		{name: "the choices of a repeatable flag", words: []string{"acme", "check", "--tag", "a", "--tag", ""},
@@ -150,9 +156,9 @@ func TestCompleteOffersWhatTheDeclarationOfAScriptTakes(t *testing.T) {
 func TestHelpAndCompletionRunNoScript(t *testing.T) {
 	t.Parallel()
 	source := lines(
-		`require("ytrack/v1").project.list({ fields: "shortName", limit: 1, skip: 0 });`,
-		`exports.command = { short: "Reach the instance on load", long: "Reach the instance when loaded." };`,
-		`exports.run = () => ({});`,
+		`require("ytrack/v1").projects.list({ fields: "shortName", limit: 1, skip: 0 });`,
+		`exports.definition = { short: "Reach the instance on load", long: "Reach the instance when loaded." };`,
+		`exports.command = () => ({});`,
 	)
 	tests := []struct {
 		name string

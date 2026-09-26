@@ -17,8 +17,8 @@ func lines(source ...string) string {
 }
 
 var greeting = lines(
-	`exports.command = { short: "Greet", long: "Say hello." };`,
-	`exports.run = () => ({ said: "hello" });`,
+	`exports.definition = { short: "Greet", long: "Say hello." };`,
+	`exports.command = () => ({ said: "hello" });`,
 )
 
 const greeted = `said: "hello"` + "\n"
@@ -206,7 +206,7 @@ func TestScriptBesideADirectoryOfTheSameNameIsNoCommand(t *testing.T) {
 
 func TestDirectoryOfBrokenScriptsAloneIsNoCommand(t *testing.T) {
 	t.Parallel()
-	env := atHome(fake.ServeNothing(t), scriptsHome(t, map[string]string{"deploy/x.js": `exports.command = 1;`,
+	env := atHome(fake.ServeNothing(t), scriptsHome(t, map[string]string{"deploy/x.js": `exports.definition = 1;`,
 		"ok.js": greeting}))
 
 	offered := completingWith(t, env, "").names()
@@ -225,11 +225,11 @@ func TestHelpWarnsOfTheScriptsThatEnterNoCommandTree(t *testing.T) {
 	}{
 		{name: "a script beside a directory of the same name", files: map[string]string{"docs.js": greeting,
 			"docs/map.js": greeting}, argv: []string{"--help"}, codes: []string{"script_failed"}},
-		{name: "an unreadable declaration", files: map[string]string{"bad.js": `exports.command = { short: x };`},
+		{name: "an unreadable declaration", files: map[string]string{"bad.js": `exports.definition = { short: x };`},
 			argv: []string{"--help"}, codes: []string{"script_failed"}},
-		{name: "an unreadable declaration under the command", files: map[string]string{"docs/bad.js": `exports.command = 1;`},
+		{name: "an unreadable declaration under the command", files: map[string]string{"docs/bad.js": `exports.definition = 1;`},
 			argv: []string{"docs", "--help"}, codes: []string{"script_failed"}},
-		{name: "an unreadable declaration under another command", files: map[string]string{"docs/bad.js": `exports.command = 1;`,
+		{name: "an unreadable declaration under another command", files: map[string]string{"docs/bad.js": `exports.definition = 1;`,
 			"acme/hello.js": greeting}, argv: []string{"acme", "--help"}, codes: []string{}},
 	}
 	for _, tc := range tests {
@@ -247,29 +247,29 @@ func TestUnreadableDeclarationFailsTheCallAtItsPlace(t *testing.T) {
 	t.Parallel()
 	home := scriptsHome(t, map[string]string{"bad.js": lines(
 		`// a command`,
-		`exports.command = { short: "Bad", long: "Bad.", flags: [{ name: "mode", type: "string", usage: "m" + "n" }] };`,
+		`exports.definition = { short: "Bad", long: "Bad.", flags: [{ name: "mode", type: "string", usage: "m" + 1 }] };`,
 	)})
 
 	got := runWith(t, atHome(fake.ServeNothing(t), home), "bad")
 
-	assert.Equal(t, scriptFailedIn(home, "bad.js", detail{"line", 2}, detail{"column", 96}), requireFault(t, got))
+	assert.Equal(t, scriptFailedIn(home, "bad.js", detail{"line", 2}, detail{"column", 99}), requireFault(t, got))
 }
 
 func TestDeclarationThatIsNoPureLiteralIsUnreadable(t *testing.T) {
 	t.Parallel()
-	const head = `exports.command = { short: "Bad", long: "Bad.", `
+	const head = `exports.definition = { short: "Bad", long: "Bad.", `
 	tests := []struct {
 		name   string
 		source string
 	}{
-		{name: "a name", source: `const s = "Bad"; exports.command = { short: s, long: "Bad." };`},
-		{name: "a call", source: `exports.command = { short: String("Bad"), long: "Bad." };`},
-		{name: "a template with a value", source: "exports.command = { short: `Bad ${1}`, long: \"Bad.\" };"},
-		{name: "a spread", source: `exports.command = { ...{ short: "Bad", long: "Bad." } };`},
+		{name: "a name", source: `const s = "Bad"; exports.definition = { short: s, long: "Bad." };`},
+		{name: "a call", source: `exports.definition = { short: String("Bad"), long: "Bad." };`},
+		{name: "a template with a value", source: "exports.definition = { short: `Bad ${1}`, long: \"Bad.\" };"},
+		{name: "a spread", source: `exports.definition = { ...{ short: "Bad", long: "Bad." } };`},
 		{name: "a key it does not know", source: head + `hidden: true };`},
-		{name: "no short", source: `exports.command = { long: "Bad." };`},
-		{name: "no long", source: `exports.command = { short: "Bad" };`},
-		{name: "a short of two lines", source: `exports.command = { short: "Bad\nworse", long: "Bad." };`},
+		{name: "no short", source: `exports.definition = { long: "Bad." };`},
+		{name: "no long", source: `exports.definition = { short: "Bad" };`},
+		{name: "a short of two lines", source: `exports.definition = { short: "Bad\nworse", long: "Bad." };`},
 		{name: "an argument of no type", source: head + `args: [{ name: "id", usage: "id" }] };`},
 		{name: "an argument with no usage", source: head + `args: [{ name: "id", type: "string" }] };`},
 		{name: "an argument named twice", source: head +
@@ -281,6 +281,18 @@ func TestDeclarationThatIsNoPureLiteralIsUnreadable(t *testing.T) {
 		{name: "a flag of a type it does not know", source: head + `flags: [{ name: "n", type: "float", usage: "n" }] };`},
 		{name: "a flag with no usage", source: head + `flags: [{ name: "n", type: "int" }] };`},
 		{name: "choices of a number flag", source: head + `flags: [{ name: "n", type: "int", usage: "n", choices: ["1"] }] };`},
+		{name: "a multiple flag that is no string flag", source: head +
+			`flags: [{ name: "n", type: "int", multiple: true, usage: "n" }] };`},
+		{name: "a multiple that is no bool", source: head +
+			`flags: [{ name: "m", type: "string", multiple: "yes", usage: "m" }] };`},
+		{name: "a default of a multiple flag that is no array", source: head +
+			`flags: [{ name: "m", type: "string", multiple: true, usage: "m", default: "a" }] };`},
+		{name: "a multiple duration flag", source: head +
+			`flags: [{ name: "d", type: "duration", multiple: true, usage: "d" }] };`},
+		{name: "a default of a pair flag", source: head +
+			`flags: [{ name: "p", type: "pair", usage: "p", default: "a=b" }] };`},
+		{name: "a string joined to a number", source: head + `flags: [{ name: "m", type: "string", usage: "m" + 1 }] };`},
+		{name: "an argument of a type it does not know", source: head + `args: [{ name: "n", type: "int", usage: "n" }] };`},
 		{name: "a flag named help", source: head + `flags: [{ name: "help", type: "bool", usage: "h" }] };`},
 		{name: "a default of another type", source: head + `flags: [{ name: "n", type: "int", usage: "n", default: "1" }] };`},
 		{name: "a default outside the choices", source: head +

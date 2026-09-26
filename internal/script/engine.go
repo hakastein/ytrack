@@ -30,7 +30,7 @@ type Host struct {
 
 // A flag left out of the call has no key in Flags.
 type Input struct {
-	Args  []string
+	Args  []any
 	Flags map[string]any
 }
 
@@ -95,10 +95,10 @@ func (e *engine) answer(command *Command, input Input) (*youtrack.Node, *diag.Fa
 	exports, _ := e.load(command.file).(*goja.Object)
 	var run goja.Callable
 	if exports != nil {
-		run, _ = goja.AssertFunction(exports.Get("run"))
+		run, _ = goja.AssertFunction(exports.Get("command"))
 	}
 	if run == nil {
-		return nil, fileFault("exports.run is no function, and a command script is run by calling it", e.file)
+		return nil, fileFault("exports.command is no function, and a command script is run by calling it", e.file)
 	}
 	returned, err := run(goja.Undefined(), e.call(command, input)...)
 	if err != nil {
@@ -109,12 +109,11 @@ func (e *engine) answer(command *Command, input Input) (*youtrack.Node, *diag.Fa
 		err = errors.New("is no object, and a command prints one YAML mapping")
 	}
 	if err != nil {
-		return nil, fileFault("the value exports.run returned "+err.Error(), e.file)
+		return nil, fileFault("the value exports.command returned "+err.Error(), e.file)
 	}
 	return document, nil
 }
 
-// run takes the arguments of the call in order and its flags last, as a function of the API does.
 func (e *engine) call(command *Command, input Input) []goja.Value {
 	values := make([]goja.Value, 0, len(input.Args)+1)
 	for _, arg := range input.Args {
@@ -130,11 +129,35 @@ func (e *engine) call(command *Command, input Input) []goja.Value {
 		case !given && flag.Default != nil:
 			value, given = flag.Default, true
 		}
-		if given {
+		if pairs, isPairs := value.([]pair); isPairs {
+			e.define(flags, flag.Name, e.pairsObject(pairs))
+		} else if given {
 			e.define(flags, flag.Name, e.vm.ToValue(value))
 		}
 	}
 	return append(values, flags)
+}
+
+func (e *engine) pairsObject(pairs []pair) *goja.Object {
+	object := e.vm.NewObject()
+	held := map[string][]string{}
+	var names []string
+	for _, p := range pairs {
+		if _, seen := held[p.name]; !seen {
+			names = append(names, p.name)
+		}
+		held[p.name] = append(held[p.name], p.value)
+	}
+	for _, name := range names {
+		var value any = held[name]
+		if len(held[name]) == 1 {
+			value = held[name][0]
+		}
+		if err := object.Set(name, value); err != nil {
+			panic(err)
+		}
+	}
+	return object
 }
 
 func (e *engine) define(object *goja.Object, key string, value goja.Value) {
