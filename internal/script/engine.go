@@ -129,7 +129,7 @@ func (e *engine) catch(f func()) (fault *diag.Fault) {
 		}
 		switch thrown := thrown.(type) {
 		case goja.Value:
-			fault = scriptFault(thrown.String(), file.Position{})
+			fault = e.root.fault(thrown.String(), file.Position{})
 			if object, isObject := thrown.(*goja.Object); isObject {
 				if held, isFault := object.Export().(*faultValue); isFault {
 					copied := *held.fault
@@ -166,13 +166,13 @@ func (e *engine) faultOf(err error) *diag.Fault {
 	}
 	var syntax *unreadable
 	if errors.As(err, &syntax) {
-		return scriptFault(syntax.message, syntax.at)
+		return e.root.fault(syntax.message, syntax.at)
 	}
 	return &diag.Fault{Code: diag.CodeScriptFailed, Message: err.Error()}
 }
 
 func (e *engine) stackFault(message string, stack []goja.StackFrame) *diag.Fault {
-	return scriptFault(message, placeIn(stack))
+	return e.root.fault(message, placeIn(stack))
 }
 
 // The first frame with a source is the line of the script; native frames of the API come before it.
@@ -189,7 +189,7 @@ func placeIn(stack []goja.StackFrame) file.Position {
 	return file.Position{}
 }
 
-func scriptFault(message string, at file.Position) *diag.Fault {
+func (r *Root) fault(message string, at file.Position) *diag.Fault {
 	fault := &diag.Fault{Code: diag.CodeScriptFailed, Message: message}
 	if at.Filename != "" {
 		fault.Details = append(fault.Details, youtrack.Pair{Key: "file", Value: youtrack.NewString(at.Filename)})
@@ -199,11 +199,12 @@ func scriptFault(message string, at file.Position) *diag.Fault {
 			youtrack.Pair{Key: "line", Value: youtrack.NewNumber(json.Number(strconv.Itoa(at.Line)))},
 			youtrack.Pair{Key: "column", Value: youtrack.NewNumber(json.Number(strconv.Itoa(at.Column)))})
 	}
+	fault.Details = append(fault.Details, youtrack.Pair{Key: "builtin", Value: youtrack.NewBool(r.Builtin())})
 	return fault
 }
 
 func (e *engine) fileFault(name, message string) *diag.Fault {
-	return scriptFault(message, file.Position{Filename: e.root.display(name)})
+	return e.root.fault(message, file.Position{Filename: e.root.display(name)})
 }
 
 // The wrapper keeps the lines of the module where they are; only the first line moves right by its length.
@@ -226,13 +227,13 @@ func (e *engine) load(name string) goja.Value {
 			if at.Line == 1 {
 				at.Column -= len(modulePrefix)
 			}
-			panic(e.throw(scriptFault("SyntaxError: "+list[0].Message, at)))
+			panic(e.throw(e.root.fault("SyntaxError: "+list[0].Message, at)))
 		}
-		panic(e.throw(scriptFault(err.Error(), file.Position{Filename: display})))
+		panic(e.throw(e.root.fault(err.Error(), file.Position{Filename: display})))
 	}
 	compiled, err := goja.CompileAST(program, true)
 	if err != nil {
-		panic(e.throw(scriptFault(err.Error(), file.Position{Filename: display})))
+		panic(e.throw(e.root.fault(err.Error(), file.Position{Filename: display})))
 	}
 	wrapper, err := e.vm.RunProgram(compiled)
 	if err != nil {
@@ -315,5 +316,5 @@ func (e *engine) api(wanted string) goja.Value {
 }
 
 func (e *engine) callerFault(message string) *diag.Fault {
-	return scriptFault(message, placeIn(e.vm.CaptureCallStack(0, nil)))
+	return e.root.fault(message, placeIn(e.vm.CaptureCallStack(0, nil)))
 }

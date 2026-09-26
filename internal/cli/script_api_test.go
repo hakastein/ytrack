@@ -163,6 +163,9 @@ func TestDefectOfAScriptIsScriptFailedAtItsLine(t *testing.T) {
 		{name: "fields that add to the default", body: `exports.run = () => project.show("DEV", { fields: "+id" });`, column: 33},
 		{name: "fields that name none", body: `exports.run = () => project.show("DEV", { fields: "" });`, column: 33},
 		{name: "a code out of the dictionary", body: `exports.run = () => fail("broken", "no");`, column: 25},
+		{name: "a fail posing as a defect of a builtin script",
+			body: `exports.run = () => fail("script_failed", "no", { file: "builtin:project/show.js", builtin: true });`, column: 25},
+		{name: "a warning posing as a defect of a script", body: `exports.run = () => warn("script_failed", "no");`, column: 25},
 		{name: "a warning with a code out of the dictionary", body: `exports.run = () => warn("broken", "no");`, column: 25},
 		{name: "a value written into an answer",
 			body: `exports.run = () => { project.list({ fields: "id", limit: 1, skip: 0 }).total = 5; };`, column: 73},
@@ -176,7 +179,7 @@ func TestDefectOfAScriptIsScriptFailedAtItsLine(t *testing.T) {
 			got := runWith(t, scriptEnv(server, home), "run")
 
 			want := faultDocument{code: "script_failed", details: []detail{
-				scriptFile(filepath.Join(scriptsRoot(home), "run.js")), {"line", 3}, {"column", tc.column},
+				scriptFile(filepath.Join(scriptsRoot(home), "run.js")), {"line", 3}, {"column", tc.column}, custom,
 			}}
 			assert.Equal(t, want, requireFault(t, got))
 		})
@@ -210,7 +213,7 @@ func TestValueAScriptReturnsIsScriptFailedWhenYAMLHoldsNoSuch(t *testing.T) {
 
 			got := runWith(t, scriptEnv(fake.ServeNothing(t), home), "run")
 
-			want := faultDocument{code: "script_failed", details: []detail{scriptFile(filepath.Join(scriptsRoot(home), "run.js"))}}
+			want := faultDocument{code: "script_failed", details: []detail{scriptFile(filepath.Join(scriptsRoot(home), "run.js")), custom}}
 			assert.Equal(t, want, requireFault(t, got))
 		})
 	}

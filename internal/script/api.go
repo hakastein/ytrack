@@ -312,9 +312,11 @@ func (e *engine) faultArguments(name string, call goja.FunctionCall) *diag.Fault
 		panic(e.throw(e.callerFault(name + " takes a code, a message and, if the fault has them, its details")))
 	}
 	code, isString := call.Argument(0).Export().(string)
-	if !isString || !slices.Contains(diag.Codes(), youtrack.Code(code)) {
-		codes := make([]string, 0, len(diag.Codes()))
-		for _, known := range diag.Codes() {
+	// Only ytrack says a script failed, so builtin and the place in a script_failed cannot be forged.
+	given := slices.DeleteFunc(diag.Codes(), func(known youtrack.Code) bool { return known == diag.CodeScriptFailed })
+	if !isString || !slices.Contains(given, youtrack.Code(code)) {
+		codes := make([]string, 0, len(given))
+		for _, known := range given {
 			codes = append(codes, string(known))
 		}
 		panic(e.throw(e.callerFault(fmt.Sprintf("%s takes a code of the dictionary, and %s is none of %s", name,

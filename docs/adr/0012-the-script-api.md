@@ -30,7 +30,8 @@ status: accepted, partly implemented
 - **Модули исполняются в строгом режиме,** поэтому запись в ответ бросает `TypeError`, и непойманная становится
   `script_failed`.
 - **Скрипт не добавляет кодов,** потому что агент, который читает `code`, знает все значения заранее. Код не из
-  словаря [ADR-0005](0005-an-error-is-a-document.md) в `fail` и `warn` даёт `script_failed`.
+  словаря [ADR-0005](0005-an-error-is-a-document.md) в `fail` и `warn` даёт `script_failed`, и сам `script_failed`
+  тоже: его даёт только ytrack.
 
 ## Ответ
 

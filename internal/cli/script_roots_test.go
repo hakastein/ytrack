@@ -61,6 +61,8 @@ func stderrCodes(t *testing.T, got outcome) []string {
 	return codes
 }
 
+var custom = detail{"builtin", false}
+
 func scriptFile(path string) detail {
 	return detail{"file", path}
 }
@@ -184,7 +186,7 @@ func TestScriptBesideADirectoryOfTheSameNameIsNoCommand(t *testing.T) {
 			t.Parallel()
 			got := runWith(t, env, tc.argv...)
 
-			want := faultDocument{code: "script_failed", details: []detail{scriptFile(filepath.Join(scriptsRoot(home), "docs.js"))}}
+			want := faultDocument{code: "script_failed", details: []detail{scriptFile(filepath.Join(scriptsRoot(home), "docs.js")), custom}}
 			assert.Equal(t, want, requireFault(t, got))
 		})
 	}
@@ -228,7 +230,7 @@ func TestUnreadableDeclarationFailsTheCallAtItsPlace(t *testing.T) {
 	got := runWith(t, scriptEnv(fake.ServeNothing(t), home), "bad")
 
 	want := faultDocument{code: "script_failed", details: []detail{
-		scriptFile(filepath.Join(scriptsRoot(home), "bad.js")), {"line", 2}, {"column", 75},
+		scriptFile(filepath.Join(scriptsRoot(home), "bad.js")), {"line", 2}, {"column", 75}, custom,
 	}}
 	assert.Equal(t, want, requireFault(t, got))
 }

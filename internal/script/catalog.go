@@ -89,7 +89,7 @@ func Load(reserved []string, places Places) *Catalog {
 			case held.Builtin() && !root.Builtin():
 				message := fmt.Sprintf("%s is not a command: the command %s is built into ytrack, and no script "+
 					"adds to or replaces a builtin command", render.Quote(entry.display), render.Quote(word))
-				catalog.Hidden = append(catalog.Hidden, Hidden{Word: word, Warning: fileFault(message, entry.display)})
+				catalog.Hidden = append(catalog.Hidden, Hidden{Word: word, Warning: root.fileFault(message, entry.display)})
 			}
 		}
 	}
@@ -129,7 +129,7 @@ func isDir(dir string, catalog *Catalog) bool {
 	case errors.Is(err, fs.ErrNotExist):
 		return false
 	case err != nil:
-		catalog.Broken = append(catalog.Broken, Broken{Fault: fileFault(fmt.Sprintf("the root of scripts %s "+
+		catalog.Broken = append(catalog.Broken, Broken{Fault: (&Root{Dir: dir}).fileFault(fmt.Sprintf("the root of scripts %s "+
 			"cannot be read: %v", render.Quote(dir), unwrapPath(err)), dir)})
 		return false
 	}
@@ -159,7 +159,7 @@ func (s *scanner) dir(dir string, words []string) map[string]*entry {
 	if err != nil {
 		display := s.root.display(dir)
 		message := fmt.Sprintf("directory %s cannot be read: %v", render.Quote(display), unwrapPath(err))
-		return map[string]*entry{"": {broken: []Broken{{Path: words, Fault: fileFault(message, display)}}}}
+		return map[string]*entry{"": {broken: []Broken{{Path: words, Fault: s.root.fileFault(message, display)}}}}
 	}
 	files, dirs := map[string]*entry{}, map[string]*entry{}
 	for _, item := range listed {
@@ -175,12 +175,12 @@ func (s *scanner) dir(dir string, words []string) map[string]*entry {
 		case err != nil:
 			display := s.root.display(at)
 			message := fmt.Sprintf("%s cannot be read: %v", render.Quote(display), unwrapPath(err))
-			files[word] = &entry{display: display, broken: []Broken{{Path: here, Fault: fileFault(message, display)}}}
+			files[word] = &entry{display: display, broken: []Broken{{Path: here, Fault: s.root.fileFault(message, display)}}}
 		case info.IsDir() && len(here) >= deepestPath:
 			display := s.root.display(at)
 			message := fmt.Sprintf("directory %s lies %d directories deep, and a command path is shorter",
 				render.Quote(display), len(here))
-			dirs[name] = &entry{display: display, broken: []Broken{{Path: here, Fault: fileFault(message, display)}}}
+			dirs[name] = &entry{display: display, broken: []Broken{{Path: here, Fault: s.root.fileFault(message, display)}}}
 		case info.IsDir():
 			dirs[name] = s.flatten(s.dir(at, here), s.root.display(at))
 		case info.Mode().IsRegular() && isScript:
@@ -216,7 +216,7 @@ func (s *scanner) join(files, dirs map[string]*entry, words []string) map[string
 		here := append(slices.Clip(words), word)
 		message := fmt.Sprintf("%s and %s both name the command %s, which is either a script or a directory of "+
 			"its subcommands", render.Quote(script.display), render.Quote(below.display), render.Quote(strings.Join(here, " ")))
-		joined[word] = &entry{display: below.display, broken: []Broken{{Path: here, Fault: fileFault(message, script.display)}}}
+		joined[word] = &entry{display: below.display, broken: []Broken{{Path: here, Fault: s.root.fileFault(message, script.display)}}}
 	}
 	for word, held := range joined {
 		if held.empty() || wordGrammar.MatchString(word) {
@@ -225,7 +225,7 @@ func (s *scanner) join(files, dirs map[string]*entry, words []string) map[string
 		here := append(slices.Clip(words), word)
 		message := fmt.Sprintf("%s names the command word %s, which is not lowercase letters, digits, - and _",
 			render.Quote(held.display), render.Quote(word))
-		joined[word] = &entry{display: held.display, broken: []Broken{{Path: here, Fault: fileFault(message, held.display)}}}
+		joined[word] = &entry{display: held.display, broken: []Broken{{Path: here, Fault: s.root.fileFault(message, held.display)}}}
 	}
 	return joined
 }
@@ -235,13 +235,13 @@ func (s *scanner) file(name string, words []string) *entry {
 	source, err := fs.ReadFile(s.root.fsys, name)
 	if err != nil {
 		message := fmt.Sprintf("%s cannot be read: %v", render.Quote(display), unwrapPath(err))
-		return &entry{display: display, broken: []Broken{{Path: words, Fault: fileFault(message, display)}}}
+		return &entry{display: display, broken: []Broken{{Path: words, Fault: s.root.fileFault(message, display)}}}
 	}
 	command, err := declaration(display, string(source))
 	var failed *unreadable
 	switch {
 	case errors.As(err, &failed):
-		return &entry{display: display, broken: []Broken{{Path: words, Fault: scriptFault(failed.message, failed.at)}}}
+		return &entry{display: display, broken: []Broken{{Path: words, Fault: s.root.fault(failed.message, failed.at)}}}
 	case command == nil:
 		return &entry{display: display}
 	}
@@ -258,8 +258,8 @@ func sortedWords(entries map[string]*entry) []string {
 	return words
 }
 
-func fileFault(message, display string) *diag.Fault {
-	return scriptFault(message, file.Position{Filename: display})
+func (r *Root) fileFault(message, display string) *diag.Fault {
+	return r.fault(message, file.Position{Filename: display})
 }
 
 func (c *Catalog) Warnings(under []string) []*youtrack.Warning {
