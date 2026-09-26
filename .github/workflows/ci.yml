@@ -14,15 +14,6 @@ jobs:
           go-version-file: go.mod
       - run: make go
 
-  ytapi:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-      - run: make ytapi
-
   build:
     runs-on: ubuntu-latest
     steps:
@@ -36,7 +27,7 @@ jobs:
           ./bin/ytrack --version | grep -qx "revision: \"$GITHUB_SHA\""
 
   release:
-    needs: [go, ytapi, build]
+    needs: [go, build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

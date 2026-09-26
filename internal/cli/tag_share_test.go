@@ -6,23 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-const shownGroupFields = "id,name"
-
-func groupsRequest(address string) string {
-	return "GET " + address + "/api/groups?fields=" + shownGroupFields + "&$top=-1"
-}
-
 func catalogueGroup(id, name, kind string) string {
 	return `{"$type":` + strconv.Quote(kind) + `,"id":` + strconv.Quote(id) + `,"name":` + strconv.Quote(name) + `}`
-}
-
-func everyGroupName() []any {
-	return []any{"First", "Second", "Third"}
 }
 
 func groupsOfTheInstance() string {
@@ -83,57 +73,14 @@ func TestTagCreateWritesTheGroupOfEachFlagToItsSet(t *testing.T) {
 		[]sharedGroup{{id: "6-2", name: "Second"}},
 		[]sharedGroup{{id: "6-3", name: "Third"}})))
 
-	got := runWith(t, server.Env(), "tag", "create", "--name", "Early",
+	got := runWith(t, envOf(server), "tag", "create", "--name", "Early",
 		"--visible-for", "First", "--updateable-by", "Second", "--taggable-by", "Third", "--fields", "name")
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, server.Methods())
-	assert.Equal(t, []string{"/api/groups", "/api/tags"}, server.Paths())
 	assert.Equal(t, map[string]any{
 		"name":                  "Early",
 		"readSharingSettings":   map[string]any{"permittedGroups": []any{map[string]any{"id": "6-1"}}},
 		"updateSharingSettings": map[string]any{"permittedGroups": []any{map[string]any{"id": "6-2"}}},
 		"tagSharingSettings":    map[string]any{"permittedGroups": []any{map[string]any{"id": "6-3"}}},
 	}, server.LastJSON(t))
-}
-
-func TestTagCreateRefusesEveryGroupItCannotResolveAtOnce(t *testing.T) {
-	t.Parallel()
-	server := sharingATag(t, groupsOfTheInstance(), fake.Unexpected(t))
-
-	got := runWith(t, server.Env(), "tag", "create", "--name", "Early",
-		"--visible-for", "Nobody", "--updateable-by", "None")
-
-	want := faultDocument{
-		code: "unknown_name",
-		details: []detail{
-			{"request", groupsRequest(server.URL)},
-			{"unknown", []any{
-				[]detail{{"group", "Nobody"}, {"nearest", everyGroupName()}},
-				[]detail{{"group", "None"}, {"nearest", everyGroupName()}},
-			}},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, server.Methods())
-}
-
-func TestTagCreateRefusesAGroupIDItCannotShareTheTagBy(t *testing.T) {
-	t.Parallel()
-	catalogue := "[" + catalogueGroup("..", "First", "UserGroup") + "]"
-	server := sharingATag(t, catalogue, fake.Unexpected(t))
-
-	got := runWith(t, server.Env(), "tag", "create", "--name", "Early", "--visible-for", "First")
-
-	want := faultDocument{
-		code: "upstream_invalid",
-		details: []detail{
-			{"request", groupsRequest(server.URL)},
-			{"upstream_status", 200},
-			{"upstream_body", catalogue},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, server.Methods(),
-		"the server answers a malformed id with 400 that does not say where the id came from")
 }

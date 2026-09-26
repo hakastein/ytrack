@@ -1,42 +1,9 @@
 ---
-status: accepted, implemented
+status: superseded by go-youtrack ADR-0004
 ---
 
 # Генератор владеет поверхностью операций
 
-Генератор по спецификации YouTrack строит только поверхность операций: URL, параметры и сборку запроса. Тела
-пишутся вручную, потому что они деревья ([ADR-0001](0001-a-response-is-a-tree.md)).
-
-## Решение
-
-- **Генератор, спецификация и overlay живут в модуле
-  [`github.com/hakastein/youtrack`](https://github.com/hakastein/youtrack)**, по его
-  [ADR-0004](https://github.com/hakastein/youtrack/blob/main/docs/adr/0004-the-generator-owns-the-operation-surface.md):
-  сырой `ytapi.Client` с `*http.Response` и `<Op>Params` без `ClientWithResponses`, спецификация `api/openapi.json`,
-  которую `make openapi` модуля снимает с дев-инстанса ytrack (`dev/`), и один overlay со `strict: true`. Там же
-  записаны параметры, которые сервер понимает, а спецификация не объявляет: `customFields=` у `GET /issues/{id}`,
-  `query=` у `GET /users` и у `GET /articles`. Правка поверхности операций — релиз модуля, а ytrack поднимает его
-  версию в `go.mod`.
-- **Сгенерированный клиент видит один файл-адаптер `internal/youtrack/ytapi.go`:** только он импортирует `ytapi` модуля
-  и зовёт `Client.API()`. За пределами адаптера видны только `Client`, `NewClient`, `*Params`, `RequestEditorFn` и
-  `HttpRequestDoer` ([ADR-0006](0006-packages-and-the-entry-point.md)). Шов проверяет `scripts/ytapi-imports.go`.
-- **`customFields=` отправляется, только если блок самой задачи — единственный блок кастом-полей в запросе**, потому
-  что сервер обрезает этим параметром все блоки ответа. Иначе блоки приходят целиком, а поля выбираются при печати.
-  Сервер присылает только названные поля, которые стоят на проекте задачи: пустое — `null` или `[]`, поля чужого
-  проекта нет, порядок — по `ordinal`, а не по порядку имён.
-- **Неверный медиатип исправляется в месте вызова.** `POST /articles/{id}/attachments` уходит multipart, как у
-  задачи, потому что на JSON сервер отвечает `500`. Ответ на него читается списком, как у задачи: сервер присылает
-  массив, хотя спецификация объявляет один `ArticleAttachment`.
-- **Каталог схем генерируется из спецификации модуля той версии, что в `go.mod`**
-  ([ADR-0007](0007-missing-fields-are-checked-by-server-type.md)), поэтому он меняется вместе с поверхностью операций.
-  `make ytapi` проверяет, что каталог байт в байт воспроизводится из неё, а `ytapi` виден только из адаптера.
-- **Исправления в коде не помечаются.** Каждое утверждение о сервере записано в ADR вместе с версией YouTrack, на
-  которой измерено. Измеряют на дев-инстансе (`dev/`), а тестов против него нет
-  ([ADR-0006](0006-packages-and-the-entry-point.md)).
-
-## Отвергнуто
-
-- **`ClientWithResponses` и типизированные тела.** Сгенерированная структура не умеет очистить поле.
-- **`RequestEditorFn`, дописывающий необъявленный параметр.** Не заметит, когда спецификация его объявит.
-- **Своя копия спецификации и генератора в ytrack.** Две копии одного дев-инстанса расходятся, а модулю, kraken и TMS
-  нужна та же поверхность операций.
+Генератор, спецификация YouTrack и её overlay принадлежат SDK:
+[ADR-0004 SDK](https://github.com/hakastein/go-youtrack/blob/main/docs/adr/0004-the-generator-owns-the-operation-surface.md).
+ytrack зовёт только сервисы клиента SDK и не видит ни сгенерированного клиента `ytapi`, ни `Client.API()`.

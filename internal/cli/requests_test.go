@@ -2,35 +2,15 @@ package cli_test
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"io"
 	"mime"
 	"mime/multipart"
-	"net/http"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
-	"github.com/stretchr/testify/assert"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/require"
 )
-
-const markupFields = "query,styleRanges(start,length,style)"
-
-func requireMarkedUpFirst(t *testing.T, server *fake.Server, query string) {
-	t.Helper()
-	first := server.Request(t, 0)
-	assert.Equal(t, fake.AssistPath, first.URL.Path)
-	assert.Equal(t, 1, sentTo(server, fake.AssistPath))
-	assert.Equal(t, http.MethodPost, first.Method)
-	assert.Equal(t, "application/json", first.Header.Get("Content-Type"))
-	assert.Equal(t, markupFields, first.URL.Query().Get("fields"))
-	asked, err := json.Marshal(struct {
-		Query string `json:"query"`
-	}{Query: query})
-	require.NoError(t, err)
-	assert.Equal(t, string(asked), first.Body)
-}
 
 const multipartForm = "multipart/form-data"
 
@@ -84,14 +64,4 @@ func sentParts(t *testing.T, server *fake.Server, at int) []formPart {
 	parts, isForm := partsOf([]byte(sent.Body), sent.Header.Get("Content-Type"))
 	require.True(t, isForm, "the body of %s %s is no multipart form: %q", sent.Method, sent.URL, sent.Body)
 	return parts
-}
-
-func sentTo(server *fake.Server, path string) int {
-	sent := 0
-	for _, p := range server.Paths() {
-		if p == path {
-			sent++
-		}
-	}
-	return sent
 }

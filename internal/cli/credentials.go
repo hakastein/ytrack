@@ -6,9 +6,10 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/hakastein/go-youtrack"
+
 	"github.com/hakastein/ytrack/internal/diag"
 	"github.com/hakastein/ytrack/internal/render"
-	"github.com/hakastein/ytrack/internal/youtrack"
 )
 
 type connection struct {
@@ -24,8 +25,8 @@ const (
 	fromSettings    loginSource = "settings"
 )
 
-func (o loginSource) pair() render.Pair {
-	return render.Pair{Key: "auth_from", Value: render.NewString(string(o))}
+func (o loginSource) pair() youtrack.Pair {
+	return youtrack.Pair{Key: "auth_from", Value: youtrack.NewString(string(o))}
 }
 
 const (
@@ -52,20 +53,20 @@ func connect(env []string) (connection, *diag.Fault) {
 
 func partialEnvFault(set, unset string) *diag.Fault {
 	message := fmt.Sprintf("%s is set and %s is not, and an address and a token are taken together: set both to work from the environment, or neither to work from the settings", set, unset)
-	return &diag.Fault{Code: diag.BadUsage, Message: message}
+	return &diag.Fault{Code: youtrack.CodeBadUsage, Message: message}
 }
 
 func fromEnvironmentVariables(env []string, raw, token string) (connection, *diag.Fault) {
 	address, reason := parseAddress(raw, urlVariable)
 	if reason != "" {
-		return connection{}, &diag.Fault{Code: diag.BadUsage, Message: reason}
+		return connection{}, &diag.Fault{Code: youtrack.CodeBadUsage, Message: reason}
 	}
 	if reason := validateToken(token, tokenVariable); reason != "" {
-		return connection{}, &diag.Fault{Code: diag.BadUsage, Message: reason}
+		return connection{}, &diag.Fault{Code: youtrack.CodeBadUsage, Message: reason}
 	}
-	client, fault := youtrack.New(address, token, cacheDirectory(lookup(env, homeVariable)))
-	if fault != nil {
-		return connection{}, fault
+	client, err := youtrack.NewClient(address.String(), token, youtrack.WithMetadataCache(cacheDirectory(lookup(env, homeVariable))))
+	if err != nil {
+		return connection{}, diag.FromError(err)
 	}
 	return connection{client: client, address: address, from: fromEnvironment}, nil
 }
@@ -88,15 +89,15 @@ func fromSavedLogin(env []string) (connection, *diag.Fault) {
 		return connection{}, noLoginFoundFault(noLoginFound, string(fromSettings))
 	}
 	held := chain[0]
-	client, fault := youtrack.New(held.address, held.token, cacheDirectory(home))
-	if fault != nil {
-		return connection{}, fault
+	client, err := youtrack.NewClient(held.address.String(), held.token, youtrack.WithMetadataCache(cacheDirectory(home)))
+	if err != nil {
+		return connection{}, diag.FromError(err)
 	}
 	return connection{client: client, address: held.address, from: fromSettings}, nil
 }
 
 func (c connection) withLoginSource(fault *diag.Fault) *diag.Fault {
-	if fault.Code != diag.Denied {
+	if fault.Code != youtrack.CodeDenied {
 		return fault
 	}
 	fault.Details = append(fault.Details, c.from.pair())
@@ -104,12 +105,12 @@ func (c connection) withLoginSource(fault *diag.Fault) *diag.Fault {
 }
 
 func noLoginFoundFault(message string, lookedIn ...string) *diag.Fault {
-	places := []*render.Node{render.NewString(urlVariable), render.NewString(tokenVariable)}
+	places := []*youtrack.Node{youtrack.NewString(urlVariable), youtrack.NewString(tokenVariable)}
 	for _, place := range lookedIn {
-		places = append(places, render.NewString(place))
+		places = append(places, youtrack.NewString(place))
 	}
-	details := []render.Pair{{Key: "looked_in", Value: render.NewList(places...)}}
-	return &diag.Fault{Code: diag.Denied, Message: message, Details: details}
+	details := []youtrack.Pair{{Key: "looked_in", Value: youtrack.NewList(places...)}}
+	return &diag.Fault{Code: youtrack.CodeDenied, Message: message, Details: details}
 }
 
 func requotedURLReason(err error) string {

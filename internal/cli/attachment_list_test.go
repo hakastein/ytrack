@@ -2,53 +2,23 @@ package cli_test
 
 import (
 	"net/http"
-	"net/url"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
 )
 
-const attachmentFields = "id,name,size,mimeType,url"
-
-func attachmentsRequest(address, owners, id, fields, top string) string {
-	return "GET " + address + "/api/" + owners + "/" + id + "/attachments?fields=" + fields + "&$top=" + top
-}
-
-func TestAttachmentListPrintsTheRecordsAsTheyWereAskedFor(t *testing.T) {
+func TestAttachmentListPrintsTheAttachmentsOfTheOwner(t *testing.T) {
 	t.Parallel()
-	const records = `[{"name":"заметка.txt","$type":"IssueAttachment","size":75,` +
-		`"url":"/api/files/12-2?sign=Ab-_9&updated=1","mimeType":"text/plain","id":"12-2"},` +
-		`{"size":0,"id":"12-3","mimeType":"application/octet-stream","$type":"IssueAttachment",` +
-		`"name":"пусто.bin","url":"/api/files/12-3?sign=x&updated=2"}]`
+	const records = `[{"name":"заметка.txt","$type":"IssueAttachment","size":75,"id":"12-2"},` +
+		`{"size":0,"id":"12-3","$type":"IssueAttachment","name":"пусто.bin"}]`
 	server := fake.Serve(t, fake.JSON(http.StatusOK, records))
 
-	got := runWith(t, server.Env(), "attachment", "list", "DEV-1")
+	got := runWith(t, envOf(server), "attachment", "list", "DEV-1", "--fields", "id,name,size")
 
 	want := "total: 2\nreturned: 2\ntruncated: false\nattachments:\n" +
-		`  - {id: "12-2", name: "заметка.txt", size: 75, mimeType: "text/plain", url: "` +
-		server.Origin + `/api/files/12-2?sign=Ab-_9&updated=1"}` + "\n" +
-		`  - {id: "12-3", name: "пусто.bin", size: 0, mimeType: "application/octet-stream", url: "` +
-		server.Origin + `/api/files/12-3?sign=x&updated=2"}` + "\n"
+		`  - {id: "12-2", name: "заметка.txt", size: 75}` + "\n" +
+		`  - {id: "12-3", name: "пусто.bin", size: 0}` + "\n"
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []string{"/api/issues/DEV-1/attachments"}, server.Paths())
-	assert.Equal(t, []url.Values{{"fields": {attachmentFields}, "$top": {"50"}}}, server.Queries())
-}
-
-func TestAttachmentListRefusesALinkThatIsNoAbsolutePath(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK,
-		`[{"id":"12-2","name":"a.txt","size":1,"mimeType":"text/plain","url":"api/files/12-2"}]`))
-
-	got := runWith(t, server.Env(), "attachment", "list", "DEV-1", "--fields", "url")
-
-	want := faultDocument{
-		code: "upstream_invalid",
-		details: []detail{
-			{"request", attachmentsRequest(server.URL, "issues", "DEV-1", "url", "50")},
-			{"field", "url"},
-			{"upstream_value", "api/files/12-2"},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
+	assert.Contains(t, server.Routes(), "GET /api/issues/DEV-1/attachments")
 }

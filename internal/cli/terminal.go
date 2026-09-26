@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"github.com/hakastein/go-youtrack"
+
 	"context"
 	"errors"
 	"io"
@@ -35,7 +37,7 @@ func (c console) Close() {
 
 func terminal(stdin *os.File) (console, *diag.Fault) {
 	if !term.IsTerminal(int(stdin.Fd())) {
-		return console{}, &diag.Fault{Code: diag.BadUsage, Message: notATerminal}
+		return console{}, &diag.Fault{Code: youtrack.CodeBadUsage, Message: notATerminal}
 	}
 	out, err := promptsOn(stdin)
 	if err != nil {
@@ -86,7 +88,7 @@ func readLineContext(ctx context.Context, read func() ([]byte, error)) (string, 
 	}()
 	select {
 	case <-ctx.Done():
-		return "", &diag.Fault{Code: diag.UpstreamFailed, Message: dialogueStopped}
+		return "", &diag.Fault{Code: youtrack.CodeUpstreamFailed, Message: dialogueStopped}
 	case got := <-answered:
 		if got.err != nil && !errors.Is(got.err, io.EOF) {
 			return "", unreadable(got.err)
@@ -121,9 +123,9 @@ func prompt(screen *os.File, words string) *diag.Fault {
 }
 
 func unwritable(err error) *diag.Fault {
-	return &diag.Fault{Code: diag.UpstreamFailed, Message: "the terminal cannot be written to: " + err.Error()}
+	return &diag.Fault{Code: youtrack.CodeUpstreamFailed, Message: "the terminal cannot be written to: " + err.Error()}
 }
 
 func unreadable(err error) *diag.Fault {
-	return &diag.Fault{Code: diag.UpstreamFailed, Message: "the terminal cannot be read: " + err.Error()}
+	return &diag.Fault{Code: youtrack.CodeUpstreamFailed, Message: "the terminal cannot be read: " + err.Error()}
 }

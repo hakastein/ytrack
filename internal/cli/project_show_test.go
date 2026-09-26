@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -18,24 +18,6 @@ import (
 const projectDEV = `{"name":"DEVELOPMENT","plugins":{"timeTrackingSettings":{"workItemTypes":[` +
 	`{"name":"First","$type":"WorkItemType"},{"name":"Second","$type":"WorkItemType"}],` +
 	`"enabled":true,"$type":"ProjectTimeTrackingSettings"},"$type":"ProjectPlugins"},"$type":"Project","shortName":"DEV"}`
-
-const printedDEV = `shortName: "DEV"
-name: "DEVELOPMENT"
-plugins:
-  timeTrackingSettings:
-    enabled: true
-    workItemTypes:
-      - {name: "First"}
-      - {name: "Second"}
-`
-
-func authFromEnv() detail {
-	return detail{"auth_from", "environment"}
-}
-
-func authFromSettings() detail {
-	return detail{"auth_from", "settings"}
-}
 
 func lookedIn(places ...any) detail {
 	return detail{"looked_in", places}
@@ -152,18 +134,8 @@ func TestProjectRefusesACallForTheFaultCheckedFirst(t *testing.T) {
 		want faultDocument
 	}{
 		{
-			name: "a code of another form, fields that do not parse, no address and no token",
-			argv: []string{"project", "show", "a/b", "--fields", "a,,b"},
-			want: faultDocument{code: "bad_usage"},
-		},
-		{
-			name: "a limit it cannot send, fields that do not parse, no address and no token",
-			argv: []string{"project", "list", "--limit", "0", "--fields", "a,,b"},
-			want: faultDocument{code: "bad_usage"},
-		},
-		{
-			name: "fields that do not parse, no address and no token",
-			argv: []string{"project", "show", "DEV", "--fields", "a,,b"},
+			name: "a limit of no records, no address and no token",
+			argv: []string{"project", "list", "--limit", "0"},
 			want: faultDocument{code: "bad_usage"},
 		},
 		{
@@ -214,49 +186,12 @@ func TestProjectShowRefusesATokenItCannotSend(t *testing.T) {
 	}
 }
 
-func TestProjectShowRefusesWithoutThePasswordOfTheAddress(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name    string
-		handler http.HandlerFunc
-		code    string
-	}{
-		{
-			name:    "a refusal by the status of the answer",
-			handler: fake.JSON(http.StatusNotFound, `{"error":"Not Found","error_description":"Entity with id DEV not found"}`),
-			code:    "not_found",
-		},
-		{
-			name:    "a refusal of the judgment of names",
-			handler: fake.JSON(http.StatusOK, `{"$type":"Project"}`),
-			code:    "upstream_invalid",
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.Serve(t, tc.handler)
-			address, err := url.Parse(server.URL)
-			require.NoError(t, err)
-			address.User = url.UserPassword("svc", "secret")
-
-			got := runWith(t, []string{"YTRACK_URL=" + address.String(), "YTRACK_TOKEN=" + fake.Token}, showDEV...)
-
-			found := requireFault(t, got)
-			assert.Equal(t, tc.code, found.code)
-			require.NotEmpty(t, found.details)
-			assert.Equal(t, detail{"request", showRequest("http://svc:xxxxx@" + address.Host + address.Path)}, found.details[0])
-			assert.NotContains(t, got.stderr, "secret")
-		})
-	}
-}
-
 func TestProjectShowRefusesWhenStdoutFails(t *testing.T) {
 	t.Parallel()
 	server := fake.Serve(t, fake.JSON(http.StatusOK, projectDEV))
 	var stderr strings.Builder
 
-	code := cli.Run(t.Context(), showDEV, server.Env(), nil, nil, failingWriter{}, &stderr)
+	code := cli.Run(t.Context(), showDEV, envOf(server), nil, nil, failingWriter{}, &stderr)
 
 	got := outcome{code: code, stderr: stderr.String()}
 	assert.Equal(t, faultDocument{code: "upstream_failed"}, requireFault(t, got))

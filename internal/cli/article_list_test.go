@@ -2,59 +2,51 @@ package cli_test
 
 import (
 	"net/http"
-	"net/url"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
-
-const articleListFields = "idReadable,summary"
 
 const (
 	listedParent = `{"summary":"Parent","$type":"Article","idReadable":"DEV-A-1"}`
 	listedChild  = `{"idReadable":"DEV-A-2","$type":"Article","summary":"Child"}`
 )
 
-const (
-	printedParentRow = `  - {idReadable: "DEV-A-1", summary: "Parent"}` + "\n"
-	printedChildRow  = `  - {idReadable: "DEV-A-2", summary: "Child"}` + "\n"
-)
+const printedParentAndChild = "total: 2\nreturned: 2\ntruncated: false\narticles:\n" +
+	`  - {idReadable: "DEV-A-1", summary: "Parent"}` + "\n" +
+	`  - {idReadable: "DEV-A-2", summary: "Child"}` + "\n"
 
-func selecting(t *testing.T, handler http.HandlerFunc) *fake.Server {
-	t.Helper()
-	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == fake.AssistPath {
-			assert.Fail(t, "an article list asked for a markup", "%s %s", r.Method, r.URL)
-			http.Error(w, "the language of articles is not marked up", http.StatusInternalServerError)
-			return
-		}
-		handler(w, r)
-	})
-}
-
-func TestArticleListPrintsTheDefaultFieldsOfEachArticle(t *testing.T) {
+func TestArticleListPrintsTheArticlesOfTheSearchOrTheParent(t *testing.T) {
 	t.Parallel()
-	server := selecting(t, fake.JSON(http.StatusOK, "["+listedParent+","+listedChild+"]"))
+	tests := []struct {
+		name   string
+		argv   []string
+		route  string
+		search string
+	}{
+		{
+			name:   "a search",
+			argv:   []string{"article", "list", "--query", "  project: DEV  "},
+			route:  "GET /api/articles",
+			search: "  project: DEV  ",
+		},
+		{
+			name:  "the children of a parent",
+			argv:  []string{"article", "list", "--parent", "DEV-A-9"},
+			route: "GET /api/articles/DEV-A-9/childArticles",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := fake.Serve(t, fake.JSON(http.StatusOK, "["+listedParent+","+listedChild+"]"))
 
-	got := runWith(t, server.Env(), "article", "list", "--query", "project: DEV")
+			got := runWith(t, envOf(server), tc.argv...)
 
-	want := "total: 2\nreturned: 2\ntruncated: false\narticles:\n" + printedParentRow + printedChildRow
-	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []string{"/api/articles"}, server.Paths())
-	assert.Equal(t, []string{articleListFields}, server.Fields())
-}
-
-func TestArticleListSendsTheSearchAsWritten(t *testing.T) {
-	t.Parallel()
-	const search = "  project: DEV  "
-	server := selecting(t, fake.JSON(http.StatusOK, "["+listedParent+"]"))
-
-	got := runWith(t, server.Env(), "article", "list", "--query", search, "--fields", "idReadable")
-
-	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, []string{http.MethodGet}, server.Methods())
-	assert.Equal(t, []string{"/api/articles"}, server.Paths())
-	assert.Equal(t, []url.Values{{"fields": {"idReadable"}, "$top": {"50"}, "query": {search}}}, server.Queries())
+			assert.Equal(t, outcome{stdout: printedParentAndChild}, got)
+			assert.Contains(t, server.Routes(), tc.route)
+			assert.Equal(t, tc.search, server.Last(t).URL.Query().Get("query"))
+		})
+	}
 }

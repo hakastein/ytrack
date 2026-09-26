@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/hakastein/go-youtrack"
+
 	"github.com/hakastein/ytrack/internal/render"
 )
 
@@ -18,8 +20,8 @@ func NewStream(stderr io.Writer, renderer render.Renderer) *Stream {
 	return &Stream{stderr: stderr, renderer: renderer}
 }
 
-func (s *Stream) Warn(w *Warning) {
-	s.print(document(*w))
+func (s *Stream) Warn(w *youtrack.Warning) {
+	s.print(document{Code: w.Code, Message: w.Message, Details: w.Details})
 }
 
 func (s *Stream) Fail(f *Fault) {
@@ -30,10 +32,10 @@ func (s *Stream) print(d document) {
 	var doc bytes.Buffer
 	if err := s.renderer.Render(&doc, d.node()); err != nil {
 		doc.Reset()
-		unprinted := render.NewMap(
-			render.Pair{Key: "code", Value: render.NewString(string(d.Code))},
-			render.Pair{Key: "message", Value: render.NewString(d.Message)},
-			render.Pair{Key: "render_error", Value: render.NewString(err.Error())},
+		unprinted := youtrack.NewMap(
+			youtrack.Pair{Key: "code", Value: youtrack.NewString(string(d.Code))},
+			youtrack.Pair{Key: "message", Value: youtrack.NewString(d.Message)},
+			youtrack.Pair{Key: "render_error", Value: youtrack.NewString(err.Error())},
 		)
 		if err := s.renderer.Render(&doc, unprinted); err != nil {
 			doc.Reset()

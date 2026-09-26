@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/hakastein/go-youtrack"
+
 	"github.com/hakastein/ytrack/internal/diag"
 	"github.com/hakastein/ytrack/internal/render"
 )
@@ -295,22 +297,22 @@ func directory(path string) (fs.FileInfo, error) {
 
 func noWorkingDirFault(reason string) *diag.Fault {
 	message := "a login is saved for a directory, so which one applies depends on the directory of the call, and " + reason
-	return &diag.Fault{Code: diag.BadUsage, Message: message}
+	return &diag.Fault{Code: youtrack.CodeBadUsage, Message: message}
 }
 
 func corruptFileFault(path string) *diag.Fault {
 	return &diag.Fault{
-		Code:    diag.BadUsage,
+		Code:    youtrack.CodeBadUsage,
 		Message: "the file of saved logins is damaged",
-		Details: []render.Pair{{Key: "file", Value: render.NewString(path)}},
+		Details: []youtrack.Pair{{Key: "file", Value: youtrack.NewString(path)}},
 	}
 }
 
 func accessFault(path, message string, err error) *diag.Fault {
 	return &diag.Fault{
-		Code:    diag.Denied,
+		Code:    youtrack.CodeDenied,
 		Message: message + ": " + systemReason(err),
-		Details: []render.Pair{{Key: "directory", Value: render.NewString(filepath.Dir(path))}},
+		Details: []youtrack.Pair{{Key: "directory", Value: youtrack.NewString(filepath.Dir(path))}},
 	}
 }
 

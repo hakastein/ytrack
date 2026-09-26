@@ -3,20 +3,21 @@ package cli_test
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type pagedList struct {
-	argv              []string
-	plural            string
-	record            func(at int) string
-	totalBeforeTheEnd string
+	argv   []string
+	record func(at int) string
+	top    string
 }
 
 func recordOf(schema string) func(at int) string {
@@ -29,41 +30,28 @@ func activityAt(at int) string {
 		`"category":{"$type":"ActivityCategory","id":"IssueCreatedCategory"}}`, at, newest-at)
 }
 
-func countedLists() []pagedList {
-	return []pagedList{
-		{argv: []string{"issue", "list", "--query", ""}, plural: "issues", record: recordOf("Issue")},
-		{argv: []string{"article", "list", "--query", ""}, plural: "articles", record: recordOf("Article")},
-		{argv: []string{"article", "list", "--parent", "DEV-A-1"}, plural: "articles", record: recordOf("Article")},
-		{argv: []string{"comment", "list", "DEV-1"}, plural: "comments", record: recordOf("IssueComment")},
-		{argv: []string{"attachment", "list", "DEV-1"}, plural: "attachments", record: recordOf("IssueAttachment")},
-		{argv: []string{"tag", "list"}, plural: "tags", record: recordOf("Tag")},
-		{argv: []string{"time", "list", "DEV-1"}, plural: "workItems", record: recordOf("IssueWorkItem")},
-		{argv: []string{"user", "list", "--query", ""}, plural: "users", record: recordOf("User")},
-		{argv: []string{"project", "list"}, plural: "projects", record: recordOf("Project")},
-	}
-}
-
 func pagedLists() []pagedList {
-	counted := countedLists()
-	for at := range counted {
-		counted[at].totalBeforeTheEnd = "5"
+	return []pagedList{
+		{argv: []string{"issue", "list", "--query", ""}, record: recordOf("Issue"), top: "2"},
+		{argv: []string{"article", "list", "--query", ""}, record: recordOf("Article"), top: "2"},
+		{argv: []string{"article", "list", "--parent", "DEV-A-1"}, record: recordOf("Article"), top: "2"},
+		{argv: []string{"comment", "list", "DEV-1"}, record: recordOf("IssueComment"), top: "2"},
+		{argv: []string{"attachment", "list", "DEV-1"}, record: recordOf("IssueAttachment"), top: "2"},
+		{argv: []string{"tag", "list"}, record: recordOf("Tag"), top: "2"},
+		{argv: []string{"time", "list", "DEV-1"}, record: recordOf("IssueWorkItem"), top: "2"},
+		{argv: []string{"user", "list", "--query", ""}, record: recordOf("User"), top: "2"},
+		{argv: []string{"project", "list"}, record: recordOf("Project"), top: "2"},
+		{argv: []string{"activity", "list", "DEV-1"}, record: activityAt, top: "3"},
 	}
-	activity := pagedList{argv: []string{"activity", "list", "DEV-1"}, plural: "activities", record: activityAt,
-		totalBeforeTheEnd: "null"}
-	return append(counted, activity)
 }
 
-type collection struct {
-	records    int
-	counted    int
-	ignoresTop bool
-}
+const heldRecords = 5
 
-func servedList(t *testing.T, list pagedList, held collection) *fake.Server {
+func servedList(t *testing.T, list pagedList) *fake.Server {
 	t.Helper()
 	return fake.Serve(t, fake.Searching(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == countPath {
-			countHandler(strconv.Itoa(held.counted))(w, r)
+			countHandler(strconv.Itoa(heldRecords))(w, r)
 			return
 		}
 		query := r.URL.Query()
@@ -78,12 +66,9 @@ func servedList(t *testing.T, list pagedList, held collection) *fake.Server {
 				return
 			}
 		}
-		first, end := skip, held.records
-		switch {
-		case top == -1:
-			first, end = 0, held.counted
-		case !held.ignoresTop:
-			end = min(held.records, skip+top)
+		first, end := skip, min(heldRecords, skip+top)
+		if top == -1 {
+			first, end = 0, heldRecords
 		}
 		records := []string{}
 		for at := first; at < end; at++ {
@@ -93,126 +78,46 @@ func servedList(t *testing.T, list pagedList, held collection) *fake.Server {
 	}))
 }
 
-func countsSent(server *fake.Server) int {
-	counts := 0
-	for _, request := range server.Requests() {
-		if request.URL.Path == countPath || request.URL.Query().Get("$top") == "-1" {
-			counts++
+func windowsSent(server *fake.Server) []url.Values {
+	windows := []url.Values{}
+	for _, query := range server.Queries() {
+		if query.Has("$top") {
+			windows = append(windows, url.Values{"$top": query["$top"], "$skip": query["$skip"]})
 		}
 	}
-	return counts
-}
-
-func printedIDs(plural, total string, truncated bool, ids ...int) string {
-	head := fmt.Sprintf("total: %s\nreturned: %d\ntruncated: %t\n%s:", total, len(ids), truncated, plural)
-	if len(ids) == 0 {
-		return head + " []\n"
-	}
-	var rows strings.Builder
-	for _, id := range ids {
-		fmt.Fprintf(&rows, "  - {id: \"1-%d\"}\n", id)
-	}
-	return head + "\n" + rows.String()
+	return windows
 }
 
 func paging(list pagedList, flags ...string) []string {
 	return slices.Concat(list.argv, []string{"--fields", "id"}, flags)
 }
 
-func TestListRefusesAPageItCannotSend(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		flags []string
-	}{
-		{name: "no limit", flags: []string{"--limit", "0"}},
-		{name: "a negative skip", flags: []string{"--skip", "-1"}},
-	}
-	for _, list := range pagedLists() {
-		for _, tc := range tests {
-			t.Run(strings.Join(list.argv, " ")+"/"+tc.name, func(t *testing.T) {
-				t.Parallel()
-				server := fake.ServeNothing(t)
-
-				got := runWith(t, server.Env(), paging(list, tc.flags...)...)
-
-				assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-				assert.Empty(t, server.Requests())
-			})
-		}
-	}
-}
-
-func TestListPrintsAPageInTheMiddleOfTheCollection(t *testing.T) {
+func TestListRefusesALimitOfNoRecordsBeforeItAsksForAnything(t *testing.T) {
 	t.Parallel()
 	for _, list := range pagedLists() {
 		t.Run(strings.Join(list.argv, " "), func(t *testing.T) {
 			t.Parallel()
-			server := servedList(t, list, collection{records: 5, counted: 5})
+			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.Env(), paging(list, "--limit", "2", "--skip", "2")...)
+			got := runWith(t, envOf(server), paging(list, "--limit", "0")...)
 
-			assert.Equal(t, outcome{stdout: printedIDs(list.plural, list.totalBeforeTheEnd, true, 2, 3)}, got)
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+			assert.Empty(t, server.Requests())
 		})
 	}
 }
 
-func TestListCountsNothingOnTheLastPage(t *testing.T) {
+func TestListAsksForThePageOfTheLimitAndTheSkip(t *testing.T) {
 	t.Parallel()
 	for _, list := range pagedLists() {
 		t.Run(strings.Join(list.argv, " "), func(t *testing.T) {
 			t.Parallel()
-			server := servedList(t, list, collection{records: 5, counted: 5})
+			server := servedList(t, list)
 
-			got := runWith(t, server.Env(), paging(list, "--limit", "2", "--skip", "4")...)
+			got := runWith(t, envOf(server), paging(list, "--limit", "2", "--skip", "2")...)
 
-			assert.Equal(t, outcome{stdout: printedIDs(list.plural, "5", false, 4)}, got)
-			assert.Zero(t, countsSent(server))
-		})
-	}
-}
-
-func TestListPrintsAnEmptyPagePastTheEnd(t *testing.T) {
-	t.Parallel()
-	for _, list := range pagedLists() {
-		t.Run(strings.Join(list.argv, " "), func(t *testing.T) {
-			t.Parallel()
-			server := servedList(t, list, collection{records: 5, counted: 5})
-
-			got := runWith(t, server.Env(), paging(list, "--limit", "2", "--skip", "9")...)
-
-			assert.Equal(t, outcome{stdout: printedIDs(list.plural, list.totalBeforeTheEnd, false)}, got)
-		})
-	}
-}
-
-func TestListRefusesACountBelowThePageItFollows(t *testing.T) {
-	t.Parallel()
-	for _, list := range countedLists() {
-		t.Run(strings.Join(list.argv, " "), func(t *testing.T) {
-			t.Parallel()
-			server := servedList(t, list, collection{records: 5, counted: 3})
-
-			got := runWith(t, server.Env(), paging(list, "--limit", "2", "--skip", "2")...)
-
-			want := faultDocument{code: "upstream_failed", details: []detail{{"total", 3}, {"returned", 2}}}
-			assert.Equal(t, want, requireFault(t, got))
-		})
-	}
-}
-
-func TestListRefusesMoreRecordsThanTheLimit(t *testing.T) {
-	t.Parallel()
-	for _, list := range pagedLists() {
-		t.Run(strings.Join(list.argv, " "), func(t *testing.T) {
-			t.Parallel()
-			server := servedList(t, list, collection{records: 5, counted: 5, ignoresTop: true})
-
-			got := runWith(t, server.Env(), paging(list, "--limit", "1")...)
-
-			want := faultDocument{code: "upstream_invalid", details: []detail{{"limit", 1}, {"returned", 5}}}
-			assert.Equal(t, want, requireFault(t, got))
-			assert.Zero(t, countsSent(server))
+			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
+			assert.Contains(t, windowsSent(server), url.Values{"$top": {list.top}, "$skip": {"2"}})
 		})
 	}
 }

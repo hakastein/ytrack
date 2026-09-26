@@ -4,7 +4,7 @@ import (
 	"runtime/debug"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -58,7 +58,7 @@ func TestVersionPrintsTheStampOfTheBuildAsOneDocument(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := runBuiltFrom(t, tc.build, nil, fake.ServeNothing(t).Env(), "--version")
+			got := runBuiltFrom(t, tc.build, nil, envOf(fake.ServeNothing(t)), "--version")
 
 			assert.Equal(t, outcome{stdout: tc.document}, got)
 		})
@@ -67,7 +67,7 @@ func TestVersionPrintsTheStampOfTheBuildAsOneDocument(t *testing.T) {
 
 func TestVersionIsRefusedUnderACommandThatRunsWithoutIt(t *testing.T) {
 	t.Parallel()
-	env := fake.ServeNothing(t).Env()
+	env := envOf(fake.ServeNothing(t))
 	require.Equal(t, 0, runWith(t, env, "completion", "bash").code)
 
 	got := runWith(t, env, "completion", "bash", "--version")

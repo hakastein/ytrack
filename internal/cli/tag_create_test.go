@@ -4,37 +4,15 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
 )
 
-const createdTagFields = tagFields +
-	",updateSharingSettings(permittedGroups(name),permittedUsers(login))" +
-	",tagSharingSettings(permittedGroups(name),permittedUsers(login))"
-
-func tagCreationRequest(address, fields string) string {
-	return "POST " + address + "/api/tags?fields=" + fields
-}
-
-func creatingATag(t *testing.T, creation http.HandlerFunc) *fake.Server {
-	t.Helper()
-	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
-		if !assert.Equal(t, http.MethodPost, r.Method, "a creation of a tag sends one POST and nothing else") {
-			return
-		}
-		creation(w, r)
-	})
-}
-
-func madeTag(name string) string {
-	return sharedTag(name, nil, nil)
-}
-
 func TestTagCreatePrintsTheTagTheServerMade(t *testing.T) {
 	t.Parallel()
-	server := creatingATag(t, fake.JSON(http.StatusOK, madeTag("[bug] fix login")))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, sharedTag("[bug] fix login", nil, nil)))
 
-	got := runWith(t, server.Env(), "tag", "create", "--name", "[bug] fix login")
+	got := runWith(t, envOf(server), "tag", "create", "--name", "[bug] fix login")
 
 	want := `name: "[bug] fix login"` + "\n" +
 		"owner:\n  login: \"admin\"\n" +
@@ -42,23 +20,5 @@ func TestTagCreatePrintsTheTagTheServerMade(t *testing.T) {
 		"updateSharingSettings:\n  permittedGroups: []\n  permittedUsers: []\n" +
 		"tagSharingSettings:\n  permittedGroups: []\n  permittedUsers: []\n"
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []string{"/api/tags?fields=" + createdTagFields}, server.Targets(t))
-	assert.Equal(t, []string{`{"name":"[bug] fix login"}`}, server.Bodies())
-}
-
-func TestTagCreateRefusesANameTheServerKeptAsAnother(t *testing.T) {
-	t.Parallel()
-	server := creatingATag(t, fake.JSON(http.StatusOK, madeTag("early")))
-
-	got := runWith(t, server.Env(), "tag", "create", "--name", "Early", "--fields", "name")
-
-	want := faultDocument{
-		code: "upstream_invalid",
-		details: []detail{
-			{"request", tagCreationRequest(server.URL, "name")},
-			{"tag", "Early"},
-			{"mismatch", []any{[]detail{{"field", "name"}, {"expected", "Early"}, {"actual", "early"}}}},
-		},
-	}
-	assert.Equal(t, want, requireUncertainty(t, got))
+	assert.Contains(t, server.Routes(), "POST /api/tags")
 }

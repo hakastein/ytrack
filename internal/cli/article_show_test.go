@@ -1,9 +1,12 @@
 package cli_test
 
-import ()
+import (
+	"net/http"
+	"testing"
 
-const articleShowFields = "idReadable,summary,reporter(login),created,updated,tags(name)," +
-	"parentArticle(idReadable,summary),childArticles(idReadable,summary),content"
+	"github.com/hakastein/go-youtrack/fake"
+	"github.com/stretchr/testify/assert"
+)
 
 func articleWithAChild() string {
 	return `{"summary":"Title","$type":"Article","id":"177-1",` +
@@ -29,3 +32,13 @@ content: |-
   second line
 comments: []
 `
+
+func TestArticleShowPrintsTheArticleOfTheID(t *testing.T) {
+	t.Parallel()
+	server := fake.Serve(t, fake.JSON(http.StatusOK, articleWithAChild()))
+
+	got := runWith(t, envOf(server), "article", "show", "DEV-A-1")
+
+	assert.Equal(t, outcome{stdout: printedArticleWithAChild}, got)
+	assert.Contains(t, server.Routes(), "GET /api/articles/DEV-A-1")
+}

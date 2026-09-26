@@ -4,77 +4,34 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-func issueToEmpty() string {
-	return issueToUpdate("DEV-1", projectResponse(
-		writableField{id: "180-1", name: "First", valueType: "enum"},
-		writableField{id: "180-2", name: "Second", valueType: "enum", isMultiValue: true},
-		writableField{id: "180-3", name: "Optional", valueType: "enum", isMultiValue: true, canBeEmpty: true},
-		writableField{id: "180-4", kind: "UserProjectCustomField", name: "Single", translate: "Localized",
-			valueType: "user", canBeEmpty: true},
-	))
-}
-
-func requireIssueWriteFault(t *testing.T, got outcome) faultDocument {
-	t.Helper()
-	found := requireFault(t, got)
-	for at, pair := range found.details {
-		if pair.key != "invalid" {
-			continue
-		}
-		entries, isList := pair.value.([]any)
-		require.True(t, isList, "invalid: %v", pair.value)
-		kept := make([]any, 0, len(entries))
-		for _, entry := range entries {
-			fields, isMap := entry.([]detail)
-			require.True(t, isMap, "an entry under invalid: %v", entry)
-			require.Len(t, fields, 3, "an entry under invalid: %v", entry)
-			assert.Equal(t, "reason", fields[2].key)
-			assert.NotEmpty(t, fields[2].value)
-			kept = append(kept, fields[:2])
-		}
-		found.details[at].value = kept
-	}
-	return found
-}
-
-func TestIssueUpdateRefusesToEmptyEveryFieldTheProjectRequires(t *testing.T) {
+func TestIssueUpdateEmptiesTheDescriptionUnderClear(t *testing.T) {
 	t.Parallel()
-	server := updating(t, fake.JSON(http.StatusOK, issueToEmpty()), fake.Unexpected(t))
-
-	got := runWith(t, server.Env(), "issue", "update", "DEV-1",
-		"--clear", "First", "--clear", "Second", "--clear", "Single")
-
-	want := faultDocument{
-		code: "missing_required",
-		details: []detail{
-			{"request", issueRequest(server.URL, "DEV-1", issueWriteFields)},
-			{"project", "DEV"},
-			{"missing", []any{"First", "Second"}},
-		},
+	tests := []struct {
+		name  string
+		clear string
+	}{
+		{name: "in lower case", clear: "description"},
+		{name: "in another letter case", clear: "Description"},
 	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, server.Methods())
-}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			read := issueToUpdate("DEV-1", projectRequiringNothing(),
+				currentField{name: "Optional", kind: "SingleEnumIssueCustomField", binding: "180-1"})
+			held := receivedFields(receivedField{name: "Optional", valueType: "enum", binding: "180-1"})
+			server := updating(t, fake.JSON(http.StatusOK, read),
+				fake.JSON(http.StatusOK, createdIssueWith("DEV-1", "x", "null", held)))
 
-func TestIssueUpdateRefusesAFieldWrittenAndEmptiedAtOnce(t *testing.T) {
-	t.Parallel()
-	server := updating(t, fake.JSON(http.StatusOK, issueToEmpty()), fake.Unexpected(t))
+			got := runWith(t, envOf(server), "issue", "update", "DEV-1", "--clear", tc.clear, "--fields", "idReadable")
 
-	got := runWith(t, server.Env(), "issue", "update", "DEV-1", "--field", "Single=first", "--clear", "localized")
-
-	want := faultDocument{
-		code: "bad_usage",
-		details: []detail{
-			{"request", issueRequest(server.URL, "DEV-1", issueWriteFields)},
-			{"project", "DEV"},
-			{"invalid", []any{[]detail{{"field", "Single"}, {"value", "first"}}}},
-		},
+			assert.Equal(t, outcome{stdout: "idReadable: \"DEV-1\"\n"}, got)
+			sent := server.Last(t)
+			assert.Equal(t, http.MethodPost, sent.Method)
+			assert.Equal(t, "/api/issues/DEV-1", sent.URL.Path)
+		})
 	}
-	assert.Equal(t, want, requireIssueWriteFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, server.Methods())
 }

@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"github.com/hakastein/go-youtrack"
+
 	"fmt"
 	"io"
 	"strconv"
@@ -62,11 +64,11 @@ func newCompletion(stdout io.Writer) *cobra.Command {
 				continue
 			}
 			if err := shell.generate(cmd.Root(), stdout); err != nil {
-				return &diag.Fault{Code: diag.UpstreamFailed, Message: err.Error()}
+				return &diag.Fault{Code: youtrack.CodeUpstreamFailed, Message: err.Error()}
 			}
 			return nil
 		}
-		return &diag.Fault{Code: diag.BadUsage, Message: fmt.Sprintf(
+		return &diag.Fault{Code: youtrack.CodeBadUsage, Message: fmt.Sprintf(
 			"unknown shell %s: ytrack has a script for %s", render.Quote(args[0]), strings.Join(shellNames(), ", "))}
 	})
 	completion.Args = cobra.ExactArgs(1)
@@ -98,7 +100,7 @@ const noCommandLine = "the completion protocol needs the command line to complet
 
 func complete(root *cobra.Command, stdout io.Writer, calledAs string, words []string) *diag.Fault {
 	if len(words) == 0 {
-		return &diag.Fault{Code: diag.BadUsage, Message: noCommandLine}
+		return &diag.Fault{Code: youtrack.CodeBadUsage, Message: noCommandLine}
 	}
 	typed, completing := words[:len(words)-1], words[len(words)-1]
 	directive := shellOffersNoFileNames
@@ -254,7 +256,7 @@ func printCompletions(stdout io.Writer, suggestions []string, prefix string, des
 	}
 	fmt.Fprintf(&answer, ":%d\n", directive)
 	if _, err := io.WriteString(stdout, answer.String()); err != nil {
-		return &diag.Fault{Code: diag.UpstreamFailed, Message: err.Error()}
+		return &diag.Fault{Code: youtrack.CodeUpstreamFailed, Message: err.Error()}
 	}
 	return nil
 }

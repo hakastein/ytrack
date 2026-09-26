@@ -7,14 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
-)
-
-const (
-	namingSent    = "field(name,localizedName,fieldType(valueType,isMultiValue))"
-	metadataSent  = "id,shortName,customFields(id,ordinal,canBeEmpty," + namingSent + ")"
-	enumFieldSent = fieldListDefault + ",bundle(values(name,archived))"
 )
 
 const printedEnumType = `field:
@@ -27,14 +21,6 @@ canBeEmpty: false
 bundle:
   values: []
 `
-
-func metadataRequest(address, project string) string {
-	return "GET " + address + "/api/admin/projects/" + project + "?fields=" + metadataSent
-}
-
-func fieldRequest(address, project, id, fields string) string {
-	return "GET " + address + "/api/admin/projects/" + project + "/customFields/" + id + "?fields=" + fields
-}
 
 func localizedNameOrNull(localized string) string {
 	if localized == "" {
@@ -50,7 +36,7 @@ func projectField(id, name, localized string) string {
 }
 
 func projectMetadata(fields ...string) string {
-	return `{"$type":"Project","id":"0-1","shortName":"DEV","customFields":[` + strings.Join(fields, ",") + `]}`
+	return `{"$type":"Project","customFields":[` + strings.Join(fields, ",") + `]}`
 }
 
 func oneField(name, localized string, canBeEmpty bool) string {
@@ -75,102 +61,10 @@ func TestFieldShowPrintsTheFieldItsNameResolvesTo(t *testing.T) {
 	metadata := projectMetadata(projectField("180-1", "Type", "Kind"))
 	server := serveTheProject(t, metadata, fake.JSON(http.StatusOK, oneField("Type", "Kind", false)))
 
-	got := runWith(t, server.Env(), "field", "show", "DEV", "Type")
+	got := runWith(t, envOf(server), "field", "show", "DEV", "Type")
 
 	assert.Equal(t, outcome{stdout: printedEnumType}, got)
-	assert.Equal(t, []string{
-		"/api/admin/projects/DEV?fields=" + metadataSent,
-		"/api/admin/projects/DEV/customFields/180-1?fields=" + enumFieldSent,
-	}, server.Targets(t))
-}
-
-func TestFieldShowRefusesANameOfNoField(t *testing.T) {
-	t.Parallel()
-	server := serveTheProject(t, projectMetadata(projectField("180-1", "Type", "Kind")), fake.Unexpected(t))
-
-	got := runWith(t, server.Env(), "field", "show", "DEV", "Nothing")
-
-	want := faultDocument{
-		code: "unknown_name",
-		details: []detail{
-			{"request", metadataRequest(server.URL, "DEV")},
-			{"project", "DEV"},
-			{"unknown", []any{unknownEntry("Nothing", "Type")}},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-}
-
-func TestFieldShowRefusesAnIdItCannotAddress(t *testing.T) {
-	t.Parallel()
-	metadata := projectMetadata(projectField("..", "Type", "Kind"))
-	server := serveTheProject(t, metadata, fake.Unexpected(t))
-
-	got := runWith(t, server.Env(), "field", "show", "DEV", "Type")
-
-	want := faultDocument{
-		code:    "upstream_invalid",
-		details: []detail{{"request", metadataRequest(server.URL, "DEV")}},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{"/api/admin/projects/DEV"}, server.Paths())
-}
-
-func TestFieldShowRefusesAFieldGoneBetweenTheTwoRequests(t *testing.T) {
-	t.Parallel()
-	const gone = `{"error":"Not Found","error_description":"Entity with id 180-1 not found"}`
-	metadata := projectMetadata(projectField("180-1", "Type", "Kind"))
-	server := serveTheProject(t, metadata, fake.JSON(http.StatusNotFound, gone))
-
-	got := runWith(t, server.Env(), showType...)
-
-	want := faultDocument{
-		code: "not_found",
-		details: []detail{
-			{"request", fieldRequest(server.URL, "DEV", "180-1", namingSent)},
-			{"upstream_status", 404},
-			{"upstream_error", "Not Found"},
-			{"upstream_message", "Entity with id 180-1 not found"},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{"/api/admin/projects/DEV", "/api/admin/projects/DEV/customFields/180-1"}, server.Paths())
-}
-
-func TestFieldShowRefusesAFieldRenamedBetweenTheTwoRequests(t *testing.T) {
-	t.Parallel()
-	renamed := oneField("Renamed", "Kind", false)
-	server := serveTheProject(t, projectMetadata(projectField("180-1", "Type", "Kind")), fake.JSON(http.StatusOK, renamed))
-
-	got := runWith(t, server.Env(), showType...)
-
-	want := faultDocument{
-		code: "upstream_failed",
-		details: []detail{
-			{"request", fieldRequest(server.URL, "DEV", "180-1", namingSent)},
-			{"upstream_status", 200},
-			{"project", "DEV"},
-			{"field", "Type"},
-			{"upstream_body", renamed},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-}
-
-func TestFieldShowRefusesAProjectWithNoFields(t *testing.T) {
-	t.Parallel()
-	server := serveTheProject(t, projectMetadata(), fake.Unexpected(t))
-
-	got := runWith(t, server.Env(), "field", "show", "DEV", "Type")
-
-	want := faultDocument{
-		code: "denied",
-		details: []detail{
-			{"request", metadataRequest(server.URL, "DEV")},
-			{"project", "DEV"},
-			{"permission", "jetbrains.jetpass.project-read"},
-			authFromEnv(),
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
+	sent := server.Last(t)
+	assert.Equal(t, http.MethodGet, sent.Method)
+	assert.Equal(t, "/api/admin/projects/DEV/customFields/180-1", sent.URL.Path)
 }

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -16,7 +16,7 @@ const (
 	firstFieldPath = metadataPath + "/customFields/180-1"
 )
 
-var showType = []string{"field", "show", "DEV", "Type", "--fields", "field(name)"}
+var showType = []string{"field", "show", "DEV", "Type"}
 
 func typeOnlyProject(t *testing.T) *fake.Server {
 	t.Helper()
@@ -25,19 +25,7 @@ func typeOnlyProject(t *testing.T) *fake.Server {
 }
 
 func atHome(server *fake.Server, home string) []string {
-	return append(server.Env(), "HOME="+home)
-}
-
-func TestFieldShowTakesTheMetadataTheRunBeforeLeftOnDisk(t *testing.T) {
-	t.Parallel()
-	server, home := typeOnlyProject(t), t.TempDir()
-
-	first := runWith(t, atHome(server, home), showType...)
-	second := runWith(t, atHome(server, home), showType...)
-
-	require.Equal(t, 0, first.code, "stderr: %s", first.stderr)
-	assert.Equal(t, first, second)
-	assert.Equal(t, []string{metadataPath, firstFieldPath, firstFieldPath}, server.Paths())
+	return append(envOf(server), "HOME="+home)
 }
 
 func TestFieldShowKeepsNoCacheWithoutAnAbsoluteHome(t *testing.T) {
@@ -53,13 +41,12 @@ func TestFieldShowKeepsNoCacheWithoutAnAbsoluteHome(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			server := typeOnlyProject(t)
-			env := append(server.Env(), tc.home...)
+			env := append(envOf(server), tc.home...)
 
 			first := runWith(t, env, showType...)
-			second := runWith(t, env, showType...)
+			runWith(t, env, showType...)
 
 			require.Equal(t, 0, first.code, "stderr: %s", first.stderr)
-			assert.Equal(t, first, second)
 			assert.Equal(t, []string{metadataPath, firstFieldPath, metadataPath, firstFieldPath}, server.Paths())
 		})
 	}

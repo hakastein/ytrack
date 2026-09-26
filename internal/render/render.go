@@ -1,7 +1,11 @@
 package render
 
-import "io"
+import (
+	"io"
+
+	"github.com/hakastein/go-youtrack"
+)
 
 type Renderer interface {
-	Render(io.Writer, *Node) error
+	Render(io.Writer, *youtrack.Node) error
 }

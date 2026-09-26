@@ -4,9 +4,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestTagRefusesAnOwnerOfNoLogin(t *testing.T) {
@@ -24,7 +23,7 @@ func TestTagRefusesAnOwnerOfNoLogin(t *testing.T) {
 			t.Parallel()
 			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.Env(), tc.argv...)
+			got := runWith(t, envOf(server), tc.argv...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.Requests())
@@ -32,15 +31,14 @@ func TestTagRefusesAnOwnerOfNoLogin(t *testing.T) {
 	}
 }
 
-func TestTagNarrowsTheNameByTheOwnerOfTheTag(t *testing.T) {
+func TestTagHandsTheOwnerToTheCall(t *testing.T) {
 	t.Parallel()
 	owner := fake.JSON(http.StatusOK, issueNamed("DEV-7"))
 	tests := []struct {
 		name    string
 		argv    []string
 		server  func(t *testing.T) *fake.Server
-		methods []string
-		paths   []string
+		printed string
 	}{
 		{
 			name: "a deletion",
@@ -48,8 +46,7 @@ func TestTagNarrowsTheNameByTheOwnerOfTheTag(t *testing.T) {
 			server: func(t *testing.T) *fake.Server {
 				return resolvingTags(t, tagsOfTwoOwners(), deletionDone())
 			},
-			methods: []string{http.MethodGet, http.MethodDelete},
-			paths:   []string{tagsCollection, tagDeletionPath("10-7")},
+			printed: "name: \"Shared\"\nowner:\n  login: \"second\"\n",
 		},
 		{
 			name: "a tagging",
@@ -57,8 +54,7 @@ func TestTagNarrowsTheNameByTheOwnerOfTheTag(t *testing.T) {
 			server: func(t *testing.T) *fake.Server {
 				return addingATag(t, owner, shownTags(), fake.JSON(http.StatusOK, catalogueTag("10-7", "Shared", "second")))
 			},
-			methods: []string{http.MethodGet, http.MethodGet, http.MethodPost},
-			paths:   []string{"/api/issues/DEV-7", tagsCollection, tagsOfOwnerPath("issues", "DEV-7")},
+			printed: "idReadable: \"DEV-7\"\nadded:\n  name: \"Shared\"\n  owner:\n    login: \"second\"\n",
 		},
 		{
 			name: "a removal",
@@ -66,8 +62,7 @@ func TestTagNarrowsTheNameByTheOwnerOfTheTag(t *testing.T) {
 			server: func(t *testing.T) *fake.Server {
 				return takingATagOff(t, owner, shownTags(), deletionDone())
 			},
-			methods: []string{http.MethodGet, http.MethodGet, http.MethodDelete},
-			paths:   []string{"/api/issues/DEV-7", tagsCollection, tagOnOwnerPath("issues", "DEV-7", "10-6")},
+			printed: "idReadable: \"DEV-7\"\nremoved:\n  name: \"Shared\"\n  owner:\n    login: \"first\"\n",
 		},
 	}
 	for _, tc := range tests {
@@ -75,11 +70,9 @@ func TestTagNarrowsTheNameByTheOwnerOfTheTag(t *testing.T) {
 			t.Parallel()
 			server := tc.server(t)
 
-			got := runWith(t, server.Env(), tc.argv...)
+			got := runWith(t, envOf(server), tc.argv...)
 
-			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			assert.Equal(t, tc.methods, server.Methods())
-			assert.Equal(t, tc.paths, server.Paths())
+			assert.Equal(t, outcome{stdout: tc.printed}, got)
 		})
 	}
 }

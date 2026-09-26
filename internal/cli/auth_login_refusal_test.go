@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -16,7 +16,7 @@ func loginEnvironment(t *testing.T) (env []string, path string) {
 	t.Helper()
 	stated, _ := here(t)
 	home, path := homeWith(t, damagedRecords)
-	return append(fake.ServeNothing(t).Env(), "HOME="+home, "PWD="+stated), path
+	return append(envOf(fake.ServeNothing(t)), "HOME="+home, "PWD="+stated), path
 }
 
 func TestAuthLoginRefusesAStdinThatIsNotATerminal(t *testing.T) {

@@ -1,6 +1,8 @@
 package render_test
 
 import (
+	"github.com/hakastein/go-youtrack"
+
 	"errors"
 	"strings"
 	"testing"
@@ -12,14 +14,14 @@ import (
 	"github.com/hakastein/ytrack/internal/render"
 )
 
-func rendered(t *testing.T, document *render.Node) string {
+func rendered(t *testing.T, document *youtrack.Node) string {
 	t.Helper()
 	var out strings.Builder
 	require.NoError(t, render.YAML{}.Render(&out, document))
 	return out.String()
 }
 
-func refused(t *testing.T, document *render.Node) {
+func refused(t *testing.T, document *youtrack.Node) {
 	t.Helper()
 	var out strings.Builder
 	assert.Error(t, render.YAML{}.Render(&out, document))
@@ -41,97 +43,97 @@ func TestYAMLPrintsEachScalarSoNullEmptyAndEmptyListDiffer(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
-		value *render.Node
+		value *youtrack.Node
 		want  string
 	}{
-		{name: "string", value: render.NewString("First"), want: lines(`value: "First"`)},
-		{name: "empty string", value: render.NewString(""), want: lines(`value: ""`)},
-		{name: "string that reads as null", value: render.NewString("null"), want: lines(`value: "null"`)},
-		{name: "string that reads as a bool", value: render.NewString("true"), want: lines(`value: "true"`)},
-		{name: "string that reads as a number", value: render.NewString("12"), want: lines(`value: "12"`)},
-		{name: "string that reads as an empty list", value: render.NewString("[]"), want: lines(`value: "[]"`)},
-		{name: "null", value: render.NewNull(), want: lines(`value: null`)},
-		{name: "empty list", value: render.NewList(), want: lines(`value: []`)},
-		{name: "empty mapping", value: render.NewMap(), want: lines(`value: {}`)},
-		{name: "true", value: render.NewBool(true), want: lines(`value: true`)},
-		{name: "false", value: render.NewBool(false), want: lines(`value: false`)},
-		{name: "number", value: render.NewNumber("-1.5"), want: lines(`value: -1.5`)},
+		{name: "string", value: youtrack.NewString("First"), want: lines(`value: "First"`)},
+		{name: "empty string", value: youtrack.NewString(""), want: lines(`value: ""`)},
+		{name: "string that reads as null", value: youtrack.NewString("null"), want: lines(`value: "null"`)},
+		{name: "string that reads as a bool", value: youtrack.NewString("true"), want: lines(`value: "true"`)},
+		{name: "string that reads as a number", value: youtrack.NewString("12"), want: lines(`value: "12"`)},
+		{name: "string that reads as an empty list", value: youtrack.NewString("[]"), want: lines(`value: "[]"`)},
+		{name: "null", value: youtrack.NewNull(), want: lines(`value: null`)},
+		{name: "empty list", value: youtrack.NewList(), want: lines(`value: []`)},
+		{name: "empty mapping", value: youtrack.NewMap(), want: lines(`value: {}`)},
+		{name: "true", value: youtrack.NewBool(true), want: lines(`value: true`)},
+		{name: "false", value: youtrack.NewBool(false), want: lines(`value: false`)},
+		{name: "number", value: youtrack.NewNumber("-1.5"), want: lines(`value: -1.5`)},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tc.want, rendered(t, render.NewMap(render.Pair{Key: "value", Value: tc.value})))
+			assert.Equal(t, tc.want, rendered(t, youtrack.NewMap(youtrack.Pair{Key: "value", Value: tc.value})))
 		})
 	}
 }
 
 func TestYAMLNestsMappingsInBlocksAndWritesEachRecordOnOneLine(t *testing.T) {
 	t.Parallel()
-	first := render.NewMap(render.Pair{Key: "id", Value: render.NewString("1")}, render.Pair{Key: "name", Value: render.NewString("First")})
-	second := render.NewMap(render.Pair{Key: "id", Value: render.NewString("2")}, render.Pair{Key: "name", Value: render.NewString("Second")})
+	first := youtrack.NewMap(youtrack.Pair{Key: "id", Value: youtrack.NewString("1")}, youtrack.Pair{Key: "name", Value: youtrack.NewString("First")})
+	second := youtrack.NewMap(youtrack.Pair{Key: "id", Value: youtrack.NewString("2")}, youtrack.Pair{Key: "name", Value: youtrack.NewString("Second")})
 	tests := []struct {
 		name     string
-		document *render.Node
+		document *youtrack.Node
 		want     string
 	}{
-		{name: "empty document", document: render.NewMap(), want: ""},
+		{name: "empty document", document: youtrack.NewMap(), want: ""},
 		{
 			name:     "keys in their order",
-			document: render.NewMap(render.Pair{Key: "second", Value: render.NewString("Second")}, render.Pair{Key: "first", Value: render.NewString("First")}),
+			document: youtrack.NewMap(youtrack.Pair{Key: "second", Value: youtrack.NewString("Second")}, youtrack.Pair{Key: "first", Value: youtrack.NewString("First")}),
 			want:     lines(`second: "Second"`, `first: "First"`),
 		},
 		{
 			name:     "mapping under a key",
-			document: render.NewMap(render.Pair{Key: "owner", Value: first}),
+			document: youtrack.NewMap(youtrack.Pair{Key: "owner", Value: first}),
 			want:     lines(`owner:`, `  id: "1"`, `  name: "First"`),
 		},
 		{
 			name: "mapping two levels down",
-			document: render.NewMap(render.Pair{Key: "outer", Value: render.NewMap(
-				render.Pair{Key: "inner", Value: first},
-				render.Pair{Key: "after", Value: render.NewNull()},
+			document: youtrack.NewMap(youtrack.Pair{Key: "outer", Value: youtrack.NewMap(
+				youtrack.Pair{Key: "inner", Value: first},
+				youtrack.Pair{Key: "after", Value: youtrack.NewNull()},
 			)}),
 			want: lines(`outer:`, `  inner:`, `    id: "1"`, `    name: "First"`, `  after: null`),
 		},
 		{
 			name:     "list of strings",
-			document: render.NewMap(render.Pair{Key: "items", Value: render.NewList(render.NewString("First"), render.NewString("Second"))}),
+			document: youtrack.NewMap(youtrack.Pair{Key: "items", Value: youtrack.NewList(youtrack.NewString("First"), youtrack.NewString("Second"))}),
 			want:     lines(`items:`, `  - "First"`, `  - "Second"`),
 		},
 		{
 			name:     "list of scalars of every kind",
-			document: render.NewMap(render.Pair{Key: "items", Value: render.NewList(render.NewNull(), render.NewNumber("1"), render.NewBool(true))}),
+			document: youtrack.NewMap(youtrack.Pair{Key: "items", Value: youtrack.NewList(youtrack.NewNull(), youtrack.NewNumber("1"), youtrack.NewBool(true))}),
 			want:     lines(`items:`, `  - null`, `  - 1`, `  - true`),
 		},
 		{
 			name:     "list of records",
-			document: render.NewMap(render.Pair{Key: "records", Value: render.NewList(first, second)}),
+			document: youtrack.NewMap(youtrack.Pair{Key: "records", Value: youtrack.NewList(first, second)}),
 			want:     lines(`records:`, `  - {id: "1", name: "First"}`, `  - {id: "2", name: "Second"}`),
 		},
 		{
 			name: "record holding mappings and lists",
-			document: render.NewMap(render.Pair{Key: "records", Value: render.NewList(render.NewMap(
-				render.Pair{Key: "owner", Value: first},
-				render.Pair{Key: "tags", Value: render.NewList(render.NewString("First"), render.NewString("Second"))},
-				render.Pair{Key: "none", Value: render.NewList()},
-				render.Pair{Key: "empty", Value: render.NewMap()},
-				render.Pair{Key: "gone", Value: render.NewNull()},
+			document: youtrack.NewMap(youtrack.Pair{Key: "records", Value: youtrack.NewList(youtrack.NewMap(
+				youtrack.Pair{Key: "owner", Value: first},
+				youtrack.Pair{Key: "tags", Value: youtrack.NewList(youtrack.NewString("First"), youtrack.NewString("Second"))},
+				youtrack.Pair{Key: "none", Value: youtrack.NewList()},
+				youtrack.Pair{Key: "empty", Value: youtrack.NewMap()},
+				youtrack.Pair{Key: "gone", Value: youtrack.NewNull()},
 			))}),
 			want: lines(`records:`, `  - {owner: {id: "1", name: "First"}, tags: ["First", "Second"], none: [], empty: {}, gone: null}`),
 		},
 		{
 			name:     "record with a key from data",
-			document: render.NewMap(render.Pair{Key: "records", Value: render.NewList(render.NewMap(render.FromData("First field", render.NewString("First"))))}),
+			document: youtrack.NewMap(youtrack.Pair{Key: "records", Value: youtrack.NewList(youtrack.NewMap(youtrack.DataPair("First field", youtrack.NewString("First"))))}),
 			want:     lines(`records:`, `  - {"First field": "First"}`),
 		},
 		{
 			name:     "list of lists",
-			document: render.NewMap(render.Pair{Key: "items", Value: render.NewList(render.NewList(render.NewString("First")), render.NewList())}),
+			document: youtrack.NewMap(youtrack.Pair{Key: "items", Value: youtrack.NewList(youtrack.NewList(youtrack.NewString("First")), youtrack.NewList())}),
 			want:     lines(`items:`, `  - ["First"]`, `  - []`),
 		},
 		{
 			name:     "list under a nested mapping",
-			document: render.NewMap(render.Pair{Key: "outer", Value: render.NewMap(render.Pair{Key: "records", Value: render.NewList(first)})}),
+			document: youtrack.NewMap(youtrack.Pair{Key: "outer", Value: youtrack.NewMap(youtrack.Pair{Key: "records", Value: youtrack.NewList(first)})}),
 			want:     lines(`outer:`, `  records:`, `    - {id: "1", name: "First"}`),
 		},
 	}
@@ -145,20 +147,20 @@ func TestYAMLNestsMappingsInBlocksAndWritesEachRecordOnOneLine(t *testing.T) {
 
 func TestYAMLRefusesADocumentItCannotPrintBeforeTheFirstByte(t *testing.T) {
 	t.Parallel()
-	printable := render.Pair{Key: "first", Value: render.NewString("First")}
+	printable := youtrack.Pair{Key: "first", Value: youtrack.NewString("First")}
 	tests := []struct {
 		name     string
-		document *render.Node
+		document *youtrack.Node
 	}{
 		{name: "no document", document: nil},
-		{name: "list as the document", document: render.NewList(render.NewMap(printable))},
-		{name: "string as the document", document: render.NewString("First")},
-		{name: "text as the document", document: render.NewText("First")},
-		{name: "null as the document", document: render.NewNull()},
-		{name: "nil value", document: render.NewMap(printable, render.Pair{Key: "second", Value: nil})},
-		{name: "nil value in a record", document: render.NewMap(printable, render.Pair{Key: "records", Value: render.NewList(render.NewMap(render.Pair{Key: "second", Value: nil}))})},
-		{name: "nil list item", document: render.NewMap(printable, render.Pair{Key: "items", Value: render.NewList(render.NewString("Second"), nil)})},
-		{name: "value of no kind", document: render.NewMap(printable, render.Pair{Key: "second", Value: &render.Node{}})},
+		{name: "list as the document", document: youtrack.NewList(youtrack.NewMap(printable))},
+		{name: "string as the document", document: youtrack.NewString("First")},
+		{name: "text as the document", document: youtrack.NewText("First")},
+		{name: "null as the document", document: youtrack.NewNull()},
+		{name: "nil value", document: youtrack.NewMap(printable, youtrack.Pair{Key: "second", Value: nil})},
+		{name: "nil value in a record", document: youtrack.NewMap(printable, youtrack.Pair{Key: "records", Value: youtrack.NewList(youtrack.NewMap(youtrack.Pair{Key: "second", Value: nil}))})},
+		{name: "nil list item", document: youtrack.NewMap(printable, youtrack.Pair{Key: "items", Value: youtrack.NewList(youtrack.NewString("Second"), nil)})},
+		{name: "value of no kind", document: youtrack.NewMap(printable, youtrack.Pair{Key: "second", Value: &youtrack.Node{}})},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -178,6 +180,6 @@ func (failingWriter) Write([]byte) (int, error) {
 
 func TestYAMLReturnsTheFailureOfTheWriter(t *testing.T) {
 	t.Parallel()
-	document := render.NewMap(render.Pair{Key: "first", Value: render.NewString("First")})
+	document := youtrack.NewMap(youtrack.Pair{Key: "first", Value: youtrack.NewString("First")})
 	assert.ErrorIs(t, render.YAML{}.Render(failingWriter{}, document), errWriteFailed)
 }

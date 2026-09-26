@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -102,7 +102,7 @@ func TestEveryCommandRefusesAFlagOfOneValueGivenTwice(t *testing.T) {
 			t.Parallel()
 			server := fake.ServeNothing(t)
 
-			got := runWith(t, server.Env(), slices.Concat(tc.argv, []string{tc.flag, tc.value, tc.flag, tc.value})...)
+			got := runWith(t, envOf(server), slices.Concat(tc.argv, []string{tc.flag, tc.value, tc.flag, tc.value})...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.Requests())

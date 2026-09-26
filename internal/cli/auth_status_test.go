@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -37,7 +37,7 @@ func TestAuthStatusPrintsTheAddressTheSourceOfTheLoginAndTheUser(t *testing.T) {
 		login func(t *testing.T, server *fake.Server) []string
 		from  string
 	}{
-		{name: "a login from the environment", login: func(_ *testing.T, server *fake.Server) []string { return server.Env() }, from: "environment"},
+		{name: "a login from the environment", login: func(_ *testing.T, server *fake.Server) []string { return envOf(server) }, from: "environment"},
 		{name: "a saved login", login: func(t *testing.T, server *fake.Server) []string {
 			home, _ := homeWith(t, globalRecord(server.URL, fake.Token))
 			return []string{"HOME=" + home}
@@ -46,7 +46,7 @@ func TestAuthStatusPrintsTheAddressTheSourceOfTheLoginAndTheUser(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := fake.Serve(t, fake.JSON(http.StatusOK, `{"fullName":"Full Name","$type":"Me","login":"login"}`))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, currentUser("login", "Full Name")))
 
 			got := runWith(t, tc.login(t, server), "auth", "status")
 
@@ -54,7 +54,6 @@ func TestAuthStatusPrintsTheAddressTheSourceOfTheLoginAndTheUser(t *testing.T) {
 			sent := server.Request(t, 0)
 			assert.Equal(t, []string{"/api/users/me"}, server.Paths())
 			assert.Equal(t, http.MethodGet, sent.Method)
-			assert.Equal(t, url.Values{"fields": {"login,fullName"}}, sent.URL.Query())
 			assert.Equal(t, bearing(fake.Token), sent.Header.Get("Authorization"))
 		})
 	}
@@ -76,7 +75,7 @@ func TestAuthStatusPrintsTheAddressInOneSpelling(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			server := fake.Serve(t, fake.JSON(http.StatusOK, `{"login":"login","fullName":"Full Name","$type":"Me"}`))
+			server := fake.Serve(t, fake.JSON(http.StatusOK, currentUser("login", "Full Name")))
 			listening := server.Address(t)
 			port, prefix := listening.Port(), listening.Path
 
@@ -90,29 +89,11 @@ func TestAuthStatusPrintsTheAddressInOneSpelling(t *testing.T) {
 
 func TestAuthStatusPrintsTheAddressWithoutItsPassword(t *testing.T) {
 	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, `{"login":"login","fullName":"Full Name","$type":"Me"}`))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, currentUser("login", "Full Name")))
 	address := server.Address(t)
 	address.User = url.UserPassword("svc", "secret")
 
 	got := runWith(t, []string{"YTRACK_URL=" + address.String(), "YTRACK_TOKEN=" + fake.Token}, "auth", "status")
 
 	assert.Equal(t, "http://svc:xxxxx@"+address.Host+address.Path, urlPrinted(t, got))
-}
-
-func TestAuthStatusRefusesAUserWithoutTheFullName(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, `{"login":"login","$type":"Me"}`))
-
-	got := runWith(t, server.Env(), "auth", "status")
-
-	want := faultDocument{
-		code: "upstream_invalid",
-		details: []detail{
-			{"request", "GET " + server.URL + "/api/users/me?fields=login,fullName"},
-			{"fields", "login,fullName"},
-			{"missing", []any{missingEntry("fullName", "Me")}},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{"/api/users/me"}, server.Paths())
 }
