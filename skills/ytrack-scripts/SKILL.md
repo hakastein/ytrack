@@ -24,8 +24,5 @@ A command script is a JavaScript file that `ytrack` runs as a command of its own
    `ytrack` has already expanded.
 3. **Fail with a code the agent already knows.** `fail` and `warn` take only the codes in `v1.d.ts`; a fault a
    function throws can be left to print as it is. Exit code `2` after a write is `ytrack`'s to count.
-4. **Run it against a server of your own:** `YTRACK_URL` and `YTRACK_TOKEN` point `ytrack` at any HTTP server, which
-   answers the requests the script sends. Done when every branch of the script has run once — each flag given and
-   left out, each fault it catches.
 
 A `script_failed` names the `file`, `line` and `column` of the defect: the fix goes into the script there.
