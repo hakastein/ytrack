@@ -63,11 +63,11 @@ func fromEnvironmentVariables(env []string, raw, token string) (connection, *dia
 	if reason := validateToken(token, tokenVariable); reason != "" {
 		return connection{}, &diag.Fault{Code: diag.BadUsage, Message: reason}
 	}
-	return connection{
-		client:  youtrack.New(address, token, cacheDirectory(lookup(env, homeVariable))),
-		address: address,
-		from:    fromEnvironment,
-	}, nil
+	client, fault := youtrack.New(address, token, cacheDirectory(lookup(env, homeVariable)))
+	if fault != nil {
+		return connection{}, fault
+	}
+	return connection{client: client, address: address, from: fromEnvironment}, nil
 }
 
 func fromSavedLogin(env []string) (connection, *diag.Fault) {
@@ -88,11 +88,11 @@ func fromSavedLogin(env []string) (connection, *diag.Fault) {
 		return connection{}, noLoginFoundFault(noLoginFound, string(fromSettings))
 	}
 	held := chain[0]
-	return connection{
-		client:  youtrack.New(held.address, held.token, cacheDirectory(home)),
-		address: held.address,
-		from:    fromSettings,
-	}, nil
+	client, fault := youtrack.New(held.address, held.token, cacheDirectory(home))
+	if fault != nil {
+		return connection{}, fault
+	}
+	return connection{client: client, address: held.address, from: fromSettings}, nil
 }
 
 func (c connection) withLoginSource(fault *diag.Fault) *diag.Fault {

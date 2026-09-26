@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hakastein/youtrack/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/hakastein/ytrack/internal/diag"
-	"github.com/hakastein/ytrack/internal/fake"
 	"github.com/hakastein/ytrack/internal/render"
 	"github.com/hakastein/ytrack/internal/youtrack"
 )
@@ -27,7 +27,14 @@ const noMetadataCache = ""
 
 func client(t *testing.T, server *fake.Server) *youtrack.Client {
 	t.Helper()
-	return youtrack.New(server.Address(t), fake.Token, noMetadataCache)
+	return clientWith(t, server, fake.Token, noMetadataCache)
+}
+
+func clientWith(t *testing.T, server *fake.Server, token, cacheDir string) *youtrack.Client {
+	t.Helper()
+	c, fault := youtrack.New(server.Address(t), token, cacheDir)
+	require.Nil(t, fault)
+	return c
 }
 
 func callOn(t *testing.T, server *fake.Server) func(youtrack.Call, *diag.Fault) (*render.Node, *diag.Fault) {

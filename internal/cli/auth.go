@@ -90,7 +90,11 @@ func login(ctx context.Context, env []string, stdin *os.File, stdout io.Writer, 
 	if reason := validateToken(secret, tokenTyped); reason != "" {
 		return &diag.Fault{Code: diag.BadUsage, Message: reason}
 	}
-	user, fault := youtrack.CurrentUser(ctx, youtrack.New(address, secret, noMetadataCache))
+	client, fault := youtrack.New(address, secret, noMetadataCache)
+	if fault != nil {
+		return fault
+	}
+	user, fault := youtrack.CurrentUser(ctx, client)
 	if fault != nil {
 		return fault
 	}

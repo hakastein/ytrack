@@ -51,7 +51,8 @@ status: accepted, implemented
 - **Поле, скрытое правами, — тоже `upstream_invalid`**, и сообщение называет права возможной причиной. Поля по умолчанию
   не включают полей, которые могут скрыть права: так, участнику сервер не присылает `archived` у `Project`, и в полях
   по умолчанию `project show` его нет.
-- **Каталог схем генерируется** `scripts/catalogue.go` из `api/openapi.json` в `internal/youtrack/catalogue.gen.go`
+- **Каталог схем генерируется** `scripts/catalogue.go` из `api/openapi.json` модуля youtrack той версии, что в
+  `go.mod` ([ADR-0004](0004-the-generator-owns-the-operation-surface.md)), в `internal/youtrack/catalogue.gen.go`
   (`make generate`) и руками не правится. `make ytapi` сверяет его с деревом байт в байт. Схема в нём записана под
   своим `$type`, с предком и видом каждого свойства. Там же помечены скаляры времени и многострочного текста
   ([ADR-0003](0003-output-is-one-yaml-document.md)). Генератор падает на любой незнакомой форме спецификации.
@@ -61,5 +62,5 @@ status: accepted, implemented
 - **Отсутствие ключа — всегда ошибка.** Ложные ошибки на `value(name,login)` и `bundle`.
 - **Отсутствующий ключ просто опускается.** Опечатка выйдет с кодом 0.
 - **Набор схем из присланных типов.** Результат зависел бы от данных.
-- **`embedded-spec` от `oapi-codegen` или модели `internal/ytapi`.** В них нет подтипов.
+- **`embedded-spec` от `oapi-codegen` или модели `ytapi`.** В них нет подтипов.
 - **Подтипы в overlay или рукописный список имён.** Вторая копия спецификации.

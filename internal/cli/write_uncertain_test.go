@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/hakastein/youtrack/fake"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/hakastein/ytrack/internal/cli"
-	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const gatewayPage = "<html><head><title>Bad Gateway</title></head><body>The server is not answering</body></html>"

@@ -7,10 +7,9 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/hakastein/youtrack/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func assertNoToken(t *testing.T, got outcome, secret string) {

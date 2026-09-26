@@ -3,7 +3,11 @@ package youtrack
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/hakastein/ytrack/internal/diag"
 	"github.com/hakastein/ytrack/internal/render"
@@ -334,8 +338,8 @@ func (p projectWorkItemTypes) fault(name string, catalogue []fieldInfo) *diag.Fa
 		render.Pair{Key: typeKey, Value: render.NewString(name)},
 		render.Pair{Key: "nearest", Value: render.NewList(names(nearestNamed(name, catalogue))...)})
 	message := "the name under unknown is not one type of work the project writes work items against"
-	return unknownNames(p.response.httpResponse, render.Pair{Key: projectKey, Value: render.NewString(p.project)},
-		"unknown", message, []*render.Node{entry})
+	sent := requestDetail(p.response.httpResponse.Request.Method, p.response.httpResponse.Request.URL.Redacted())
+	return unknownNames(sent, render.Pair{Key: projectKey, Value: render.NewString(p.project)}, "unknown", message, []*render.Node{entry})
 }
 
 func (c *Client) listWorkItems(ctx context.Context, spec *schemas, id string, requested []requestedField, page Page) (*render.Node, *diag.Fault) {
@@ -367,4 +371,65 @@ func workItemFields(spec *schemas, expression *string, defaults string) ([]reque
 		return nil, fault
 	}
 	return requested, rejectIssueBlocks(spec, composedWorkItem(), written, requested)
+}
+
+type minutesBody struct {
+	Minutes int64 `json:"minutes"`
+}
+
+func periodMinutes(text string) (int64, bool) {
+	rest, isPeriod := strings.CutPrefix(text, "PT")
+	if !isPeriod {
+		return 0, false
+	}
+	hours, rest, hoursGiven, read := countBefore(rest, 'H')
+	if !read {
+		return 0, false
+	}
+	minutes, rest, minutesGiven, read := countBefore(rest, 'M')
+	if !read || rest != "" || (!hoursGiven && !minutesGiven) {
+		return 0, false
+	}
+	return min(hours*60, pastMaxInt32) + minutes, true
+}
+
+const pastMaxInt32 = math.MaxInt32 + 1
+
+func countBefore(text string, mark byte) (count int64, rest string, given, read bool) {
+	before, after, marked := strings.Cut(text, string(mark))
+	if !marked {
+		return 0, text, false, true
+	}
+	if before == "" {
+		return 0, "", false, false
+	}
+	for _, digit := range []byte(before) {
+		if digit < '0' || digit > '9' {
+			return 0, "", false, false
+		}
+		count = min(count*10+int64(digit-'0'), pastMaxInt32)
+	}
+	return count, after, true, true
+}
+
+func noonUTC(day time.Time) int64 {
+	return time.Date(day.Year(), day.Month(), day.Day(), 12, 0, 0, 0, time.UTC).UnixMilli()
+}
+
+func formatDateTime(milliseconds int64) string {
+	return time.UnixMilli(milliseconds).UTC().Format(time.RFC3339Nano)
+}
+
+func duration(minutes int64) string {
+	written := ""
+	if hours := minutes / 60; hours != 0 {
+		written += strconv.FormatInt(hours, 10) + "H"
+	}
+	if rest := minutes % 60; rest != 0 {
+		written += strconv.FormatInt(rest, 10) + "M"
+	}
+	if written == "" {
+		written = "0M"
+	}
+	return "PT" + written
 }

@@ -5,9 +5,8 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/hakastein/youtrack/fake"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const tagFields = "name,owner(login),readSharingSettings(permittedGroups(name),permittedUsers(login))"

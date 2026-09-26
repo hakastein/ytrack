@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptrace"
 	"net/url"
-	"sync/atomic"
+
+	yt "github.com/hakastein/youtrack"
 
 	"github.com/hakastein/ytrack/internal/diag"
 	"github.com/hakastein/ytrack/internal/render"
@@ -106,24 +106,12 @@ func (c *Client) write(ctx context.Context, spec *schemas, responseSchema string
 	return node, nil
 }
 
-// net/http tells an unsent request only by an unexported error, and a server does not act on a partial one.
 func send(ctx context.Context, call func(ctx context.Context) (*http.Response, error)) (*http.Response, *diag.Fault) {
-	var requestWritten atomic.Bool
-	traced := httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
-		WroteRequest: func(wrote httptrace.WroteRequestInfo) {
-			if wrote.Err == nil {
-				requestWritten.Store(true)
-			}
-		},
-	})
-	response, err := call(traced)
-	switch {
-	case err == nil:
-		return response, nil
-	case requestWritten.Load():
-		return nil, uncertainWrite(err)
+	response, err := yt.Send(ctx, call)
+	if err != nil {
+		return nil, moduleFailure(err)
 	}
-	return nil, transportFailure(err)
+	return response, nil
 }
 
 func (c *Client) request(ctx context.Context, spec *schemas, responseSchema string, requested []requestedField, call func(ctx context.Context, fields string) (*http.Response, error)) (decodedResponse, *diag.Fault) {

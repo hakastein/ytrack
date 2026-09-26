@@ -6,9 +6,8 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/hakastein/youtrack/fake"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func articleNamed(readable string) string {

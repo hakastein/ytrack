@@ -1,22 +1,22 @@
 package youtrack
 
 import (
-	"net/http"
 	"net/url"
+
+	yt "github.com/hakastein/youtrack"
+
+	"github.com/hakastein/ytrack/internal/diag"
 )
 
 type Client struct {
-	address    *url.URL
-	token      string
-	httpClient *http.Client
-	cache      metaCache
+	address *url.URL
+	module  *yt.Client
 }
 
-func New(address *url.URL, token, cacheDir string) *Client {
-	return &Client{
-		address:    address,
-		token:      token,
-		httpClient: newSendOnceHTTPClient(),
-		cache:      newMetaCache(cacheDir, address.String(), token),
+func New(address *url.URL, token, cacheDir string) (*Client, *diag.Fault) {
+	module, err := yt.New(address.String(), token, yt.WithMetadataCache(cacheDir))
+	if err != nil {
+		return nil, moduleFailure(err)
 	}
+	return &Client{address: address, module: module}, nil
 }

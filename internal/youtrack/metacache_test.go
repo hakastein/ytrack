@@ -11,11 +11,11 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/hakastein/youtrack/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/hakastein/ytrack/internal/diag"
-	"github.com/hakastein/ytrack/internal/fake"
 	"github.com/hakastein/ytrack/internal/render"
 	"github.com/hakastein/ytrack/internal/youtrack"
 )
@@ -72,7 +72,7 @@ func (i *fieldMetaInstance) serve(t *testing.T) *fake.Server {
 
 func fieldMetaCached(t *testing.T, server *fake.Server, root string) *youtrack.Client {
 	t.Helper()
-	return youtrack.New(server.Address(t), fake.Token, root)
+	return clientWith(t, server, fake.Token, root)
 }
 
 func fieldMetaShowOf(t *testing.T, c *youtrack.Client, project, name string) (*render.Node, *diag.Fault) {
@@ -281,7 +281,7 @@ func TestShowFieldRefusesAnIdNoPathCanHoldOverTheCacheAsWell(t *testing.T) {
 
 	_, fault = fieldMetaShowOf(t, fieldMetaCached(t, server, root), "DEV", "Field")
 
-	assert.Equal(t, unreadable(lastRequest(t, server), metadata), faultOf(t, fault))
+	assert.Equal(t, diag.Fault{Code: diag.UpstreamInvalid, Details: []render.Pair{lastRequest(t, server)}}, faultOf(t, fault))
 	assert.Equal(t, []string{fieldMetaPath, fieldMetaPath}, server.Paths())
 }
 
@@ -332,7 +332,7 @@ func TestShowFieldKeepsTheCacheOfOneTokenFromAnother(t *testing.T) {
 	_, fault := fieldMetaShowOf(t, fieldMetaCached(t, server, root), "DEV", "Field")
 	require.Nil(t, fault)
 
-	_, fault = fieldMetaShowOf(t, youtrack.New(server.Address(t), fake.Token+"-of-another-user", root), "DEV", "Field")
+	_, fault = fieldMetaShowOf(t, clientWith(t, server, fake.Token+"-of-another-user", root), "DEV", "Field")
 
 	require.Nil(t, fault)
 	assert.Equal(t, []string{fieldMetaPath, fieldMetaFirstPath, fieldMetaPath, fieldMetaFirstPath}, server.Paths())

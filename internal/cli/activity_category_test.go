@@ -3,9 +3,8 @@ package cli_test
 import (
 	"testing"
 
+	"github.com/hakastein/youtrack/fake"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/hakastein/ytrack/internal/fake"
 )
 
 func TestActivityRefusesANameOfNoCategoryBeforeItAsksForAnything(t *testing.T) {

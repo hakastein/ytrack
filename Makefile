@@ -1,4 +1,4 @@
-.PHONY: go build dist openapi generate ytapi
+.PHONY: go build dist generate ytapi
 
 VERSION ?=
 
@@ -14,9 +14,6 @@ build:
 
 dist:
 	scripts/dist.sh '$(VERSION)'
-
-openapi:
-	scripts/openapi.sh
 
 generate:
 	go generate ./...

@@ -9,12 +9,16 @@ CLI для YouTrack, рассчитанный на агента. Задачи и
 - Перед изучением кода — словарь [`CONTEXT.md`](CONTEXT.md) и принятые решения в
   [`docs/adr/`](docs/adr/); до того, как писать код, проверь там, что нужное решение
   уже принято
-- Перед правкой `api/`, `internal/ytapi/`, `internal/youtrack/ytapi.go` или
-  `internal/youtrack/catalogue.gen.go` —
+- Транспорт, сгенерированный клиент `ytapi` со спецификацией, таблица типов кастом-полей, кэш
+  метаданных и фейковый сервер `fake` живут в модуле
+  [`github.com/hakastein/youtrack`](https://github.com/hakastein/youtrack)
+  ([ADR-0006](docs/adr/0006-packages-and-the-entry-point.md)): их меняют релизом модуля, а
+  ytrack поднимает его версию в `go.mod`
+- Перед правкой `internal/youtrack/ytapi.go` или `internal/youtrack/catalogue.gen.go` —
   [ADR-0004](docs/adr/0004-the-generator-owns-the-operation-surface.md) и
-  [ADR-0007](docs/adr/0007-missing-fields-are-checked-by-server-type.md):
-  `internal/ytapi` и `catalogue.gen.go` только регенерируются (`make generate`), спека
-  обновляется только через `make openapi`, проверка — `make ytapi`
+  [ADR-0007](docs/adr/0007-missing-fields-are-checked-by-server-type.md): `ytapi` модуля и
+  `Client.API()` зовёт только адаптер `ytapi.go`, `catalogue.gen.go` только регенерируется
+  (`make generate`) из спецификации модуля, проверка — `make ytapi`
 - Перед правкой того, как находятся адрес и токен (`internal/cli/credentials.go`,
   `loginstore.go`, `terminal.go`, `auth.go`) —
   [ADR-0008](docs/adr/0008-a-login-is-an-address-and-a-token.md):
@@ -34,7 +38,7 @@ CLI для YouTrack, рассчитанный на агента. Задачи и
 - Перед тем как писать или править тест — раздел «Тесты»
   [ADR-0006](docs/adr/0006-packages-and-the-entry-point.md). Знание о YouTrack проверяется юнитом
   `internal/youtrack` через конструкторы команд и `Call`, через `Run` — только склейка команды и то, что принадлежит
-  CLI: вход, коды возврата, транспорт, автодополнение. Фейковый сервер — `internal/fake`, один на тестовый
+  CLI: вход, коды возврата, транспорт, автодополнение. Фейковый сервер — `fake` модуля, один на тестовый
   пакет. Прозу не сверяют, чужой код и сам YouTrack не проверяют
 - Сборка бинарника — `make build`, он кладёт `bin/ytrack`. Ревизию кладёт в бинарник
   сам `go build`, и `ytrack --version` читает положенное; версию тоже, если сборке не

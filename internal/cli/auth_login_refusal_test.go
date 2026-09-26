@@ -5,10 +5,9 @@ import (
 	"os"
 	"testing"
 
+	"github.com/hakastein/youtrack/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/hakastein/ytrack/internal/fake"
 )
 
 const damagedRecords = "not a file of login records"
