@@ -174,7 +174,7 @@ func newTagCreate(env []string, stdout io.Writer, renderer render.Renderer) *cob
 		"`group` that may edit the tag; repeatable")
 	create.Flags().StringArrayVar((*[]string)(&shared.TaggableBy), taggableByFlag, nil,
 		"`group` that may tag with it; repeatable")
-	fieldsFlag(create, &fields, youtrack.TagCreateFields)
+	fieldsFlag(create, &fields, tagCreateFields)
 	return create
 }
 
@@ -214,7 +214,7 @@ func newTagList(env []string, stdout io.Writer, renderer render.Renderer) *cobra
 	list.Args = cobra.ExactArgs(0)
 	list.Short = "List tags"
 	list.Long = "List tags you own or that are shared with you. Names may clash across owners."
-	fieldsFlag(list, &fields, youtrack.TagListFields)
+	fieldsFlag(list, &fields, tagListFields)
 	pageFlags(list, &page, "tags")
 	return list
 }
@@ -231,7 +231,7 @@ func newLink(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Co
 	list.Long = "List links of an issue by phrase.\n\n" +
 		"A phrase reads from this issue to the linked ones.\n\n" +
 		"--fields applies to the linked issues."
-	fieldsFlag(list, &listFields, youtrack.LinkListFields)
+	fieldsFlag(list, &listFields, linkListFields)
 
 	var addFields string
 	add := newCommand("add <id> <phrase> <id>", func(cmd *cobra.Command, args []string) *diag.Fault {
@@ -244,7 +244,7 @@ func newLink(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Co
 	add.Long = "Link two issues; prints the links of the first.\n\n" +
 		"<phrase> reads from the first issue to the second, such as \"depends on\" or \"is required for\": " +
 		"ytrack link add DEV-1 \"depends on\" DEV-2."
-	fieldsFlag(add, &addFields, youtrack.LinkListFields)
+	fieldsFlag(add, &addFields, linkListFields)
 
 	remove := newCommand("remove <id> <phrase> <id>", func(cmd *cobra.Command, args []string) *diag.Fault {
 		return runCall(cmd.Context(), env, stdout, renderer, func(ctx context.Context, c *youtrack.Client) (*youtrack.Node, error) {
@@ -299,7 +299,7 @@ func newArticleCreate(env []string, stdout io.Writer, renderer render.Renderer) 
 	rejectRepeat(create.Flags().Lookup(contentFlag))
 	create.Flags().StringVar(&parent, parentFlag, "", "parent article `id`")
 	rejectRepeat(create.Flags().Lookup(parentFlag))
-	fieldsFlag(create, &fields, youtrack.ArticleShowFields)
+	fieldsFlag(create, &fields, articleShowFields)
 	return create
 }
 
@@ -328,7 +328,7 @@ func newArticleUpdate(env []string, stdout io.Writer, renderer render.Renderer) 
 	update.Flags().StringVar(&parent, parentFlag, "", "parent article `id`")
 	rejectRepeat(update.Flags().Lookup(parentFlag))
 	update.Flags().StringArrayVar(&emptied, clearFlag, nil, "empty a `part`: content or parent")
-	fieldsFlag(update, &fields, youtrack.ArticleShowFields)
+	fieldsFlag(update, &fields, articleShowFields)
 	return update
 }
 
@@ -365,7 +365,7 @@ func newArticleList(env []string, stdout io.Writer, renderer render.Renderer) *c
 	rejectRepeat(list.Flags().Lookup("query"))
 	list.Flags().StringVar(&parent, parentFlag, "", "parent article `id`")
 	rejectRepeat(list.Flags().Lookup(parentFlag))
-	fieldsFlag(list, &fields, youtrack.ArticleListFields)
+	fieldsFlag(list, &fields, articleListFields)
 	pageFlags(list, &page, "articles")
 	return list
 }
@@ -399,7 +399,7 @@ func newArticleShow(env []string, stdout io.Writer, renderer render.Renderer) *c
 	show.Args = cobra.ExactArgs(1)
 	show.Short = "Show an article"
 	show.Long = "Show an article with comments, oldest first."
-	fieldsFlag(show, &fields, youtrack.ArticleShowFields)
+	fieldsFlag(show, &fields, articleShowFields)
 	commentsFlag(show, &comments)
 	return show
 }
@@ -444,7 +444,7 @@ func newAttachmentCreate(env []string, stdout io.Writer, renderer render.Rendere
 	create.Short = "Attach a file"
 	create.Long = "Attach a local file.\n\n" +
 		"<owner> is a readable id such as DEV-1 or DEV-A-1."
-	fieldsFlag(create, &fields, youtrack.AttachmentListFields)
+	fieldsFlag(create, &fields, attachmentListFields)
 	return create
 }
 
@@ -462,7 +462,7 @@ func newAttachmentList(env []string, stdout io.Writer, renderer render.Renderer)
 		"--fields +comment(id) says which comment.\n\n" +
 		"<owner> is a readable id such as DEV-1 or DEV-A-1.\n\n" +
 		"url downloads the file without a token for up to three days: keep it as secret as a token."
-	fieldsFlag(list, &fields, youtrack.AttachmentListFields)
+	fieldsFlag(list, &fields, attachmentListFields)
 	pageFlags(list, &page, "attachments")
 	return list
 }
@@ -489,7 +489,7 @@ func newCommentList(env []string, stdout io.Writer, renderer render.Renderer) *c
 		"<owner> is a readable id such as DEV-1 or DEV-A-1.\n\n" +
 		"Comments of an article have no deleted. --limit keeps the oldest; ytrack issue show --comments 5 prints " +
 		"the latest five."
-	fieldsFlag(list, &fields, youtrack.CommentListFields)
+	fieldsFlag(list, &fields, commentListFields)
 	pageFlags(list, &page, "comments")
 	return list
 }
@@ -517,7 +517,7 @@ func newCommentCreate(env []string, stdout io.Writer, renderer render.Renderer) 
 		commentOwner
 	create.Flags().StringVar(&text, textFlag, "", "comment `text`")
 	rejectRepeat(create.Flags().Lookup(textFlag))
-	fieldsFlag(create, &fields, youtrack.CommentFields)
+	fieldsFlag(create, &fields, commentFields)
 	return create
 }
 
@@ -539,7 +539,7 @@ func newCommentUpdate(env []string, stdout io.Writer, renderer render.Renderer) 
 		commentOwner
 	update.Flags().StringVar(&text, textFlag, "", "comment `text`")
 	rejectRepeat(update.Flags().Lookup(textFlag))
-	fieldsFlag(update, &fields, youtrack.CommentFields)
+	fieldsFlag(update, &fields, commentFields)
 	return update
 }
 
@@ -581,7 +581,7 @@ func newIssueShow(env []string, stdout io.Writer, renderer render.Renderer) *cob
 		"they hold a space: --fields '+customFields(Priority,\"Due Date\")'. A bare customFields prints every field " +
 		"that holds something; a named field is printed even when empty, and one the issue does not have is left out.\n\n" +
 		"Comments print id, author(login), created and text whatever --fields says, and deleted ones are left out."
-	fieldsFlag(show, &fields, youtrack.IssueShowFields)
+	fieldsFlag(show, &fields, issueShowFields)
 	commentsFlag(show, &comments)
 	return show
 }
@@ -606,7 +606,7 @@ func newIssueList(env []string, stdout io.Writer, renderer render.Renderer, stre
 		"Links print under their phrase: --fields '+links(issues(idReadable))'."
 	list.Flags().StringVar(&query, "query", "", "YouTrack `search`")
 	rejectRepeat(list.Flags().Lookup("query"))
-	fieldsFlag(list, &fields, youtrack.IssueListFields)
+	fieldsFlag(list, &fields, issueListFields)
 	pageFlags(list, &page, "issues")
 	return list
 }
@@ -640,7 +640,7 @@ func newIssueCreate(env []string, stdout io.Writer, renderer render.Renderer) *c
 	rejectRepeat(create.Flags().Lookup(descriptionFlag))
 	create.Flags().StringArrayVar(&filled, fieldFlag, nil,
 		"custom field `Name=value`; repeatable")
-	fieldsFlag(create, &fields, youtrack.IssueShowFields)
+	fieldsFlag(create, &fields, issueShowFields)
 	return create
 }
 
@@ -672,7 +672,7 @@ func newIssueUpdate(env []string, stdout io.Writer, renderer render.Renderer) *c
 		"custom field `Name=value`; repeatable")
 	update.Flags().StringArrayVar(&emptied, clearFlag, nil,
 		"empty a custom field or description by `name`")
-	fieldsFlag(update, &fields, youtrack.IssueShowFields)
+	fieldsFlag(update, &fields, issueShowFields)
 	return update
 }
 
@@ -707,7 +707,7 @@ func newActivity(env []string, stdout io.Writer, renderer render.Renderer) *cobr
 	list.Flags().StringArrayVar(&categories, "category", nil,
 		"`category` to print; repeatable; default all")
 	closedSet(list.Flags().Lookup("category"), youtrack.ActivityCategories())
-	fieldsFlag(list, &fields, youtrack.ActivityListFields)
+	fieldsFlag(list, &fields, activityListFields)
 	pageFlags(list, &page, "activities")
 
 	activity := newCommand("activity", requireSubcommand)
@@ -746,14 +746,14 @@ func newUser(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Co
 	var showFields string
 	show := newCommand("show <login>", func(cmd *cobra.Command, args []string) *diag.Fault {
 		return runCall(cmd.Context(), env, stdout, renderer, func(ctx context.Context, c *youtrack.Client) (*youtrack.Node, error) {
-			return c.Users.Show(ctx, args[0], &youtrack.ShowUserOptions{Fields: showFields})
+			return c.Users.Show(ctx, args[0], &youtrack.ShowUserOptions{Fields: fieldsFlagValue(cmd, &showFields)})
 		})
 	})
 	show.Args = cobra.ExactArgs(1)
 	show.Short = "Show a user"
 	show.Long = "Show a user.\n\n" +
 		"<login> is a login, not a full name; ytrack user list --query finds one by name."
-	fieldsFlag(show, &showFields, youtrack.UserShowFields)
+	fieldsFlag(show, &showFields, userShowFields)
 
 	var listFields, search string
 	var page youtrack.Page
@@ -771,7 +771,7 @@ func newUser(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Co
 		"An email address matches nothing."
 	list.Flags().StringVar(&search, "query", "", "login or name prefix")
 	rejectRepeat(list.Flags().Lookup("query"))
-	fieldsFlag(list, &listFields, youtrack.UserListFields)
+	fieldsFlag(list, &listFields, userListFields)
 	pageFlags(list, &page, "users")
 
 	user := newCommand("user", requireSubcommand)
@@ -790,7 +790,7 @@ func newField(env []string, stdout io.Writer, renderer render.Renderer) *cobra.C
 	list.Args = cobra.ExactArgs(1)
 	list.Short = "List custom fields of a project"
 	list.Long = "List custom fields of a project."
-	fieldsFlag(list, &listFields, youtrack.FieldListFields)
+	fieldsFlag(list, &listFields, fieldListFields)
 
 	var showFields string
 	show := newCommand("show <project> <field>", func(cmd *cobra.Command, args []string) *diag.Fault {
@@ -801,8 +801,9 @@ func newField(env []string, stdout io.Writer, renderer render.Renderer) *cobra.C
 	show.Args = cobra.ExactArgs(2)
 	show.Short = "Show a custom field"
 	show.Long = "Show a custom field with its allowed values.\n\n" +
-		"A field of users prints bundle.aggregatedUsers(login) instead, where an empty list means anyone."
-	fieldsFlag(show, &showFields, defaultFieldsDependOnFieldType)
+		"A field of users prints the people and groups of its bundle under bundle.values and every user they hold " +
+		"under bundle.aggregatedUsers, where an empty list means anyone."
+	fieldsFlag(show, &showFields, fieldShowFields)
 
 	field := newCommand("field", requireSubcommand)
 	field.Short = "Read custom fields"
@@ -831,7 +832,7 @@ func newTimeList(env []string, stdout io.Writer, renderer render.Renderer) *cobr
 	list.Long = "List work items, oldest first." +
 		"\n\n" +
 		"date is a day, printed as its midnight UTC."
-	fieldsFlag(list, &fields, youtrack.WorkItemListFields)
+	fieldsFlag(list, &fields, workItemListFields)
 	pageFlags(list, &page, "work items")
 	return list
 }
@@ -871,7 +872,7 @@ func newTimeCreate(env []string, stdout io.Writer, renderer render.Renderer) *co
 	create.Flags().StringVar(&text, textFlag, "", "work item `text`")
 	rejectRepeat(create.Flags().Lookup(textFlag))
 	create.Flags().StringArrayVar(&attributes, attributeFlag, nil, "work item attribute `Name=value`; repeatable")
-	fieldsFlag(create, &fields, youtrack.WorkItemWriteFields)
+	fieldsFlag(create, &fields, workItemWriteFields)
 	return create
 }
 
@@ -915,7 +916,7 @@ func newTimeUpdate(env []string, stdout io.Writer, renderer render.Renderer) *co
 	rejectRepeat(update.Flags().Lookup(textFlag))
 	update.Flags().StringArrayVar(&attributes, attributeFlag, nil, "work item attribute `Name=value`; repeatable")
 	update.Flags().StringArrayVar(&emptied, clearFlag, nil, "empty a `part`: type, text or an attribute name")
-	fieldsFlag(update, &fields, youtrack.WorkItemWriteFields)
+	fieldsFlag(update, &fields, workItemWriteFields)
 	return update
 }
 
@@ -975,7 +976,26 @@ func pageFlags(cmd *cobra.Command, page *youtrack.Page, plural string) {
 	rejectRepeat(cmd.Flags().Lookup("skip"))
 }
 
-const defaultFieldsDependOnFieldType = ""
+// The SDK has no default fields: a command holds its own.
+const (
+	activityListFields   = "timestamp,author(login),category,field,added(id,idReadable,login,name,urls),removed(id,idReadable,login,name,urls)"
+	articleListFields    = "idReadable,summary"
+	articleShowFields    = "idReadable,summary,reporter(login),created,updated,tags(name),parentArticle(idReadable,summary),childArticles(idReadable,summary),content"
+	attachmentListFields = "id,name,size,mimeType,url"
+	commentFields        = "id,author(login),created,updated,text"
+	commentListFields    = "id,author(login),created,text,deleted"
+	fieldListFields      = "field(name,localizedName,fieldType(valueType,isMultiValue)),canBeEmpty"
+	fieldShowFields      = fieldListFields + ",bundle(values(name,archived),aggregatedUsers(login))"
+	issueListFields      = "idReadable,summary,resolved,created"
+	issueShowFields      = "idReadable,summary,reporter(login),created,updated,resolved,tags(name),customFields,links(issues(idReadable,summary)),description"
+	linkListFields       = "idReadable,summary"
+	tagListFields        = "name,owner(login),readSharingSettings(permittedGroups(name),permittedUsers(login))"
+	tagCreateFields      = "name,owner(login),readSharingSettings(permittedGroups(name),permittedUsers(login)),updateSharingSettings(permittedGroups(name),permittedUsers(login)),tagSharingSettings(permittedGroups(name),permittedUsers(login))"
+	userListFields       = "login,fullName,banned"
+	userShowFields       = "login,fullName,email,banned"
+	workItemListFields   = "id,duration,type(name),attributes,author(login),date,text"
+	workItemWriteFields  = "id,duration,type(name),attributes,author(login),date,issue(idReadable,customFields),text"
+)
 
 // The module reads a limit of 0 as its default page.
 type limitValue int
@@ -1012,10 +1032,7 @@ func commentsFlag(cmd *cobra.Command, comments *commentsValue) {
 }
 
 func fieldsFlagValue(cmd *cobra.Command, expression *string) string {
-	if !cmd.Flags().Changed("fields") {
-		return ""
-	}
-	return *expression
+	return script.Fields(cmd.Flags().Lookup("fields").DefValue, *expression)
 }
 
 func rejectNoQuery(cmd *cobra.Command, carries, thing string) *diag.Fault {
