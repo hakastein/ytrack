@@ -15,7 +15,7 @@ const checkDeclaration = `exports.command = { short: "Check an issue", long: "Ch
 	` { name: "mode", type: "string", usage: "a ` + "`mode`" + `", choices: ["fast", "slow"], default: "fast" },` +
 	` { name: "count", type: "int", usage: "how many" },` +
 	` { name: "verbose", type: "bool", usage: "say more" },` +
-	` { name: "tag", type: "strings", usage: "a tag; repeatable", choices: ["a", "b", "c"] },` +
+	` { name: "tag", type: "string", multiple: true, usage: "a tag; repeatable", choices: ["a", "b", "c"] },` +
 	` { name: "fields", type: "fields", default: "id,summary" } ] };`
 
 var checkReaching = lines(

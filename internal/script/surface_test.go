@@ -54,9 +54,9 @@ func runtimeSurface(t *testing.T) []string {
 }
 
 var (
-	declaredNamespace = regexp.MustCompile(`^  export namespace (\w+) \{$`)
-	declaredMember    = regexp.MustCompile(`^    function (\w+)\(`)
-	declaredValue     = regexp.MustCompile(`^  export (?:function|const) (\w+)\b`)
+	declaredEntity = regexp.MustCompile(`^  export const (\w+): \{$`)
+	declaredMember = regexp.MustCompile(`^    (\w+)\(`)
+	declaredValue  = regexp.MustCompile(`^  export (?:function (\w+)\(|const (\w+): [^{]+;$)`)
 )
 
 func declaredSurface(t *testing.T) []string {
@@ -64,16 +64,16 @@ func declaredSurface(t *testing.T) []string {
 	declarations, err := os.ReadFile("v1.d.ts")
 	require.NoError(t, err)
 	var names []string
-	var namespace string
+	var entity string
 	for _, line := range strings.Split(string(declarations), "\n") {
-		if found := declaredNamespace.FindStringSubmatch(line); found != nil {
-			namespace = found[1]
+		if found := declaredEntity.FindStringSubmatch(line); found != nil {
+			entity = found[1]
 		}
 		if found := declaredMember.FindStringSubmatch(line); found != nil {
-			names = append(names, namespace+"."+found[1])
+			names = append(names, entity+"."+found[1])
 		}
 		if found := declaredValue.FindStringSubmatch(line); found != nil {
-			names = append(names, found[1])
+			names = append(names, found[1]+found[2])
 		}
 	}
 	return sorted(names)

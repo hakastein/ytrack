@@ -281,6 +281,12 @@ func TestDeclarationThatIsNoPureLiteralIsUnreadable(t *testing.T) {
 		{name: "a flag of a type it does not know", source: head + `flags: [{ name: "n", type: "float", usage: "n" }] };`},
 		{name: "a flag with no usage", source: head + `flags: [{ name: "n", type: "int" }] };`},
 		{name: "choices of a number flag", source: head + `flags: [{ name: "n", type: "int", usage: "n", choices: ["1"] }] };`},
+		{name: "a multiple flag that is no string flag", source: head +
+			`flags: [{ name: "n", type: "int", multiple: true, usage: "n" }] };`},
+		{name: "a multiple that is no bool", source: head +
+			`flags: [{ name: "m", type: "string", multiple: "yes", usage: "m" }] };`},
+		{name: "a default of a multiple flag that is no array", source: head +
+			`flags: [{ name: "m", type: "string", multiple: true, usage: "m", default: "a" }] };`},
 		{name: "a flag named help", source: head + `flags: [{ name: "help", type: "bool", usage: "h" }] };`},
 		{name: "a default of another type", source: head + `flags: [{ name: "n", type: "int", usage: "n", default: "1" }] };`},
 		{name: "a default outside the choices", source: head +

@@ -29,11 +29,110 @@ declare module "ytrack/v1" {
     readonly wrote: boolean;
   }
 
-  // A function has no default values: every flag it takes is given.
-  export namespace project {
-    function show(code: string, flags: { fields: string }): Answer;
-    function list(flags: { fields: string; limit: number; skip: number }): Answer;
+  // A function has no default values: every flag it takes whose command has a default is given, and the others may
+  // be left out. A flag repeated on the command line is an array.
+  interface Page {
+    fields: string;
+    limit: number;
+    skip: number;
   }
+
+  export const project: {
+    show(code: string, flags: { fields: string }): Answer;
+    list(flags: Page): Answer;
+  };
+
+  export const user: {
+    show(login: string, flags: { fields: string }): Answer;
+    list(flags: Page & { query?: string }): Answer;
+  };
+
+  export const field: {
+    list(project: string, flags: { fields: string }): Answer;
+    show(project: string, field: string, flags: { fields: string }): Answer;
+  };
+
+  export const issue: {
+    show(id: string, flags: { fields: string; comments: string }): Answer;
+    list(flags: Page & { query?: string }): Answer;
+    create(
+      project: string,
+      flags: { fields: string; summary?: string; description?: string; field?: string[] },
+    ): Answer;
+    update(
+      id: string,
+      flags: { fields: string; summary?: string; description?: string; field?: string[]; clear?: string[] },
+    ): Answer;
+    delete(id: string): Answer;
+  };
+
+  export const article: {
+    show(id: string, flags: { fields: string; comments: string }): Answer;
+    list(flags: Page & { query?: string; parent?: string }): Answer;
+    create(project: string, flags: { fields: string; summary?: string; content?: string; parent?: string }): Answer;
+    update(
+      id: string,
+      flags: { fields: string; summary?: string; content?: string; parent?: string; clear?: string[] },
+    ): Answer;
+    delete(id: string): Answer;
+  };
+
+  export const comment: {
+    list(owner: string, flags: Page): Answer;
+    create(owner: string, flags: { fields: string; text?: string }): Answer;
+    update(owner: string, id: string, flags: { fields: string; text?: string }): Answer;
+    delete(owner: string, id: string): Answer;
+  };
+
+  export const attachment: {
+    list(owner: string, flags: Page): Answer;
+    // path is a local file, relative to the working directory of ytrack.
+    create(owner: string, path: string, flags: { fields: string }): Answer;
+    delete(owner: string, id: string): Answer;
+  };
+
+  export const link: {
+    list(issue: string, flags: { fields: string }): Answer;
+    add(issue: string, phrase: string, target: string, flags: { fields: string }): Answer;
+    remove(issue: string, phrase: string, target: string): Answer;
+  };
+
+  export const tag: {
+    list(flags: Page): Answer;
+    create(
+      flags: { fields: string; name?: string; "visible-for"?: string[]; "updateable-by"?: string[]; "taggable-by"?: string[] },
+    ): Answer;
+    delete(flags: { name?: string; "owned-by"?: string }): Answer;
+    add(owner: string, flags: { name?: string; "owned-by"?: string }): Answer;
+    remove(owner: string, flags: { name?: string; "owned-by"?: string }): Answer;
+  };
+
+  export const time: {
+    list(issue: string, flags: Page): Answer;
+    create(
+      issue: string,
+      duration: string,
+      flags: { fields: string; date?: string; type?: string; text?: string; attribute?: string[] },
+    ): Answer;
+    update(
+      issue: string,
+      id: string,
+      flags: {
+        fields: string;
+        duration?: string;
+        date?: string;
+        type?: string;
+        text?: string;
+        attribute?: string[];
+        clear?: string[];
+      },
+    ): Answer;
+    delete(issue: string, id: string): Answer;
+  };
+
+  export const activity: {
+    list(issue: string, flags: Page & { category?: string[] }): Answer;
+  };
 
   export function fail(code: Code, message: string, details?: { [key: string]: unknown }): never;
   export function warn(code: Code, message: string, details?: { [key: string]: unknown }): void;
@@ -58,10 +157,10 @@ declare module "ytrack/v1" {
   }
 
   // Given to run in its last parameter under name; one without a default is there only when the call gives it.
-  // strings is repeatable, int is 32 bits, fields is default when not given or empty and +expr adds expr to default.
+  // multiple repeats a string flag into an array, int is 32 bits, fields is default when not given or empty and +expr adds expr to default.
   export type Flag =
-    | { name: string; type: "string"; usage: string; choices?: string[]; default?: string }
-    | { name: string; type: "strings"; usage: string; choices?: string[]; default?: string[] }
+    | { name: string; type: "string"; multiple?: false; usage: string; choices?: string[]; default?: string }
+    | { name: string; type: "string"; multiple: true; usage: string; choices?: string[]; default?: string[] }
     | { name: string; type: "int"; usage: string; default?: number }
     | { name: string; type: "bool"; usage: string; default?: boolean }
     | { name: string; type: "fields"; default: string };
