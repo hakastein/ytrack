@@ -150,11 +150,11 @@ func loginDocument(address, scope, login, fullName string) string {
 
 func TestAuthLoginKeepsTheLoginTypedForTheDirectoryItWasCalledIn(t *testing.T) {
 	t.Parallel()
-	stated, scope := here(t)
+	scope := here(t)
 	server := serveUserOfTheToken(t, map[string]string{typedToken: typedUser})
 	home, path := emptyHome(t)
-	env := []string{"HOME=" + home, "PWD=" + stated}
-	before := entries(t, stated)
+	env := []string{"HOME=" + home}
+	before := entries(t, scope)
 
 	got, said := runOnATerminal(t, env, typeAnswers(server.URL, typedToken), "auth", "login")
 
@@ -167,7 +167,7 @@ func TestAuthLoginKeepsTheLoginTypedForTheDirectoryItWasCalledIn(t *testing.T) {
 	assert.Equal(t, fs.FileMode(0o700), mode(t, filepath.Dir(path)))
 	assert.Equal(t, []string{".ytrack"}, entries(t, home))
 	assert.Equal(t, []string{"auth.json"}, entries(t, filepath.Dir(path)))
-	assert.Equal(t, before, entries(t, stated))
+	assert.Equal(t, before, entries(t, scope))
 
 	afterwards := runWith(t, env, "auth", "status")
 
@@ -177,12 +177,12 @@ func TestAuthLoginKeepsTheLoginTypedForTheDirectoryItWasCalledIn(t *testing.T) {
 
 func TestAuthLoginGlobalKeepsTheLoginForEverywhere(t *testing.T) {
 	t.Parallel()
-	stated, scope := here(t)
+	scope := here(t)
 	server := serveUserOfTheToken(t, map[string]string{typedToken: typedUser})
 	held := scopedRecord(scope, "http://elsewhere.example", hereToken)
 	home, path := homeWith(t, recordFile(held))
 
-	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(server.URL, typedToken), "auth", "login", "--global")
+	got, said := runOnATerminal(t, []string{"HOME=" + home}, typeAnswers(server.URL, typedToken), "auth", "login", "--global")
 
 	assert.Equal(t, outcome{stdout: loginDocument(server.URL, "global", typedUser, typedUser)}, got)
 	assertTheTokenWasNotShown(t, got, said, typedToken)
@@ -191,12 +191,12 @@ func TestAuthLoginGlobalKeepsTheLoginForEverywhere(t *testing.T) {
 
 func TestAuthLoginGlobalReplacesTheSavedGlobalLogin(t *testing.T) {
 	t.Parallel()
-	stated, scope := here(t)
+	scope := here(t)
 	server := serveUserOfTheToken(t, map[string]string{typedToken: typedUser})
 	held := scopedRecord(scope, "http://elsewhere.example", hereToken)
 	home, path := homeWith(t, recordFile(unscopedRecord("http://was.example", everywhereToken), held))
 
-	got, _ := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(server.URL, typedToken), "auth", "login", "--global")
+	got, _ := runOnATerminal(t, []string{"HOME=" + home}, typeAnswers(server.URL, typedToken), "auth", "login", "--global")
 
 	assert.Equal(t, 0, got.code)
 	assert.Equal(t, savedFile(unscopedRecord(server.URL, typedToken), held), fileBytes(t, path))
@@ -204,13 +204,13 @@ func TestAuthLoginGlobalReplacesTheSavedGlobalLogin(t *testing.T) {
 
 func TestAuthLoginPrintsTheAddressWithoutItsPassword(t *testing.T) {
 	t.Parallel()
-	stated, scope := here(t)
+	scope := here(t)
 	server := serveUserOfTheToken(t, map[string]string{typedToken: typedUser})
 	behind := server.Address(t)
 	behind.User = url.UserPassword("svc", "secret")
 	home, path := emptyHome(t)
 
-	got, _ := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(behind.String(), typedToken), "auth", "login")
+	got, _ := runOnATerminal(t, []string{"HOME=" + home}, typeAnswers(behind.String(), typedToken), "auth", "login")
 
 	assert.Equal(t, "http://svc:xxxxx@"+behind.Host+behind.Path, urlPrinted(t, got))
 	assert.Equal(t, savedFile(scopedRecord(scope, behind.String(), typedToken)), fileBytes(t, path))
@@ -218,13 +218,13 @@ func TestAuthLoginPrintsTheAddressWithoutItsPassword(t *testing.T) {
 
 func TestAuthLoginReplacesTheLoginSavedForTheSameDirectory(t *testing.T) {
 	t.Parallel()
-	stated, scope := here(t)
+	scope := here(t)
 	server := serveUserOfTheToken(t, map[string]string{typedToken: typedUser})
 	everywhere := unscopedRecord("http://elsewhere.example", everywhereToken)
 	held := recordFile(scopedRecord(scope, "http://was.example", hereToken), everywhere)
 	home, path := homeWith(t, held)
 
-	got, _ := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(server.URL, typedToken), "auth", "login")
+	got, _ := runOnATerminal(t, []string{"HOME=" + home}, typeAnswers(server.URL, typedToken), "auth", "login")
 
 	assert.Equal(t, 0, got.code)
 	assert.Equal(t, savedFile(everywhere, scopedRecord(scope, server.URL, typedToken)), fileBytes(t, path))
@@ -232,12 +232,12 @@ func TestAuthLoginReplacesTheLoginSavedForTheSameDirectory(t *testing.T) {
 
 func TestAuthLoginKeepsNoLoginTheServerRefuses(t *testing.T) {
 	t.Parallel()
-	stated, scope := here(t)
+	scope := here(t)
 	server := fake.Serve(t, fake.JSON(http.StatusUnauthorized, `{"error":"Unauthorized","error_description":"Invalid token"}`))
 	held := recordFile(scopedRecord(scope, "http://was.example", hereToken))
 	home, path := homeWith(t, held)
 
-	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(server.URL, typedToken), "auth", "login")
+	got, said := runOnATerminal(t, []string{"HOME=" + home}, typeAnswers(server.URL, typedToken), "auth", "login")
 
 	assert.Equal(t, "denied", requireFault(t, got).code)
 	assertTheTokenWasNotShown(t, got, said, typedToken)
@@ -246,11 +246,10 @@ func TestAuthLoginKeepsNoLoginTheServerRefuses(t *testing.T) {
 
 func TestAuthLoginKeepsNoLoginWhenNothingAnswersAtTheAddress(t *testing.T) {
 	t.Parallel()
-	stated, _ := here(t)
 	closed := fake.NobodyListens
 	home, path := emptyHome(t)
 
-	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(closed, typedToken), "auth", "login")
+	got, said := runOnATerminal(t, []string{"HOME=" + home}, typeAnswers(closed, typedToken), "auth", "login")
 
 	assert.Equal(t, "upstream_failed", requireFault(t, got).code)
 	assertTheTokenWasNotShown(t, got, said, typedToken)
@@ -260,7 +259,6 @@ func TestAuthLoginKeepsNoLoginWhenNothingAnswersAtTheAddress(t *testing.T) {
 
 func TestAuthLoginRefusesAnAddressItCannotUseBeforeAskingForTheToken(t *testing.T) {
 	t.Parallel()
-	stated, _ := here(t)
 	tests := []struct {
 		name    string
 		address string
@@ -274,7 +272,7 @@ func TestAuthLoginRefusesAnAddressItCannotUseBeforeAskingForTheToken(t *testing.
 			t.Parallel()
 			home, path := emptyHome(t)
 
-			got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, func(t *testing.T, k *keyboard) {
+			got, said := runOnATerminal(t, []string{"HOME=" + home}, func(t *testing.T, k *keyboard) {
 				k.waitForThePrompt(t, addressPrompt)
 				k.typeLine(t, tc.address)
 				k.typeLine(t, "")
@@ -289,10 +287,9 @@ func TestAuthLoginRefusesAnAddressItCannotUseBeforeAskingForTheToken(t *testing.
 
 func TestAuthLoginRefusesAnEndOfInputAtTheAddressPrompt(t *testing.T) {
 	t.Parallel()
-	stated, _ := here(t)
 	home, path := emptyHome(t)
 
-	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typingTheEndOfInput, "auth", "login")
+	got, said := runOnATerminal(t, []string{"HOME=" + home}, typingTheEndOfInput, "auth", "login")
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 	assert.Equal(t, addressPrompt, said.shown)
@@ -301,7 +298,7 @@ func TestAuthLoginRefusesAnEndOfInputAtTheAddressPrompt(t *testing.T) {
 
 func TestAuthLoginRefusesATokenOfNothingAtAll(t *testing.T) {
 	t.Parallel()
-	stated, scope := here(t)
+	scope := here(t)
 	tests := []struct {
 		name  string
 		typed string
@@ -316,7 +313,7 @@ func TestAuthLoginRefusesATokenOfNothingAtAll(t *testing.T) {
 			held := recordFile(scopedRecord(scope, "http://was.example", hereToken))
 			home, path := homeWith(t, held)
 
-			got, _ := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(server.URL, tc.typed), "auth", "login")
+			got, _ := runOnATerminal(t, []string{"HOME=" + home}, typeAnswers(server.URL, tc.typed), "auth", "login")
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Equal(t, held, fileBytes(t, path))
@@ -326,12 +323,12 @@ func TestAuthLoginRefusesATokenOfNothingAtAll(t *testing.T) {
 
 func TestAuthLoginRefusesATokenItCannotSend(t *testing.T) {
 	t.Parallel()
-	stated, scope := here(t)
+	scope := here(t)
 	const typed = "perm-\x1bbad"
 	held := recordFile(scopedRecord(scope, "http://was.example", hereToken))
 	home, path := homeWith(t, held)
 
-	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(fake.ServeNothing(t).URL, typed), "auth", "login")
+	got, said := runOnATerminal(t, []string{"HOME=" + home}, typeAnswers(fake.ServeNothing(t).URL, typed), "auth", "login")
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 	assertTheTokenWasNotShown(t, got, said, typed)
@@ -341,11 +338,10 @@ func TestAuthLoginRefusesATokenItCannotSend(t *testing.T) {
 
 func TestAuthLoginUsesNoFileOfLoginRecordsItCannotRead(t *testing.T) {
 	t.Parallel()
-	stated, _ := here(t)
 	held := `[{"url":"http://h","token":"perm-x","expires":"never"}]`
 	home, path := homeWith(t, held)
 
-	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typingTheEndOfInput, "auth", "login")
+	got, said := runOnATerminal(t, []string{"HOME=" + home}, typingTheEndOfInput, "auth", "login")
 
 	want := faultDocument{code: "bad_usage", details: []detail{fileDetail(path)}}
 	assert.Equal(t, want, requireFault(t, got))
@@ -355,7 +351,7 @@ func TestAuthLoginUsesNoFileOfLoginRecordsItCannotRead(t *testing.T) {
 
 func TestAuthLoginSendsAndKeepsTheTokenWithoutTheSpacesAroundIt(t *testing.T) {
 	t.Parallel()
-	stated, scope := here(t)
+	scope := here(t)
 	tests := []struct {
 		name  string
 		typed string
@@ -370,7 +366,7 @@ func TestAuthLoginSendsAndKeepsTheTokenWithoutTheSpacesAroundIt(t *testing.T) {
 			server := serveUserOfTheToken(t, map[string]string{tc.token: typedUser})
 			home, path := emptyHome(t)
 
-			got, _ := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typeAnswers(server.URL, tc.typed), "auth", "login")
+			got, _ := runOnATerminal(t, []string{"HOME=" + home}, typeAnswers(server.URL, tc.typed), "auth", "login")
 
 			assert.Equal(t, 0, got.code)
 			assert.Equal(t, bearing(tc.token), server.Request(t, 0).Header.Get("Authorization"))
@@ -381,12 +377,11 @@ func TestAuthLoginSendsAndKeepsTheTokenWithoutTheSpacesAroundIt(t *testing.T) {
 
 func TestAuthLoginGivesTheEchoBackWhenItIsStoppedAtTheTokenPrompt(t *testing.T) {
 	t.Parallel()
-	stated, _ := here(t)
 	ctx, stop := context.WithCancel(t.Context())
 	server := fake.ServeNothing(t)
 	home, _ := emptyHome(t)
 
-	got, said := runOnATerminalUntil(t, ctx, []string{"HOME=" + home, "PWD=" + stated}, func(t *testing.T, k *keyboard) {
+	got, said := runOnATerminalUntil(t, ctx, []string{"HOME=" + home}, func(t *testing.T, k *keyboard) {
 		k.typeLine(t, server.URL)
 		k.waitForTheEchoToGoOff(t)
 		stop()
@@ -397,46 +392,26 @@ func TestAuthLoginGivesTheEchoBackWhenItIsStoppedAtTheTokenPrompt(t *testing.T) 
 	assert.Empty(t, entries(t, home))
 }
 
-func TestAuthLoginAsksForNothingWithoutADirectoryToSaveTheLogin(t *testing.T) {
+func TestAuthLoginAsksForNothingWithoutAHomeDirectory(t *testing.T) {
 	t.Parallel()
-	stated, scope := here(t)
-	tests := []struct {
-		name string
-		env  func(home, stale string) []string
-	}{
-		{
-			name: "a PWD naming a directory the call is not in",
-			env:  func(home, stale string) []string { return []string{"HOME=" + home, "PWD=" + stale} },
-		},
-		{
-			name: "no home directory",
-			env:  func(_, stale string) []string { return []string{"PWD=" + stated} },
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			stale := t.TempDir()
-			server := fake.ServeNothing(t)
-			held := recordFile(scopedRecord(scope, server.URL, hereToken))
-			home, path := homeWith(t, held)
+	scope := here(t)
+	server := fake.ServeNothing(t)
+	held := recordFile(scopedRecord(scope, server.URL, hereToken))
+	_, path := homeWith(t, held)
 
-			got, said := runOnATerminal(t, tc.env(home, stale), typingTheEndOfInput, "auth", "login")
+	got, said := runOnATerminal(t, nil, typingTheEndOfInput, "auth", "login")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, said.shown, "the terminal was asked something before there was a place to keep the answer")
-			assertNoRecordedToken(t, got)
-			assert.Equal(t, held, fileBytes(t, path))
-		})
-	}
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+	assert.Empty(t, said.shown, "the terminal was asked something before there was a place to keep the answer")
+	assertNoRecordedToken(t, got)
+	assert.Equal(t, held, fileBytes(t, path))
 }
 
 func TestAuthLoginOnATerminalRefusesAnArgument(t *testing.T) {
 	t.Parallel()
-	stated, _ := here(t)
 	home, _ := emptyHome(t)
 
-	got, said := runOnATerminal(t, []string{"HOME=" + home, "PWD=" + stated}, typingTheEndOfInput, "auth", "login", fake.NobodyListens)
+	got, said := runOnATerminal(t, []string{"HOME=" + home}, typingTheEndOfInput, "auth", "login", fake.NobodyListens)
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 	assert.Empty(t, said.shown, "the terminal was asked for an address past the argument")

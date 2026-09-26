@@ -13,7 +13,7 @@ const bogusToken = "perm-bogus"
 
 func TestNoCommandNamesWhereTheTokenTheServerRefusedCameFrom(t *testing.T) {
 	t.Parallel()
-	stated, scope := here(t)
+	scope := here(t)
 	tests := []struct {
 		name            string
 		status          int
@@ -47,7 +47,7 @@ func TestNoCommandNamesWhereTheTokenTheServerRefusedCameFrom(t *testing.T) {
 			upstreamMessage: "Access to the project is denied",
 			where: func(t *testing.T, address string) ([]string, string) {
 				home, _ := homeWith(t, recordFile(scopedRecord(scope, address, bogusToken)))
-				return []string{"HOME=" + home, "PWD=" + stated}, "settings"
+				return []string{"HOME=" + home}, "settings"
 			},
 		},
 	}

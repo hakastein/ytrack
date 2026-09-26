@@ -5,6 +5,7 @@ import (
 
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -81,14 +82,10 @@ func newCompletion(stdout io.Writer) *cobra.Command {
 	return completion
 }
 
-const pathIsArgumentNumber = "ytrack.completesPathAt"
+const completesPathAt = "ytrack.completesPathAt"
 
-func pathArgumentNumber(cmd *cobra.Command) int {
-	number, err := strconv.Atoi(cmd.Annotations[pathIsArgumentNumber])
-	if err != nil {
-		return 0
-	}
-	return number
+func takesPathAt(cmd *cobra.Command, number int) bool {
+	return slices.Contains(strings.Split(cmd.Annotations[completesPathAt], ","), strconv.Itoa(number))
 }
 
 const (
@@ -115,7 +112,7 @@ func complete(root *cobra.Command, stdout io.Writer, calledAs string, words []st
 			suggestions = closedSetOf(written.valueOf)
 		default:
 			suggestions = argumentsOf(cmd, written)
-			if completingArgument := written.arguments + 1; completingArgument == pathArgumentNumber(cmd) {
+			if takesPathAt(cmd, written.arguments+1) {
 				directive = shellOffersFileNames
 			}
 		}

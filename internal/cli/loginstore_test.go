@@ -226,13 +226,13 @@ func TestAuthLogoutIsDeniedTheRemovalOfTheLastRecord(t *testing.T) {
 
 func TestAuthLogoutIsDeniedWritingBackTheRecordsLeft(t *testing.T) {
 	t.Parallel()
-	stated, scope := here(t)
+	scope := here(t)
 	server := fake.ServeNothing(t)
 	held := recordFile(scopedRecord(scope, server.URL, hereToken), unscopedRecord(server.URL, everywhereToken))
 	home, path := homeWith(t, held)
 	withoutTheRightToWrite(t, filepath.Dir(path))
 
-	got := runWith(t, []string{"HOME=" + home, "PWD=" + stated}, "auth", "logout")
+	got := runWith(t, []string{"HOME=" + home}, "auth", "logout")
 
 	want := faultDocument{code: "denied", details: []detail{directoryDetail(path)}}
 	assert.Equal(t, want, requireFault(t, got))

@@ -140,7 +140,7 @@ func loginTarget(env []string, global bool, wanted string) (path string, kept sc
 	if global {
 		return path, globalScope(), nil
 	}
-	dir, reason := workingDirectory(env)
+	dir, reason := workingDirectory()
 	if reason != "" {
 		return "", scope{}, &diag.Fault{Code: youtrack.CodeBadUsage, Message: wanted + reason}
 	}

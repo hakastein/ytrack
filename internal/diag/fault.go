@@ -6,6 +6,9 @@ import (
 	"github.com/hakastein/go-youtrack"
 )
 
+// CodeScriptFailed is a defect of a command script: its author fixes it, and the call is not repeated.
+const CodeScriptFailed youtrack.Code = "script_failed"
+
 type document struct {
 	Code    youtrack.Code
 	Message string
@@ -36,11 +39,19 @@ func (f *Fault) Error() string {
 	return string(f.Code) + ": " + f.Message
 }
 
+func (f *Fault) MayHaveWritten() bool {
+	return f.Code == youtrack.CodeWriteUncertain || f.AfterWrite
+}
+
 func (f *Fault) ExitCode() int {
-	if f.Code == youtrack.CodeWriteUncertain || f.AfterWrite {
+	if f.MayHaveWritten() {
 		return exitMayHaveWritten
 	}
 	return exitFailed
+}
+
+func (f *Fault) Warning() *youtrack.Warning {
+	return &youtrack.Warning{Code: f.Code, Message: f.Message, Details: f.Details}
 }
 
 func (f *Fault) Node() *youtrack.Node {

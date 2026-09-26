@@ -14,9 +14,8 @@ const damagedRecords = "not a file of login records"
 
 func loginEnvironment(t *testing.T) (env []string, path string) {
 	t.Helper()
-	stated, _ := here(t)
 	home, path := homeWith(t, damagedRecords)
-	return append(envOf(fake.ServeNothing(t)), "HOME="+home, "PWD="+stated), path
+	return append(envOf(fake.ServeNothing(t)), "HOME="+home), path
 }
 
 func TestAuthLoginRefusesAStdinThatIsNotATerminal(t *testing.T) {
