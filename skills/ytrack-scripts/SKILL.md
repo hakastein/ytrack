@@ -3,53 +3,29 @@ name: ytrack-scripts
 description: Use when writing or fixing a ytrack command script — a JavaScript file under `.ytrack/scripts` or `~/.ytrack/scripts`.
 ---
 
-A command script is a procedure over YouTrack that `ytrack` runs as a command of its own: the path of the file under
-the script root is the command path, `.ytrack/scripts/docs/map.js` is `ytrack docs map`. The repository's root is the
-nearest `.ytrack/scripts` above the working directory; `~/.ytrack/scripts` holds the user's own. A first word the
-built-in commands use (`issue`, `tag`, …) is theirs: a script cannot add `issue close`.
+A command script is a JavaScript file that `ytrack` runs as a command of its own. Its sources of truth:
 
-Every rule of the API, `fs` and `fetch` is in [REFERENCE.md](REFERENCE.md); the signatures are in
-[v1.d.ts](v1.d.ts) and [node.d.ts](node.d.ts). Read them before the first call of a function you have not used.
-
-## Shape
-
-```js
-const { issues, comments } = require("ytrack/v1");
-
-exports.definition = {
-  short: "Take an issue into work",
-  long: "Move an issue to In Progress and leave a comment when --note is given.",
-  args: [{ name: "id", type: "string", usage: "readable id of the issue, such as DEV-1" }],
-  flags: [
-    { name: "note", type: "string", usage: "comment `text`" },
-    { name: "fields", type: "fields", default: "idReadable,summary,customFields(State)" },
-  ],
-};
-
-exports.command = (id, flags) => {
-  issues.update({ id, customFields: { State: "In Progress" }, fields: "idReadable" });
-  if (flags.note !== undefined) {
-    comments.create({ owner: id, text: flags.note, fields: "id" });
-  }
-  return issues.show({ id, fields: flags.fields });
-};
-```
+- the section [«Свои команды»](https://github.com/hakastein/ytrack#свои-команды) of the README — roots, how a file
+  path becomes a command, the flag types, a whole script;
+- [v1.d.ts](v1.d.ts) — `exports.definition` and every function of `require("ytrack/v1")`;
+- [node.d.ts](node.d.ts) — `require("fs")`, `Buffer` and `fetch`, a synchronous subset of Node used in place of
+  `@types/node`;
+- the [built-in commands](https://github.com/hakastein/ytrack/tree/main/internal/script/builtin), scripts on the same
+  API;
+- `ytrack --help` and `ytrack <command> --help` for what the commands of this repository already do.
 
 ## Steps
 
-1. **Declare the call.** `exports.definition` is a pure literal — strings, numbers, booleans, arrays and objects,
-   texts joined by `+` and nothing else — since `ytrack` reads it without running the module for `--help` and every
-   TAB. `short` is one present-tense line, capitalized, no full stop, at most 60 characters. Done when
-   `ytrack <path> --help` prints the command with no `script_failed` warning.
-2. **Write `exports.command`.** It takes the declared arguments in order, then the object of flags, and returns one
-   object: that is the YAML document `ytrack` prints. Each function of `ytrack/v1` takes one object of named keys
-   with `fields` given whole — pass the expression from the `fields` flag, never an empty one or one starting with
-   `+`. Code runs synchronously: no `async`, no `await`.
-3. **Fail in the dictionary.** A failure the caller can act on goes out through `fail(code, message, details)` with a
-   code of the dictionary; `warn` has the same form and goes to stderr. A fault a function throws may be caught — its
-   `wrote` says whether the instance may have changed — or left to print as it is.
-4. **Run it against a server of your own.** `YTRACK_URL` and `YTRACK_TOKEN` point `ytrack` at any HTTP server, so a
-   test answers the requests the script sends and checks stdout, stderr and the exit code. Done when every branch of
-   the script has run once: each flag given and left out, each fault it catches.
+1. **Declare the call.** `exports.definition` is a pure literal: `ytrack` parses it without running the module, so
+   a name, a call or a computed value makes it unreadable; strings may be joined with `+`. Done when
+   `ytrack <command> --help` prints the command and stderr holds no `script_failed`.
+2. **Write `exports.command`,** synchronously: there is no event loop, so no `async` and no `await`, and `fetch`
+   returns the response itself. A function of `ytrack/v1` gets `fields` whole — pass the `fields` flag on, which
+   `ytrack` has already expanded.
+3. **Fail with a code the agent already knows.** `fail` and `warn` take only the codes in `v1.d.ts`; a fault a
+   function throws can be left to print as it is. Exit code `2` after a write is `ytrack`'s to count.
+4. **Run it against a server of your own:** `YTRACK_URL` and `YTRACK_TOKEN` point `ytrack` at any HTTP server, which
+   answers the requests the script sends. Done when every branch of the script has run once — each flag given and
+   left out, each fault it catches.
 
-A `script_failed` names the `file`, `line` and `column` of the defect: fix the script there, the call may be right.
+A `script_failed` names the `file`, `line` and `column` of the defect: the fix goes into the script there.

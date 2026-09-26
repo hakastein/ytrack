@@ -50,7 +50,7 @@ mv ~/.local/bin/ytrack-linux-amd64 ~/.local/bin/ytrack && chmod +x ~/.local/bin/
 
 Скилл [`youtrack`](skills/youtrack/SKILL.md) говорит агенту в любом репозитории, что
 с YouTrack работают через `ytrack`, а [`ytrack-scripts`](skills/ytrack-scripts/SKILL.md) —
-как написать свою команду: справочник API и декларации `v1.d.ts` лежат рядом с ним.
+как написать свою команду: декларации `v1.d.ts` и `node.d.ts` лежат рядом с ним.
 Формат — [Agent Skills](https://agentskills.io), его читают Claude Code, Codex, OpenCode,
 Gemini CLI, Copilot и Cursor.
 
@@ -235,7 +235,7 @@ ytrack triage --help
   `fetch` синхронный и требует `timeout`, `maxBytes` и `redirect`; токен YouTrack он не
   отправляет никуда. Скачанное прикладывается к задаче через
   `attachments.create({ owner, name, content, fields })`.
-- Справочник, декларации для редактора и скилл для агента, который пишет скрипт, —
+- Декларации для редактора и скилл для агента, который пишет скрипт, —
   [`skills/ytrack-scripts/`](skills/ytrack-scripts/); решения о форме —
   [ADR-0011](docs/adr/0011-a-command-is-a-script.md) и
   [ADR-0012](docs/adr/0012-the-script-api.md).
