@@ -14,6 +14,6 @@ under the directory they come from, and they print and fail the same way.
   A field that is not printed was not requested; it is not empty.
 - Exit `2` is `write_uncertain`, or a failure after a write: the instance may have
   changed. Read the object back before repeating it.
-- `script_failed` is a defect of a command script at its `file`, `line` and `column`;
-  the call itself may be right. With `builtin: true` the script is part of ytrack;
-  otherwise it belongs to whoever runs it.
+- `script_failed` is a defect of a command script of the repository or of the user,
+  at its `file`, `line` and `column`; the call itself may be right. Built-in commands
+  never give it.

@@ -61,6 +61,9 @@ func Run(ctx context.Context, command *Command, input Input, host Host) (answer 
 		}
 	}()
 	answer, fault = e.run(command, input)
+	if fault != nil && fault.Code == diag.CodeScriptFailed && command.root.Builtin() {
+		defect(fault)
+	}
 	if fault != nil && e.wrote {
 		fault.AfterWrite = true
 	}
@@ -199,8 +202,16 @@ func (r *Root) fault(message string, at file.Position) *diag.Fault {
 			youtrack.Pair{Key: "line", Value: youtrack.NewNumber(json.Number(strconv.Itoa(at.Line)))},
 			youtrack.Pair{Key: "column", Value: youtrack.NewNumber(json.Number(strconv.Itoa(at.Column)))})
 	}
-	fault.Details = append(fault.Details, youtrack.Pair{Key: "builtin", Value: youtrack.NewBool(r.Builtin())})
 	return fault
+}
+
+// A builtin script is code of ytrack, so its defect is a bug of ytrack and panics as one in Go would.
+func defect(fault *diag.Fault) {
+	place := make([]string, 0, len(fault.Details))
+	for _, pair := range fault.Details {
+		place = append(place, pair.Value.Value())
+	}
+	panic("a builtin script failed at " + strings.Join(place, ":") + ": " + fault.Message)
 }
 
 func (e *engine) fileFault(name, message string) *diag.Fault {

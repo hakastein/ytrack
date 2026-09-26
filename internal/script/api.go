@@ -312,7 +312,7 @@ func (e *engine) faultArguments(name string, call goja.FunctionCall) *diag.Fault
 		panic(e.throw(e.callerFault(name + " takes a code, a message and, if the fault has them, its details")))
 	}
 	code, isString := call.Argument(0).Export().(string)
-	// Only ytrack says a script failed, so builtin and the place in a script_failed cannot be forged.
+	// Only ytrack says a script failed, so the place in a script_failed cannot be forged.
 	given := slices.DeleteFunc(diag.Codes(), func(known youtrack.Code) bool { return known == diag.CodeScriptFailed })
 	if !isString || !slices.Contains(given, youtrack.Code(code)) {
 		codes := make([]string, 0, len(given))

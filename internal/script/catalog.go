@@ -81,6 +81,9 @@ func Load(reserved []string, places Places) *Catalog {
 		scanned := (&scanner{root: root}).dir(".", nil)
 		for _, word := range sortedWords(scanned) {
 			entry := scanned[word]
+			if root.Builtin() && len(entry.broken) > 0 {
+				defect(entry.broken[0].Fault)
+			}
 			switch held := owner[word]; {
 			case held == nil:
 				owner[word] = root
