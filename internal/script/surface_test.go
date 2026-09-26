@@ -61,7 +61,7 @@ var (
 
 func declaredSurface(t *testing.T) []string {
 	t.Helper()
-	declarations, err := os.ReadFile("v1.d.ts")
+	declarations, err := os.ReadFile("../../skills/ytrack-scripts/v1.d.ts")
 	require.NoError(t, err)
 	var names []string
 	var entity string

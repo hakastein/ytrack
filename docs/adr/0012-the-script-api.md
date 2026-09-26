@@ -11,7 +11,7 @@ status: accepted, partly implemented
 
 - **`ytrack/v<N>` — это SDK в JS:** объект на сервис SDK с функцией на операцию — `issues`, `articles`, `comments`,
   `attachments`, `links`, `tags`, `workItems`, `activities`, `projects`, `customFields`, `users` — а кроме них
-  `fail`, `warn`, `address`, `fs` и `http`. Грамматики CLI в API нет: `Name=value`, `--clear`, `PT1H30M` и
+  `fail`, `warn` и `address`. Файлы и HTTP скрипт берёт из подмножества Node, а не из API. Грамматики CLI в API нет: `Name=value`, `--clear`, `PT1H30M` и
   `--comments all` разбирает объявление или сам скрипт команды, а функция получает готовые значения.
 - **Функция принимает один объект, в котором каждый ключ назван,** как в Octokit:
   `issues.update({ id: "DEV-1", summary: "New", description: null, customFields: { Type: "Task" }, fields: "id" })`.
@@ -62,19 +62,49 @@ status: accepted, partly implemented
 ## Реализовано
 
 В `v1` есть все операции сервисов SDK, кроме `Send`, а также `fail`, `warn` и `address`; их и форму объявления
-описывает `internal/script/v1.d.ts`. Тест сверяет с движком имена того, что экспортирует `ytrack/v1`, но не ключи
-функций. `v1` переопределён этой формой, а не выпущен как `v2`: до неё в `v1` были только `project.show` и
-`project.list`, прожившие в релизах день. `fs`, `http`, корпус версии и предупреждение устаревшей версии приходят
-следующими шагами.
+описывает [`skills/ytrack-scripts/v1.d.ts`](../../skills/ytrack-scripts/v1.d.ts): он лежит в скилле для авторов
+скриптов, и агент в чужом репозитории получает его вместе со скиллом. Отдельного справочника нет, потому что его
+пришлось бы держать вровень с кодом: правила API — в комментариях деклараций и в README. Тест сверяет с движком имена
+того, что экспортирует `ytrack/v1`, но не ключи функций. `v1` переопределён этой формой, а не выпущен как `v2`: до неё
+в `v1` были только `project.show` и `project.list`, прожившие в релизах день. Корпус версии и предупреждение устаревшей
+версии приходят следующими шагами.
 
-## Кроме сервисов
+## Подмножество Node
 
-- **`fs`:** `read`, `readText`, `write` и `mkdir` с путём по правилам [ADR-0006](0006-packages-and-the-entry-point.md).
-  Место записи не ограничено. Недоступный путь даёт `bad_usage`. Пока `fs` нет, `attachments.create` берёт `path`.
-- **`http.get({ url, timeout, maxBytes, follow })`** с обязательными ключами, не дальше 10 редиректов, только
-  `http` и `https`. **Статус вне `2xx` — ответ, а не ошибка.** Сбой транспорта, таймаут и тело длиннее `maxBytes`
-  дают `upstream_failed`.
-- **Токен инстанса в `http` не уходит никогда.** Куки и прокси из окружения не используются, запрос не повторяется.
+- **Файлы, байты и HTTP — это API Node, а не ytrack:** `require("fs")` (и `"node:fs"`), глобальный `Buffer` (и
+  `require("buffer")`) и глобальный `fetch`. Их знают и агент, и автор скрипта, а своя форма была бы вторым API,
+  который надо учить. Имена, аргументы и ошибки — как в Node, поэтому подмножество вне версий `ytrack/v<N>`: оно
+  только расширяется.
+- **Всё синхронно,** как остальной скрипт: `fs` — только функции `*Sync`, а `fetch` возвращает ответ, а не `Promise`.
+- **Опция Node, которой ytrack не знает, — `TypeError`,** а не пропуск: пропущенная опция молча сделала бы не то, что
+  просил скрипт. Неверный вызов — тоже `TypeError`, и непойманный он становится `script_failed`.
+- **`fs`:** `readFileSync(path[, encoding | { encoding }])`, `writeFileSync(path, data[, encoding | { encoding }])`,
+  `mkdirSync(path[, { recursive }])`, `existsSync(path)`, `readdirSync(path[, "utf8"])` и
+  `statSync(path[, { throwIfNoEntry }])` со `size`, `mtimeMs`, `mtime`, `isFile()`, `isDirectory()` и
+  `isSymbolicLink()`. Путь — по правилам
+  [ADR-0006](0006-packages-and-the-entry-point.md): существующий путь не к обычному файлу читается и пишется ошибкой
+  (`EISDIR` для каталога, `EINVAL` для остального), потому что именованный канал ждал бы вечно. Место записи не
+  ограничено. Ошибка бросается, как в Node, с `code`, `syscall` и `path`; **непойманная — `bad_usage` с `path`:**
+  не удался путь, который скрипту дали.
+- **`Buffer` — из [goja_nodejs](https://github.com/dop251/goja_nodejs)** с кодировками `utf8`, `hex` и `base64`;
+  ytrack добавляет `Buffer.isBuffer`, которого там нет. Байты — `Buffer`, `Uint8Array` или `ArrayBuffer`, и в
+  документ ответа они не попадают ([ADR-0003](0003-output-is-one-yaml-document.md)). `writeFileSync`, как в Node,
+  `ArrayBuffer` не берёт.
+- **Декларации подмножества — [`node.d.ts`](../../skills/ytrack-scripts/node.d.ts), а не `@types/node`,** потому что
+  там `fetch` возвращает `Promise`.
+- **`fetch(url, { timeout, maxBytes, redirect })`** — только `GET` (`method` можно назвать только `"GET"`), без своих
+  заголовков, только `http` и `https`. `timeout` в миллисекундах, `maxBytes` и `redirect` обязательны: у запроса
+  наружу нет разумного предела по умолчанию. `redirect` — `"follow"`, не дальше 10 редиректов, или `"manual"`.
+- **Статус вне `2xx` — ответ, а не ошибка.** Сбой транспорта, таймаут, лишний редирект и тело длиннее `maxBytes`
+  бросают `upstream_failed` с `url`.
+- **Ответ — в форме `Response`:** `status`, `ok`, `statusText`, `url`, `redirected`, `headers` (`get`, `has`,
+  `forEach`, `keys`, `values`, `entries`, `getSetCookie`), `text()`, `json()` и `arrayBuffer()`. Тело прочитано
+  целиком, поэтому методы можно звать несколько раз. `text()` декодирует UTF-8, как `fetch`: неверная
+  последовательность становится U+FFFD, BOM отбрасывается.
+- **Токен инстанса в `fetch` не уходит никогда,** даже на адрес входа. Куки и прокси из окружения не используются,
+  запрос не повторяется.
+- **`attachments.create` берёт либо `path`, либо `content` с `name`:** `content` — строка в UTF-8 или байты, так что
+  скачанное `fetch` прикладывается без файла. `name` идёт только с `content`.
 
 ## Версии
 
@@ -106,3 +136,6 @@ status: accepted, partly implemented
 - **Версия в объявлении** и **диапазон релизов.** Расходится с `require` библиотечного модуля или умеет только давать ошибку.
 - **Все версии навсегда** и **только срок.** Копятся адаптеры или живут три-четыре версии.
 - **Тестовый режим для скриптов.** Хватает `YTRACK_URL` на свой сервер.
+- **`fs` и `http.get` своей формы в `ytrack/v<N>`.** Второй API к тому, что уже знают по Node, и его пришлось бы
+  версионировать.
+- **`fetch` с `Promise`.** Цикла событий у скрипта нет, и `await` сделал бы скрипт асинхронным ради одного вызова.

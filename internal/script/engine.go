@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"reflect"
 	"strconv"
 	"strings"
 
 	"github.com/dop251/goja"
 	"github.com/dop251/goja/file"
 	"github.com/dop251/goja/parser"
+	"github.com/dop251/goja_nodejs/buffer"
 
 	"github.com/hakastein/go-youtrack"
 
@@ -46,9 +48,15 @@ type engine struct {
 	answers map[*goja.Object]*youtrack.Node
 	thrown  map[*goja.Object]*diag.Fault
 	wrote   bool
-	// Taken before any script runs, since a script may replace the globals Object and Error.
-	objectPrototype *goja.Object
-	errorPrototype  *goja.Object
+	// Taken before any script runs, since a script may replace the globals Object, Error, Date, JSON and Buffer.
+	objectPrototype  *goja.Object
+	errorPrototype   *goja.Object
+	errorConstructor goja.Value
+	dateConstructor  goja.Value
+	parseJSON        goja.Callable
+	buffer           *buffer.Buffer
+	bufferModule     *goja.Object
+	fsModule         *goja.Object
 }
 
 // goja sets no limit of its own, and a runaway recursion would take the memory of the process.
@@ -61,7 +69,9 @@ func Run(ctx context.Context, command *Command, input Input, host Host) (answer 
 	e := &engine{ctx: ctx, vm: vm, root: command.root, file: command.root.display(command.file), host: host,
 		modules: map[string]*goja.Object{}, apis: map[int]*goja.Object{}, answers: map[*goja.Object]*youtrack.Node{},
 		thrown: map[*goja.Object]*diag.Fault{}, objectPrototype: prototypeOf(vm, "Object"),
-		errorPrototype: prototypeOf(vm, "Error")}
+		errorPrototype: prototypeOf(vm, "Error"), errorConstructor: vm.Get("Error"), dateConstructor: vm.Get("Date")}
+	e.parseJSON, _ = goja.AssertFunction(vm.Get("JSON").ToObject(vm).Get("parse"))
+	e.enableNode()
 	stopped := make(chan struct{})
 	defer close(stopped)
 	go func() {
@@ -76,6 +86,36 @@ func Run(ctx context.Context, command *Command, input Input, host Host) (answer 
 		defect(fault)
 	}
 	return answer, e.wrote, fault
+}
+
+func (e *engine) enableNode() {
+	module := e.vm.NewObject()
+	e.set(module, property{"exports", e.vm.NewObject()})
+	buffer.Require(e.vm, module)
+	e.bufferModule = module.Get("exports").ToObject(e.vm)
+	constructor := e.bufferModule.Get("Buffer").ToObject(e.vm)
+	// goja_nodejs leaves out Buffer.isBuffer, which scripts written for Node call.
+	isBuffer := func(value goja.Value) bool {
+		object, isObject := value.(*goja.Object)
+		return isObject && object.ExportType() == reflect.TypeOf([]byte(nil)) && e.vm.InstanceOf(object, constructor)
+	}
+	e.set(constructor, property{"isBuffer", isBuffer})
+	e.set(e.vm.GlobalObject(), property{"Buffer", constructor}, property{"fetch", e.fetch})
+	e.buffer = buffer.GetApi(e.vm)
+}
+
+type property struct {
+	key   string
+	value any
+}
+
+// Properties are set in the order given: a script sees it in Object.keys, and an object it returns prints in it.
+func (e *engine) set(object *goja.Object, properties ...property) {
+	for _, p := range properties {
+		if err := object.Set(p.key, p.value); err != nil {
+			panic(err)
+		}
+	}
 }
 
 func prototypeOf(vm *goja.Runtime, class string) *goja.Object {
@@ -312,11 +352,18 @@ func (e *engine) require(from string) func(goja.FunctionCall) goja.Value {
 		switch {
 		case strings.HasPrefix(wanted, apiPrefix):
 			return e.api(wanted)
+		case wanted == "fs", wanted == "node:fs":
+			if e.fsModule == nil {
+				e.fsModule = e.nodeFs()
+			}
+			return e.fsModule
+		case wanted == "buffer", wanted == "node:buffer":
+			return e.bufferModule
 		case strings.HasPrefix(wanted, "./"), strings.HasPrefix(wanted, "../"):
 			return e.load(e.library(from, wanted))
 		}
-		panic(e.throw(e.callerFault(fmt.Sprintf("require %s names neither %s<N> nor a module by a path starting "+
-			"with ./ or ../", render.Quote(wanted), apiPrefix))))
+		panic(e.throw(e.callerFault(fmt.Sprintf("require %s names neither %s<N>, fs, buffer nor a module by a path "+
+			"starting with ./ or ../", render.Quote(wanted), apiPrefix))))
 	}
 }
 

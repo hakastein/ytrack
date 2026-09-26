@@ -1,6 +1,7 @@
 package script
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"maps"
@@ -362,9 +363,25 @@ func attachments() map[string]function {
 			}),
 		},
 		"create": {
-			params: []param{required("owner", textParam), required("path", textParam), fieldsParam()},
+			params: []param{required("owner", textParam), optional("path", textParam), optional("name", textParam),
+				optional("content", bytesParam), fieldsParam()},
 			writes: true,
+			refuse: func(opts options) string {
+				switch {
+				case opts.given("path") == opts.given("content"):
+					return "takes either path or content"
+				case opts.given("content") != opts.given("name"):
+					return "takes name with content and only with it"
+				}
+				return ""
+			},
 			bind: func(opts options) (call, *diag.Fault) {
+				if opts.given("content") {
+					return func(ctx context.Context, c *youtrack.Client) (*youtrack.Node, error) {
+						sent := youtrack.File{Name: opts.string("name"), Content: bytes.NewReader(opts.bytes("content"))}
+						return c.Attachments.Create(ctx, opts.string("owner"), sent, written(opts))
+					}, nil
+				}
 				path := opts.string("path")
 				// Checked before the login is looked up, and opened again for the upload.
 				checked, fault := openLocalFile(path)
@@ -378,8 +395,7 @@ func attachments() map[string]function {
 						return nil, fault
 					}
 					defer file.Close()
-					sent := youtrack.File{Name: filepath.Base(path), Content: file}
-					return c.Attachments.Create(ctx, opts.string("owner"), sent, written(opts))
+					return c.Attachments.Create(ctx, opts.string("owner"), youtrack.File{Name: filepath.Base(path), Content: file}, written(opts))
 				}, nil
 			},
 		},
