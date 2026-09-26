@@ -14,7 +14,7 @@ status: accepted, partly implemented
   ```
   cmd/ytrack             процесс: вызов, сигналы, штамп бинарника, os.Exit
   internal/cli           cobra, Run, вход, грамматика флагов, вызов SDK, команды на Go
-  internal/script        движок скриптов команд (не реализован)
+  internal/script        движок скриптов команд, объявление, корни, API скриптов
   internal/render        Renderer и YAML документа youtrack.Node
   internal/diag          Fault, перевод ошибки SDK, поток stderr
   ```
@@ -119,5 +119,7 @@ func Run(ctx context.Context, argv, env []string, build *debug.BuildInfo, stdin 
 - **Окружение `Run` к фейковому серверу — `YTRACK_URL` и `YTRACK_TOKEN` — собирает хелпер тестов ytrack**, потому что
   переменные входа принадлежат ytrack, а не SDK.
 - **Отказ до сети проверяется против `fake.ServeNothing`**, который роняет тест на любом запросе.
+- **Скрипты команд тест кладёт в корень пользователя под временным `HOME`.** Корень проекта ищется от `PWD`, а
+  `PWD` должен быть каталогом процесса, поэтому тест корня проекта последовательный и делает `t.Chdir`.
 - **Свой сервер поднимает только тест, которому общий не годится:** перестать слушать между двумя запросами
   (`fake.ServeAlone`).

@@ -19,6 +19,7 @@ import (
 
 	"github.com/hakastein/ytrack/internal/diag"
 	"github.com/hakastein/ytrack/internal/render"
+	"github.com/hakastein/ytrack/internal/script"
 )
 
 func Run(ctx context.Context, argv, env []string, build *debug.BuildInfo, stdin *os.File, stdout, stderr io.Writer) int {
@@ -29,7 +30,9 @@ func Run(ctx context.Context, argv, env []string, build *debug.BuildInfo, stdin 
 		argv = []string{}
 	}
 	root := newRoot(env, build, stdin, stdout, renderer, stream)
-	err := execute(ctx, root, argv, stdout)
+	catalog := loadScripts(root, env)
+	addScripts(root, catalog, env, stdout, renderer, stream)
+	err := execute(ctx, root, catalog, argv, stdout, stream)
 	if err == nil {
 		return 0
 	}
@@ -42,7 +45,9 @@ func Run(ctx context.Context, argv, env []string, build *debug.BuildInfo, stdin 
 }
 
 // cobra's own __complete reads the process env and writes to its stderr and a debug file.
-func execute(ctx context.Context, root *cobra.Command, argv []string, stdout io.Writer) error {
+func execute(ctx context.Context, root *cobra.Command, catalog *script.Catalog, argv []string, stdout io.Writer,
+	stream *diag.Stream,
+) error {
 	if len(argv) > 0 {
 		switch argv[0] {
 		case cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
@@ -52,6 +57,7 @@ func execute(ctx context.Context, root *cobra.Command, argv []string, stdout io.
 			return nil
 		}
 	}
+	warnHidden(root, catalog, argv, stream)
 	root.SetArgs(argv)
 	return root.ExecuteContext(ctx)
 }
@@ -88,8 +94,7 @@ func newRoot(env []string, build *debug.BuildInfo, stdin *os.File, stdout io.Wri
 	root.AddCommand(newActivity(env, stdout, renderer), newArticle(env, stdout, renderer),
 		newAttachment(env, stdout, renderer), newAuth(env, stdin, stdout, renderer),
 		newComment(env, stdout, renderer), newCompletion(stdout), newField(env, stdout, renderer),
-		newIssue(env, stdout, renderer, stream), newLink(env, stdout, renderer),
-		newProject(env, stdout, renderer), newTag(env, stdout, renderer),
+		newIssue(env, stdout, renderer, stream), newLink(env, stdout, renderer), newTag(env, stdout, renderer),
 		newTime(env, stdout, renderer), newUser(env, stdout, renderer))
 	return root
 }
@@ -856,42 +861,6 @@ func newField(env []string, stdout io.Writer, renderer render.Renderer) *cobra.C
 	field.Short = "Read custom fields"
 	field.AddCommand(list, show)
 	return field
-}
-
-func newProject(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {
-	var showFields string
-	show := newCommand("show <code>", func(cmd *cobra.Command, args []string) *diag.Fault {
-		return runCall(cmd.Context(), env, stdout, renderer, func(ctx context.Context, c *youtrack.Client) (*youtrack.Node, error) {
-			return c.Projects.Show(ctx, args[0], &youtrack.ShowProjectOptions{Fields: showFields})
-		})
-	})
-	show.Args = cobra.ExactArgs(1)
-	show.Short = "Show a project"
-	show.Long = "Show a project.\n\n" +
-		"workItemTypes are what ytrack time create --type takes.\n\n" +
-		example(youtrack.NewMap(youtrack.Pair{Key: "shortName", Value: youtrack.NewString("DEV")}, youtrack.Pair{Key: "name", Value: youtrack.NewString("Project")},
-			youtrack.Pair{Key: "plugins", Value: youtrack.NewMap(youtrack.Pair{Key: "timeTrackingSettings", Value: youtrack.NewMap(youtrack.Pair{Key: "enabled", Value: youtrack.NewBool(true)},
-				youtrack.Pair{Key: "workItemTypes", Value: youtrack.NewList(named("Type"))})})}))
-	fieldsFlag(show, &showFields, youtrack.ProjectShowFields)
-
-	var listFields string
-	var page youtrack.Page
-	list := newCommand("list", func(cmd *cobra.Command, _ []string) *diag.Fault {
-		return runCall(cmd.Context(), env, stdout, renderer, func(ctx context.Context, c *youtrack.Client) (*youtrack.Node, error) {
-			return c.Projects.List(ctx, &youtrack.ListProjectsOptions{Fields: listFields, Page: page})
-		})
-	})
-	list.Args = cobra.ExactArgs(0)
-	list.Short = "List projects"
-	list.Long = "List projects.\n\n" +
-		example(listed(1, false, "projects", youtrack.NewMap(youtrack.Pair{Key: "shortName", Value: youtrack.NewString("DEV")}, youtrack.Pair{Key: "name", Value: youtrack.NewString("Project")})))
-	fieldsFlag(list, &listFields, youtrack.ProjectListFields)
-	pageFlags(list, &page, "projects")
-
-	project := newCommand("project", requireSubcommand)
-	project.Short = "Read projects"
-	project.AddCommand(show, list)
-	return project
 }
 
 func newTime(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Command {
