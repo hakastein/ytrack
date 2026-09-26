@@ -108,7 +108,6 @@ func TestScriptIsFoundThroughASymlinkedDirectory(t *testing.T) {
 	assert.Equal(t, outcome{stdout: greeted}, got)
 }
 
-// The project root is looked up from PWD, and PWD counts only while it names the working directory.
 func calledFromAProject(t *testing.T) []string {
 	t.Helper()
 	project := t.TempDir()
@@ -119,7 +118,7 @@ func calledFromAProject(t *testing.T) []string {
 	require.NoError(t, os.MkdirAll(called, 0o755))
 	t.Chdir(called)
 	home := scriptsHome(t, map[string]string{"x/b.js": greeting, "y.js": greeting})
-	return append(atHome(fake.ServeNothing(t), home), "PWD="+called)
+	return atHome(fake.ServeNothing(t), home)
 }
 
 func TestScriptOfTheNearestProjectRootOrOfTheUserIsACommand(t *testing.T) {

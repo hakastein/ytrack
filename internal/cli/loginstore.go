@@ -233,10 +233,10 @@ func globalRecord(records []record) (record, bool) {
 	return record{}, false
 }
 
-func recordsForWorkingDir(records []record, env []string) ([]record, *diag.Fault) {
+func recordsForWorkingDir(records []record) ([]record, *diag.Fault) {
 	var dir string
 	if slices.ContainsFunc(records, func(held record) bool { return !held.scope.isGlobal() }) {
-		resolved, reason := workingDirectory(env)
+		resolved, reason := workingDirectory()
 		if reason != "" {
 			return nil, noWorkingDirFault(reason)
 		}
@@ -260,39 +260,15 @@ func recordsFor(records []record, dir string) []record {
 	return chain
 }
 
-func workingDirectory(env []string) (dir, reason string) {
-	stated := lookup(env, pwdVariable)
-	if stated == "" {
-		return "", pwdVariable + " is not set"
+func workingDirectory() (dir, reason string) {
+	here, err := os.Getwd()
+	if err == nil {
+		dir, err = filepath.EvalSymlinks(here)
 	}
-	if !filepath.IsAbs(stated) {
-		return "", fmt.Sprintf("%s %s is not an absolute path", pwdVariable, render.Quote(stated))
-	}
-	named, err := directory(stated)
-	if err != nil {
-		return "", fmt.Sprintf("%s %s cannot be read: %v", pwdVariable, render.Quote(stated), err)
-	}
-	here, err := directory(".")
 	if err != nil {
 		return "", fmt.Sprintf("the directory ytrack was called in cannot be read: %v", err)
 	}
-	if !os.SameFile(named, here) {
-		return "", fmt.Sprintf("%s %s is not the directory ytrack was called in", pwdVariable, render.Quote(stated))
-	}
-	physical, err := filepath.EvalSymlinks(stated)
-	if err != nil {
-		return "", fmt.Sprintf("%s %s cannot be read: %v", pwdVariable, render.Quote(stated), err)
-	}
-	return physical, ""
-}
-
-func directory(path string) (fs.FileInfo, error) {
-	opened, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer opened.Close()
-	return opened.Stat()
+	return dir, ""
 }
 
 func noWorkingDirFault(reason string) *diag.Fault {

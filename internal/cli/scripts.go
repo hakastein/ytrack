@@ -24,7 +24,7 @@ func loadScripts(root *cobra.Command, env []string) *script.Catalog {
 	for _, command := range root.Commands() {
 		reserved = append(reserved, command.Name())
 	}
-	dir, _ := workingDirectory(env)
+	dir, _ := workingDirectory()
 	return script.Load(reserved, script.Places{WorkingDir: dir, Home: lookup(env, homeVariable)})
 }
 

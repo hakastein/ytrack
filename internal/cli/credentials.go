@@ -33,7 +33,6 @@ const (
 	urlVariable   = "YTRACK_URL"
 	tokenVariable = "YTRACK_TOKEN"
 	homeVariable  = "HOME"
-	pwdVariable   = "PWD"
 
 	noLoginFound = "no login was found in the places under looked_in"
 )
@@ -81,7 +80,7 @@ func fromSavedLogin(env []string) (connection, *diag.Fault) {
 	if fault != nil {
 		return connection{}, fault
 	}
-	chain, fault := recordsForWorkingDir(records, env)
+	chain, fault := recordsForWorkingDir(records)
 	if fault != nil {
 		return connection{}, fault
 	}
