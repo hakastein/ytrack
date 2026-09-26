@@ -9,13 +9,6 @@ import (
 // CodeScriptFailed is a defect of a command script: its author fixes it, and the call is not repeated.
 const CodeScriptFailed youtrack.Code = "script_failed"
 
-// Codes is the closed vocabulary a fault or a warning takes its code from.
-func Codes() []youtrack.Code {
-	return []youtrack.Code{youtrack.CodeBadUsage, youtrack.CodeUnknownName, youtrack.CodeMissingRequired,
-		youtrack.CodeNotFound, youtrack.CodeDenied, youtrack.CodeRejected, youtrack.CodeUpstreamFailed,
-		youtrack.CodeUpstreamInvalid, youtrack.CodeWriteUncertain, CodeScriptFailed}
-}
-
 type document struct {
 	Code    youtrack.Code
 	Message string
@@ -46,8 +39,12 @@ func (f *Fault) Error() string {
 	return string(f.Code) + ": " + f.Message
 }
 
+func (f *Fault) MayHaveWritten() bool {
+	return f.Code == youtrack.CodeWriteUncertain || f.AfterWrite
+}
+
 func (f *Fault) ExitCode() int {
-	if f.Code == youtrack.CodeWriteUncertain || f.AfterWrite {
+	if f.MayHaveWritten() {
 		return exitMayHaveWritten
 	}
 	return exitFailed

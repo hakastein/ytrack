@@ -41,7 +41,12 @@ func requireCompleted(t *testing.T, got outcome) completed {
 
 func completing(t *testing.T, words ...string) completed {
 	t.Helper()
-	return requireCompleted(t, runWith(t, envOf(fake.ServeNothing(t)), append([]string{"__complete"}, words...)...))
+	return completingWith(t, envOf(fake.ServeNothing(t)), words...)
+}
+
+func completingWith(t *testing.T, env []string, words ...string) completed {
+	t.Helper()
+	return requireCompleted(t, runWith(t, env, append([]string{"__complete"}, words...)...))
 }
 
 func (c completed) names() []string {

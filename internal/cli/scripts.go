@@ -33,7 +33,7 @@ func addScripts(root *cobra.Command, catalog *script.Catalog, env []string, stdo
 ) {
 	groups := map[string]*script.Root{}
 	for _, command := range catalog.Commands {
-		parent := groupOf(root, command.Path[:len(command.Path)-1])
+		parent := groupOf(root, command.Path[:len(command.Path)-1], false)
 		parent.AddCommand(newScriptCommand(command, env, stdout, renderer, stream))
 		groups[command.Path[0]] = command.Root()
 	}
@@ -41,14 +41,12 @@ func addScripts(root *cobra.Command, catalog *script.Catalog, env []string, stdo
 		if len(broken.Path) == 0 {
 			continue
 		}
-		fault := broken.Fault
 		placeholder := newCommand(broken.Path[len(broken.Path)-1], func(*cobra.Command, []string) *diag.Fault {
-			copied := *fault
-			return &copied
+			return broken.Fault
 		})
 		placeholder.Hidden = true
 		placeholder.DisableFlagParsing = true
-		groupOf(root, broken.Path[:len(broken.Path)-1]).AddCommand(placeholder)
+		groupOf(root, broken.Path[:len(broken.Path)-1], true).AddCommand(placeholder)
 	}
 	groupRoots(root, groups)
 	shown := root.HelpFunc()
@@ -69,12 +67,13 @@ func warnHidden(root *cobra.Command, catalog *script.Catalog, argv []string, str
 	word := strings.Fields(called.CommandPath())[1]
 	for _, hidden := range catalog.Hidden {
 		if hidden.Word == word {
-			stream.Warn(hidden.Warning.Warning())
+			stream.Warn(hidden.Warning)
 		}
 	}
 }
 
-func groupOf(root *cobra.Command, path []string) *cobra.Command {
+// A directory with no command under it is no command either, so a group made for a broken path alone stays hidden.
+func groupOf(root *cobra.Command, path []string, hidden bool) *cobra.Command {
 	parent := root
 	for _, word := range path {
 		i := slices.IndexFunc(parent.Commands(), func(child *cobra.Command) bool { return child.Name() == word })
@@ -84,6 +83,7 @@ func groupOf(root *cobra.Command, path []string) *cobra.Command {
 		}
 		group := newCommand(word, requireSubcommand)
 		group.Short = "Run the " + word + " commands"
+		group.Hidden = hidden
 		parent.AddCommand(group)
 		parent = group
 	}
@@ -131,22 +131,18 @@ func newScriptCommand(command *script.Command, env []string, stdout io.Writer, r
 			}
 		}
 		answer, wrote, fault := script.Run(cmd.Context(), command, input, scriptHost(env, stream))
-		if fault != nil {
-			return fault
+		if fault == nil {
+			fault = printNode(stdout, renderer, answer)
 		}
-		if fault := printNode(stdout, renderer, answer); fault != nil {
-			fault.AfterWrite = wrote
-			return fault
+		if fault != nil && wrote {
+			fault.AfterWrite = true
 		}
-		return nil
+		return fault
 	})
 	cmd.Args = cobra.ExactArgs(len(command.Args))
-	cmd.Annotations = map[string]string{pathIsArgumentNumber: strings.Join(paths, ",")}
+	cmd.Annotations = map[string]string{completesPathAt: strings.Join(paths, ",")}
 	cmd.Short = command.Short
 	cmd.Long = command.Long
-	if cmd.Long == "" {
-		cmd.Long = command.Short
-	}
 	if command.Example != nil {
 		cmd.Long += "\n\n" + example(command.Example)
 	}
@@ -156,79 +152,53 @@ func newScriptCommand(command *script.Command, env []string, stdout io.Writer, r
 	return cmd
 }
 
+// An int wider than the int parameter of a function would fail the script instead of the call.
 func declareFlag(cmd *cobra.Command, flag script.Flag) func() any {
 	flags := cmd.Flags()
+	var read func() any
 	switch flag.Type {
 	case script.IntFlag:
-		var number int
-		flags.IntVar(&number, flag.Name, 0, flag.Usage)
-		rejectRepeat(flags.Lookup(flag.Name))
-		return func() any { return number }
+		number := flags.Int32(flag.Name, 0, flag.Usage)
+		read = func() any { return *number }
 	case script.BoolFlag:
-		var set bool
-		flags.BoolVar(&set, flag.Name, false, flag.Usage)
-		rejectRepeat(flags.Lookup(flag.Name))
-		return func() any { return set }
-	case script.StringsFlag:
-		value := &choicesValue{choices: flag.Choices}
-		flags.Var(value, flag.Name, flag.Usage)
-		closedSet(flags.Lookup(flag.Name), flag.Choices)
-		return func() any { return value.values }
+		set := flags.Bool(flag.Name, false, flag.Usage)
+		read = func() any { return *set }
+	default:
+		given := &choicesValue{kind: flag.Type, choices: flag.Choices}
+		flags.Var(given, flag.Name, flag.Usage)
+		read = func() any { return given.values }
+		if flag.Type == script.StringFlag {
+			read = func() any { return given.values[0] }
+		}
 	}
-	value := &choiceValue{choices: flag.Choices}
-	flags.Var(value, flag.Name, flag.Usage)
-	rejectRepeat(flags.Lookup(flag.Name))
-	closedSet(flags.Lookup(flag.Name), flag.Choices)
-	return func() any { return value.value }
-}
-
-type choiceValue struct {
-	choices []string
-	value   string
-}
-
-func (v *choiceValue) String() string {
-	return v.value
-}
-
-func (v *choiceValue) Set(text string) error {
-	if err := checkChoice(v.choices, text); err != nil {
-		return err
+	declared := flags.Lookup(flag.Name)
+	if flag.Type != script.StringsFlag {
+		rejectRepeat(declared)
 	}
-	v.value = text
-	return nil
-}
-
-func (v *choiceValue) Type() string {
-	return "string"
+	closedSet(declared, flag.Choices)
+	return read
 }
 
 type choicesValue struct {
+	kind    script.FlagType
 	choices []string
 	values  []string
 }
 
 func (v *choicesValue) String() string {
-	return "[" + strings.Join(v.values, ",") + "]"
+	return strings.Join(v.values, ",")
 }
 
 func (v *choicesValue) Set(text string) error {
-	if err := checkChoice(v.choices, text); err != nil {
-		return err
+	if len(v.choices) > 0 && !slices.Contains(v.choices, text) {
+		return errors.New("it is none of " + strings.Join(v.choices, ", "))
 	}
 	v.values = append(v.values, text)
 	return nil
 }
 
 func (v *choicesValue) Type() string {
-	return "strings"
-}
-
-func checkChoice(choices []string, text string) error {
-	if len(choices) == 0 || slices.Contains(choices, text) {
-		return nil
-	}
-	return errors.New("it is none of " + strings.Join(choices, ", "))
+	return string(v.kind)
 }
 
 func scriptHost(env []string, stream *diag.Stream) script.Host {
@@ -245,16 +215,12 @@ func scriptHost(env []string, stream *diag.Stream) script.Host {
 		return c, nil
 	}
 	return script.Host{
-		Call: func(ctx context.Context, call func(context.Context, *youtrack.Client) (*youtrack.Node, error)) (*youtrack.Node, *diag.Fault) {
+		Call: func(ctx context.Context, f func(context.Context, *youtrack.Client) (*youtrack.Node, error)) (*youtrack.Node, *diag.Fault) {
 			c, fault := connected()
 			if fault != nil {
 				return nil, fault
 			}
-			node, err := call(ctx, c.client)
-			if err != nil {
-				return nil, c.withLoginSource(diag.FromError(err))
-			}
-			return node, nil
+			return c.call(ctx, f)
 		},
 		Address: func() (string, *diag.Fault) {
 			c, fault := connected()

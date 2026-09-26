@@ -11,8 +11,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/dop251/goja/file"
-
 	"github.com/hakastein/go-youtrack"
 
 	"github.com/hakastein/ytrack/internal/diag"
@@ -60,7 +58,7 @@ type Broken struct {
 
 type Hidden struct {
 	Word    string
-	Warning *diag.Fault
+	Warning *youtrack.Warning
 }
 
 const scriptsDir = ".ytrack/scripts"
@@ -78,13 +76,17 @@ func Load(reserved []string, places Places) *Catalog {
 		owner[word] = builtin
 	}
 	for _, root := range roots(builtin, places, catalog) {
-		scanned := (&scanner{root: root}).dir(".", nil)
+		scanned, err := root.scan(".", nil)
+		if err != nil {
+			catalog.unreadable(root.Dir, err)
+		}
 		for _, word := range sortedWords(scanned) {
 			entry := scanned[word]
 			if root.Builtin() && len(entry.broken) > 0 {
 				defect(entry.broken[0].Fault)
 			}
 			switch held := owner[word]; {
+			case entry.empty():
 			case held == nil:
 				owner[word] = root
 				catalog.Commands = append(catalog.Commands, entry.commands...)
@@ -92,7 +94,7 @@ func Load(reserved []string, places Places) *Catalog {
 			case held.Builtin() && !root.Builtin():
 				message := fmt.Sprintf("%s is not a command: the command %s is built into ytrack, and no script "+
 					"adds to or replaces a builtin command", render.Quote(entry.display), render.Quote(word))
-				catalog.Hidden = append(catalog.Hidden, Hidden{Word: word, Warning: root.fileFault(message, entry.display)})
+				catalog.Hidden = append(catalog.Hidden, Hidden{Word: word, Warning: fileFault(message, entry.display).Warning()})
 			}
 		}
 	}
@@ -105,25 +107,30 @@ func roots(builtin *Root, places Places, catalog *Catalog) []*Root {
 	if filepath.IsAbs(places.Home) {
 		user = filepath.Join(places.Home, filepath.FromSlash(scriptsDir))
 	}
-	if places.WorkingDir != "" {
-		for dir := places.WorkingDir; ; dir = filepath.Dir(dir) {
-			candidate := filepath.Join(dir, filepath.FromSlash(scriptsDir))
-			if candidate == user {
-				break
-			}
-			if isDir(candidate, catalog) {
-				found = append(found, &Root{Dir: candidate, fsys: os.DirFS(candidate)})
-				break
-			}
-			if filepath.Dir(dir) == dir {
-				break
-			}
-		}
+	if project := projectRoot(places.WorkingDir, user, catalog); project != nil {
+		found = append(found, project)
 	}
 	if user != "" && isDir(user, catalog) {
 		found = append(found, &Root{Dir: user, fsys: os.DirFS(user)})
 	}
 	return found
+}
+
+func projectRoot(from, user string, catalog *Catalog) *Root {
+	if from == "" {
+		return nil
+	}
+	for dir := from; ; dir = filepath.Dir(dir) {
+		candidate := filepath.Join(dir, filepath.FromSlash(scriptsDir))
+		switch {
+		case candidate == user:
+			return nil
+		case isDir(candidate, catalog):
+			return &Root{Dir: candidate, fsys: os.DirFS(candidate)}
+		case filepath.Dir(dir) == dir:
+			return nil
+		}
+	}
 }
 
 func isDir(dir string, catalog *Catalog) bool {
@@ -132,11 +139,15 @@ func isDir(dir string, catalog *Catalog) bool {
 	case errors.Is(err, fs.ErrNotExist):
 		return false
 	case err != nil:
-		catalog.Broken = append(catalog.Broken, Broken{Fault: (&Root{Dir: dir}).fileFault(fmt.Sprintf("the root of scripts %s "+
-			"cannot be read: %v", render.Quote(dir), unwrapPath(err)), dir)})
+		catalog.unreadable(dir, unwrapPath(err))
 		return false
 	}
 	return info.IsDir()
+}
+
+func (c *Catalog) unreadable(root string, err error) {
+	message := fmt.Sprintf("the root of scripts %s cannot be read: %v", render.Quote(root), err)
+	c.Broken = append(c.Broken, Broken{Fault: fileFault(message, root)})
 }
 
 // entry is everything a root holds at one path and below it.
@@ -150,19 +161,17 @@ func (e *entry) empty() bool {
 	return len(e.commands) == 0 && len(e.broken) == 0
 }
 
-type scanner struct {
-	root *Root
+func brokenEntry(path []string, display, message string) *entry {
+	return &entry{display: display, broken: []Broken{{Path: path, Fault: fileFault(message, display)}}}
 }
 
 // A symlink that leads back up would otherwise be followed forever.
 const deepestPath = 8
 
-func (s *scanner) dir(dir string, words []string) map[string]*entry {
-	listed, err := fs.ReadDir(s.root.fsys, dir)
+func (r *Root) scan(dir string, words []string) (map[string]*entry, error) {
+	listed, err := fs.ReadDir(r.fsys, dir)
 	if err != nil {
-		display := s.root.display(dir)
-		message := fmt.Sprintf("directory %s cannot be read: %v", render.Quote(display), unwrapPath(err))
-		return map[string]*entry{"": {broken: []Broken{{Path: words, Fault: s.root.fileFault(message, display)}}}}
+		return nil, unwrapPath(err)
 	}
 	files, dirs := map[string]*entry{}, map[string]*entry{}
 	for _, item := range listed {
@@ -170,30 +179,31 @@ func (s *scanner) dir(dir string, words []string) map[string]*entry {
 		if strings.HasPrefix(name, ".") {
 			continue
 		}
-		at := path.Join(dir, name)
-		info, err := fs.Stat(s.root.fsys, at)
+		at, display := path.Join(dir, name), r.display(path.Join(dir, name))
+		info, err := fs.Stat(r.fsys, at)
 		word, isScript := strings.CutSuffix(name, ".js")
 		here := append(slices.Clip(words), word)
 		switch {
 		case err != nil:
-			display := s.root.display(at)
-			message := fmt.Sprintf("%s cannot be read: %v", render.Quote(display), unwrapPath(err))
-			files[word] = &entry{display: display, broken: []Broken{{Path: here, Fault: s.root.fileFault(message, display)}}}
+			files[word] = brokenEntry(here, display, fmt.Sprintf("%s cannot be read: %v", render.Quote(display), unwrapPath(err)))
 		case info.IsDir() && len(here) >= deepestPath:
-			display := s.root.display(at)
-			message := fmt.Sprintf("directory %s lies %d directories deep, and a command path is shorter",
-				render.Quote(display), len(here))
-			dirs[name] = &entry{display: display, broken: []Broken{{Path: here, Fault: s.root.fileFault(message, display)}}}
+			dirs[name] = brokenEntry(here, display, fmt.Sprintf("directory %s lies %d directories deep, and a command "+
+				"path is shorter", render.Quote(display), len(here)))
 		case info.IsDir():
-			dirs[name] = s.flatten(s.dir(at, here), s.root.display(at))
+			dirs[name] = r.subdir(at, here)
 		case info.Mode().IsRegular() && isScript:
-			files[word] = s.file(at, here)
+			files[word] = r.file(at, here)
 		}
 	}
-	return s.join(files, dirs, words)
+	return join(files, dirs, words), nil
 }
 
-func (s *scanner) flatten(below map[string]*entry, display string) *entry {
+func (r *Root) subdir(dir string, words []string) *entry {
+	display := r.display(dir)
+	below, err := r.scan(dir, words)
+	if err != nil {
+		return brokenEntry(words, display, fmt.Sprintf("directory %s cannot be read: %v", render.Quote(display), err))
+	}
 	joined := &entry{display: display}
 	for _, word := range sortedWords(below) {
 		joined.commands = append(joined.commands, below[word].commands...)
@@ -202,7 +212,7 @@ func (s *scanner) flatten(below map[string]*entry, display string) *entry {
 	return joined
 }
 
-func (s *scanner) join(files, dirs map[string]*entry, words []string) map[string]*entry {
+func join(files, dirs map[string]*entry, words []string) map[string]*entry {
 	joined := map[string]*entry{}
 	for word, script := range files {
 		joined[word] = script
@@ -217,38 +227,36 @@ func (s *scanner) join(files, dirs map[string]*entry, words []string) map[string
 			continue
 		}
 		here := append(slices.Clip(words), word)
-		message := fmt.Sprintf("%s and %s both name the command %s, which is either a script or a directory of "+
-			"its subcommands", render.Quote(script.display), render.Quote(below.display), render.Quote(strings.Join(here, " ")))
-		joined[word] = &entry{display: below.display, broken: []Broken{{Path: here, Fault: s.root.fileFault(message, script.display)}}}
+		joined[word] = brokenEntry(here, script.display, fmt.Sprintf("%s and %s both name the command %s, which is "+
+			"either a script or a directory of its subcommands", render.Quote(script.display), render.Quote(below.display),
+			render.Quote(strings.Join(here, " "))))
 	}
 	for word, held := range joined {
 		if held.empty() || wordGrammar.MatchString(word) {
 			continue
 		}
 		here := append(slices.Clip(words), word)
-		message := fmt.Sprintf("%s names the command word %s, which is not lowercase letters, digits, - and _",
-			render.Quote(held.display), render.Quote(word))
-		joined[word] = &entry{display: held.display, broken: []Broken{{Path: here, Fault: s.root.fileFault(message, held.display)}}}
+		joined[word] = brokenEntry(here, held.display,
+			fmt.Sprintf("%s names the command word %s, which is %s", render.Quote(held.display), render.Quote(word), wordRule))
 	}
 	return joined
 }
 
-func (s *scanner) file(name string, words []string) *entry {
-	display := s.root.display(name)
-	source, err := fs.ReadFile(s.root.fsys, name)
+func (r *Root) file(name string, words []string) *entry {
+	display := r.display(name)
+	source, err := fs.ReadFile(r.fsys, name)
 	if err != nil {
-		message := fmt.Sprintf("%s cannot be read: %v", render.Quote(display), unwrapPath(err))
-		return &entry{display: display, broken: []Broken{{Path: words, Fault: s.root.fileFault(message, display)}}}
+		return brokenEntry(words, display, fmt.Sprintf("%s cannot be read: %v", render.Quote(display), unwrapPath(err)))
 	}
 	command, err := declaration(display, string(source))
 	var failed *unreadable
 	switch {
 	case errors.As(err, &failed):
-		return &entry{display: display, broken: []Broken{{Path: words, Fault: s.root.fault(failed.message, failed.at)}}}
+		return &entry{display: display, broken: []Broken{{Path: words, Fault: scriptFault(failed.message, failed.at)}}}
 	case command == nil:
 		return &entry{display: display}
 	}
-	command.Path, command.root, command.file = words, s.root, name
+	command.Path, command.root, command.file = words, r, name
 	return &entry{display: display, commands: []*Command{command}}
 }
 
@@ -261,15 +269,11 @@ func sortedWords(entries map[string]*entry) []string {
 	return words
 }
 
-func (r *Root) fileFault(message, display string) *diag.Fault {
-	return r.fault(message, file.Position{Filename: display})
-}
-
 func (c *Catalog) Warnings(under []string) []*youtrack.Warning {
 	var warnings []*youtrack.Warning
 	if len(under) == 0 {
 		for _, hidden := range c.Hidden {
-			warnings = append(warnings, hidden.Warning.Warning())
+			warnings = append(warnings, hidden.Warning)
 		}
 	}
 	for _, broken := range c.Broken {

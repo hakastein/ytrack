@@ -12,9 +12,10 @@ import (
 	"github.com/dop251/goja"
 
 	"github.com/hakastein/go-youtrack"
+
+	"github.com/hakastein/ytrack/internal/render"
 )
 
-// A map or a list of an answer stays tied to its node, so it prints as that node wherever the script puts it.
 type nodeMap struct {
 	engine *engine
 	node   *youtrack.Node
@@ -26,14 +27,13 @@ func (m *nodeMap) Get(key string) goja.Value {
 	if value, held := m.read[key]; held {
 		return value
 	}
-	for _, pair := range m.pairs {
-		if pair.Key == key {
-			value := m.engine.value(pair.Value)
-			m.read[key] = value
-			return value
-		}
+	node, found := m.node.Lookup(key)
+	if !found {
+		return nil
 	}
-	return nil
+	value := m.engine.value(node)
+	m.read[key] = value
+	return value
 }
 
 func (m *nodeMap) Has(key string) bool {
@@ -59,7 +59,6 @@ func (m *nodeMap) Keys() []string {
 
 type nodeList struct {
 	engine *engine
-	node   *youtrack.Node
 	items  []*youtrack.Node
 	read   map[int]goja.Value
 }
@@ -91,12 +90,12 @@ func (l *nodeList) SetLen(int) bool {
 func (e *engine) value(node *youtrack.Node) goja.Value {
 	switch node.Kind() {
 	case youtrack.MapNode:
-		return e.vm.NewDynamicObject(&nodeMap{engine: e, node: node, pairs: node.Pairs(), read: map[string]goja.Value{}})
+		object := e.vm.NewDynamicObject(&nodeMap{engine: e, node: node, pairs: node.Pairs(), read: map[string]goja.Value{}})
+		e.answers[object] = node
+		return object
 	case youtrack.ListNode:
-		list := e.vm.NewDynamicArray(&nodeList{engine: e, node: node, items: node.Items(), read: map[int]goja.Value{}})
-		if err := list.SetPrototype(e.vm.Get("Array").ToObject(e.vm).Get("prototype").ToObject(e.vm)); err != nil {
-			panic(err)
-		}
+		list := e.vm.NewDynamicArray(&nodeList{engine: e, items: node.Items(), read: map[int]goja.Value{}})
+		e.answers[list] = node
 		return list
 	case youtrack.StringNode, youtrack.TextNode:
 		return e.vm.ToValue(node.Value())
@@ -152,11 +151,8 @@ func (e *engine) node(value goja.Value, depth int) (*youtrack.Node, error) {
 		}
 		return nil, fmt.Errorf("is a %s", value.ExportType())
 	}
-	switch held := object.Export().(type) {
-	case *nodeMap:
-		return held.node, nil
-	case *nodeList:
-		return held.node, nil
+	if node, isAnswer := e.answers[object]; isAnswer {
+		return node, nil
 	}
 	switch class := object.ClassName(); class {
 	case "Array":
@@ -180,7 +176,7 @@ func (e *engine) node(value goja.Value, depth int) (*youtrack.Node, error) {
 
 func (e *engine) isPlain(object *goja.Object) bool {
 	prototype := object.Prototype()
-	return prototype == nil || prototype.SameAs(e.vm.Get("Object").ToObject(e.vm).Get("prototype"))
+	return prototype == nil || prototype.SameAs(e.objectPrototype)
 }
 
 func (e *engine) mapNode(object *goja.Object, depth int) (*youtrack.Node, error) {
@@ -192,7 +188,7 @@ func (e *engine) mapNode(object *goja.Object, depth int) (*youtrack.Node, error)
 		}
 		node, err := e.node(value, depth+1)
 		if err != nil {
-			return nil, fmt.Errorf("under %s %w", strconv.Quote(key), err)
+			return nil, fmt.Errorf("under %s %w", render.Quote(key), err)
 		}
 		pairs = append(pairs, pairOf(key, node))
 	}
@@ -200,9 +196,8 @@ func (e *engine) mapNode(object *goja.Object, depth int) (*youtrack.Node, error)
 }
 
 func (e *engine) listNode(object *goja.Object, depth int) (*youtrack.Node, error) {
-	length := object.Get("length").ToInteger()
-	items := make([]*youtrack.Node, 0, length)
-	for index := range length {
+	var items []*youtrack.Node
+	for index := range object.Get("length").ToInteger() {
 		node, err := e.node(object.Get(strconv.FormatInt(index, 10)), depth+1)
 		if err != nil {
 			return nil, fmt.Errorf("at [%d] %w", index, err)

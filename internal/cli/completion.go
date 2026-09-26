@@ -82,10 +82,10 @@ func newCompletion(stdout io.Writer) *cobra.Command {
 	return completion
 }
 
-const pathIsArgumentNumber = "ytrack.completesPathAt"
+const completesPathAt = "ytrack.completesPathAt"
 
-func completesPathAt(cmd *cobra.Command, number int) bool {
-	return slices.Contains(strings.Split(cmd.Annotations[pathIsArgumentNumber], ","), strconv.Itoa(number))
+func takesPathAt(cmd *cobra.Command, number int) bool {
+	return slices.Contains(strings.Split(cmd.Annotations[completesPathAt], ","), strconv.Itoa(number))
 }
 
 const (
@@ -112,7 +112,7 @@ func complete(root *cobra.Command, stdout io.Writer, calledAs string, words []st
 			suggestions = closedSetOf(written.valueOf)
 		default:
 			suggestions = argumentsOf(cmd, written)
-			if completesPathAt(cmd, written.arguments+1) {
+			if takesPathAt(cmd, written.arguments+1) {
 				directive = shellOffersFileNames
 			}
 		}

@@ -1,6 +1,7 @@
 package script
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -37,26 +38,36 @@ type engine struct {
 	ctx     context.Context
 	vm      *goja.Runtime
 	root    *Root
+	file    string
 	host    Host
 	modules map[string]*goja.Object
 	apis    map[int]*goja.Object
+	// A map or a list of an answer prints as its node wherever the script puts it.
+	answers map[*goja.Object]*youtrack.Node
+	thrown  map[*goja.Object]*diag.Fault
 	wrote   bool
+	// Taken before any script runs, since a script may replace the globals Object and Error.
+	objectPrototype *goja.Object
+	errorPrototype  *goja.Object
 }
 
-// Deep enough for any honest recursion, shallow enough to stop a runaway one long before the memory runs out.
+// goja sets no limit of its own, and a runaway recursion would take the memory of the process.
 const maxCallStack = 10000
 
 // wrote holds once the instance may have changed, even when a fault came after.
 func Run(ctx context.Context, command *Command, input Input, host Host) (answer *youtrack.Node, wrote bool, fault *diag.Fault) {
-	e := &engine{ctx: ctx, vm: goja.New(), root: command.root, host: host, modules: map[string]*goja.Object{},
-		apis: map[int]*goja.Object{}}
-	e.vm.SetMaxCallStackSize(maxCallStack)
+	vm := goja.New()
+	vm.SetMaxCallStackSize(maxCallStack)
+	e := &engine{ctx: ctx, vm: vm, root: command.root, file: command.root.display(command.file), host: host,
+		modules: map[string]*goja.Object{}, apis: map[int]*goja.Object{}, answers: map[*goja.Object]*youtrack.Node{},
+		thrown: map[*goja.Object]*diag.Fault{}, objectPrototype: prototypeOf(vm, "Object"),
+		errorPrototype: prototypeOf(vm, "Error")}
 	stopped := make(chan struct{})
 	defer close(stopped)
 	go func() {
 		select {
 		case <-ctx.Done():
-			e.vm.Interrupt(ctx.Err())
+			vm.Interrupt(ctx.Err())
 		case <-stopped:
 		}
 	}()
@@ -64,43 +75,41 @@ func Run(ctx context.Context, command *Command, input Input, host Host) (answer 
 	if fault != nil && fault.Code == diag.CodeScriptFailed && command.root.Builtin() {
 		defect(fault)
 	}
-	if fault != nil && e.wrote {
-		fault.AfterWrite = true
-	}
 	return answer, e.wrote, fault
 }
 
+func prototypeOf(vm *goja.Runtime, class string) *goja.Object {
+	return vm.Get(class).ToObject(vm).Get("prototype").ToObject(vm)
+}
+
 func (e *engine) run(command *Command, input Input) (*youtrack.Node, *diag.Fault) {
+	var answer *youtrack.Node
+	var refused *diag.Fault
+	if fault := e.catch(func() { answer, refused = e.answer(command, input) }); fault != nil {
+		return nil, fault
+	}
+	return answer, refused
+}
+
+func (e *engine) answer(command *Command, input Input) (*youtrack.Node, *diag.Fault) {
+	exports, _ := e.load(command.file).(*goja.Object)
 	var run goja.Callable
-	var isFunction bool
-	if fault := e.catch(func() {
-		exports := e.load(command.file)
-		if object, isObject := exports.(*goja.Object); isObject {
-			run, isFunction = goja.AssertFunction(object.Get("run"))
-		}
-	}); fault != nil {
-		return nil, fault
+	if exports != nil {
+		run, _ = goja.AssertFunction(exports.Get("run"))
 	}
-	if !isFunction {
-		return nil, e.fileFault(command.file, "exports.run is no function, and a command script is run by calling it")
+	if run == nil {
+		return nil, fileFault("exports.run is no function, and a command script is run by calling it", e.file)
 	}
-	var returned goja.Value
-	fault := e.catch(func() {
-		var err error
-		returned, err = run(goja.Undefined(), e.input(command, input))
-		if err != nil {
-			panic(err)
-		}
-	})
-	if fault != nil {
-		return nil, fault
+	returned, err := run(goja.Undefined(), e.input(command, input))
+	if err != nil {
+		panic(err)
 	}
 	document, err := e.node(returned, 0)
 	if err == nil && document.Kind() != youtrack.MapNode {
 		err = errors.New("is no object, and a command prints one YAML mapping")
 	}
 	if err != nil {
-		return nil, e.fileFault(command.file, "the value exports.run returned "+err.Error())
+		return nil, fileFault("the value exports.run returned "+err.Error(), e.file)
 	}
 	return document, nil
 }
@@ -124,28 +133,20 @@ func (e *engine) define(object *goja.Object, key string, value goja.Value) {
 	}
 }
 
+// Try turns what the script threw into an exception; a stopped script and an overflowed stack pass it as panics.
 func (e *engine) catch(f func()) (fault *diag.Fault) {
 	defer func() {
-		thrown := recover()
-		if thrown == nil {
-			return
-		}
-		switch thrown := thrown.(type) {
-		case goja.Value:
-			fault = e.root.fault(thrown.String(), file.Position{})
-			if object, isObject := thrown.(*goja.Object); isObject {
-				if held, isFault := object.Export().(*faultValue); isFault {
-					copied := *held.fault
-					fault = &copied
-				}
-			}
+		switch thrown := recover().(type) {
+		case nil:
 		case error:
 			fault = e.faultOf(thrown)
 		default:
 			panic(thrown)
 		}
 	}()
-	f()
+	if exception := e.vm.Try(f); exception != nil {
+		return e.faultOf(exception)
+	}
 	return nil
 }
 
@@ -157,42 +158,44 @@ func (e *engine) faultOf(err error) *diag.Fault {
 	case errors.As(err, &interrupted):
 		return &diag.Fault{Code: youtrack.CodeUpstreamFailed, Message: "the script was stopped: " + interrupted.Error()}
 	case errors.As(err, &overflow):
-		return e.stackFault("RangeError: Maximum call stack size exceeded", overflow.Stack())
+		return scriptFault("RangeError: Maximum call stack size exceeded", e.placeIn(overflow.Stack()))
 	case errors.As(err, &exception):
 		if object, isObject := exception.Value().(*goja.Object); isObject {
-			if thrown, isFault := object.Export().(*faultValue); isFault {
-				copied := *thrown.fault
-				return &copied
+			if fault := e.thrown[object]; fault != nil {
+				return fault
 			}
 		}
-		return e.stackFault(exception.Value().String(), exception.Stack())
+		return scriptFault(e.describe(exception.Value()), e.placeIn(exception.Stack()))
 	}
-	var syntax *unreadable
-	if errors.As(err, &syntax) {
-		return e.root.fault(syntax.message, syntax.at)
-	}
-	return &diag.Fault{Code: diag.CodeScriptFailed, Message: err.Error()}
+	panic(err)
 }
 
-func (e *engine) stackFault(message string, stack []goja.StackFrame) *diag.Fault {
-	return e.root.fault(message, placeIn(stack))
+// String runs the toString of a thrown object, which may throw in turn.
+func (e *engine) describe(value goja.Value) string {
+	text := "a value with no string form was thrown"
+	e.vm.Try(func() { text = value.String() })
+	return text
 }
 
-// The first frame with a source is the line of the script; native frames of the API come before it.
-func placeIn(stack []goja.StackFrame) file.Position {
+// The first frame with a source is the line of the script; native frames of the API come before it. A fault
+// raised by goja while ytrack reads the returned value has no frame of the script at all.
+func (e *engine) placeIn(stack []goja.StackFrame) file.Position {
 	for _, frame := range stack {
-		at := frame.Position()
-		if at.Line > 0 {
-			if at.Line == 1 {
-				at.Column -= len(modulePrefix)
-			}
-			return at
+		if at := frame.Position(); at.Line > 0 {
+			return unwrapped(at)
 		}
 	}
-	return file.Position{}
+	return file.Position{Filename: e.file}
 }
 
-func (r *Root) fault(message string, at file.Position) *diag.Fault {
+func unwrapped(at file.Position) file.Position {
+	if at.Line == 1 {
+		at.Column -= len(modulePrefix)
+	}
+	return at
+}
+
+func scriptFault(message string, at file.Position) *diag.Fault {
 	fault := &diag.Fault{Code: diag.CodeScriptFailed, Message: message}
 	if at.Filename != "" {
 		fault.Details = append(fault.Details, youtrack.Pair{Key: "file", Value: youtrack.NewString(at.Filename)})
@@ -205,6 +208,10 @@ func (r *Root) fault(message string, at file.Position) *diag.Fault {
 	return fault
 }
 
+func fileFault(message, display string) *diag.Fault {
+	return scriptFault(message, file.Position{Filename: display})
+}
+
 // A builtin script is code of ytrack, so its defect is a bug of ytrack and panics as one in Go would.
 func defect(fault *diag.Fault) {
 	place := make([]string, 0, len(fault.Details))
@@ -214,37 +221,35 @@ func defect(fault *diag.Fault) {
 	panic("a builtin script failed at " + strings.Join(place, ":") + ": " + fault.Message)
 }
 
-func (e *engine) fileFault(name, message string) *diag.Fault {
-	return e.root.fault(message, file.Position{Filename: e.root.display(name)})
-}
-
 // The wrapper keeps the lines of the module where they are; only the first line moves right by its length.
 const modulePrefix = "(function (exports, require, module) {"
 
+// A syntax error was reported with its place when the declaration was read; what fails only here is strict mode and
+// a top-level declaration of exports, require or module, which the wrapper declares.
 func (e *engine) load(name string) goja.Value {
 	if module, loaded := e.modules[name]; loaded {
 		return module.Get("exports")
 	}
+	display := e.root.display(name)
 	source, err := fs.ReadFile(e.root.fsys, name)
 	if err != nil {
-		panic(e.throw(e.callerFault(fmt.Sprintf("module %s cannot be read: %v", render.Quote(name), err))))
+		panic(e.throw(fileFault(fmt.Sprintf("module %s cannot be read: %v", render.Quote(display), unwrapPath(err)), display)))
 	}
-	display := e.root.display(name)
+	// The parser takes #! only at the start of the source, which the wrapper moves.
+	if bytes.HasPrefix(source, []byte("#!")) {
+		copy(source, "//")
+	}
 	program, err := parser.ParseFile(nil, display, modulePrefix+string(source)+"\n})", 0)
 	if err != nil {
-		var list parser.ErrorList
-		if errors.As(err, &list) && len(list) > 0 {
-			at := list[0].Position
-			if at.Line == 1 {
-				at.Column -= len(modulePrefix)
-			}
-			panic(e.throw(e.root.fault("SyntaxError: "+list[0].Message, at)))
-		}
-		panic(e.throw(e.root.fault(err.Error(), file.Position{Filename: display})))
+		panic(e.throw(fileFault(err.Error(), display)))
 	}
 	compiled, err := goja.CompileAST(program, true)
+	var syntax *goja.CompilerSyntaxError
+	if errors.As(err, &syntax) && syntax.File != nil {
+		panic(e.throw(scriptFault("SyntaxError: "+syntax.Message, unwrapped(syntax.File.Position(syntax.Offset)))))
+	}
 	if err != nil {
-		panic(e.throw(e.root.fault(err.Error(), file.Position{Filename: display})))
+		panic(e.throw(fileFault(err.Error(), display)))
 	}
 	wrapper, err := e.vm.RunProgram(compiled)
 	if err != nil {
@@ -257,6 +262,7 @@ func (e *engine) load(name string) goja.Value {
 	e.modules[name] = module
 	call, _ := goja.AssertFunction(wrapper)
 	if _, err := call(goja.Undefined(), exports, e.vm.ToValue(e.require(name)), module); err != nil {
+		delete(e.modules, name)
 		panic(err)
 	}
 	return module.Get("exports")
@@ -266,10 +272,11 @@ const apiPrefix = "ytrack/v"
 
 func (e *engine) require(from string) func(goja.FunctionCall) goja.Value {
 	return func(call goja.FunctionCall) goja.Value {
-		wanted, isString := call.Argument(0).Export().(string)
-		switch {
-		case !isString:
+		if !goja.IsString(call.Argument(0)) {
 			panic(e.throw(e.callerFault("require takes a string")))
+		}
+		wanted := call.Argument(0).String()
+		switch {
 		case strings.HasPrefix(wanted, apiPrefix):
 			return e.api(wanted)
 		case strings.HasPrefix(wanted, "./"), strings.HasPrefix(wanted, "../"):
@@ -293,7 +300,12 @@ func (e *engine) library(from, wanted string) string {
 	if err != nil {
 		panic(e.throw(e.callerFault(fmt.Sprintf("require %s: %v", render.Quote(wanted), unwrapPath(err)))))
 	}
-	if declared, _ := declaration(name, string(source)); declared != nil {
+	declared, err := declaration(e.root.display(name), string(source))
+	var failed *unreadable
+	if errors.As(err, &failed) {
+		panic(e.throw(scriptFault(failed.message, failed.at)))
+	}
+	if declared != nil {
 		panic(e.throw(e.callerFault(fmt.Sprintf("require %s names a command script, and a script calls no other "+
 			"command", render.Quote(wanted)))))
 	}
@@ -309,12 +321,9 @@ func unwrapPath(err error) error {
 }
 
 func (e *engine) api(wanted string) goja.Value {
-	version, err := strconv.Atoi(strings.TrimPrefix(wanted, apiPrefix))
-	if err != nil || version < 1 || strconv.Itoa(version) != strings.TrimPrefix(wanted, apiPrefix) {
-		version = 0
-	}
+	version, _ := strconv.Atoi(strings.TrimPrefix(wanted, apiPrefix))
 	build, supported := versions[version]
-	if !supported {
+	if !supported || strconv.Itoa(version) != strings.TrimPrefix(wanted, apiPrefix) {
 		panic(e.throw(e.callerFault(fmt.Sprintf("require %s names no version of the API: ytrack has %s%d",
 			render.Quote(wanted), apiPrefix, currentVersion))))
 	}
@@ -327,5 +336,5 @@ func (e *engine) api(wanted string) goja.Value {
 }
 
 func (e *engine) callerFault(message string) *diag.Fault {
-	return e.root.fault(message, placeIn(e.vm.CaptureCallStack(0, nil)))
+	return scriptFault(message, e.placeIn(e.vm.CaptureCallStack(0, nil)))
 }

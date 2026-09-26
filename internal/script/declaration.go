@@ -205,6 +205,8 @@ func (r *literalReader) object(e *ast.ObjectLiteral) *object {
 // A word cannot start with a dash, or it would read as a flag.
 var wordGrammar = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
+const wordRule = "lowercase letters, digits, - and _, starting with a letter or a digit"
+
 const maxShort = 60
 
 func (r *literalReader) command(value literal, at ast.Expression) *Command {
@@ -215,16 +217,19 @@ func (r *literalReader) command(value literal, at ast.Expression) *Command {
 	}
 	r.onlyKeys(declared, at, "short", "long", "args", "flags", "example")
 	command := &Command{}
-	command.Short = r.text(declared, "short", at, true)
+	command.Short = r.text(declared, "short", at)
 	if short := command.Short; r.fault == nil && (short == "" || strings.ContainsAny(short, "\r\n") ||
 		len([]rune(short)) > maxShort) {
 		r.fail(declared.nodes["short"], "short is not one line of 1 to %d characters", maxShort)
 	}
-	command.Long = r.text(declared, "long", at, false)
+	command.Long = r.text(declared, "long", at)
 	command.Args = r.args(declared)
 	command.Flags = r.flags(declared)
 	if example, given := declared.values["example"]; given {
-		node, err := exampleNode(example)
+		node, err := literalNode(example)
+		if _, isObject := example.(*object); err == nil && !isObject {
+			err = errors.New("is no object")
+		}
 		if err == nil {
 			err = (render.YAML{}).Render(io.Discard, node)
 		}
@@ -233,15 +238,17 @@ func (r *literalReader) command(value literal, at ast.Expression) *Command {
 		}
 		command.Example = node
 	}
-	names := map[string]bool{"help": true}
+	names := []string{"help"}
 	for _, arg := range command.Args {
-		names[arg.Name] = true
+		names = append(names, arg.Name)
 	}
 	for _, flag := range command.Flags {
-		if names[flag.Name] {
-			r.fail(declared.nodes["flags"], "names %s twice among its arguments, its flags and --help", render.Quote(flag.Name))
+		names = append(names, flag.Name)
+	}
+	for i, name := range names {
+		if slices.Contains(names[:i], name) {
+			r.fail(at, "names %s twice among its arguments, its flags and --help", render.Quote(name))
 		}
-		names[flag.Name] = true
 	}
 	return command
 }
@@ -254,12 +261,10 @@ func (r *literalReader) onlyKeys(declared *object, at ast.Node, allowed ...strin
 	}
 }
 
-func (r *literalReader) text(declared *object, key string, at ast.Node, required bool) string {
+func (r *literalReader) text(declared *object, key string, at ast.Node) string {
 	value, given := declared.values[key]
 	if !given {
-		if required {
-			r.fail(at, "has no %s", key)
-		}
+		r.fail(at, "has no %s", key)
 		return ""
 	}
 	text, isString := value.(string)
@@ -289,7 +294,7 @@ func (r *literalReader) args(declared *object) []Arg {
 		}
 		r.onlyKeys(arg, at.Value[i], "name", "type")
 		name := r.name(arg, at.Value[i])
-		kind := r.text(arg, "type", at.Value[i], true)
+		kind := r.text(arg, "type", at.Value[i])
 		if kind != "string" && kind != "path" && r.fault == nil {
 			r.fail(arg.nodes["type"], "gives argument %s the type %s, which is neither string nor path",
 				render.Quote(name), render.Quote(kind))
@@ -300,10 +305,9 @@ func (r *literalReader) args(declared *object) []Arg {
 }
 
 func (r *literalReader) name(declared *object, at ast.Node) string {
-	name := r.text(declared, "name", at, true)
+	name := r.text(declared, "name", at)
 	if r.fault == nil && !wordGrammar.MatchString(name) {
-		r.fail(declared.nodes["name"], "names %s, which is not lowercase letters, digits, - and _",
-			render.Quote(name))
+		r.fail(declared.nodes["name"], "names %s, which is not %s", render.Quote(name), wordRule)
 	}
 	return name
 }
@@ -322,7 +326,7 @@ func (r *literalReader) flags(declared *object) []Flag {
 	for _, name := range flags.keys {
 		at := flags.nodes[name]
 		if !wordGrammar.MatchString(name) {
-			r.fail(at, "names the flag %s, which is not lowercase letters, digits, - and _", render.Quote(name))
+			r.fail(at, "names the flag %s, which is not %s", render.Quote(name), wordRule)
 			return nil
 		}
 		flag, isObject := flags.values[name].(*object)
@@ -331,12 +335,12 @@ func (r *literalReader) flags(declared *object) []Flag {
 			return nil
 		}
 		r.onlyKeys(flag, at, "type", "usage", "choices")
-		kind := FlagType(r.text(flag, "type", at, true))
+		kind := FlagType(r.text(flag, "type", at))
 		if !slices.Contains([]FlagType{StringFlag, IntFlag, BoolFlag, StringsFlag}, kind) && r.fault == nil {
 			r.fail(flag.nodes["type"], "gives --%s the type %s, which is none of string, int, bool and strings",
 				name, render.Quote(string(kind)))
 		}
-		read = append(read, Flag{Name: name, Type: kind, Usage: r.text(flag, "usage", at, true),
+		read = append(read, Flag{Name: name, Type: kind, Usage: r.text(flag, "usage", at),
 			Choices: r.choices(flag, name, kind)})
 	}
 	return read
@@ -367,14 +371,6 @@ func (r *literalReader) choices(flag *object, name string, kind FlagType) []stri
 		choices = append(choices, choice)
 	}
 	return choices
-}
-
-func exampleNode(value literal) (*youtrack.Node, error) {
-	declared, isObject := value.(*object)
-	if !isObject {
-		return nil, errors.New("is no object")
-	}
-	return literalNode(declared)
 }
 
 func literalNode(value literal) (*youtrack.Node, error) {

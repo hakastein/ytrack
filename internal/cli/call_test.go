@@ -22,6 +22,7 @@ func TestEveryCommandRefusesACallItCannotSendBeforeTheNetwork(t *testing.T) {
 		{name: "article list: a parent and a search together", argv: []string{"article", "list", "--parent", "DEV-A-1", "--query", ""}},
 		{name: "article list: no search", argv: []string{"article", "list"}},
 		{name: "user list: no search", argv: []string{"user", "list"}},
+		{name: "project list: a limit wider than 32 bits", argv: []string{"project", "list", "--limit", "3000000000"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

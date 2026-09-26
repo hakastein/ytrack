@@ -464,7 +464,7 @@ func newAttachmentCreate(env []string, stdout io.Writer, renderer render.Rendere
 		})
 	})
 	create.Args = cobra.ExactArgs(2)
-	create.Annotations = map[string]string{pathIsArgumentNumber: "2"}
+	create.Annotations = map[string]string{completesPathAt: "2"}
 	create.Short = "Attach a file"
 	create.Long = "Attach a local file.\n\n" +
 		"<owner> is a readable id such as DEV-1 or DEV-A-1.\n\n" +
@@ -1100,15 +1100,23 @@ func connectAndCall(ctx context.Context, env []string, call call) (connection, *
 	if fault != nil {
 		return connection{}, nil, fault
 	}
+	node, fault := c.call(ctx, call)
+	if fault != nil {
+		return connection{}, nil, fault
+	}
+	return c, node, nil
+}
+
+func (c connection) call(ctx context.Context, call call) (*youtrack.Node, *diag.Fault) {
 	node, err := call(ctx, c.client)
 	if err != nil {
 		var fault *diag.Fault
 		if !errors.As(err, &fault) {
 			fault = diag.FromError(err)
 		}
-		return connection{}, nil, c.withLoginSource(fault)
+		return nil, c.withLoginSource(fault)
 	}
-	return c, node, nil
+	return node, nil
 }
 
 func printNode(stdout io.Writer, renderer render.Renderer, node *youtrack.Node) *diag.Fault {

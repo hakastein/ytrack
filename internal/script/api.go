@@ -2,6 +2,7 @@ package script
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -22,17 +23,15 @@ var versions = map[int]func(e *engine) *goja.Object{
 }
 
 type param struct {
-	name     string
-	kind     FlagType
-	required bool
-	refuse   func(value any) string
+	name   string
+	kind   FlagType
+	refuse func(value any) string
 }
 
 type function struct {
 	args   []string
 	params []param
-	writes bool
-	// check is the grammar of the command's flags, refused as bad_usage before the login is looked up.
+	// Refused as bad_usage before the login is looked up.
 	check func(opts options) *diag.Fault
 	call  func(ctx context.Context, c *youtrack.Client, args []string, opts options) (*youtrack.Node, error)
 }
@@ -60,10 +59,11 @@ func v1(e *engine) *goja.Object {
 			},
 		},
 		"list": {
-			params: append([]param{fieldsParam()}, pageParams()...),
+			params: []param{fieldsParam(), {name: "limit", kind: IntFlag}, {name: "skip", kind: IntFlag}},
 			check:  checkPage,
 			call: func(ctx context.Context, c *youtrack.Client, _ []string, opts options) (*youtrack.Node, error) {
-				return c.Projects.List(ctx, &youtrack.ListProjectsOptions{Fields: opts.string("fields"), Page: pageOf(opts)})
+				page := youtrack.Page{Limit: opts.int("limit"), Skip: opts.int("skip")}
+				return c.Projects.List(ctx, &youtrack.ListProjectsOptions{Fields: opts.string("fields"), Page: page})
 			},
 		},
 	}))
@@ -77,17 +77,13 @@ func v1(e *engine) *goja.Object {
 
 // The answer of a function must not change when ytrack changes the default fields of a command.
 func fieldsParam() param {
-	return param{name: "fields", kind: StringFlag, required: true, refuse: func(value any) string {
-		expression := value.(string)
-		if strings.TrimSpace(expression) == "" || strings.HasPrefix(strings.TrimSpace(expression), "+") {
+	return param{name: "fields", kind: StringFlag, refuse: func(value any) string {
+		expression := strings.TrimSpace(value.(string))
+		if expression == "" || strings.HasPrefix(expression, "+") {
 			return "names the default fields, and a function has no default: it takes the whole expression"
 		}
 		return ""
 	}}
-}
-
-func pageParams() []param {
-	return []param{{name: "limit", kind: IntFlag, required: true}, {name: "skip", kind: IntFlag, required: true}}
 }
 
 // The module reads a limit of 0 as its own default page.
@@ -97,10 +93,6 @@ func checkPage(opts options) *diag.Fault {
 		return &diag.Fault{Code: youtrack.CodeBadUsage, Message: message}
 	}
 	return nil
-}
-
-func pageOf(opts options) youtrack.Page {
-	return youtrack.Page{Limit: opts.int("limit"), Skip: opts.int("skip")}
 }
 
 func (e *engine) entity(name string, functions map[string]function) *goja.Object {
@@ -128,13 +120,10 @@ func (e *engine) commandFunction(name string, f function) func(goja.FunctionCall
 			return f.call(ctx, c, args, opts)
 		})
 		if fault != nil {
-			if fault.ExitCode() != 1 {
+			if fault.MayHaveWritten() {
 				e.wrote = true
 			}
 			panic(e.throw(fault))
-		}
-		if f.writes {
-			e.wrote = true
 		}
 		return e.value(node)
 	}
@@ -145,23 +134,22 @@ func (e *engine) arguments(name string, f function, given []goja.Value) ([]strin
 	if len(f.params) > 0 {
 		takes++
 	}
-	if len(given) > takes || len(given) < len(f.args) {
+	if len(given) != takes {
 		panic(e.throw(e.callerFault(fmt.Sprintf("%s takes %s, and it was given %d arguments", name, signature(f), len(given)))))
 	}
 	args := make([]string, 0, len(f.args))
 	for i, arg := range f.args {
-		text, isString := given[i].Export().(string)
-		if !goja.IsString(given[i]) || !isString {
+		if !goja.IsString(given[i]) {
 			panic(e.throw(e.callerFault(fmt.Sprintf("%s takes <%s> as a string", name, arg))))
 		}
-		args = append(args, text)
+		args = append(args, given[i].String())
 	}
 	opts := options{}
-	if len(given) == takes && len(f.params) > 0 {
+	if len(f.params) > 0 {
 		opts = e.options(name, f, given[len(f.args)])
 	}
 	for _, p := range f.params {
-		if _, isGiven := opts[p.name]; p.required && !isGiven {
+		if _, isGiven := opts[p.name]; !isGiven {
 			panic(e.throw(e.callerFault(fmt.Sprintf("%s was not given %s, and a function has no default values",
 				name, p.name))))
 		}
@@ -215,44 +203,24 @@ func (e *engine) options(name string, f function, value goja.Value) options {
 	return opts
 }
 
+// An int is 32 bits, as the int flag of a declaration is, so whatever the command line gives a function takes.
 func readParam(kind FlagType, value goja.Value) (any, string) {
-	switch kind {
-	case StringFlag:
-		if text, isString := value.Export().(string); isString && goja.IsString(value) {
-			return text, ""
+	if kind == StringFlag {
+		if !goja.IsString(value) {
+			return nil, "is no string"
 		}
-		return nil, "is no string"
-	case IntFlag:
-		number := value.ToFloat()
-		if !goja.IsNumber(value) || number != math.Trunc(number) || math.Abs(number) > math.MaxInt32 {
-			return nil, "is no whole number"
-		}
-		return int(number), ""
-	case BoolFlag:
-		if flag, isBool := value.Export().(bool); isBool {
-			return flag, ""
-		}
-		return nil, "is neither true nor false"
-	case StringsFlag:
-		object, isObject := value.(*goja.Object)
-		if !isObject || object.ClassName() != "Array" {
-			return nil, "is no array of strings"
-		}
-		var texts []string
-		for i := range object.Get("length").ToInteger() {
-			item := object.Get(fmt.Sprint(i))
-			text, isString := item.Export().(string)
-			if !isString || !goja.IsString(item) {
-				return nil, "is no array of strings"
-			}
-			texts = append(texts, text)
-		}
-		return texts, ""
+		return value.String(), ""
 	}
-	return nil, "is of no type a flag takes"
+	if !goja.IsNumber(value) {
+		return nil, "is no number"
+	}
+	number := value.ToFloat()
+	if number != math.Trunc(number) || number < math.MinInt32 || number > math.MaxInt32 {
+		return nil, "is no whole number of 32 bits"
+	}
+	return int(number), ""
 }
 
-// A fault reaches the script as a read-only Error with code, message, details and wrote.
 type faultValue struct {
 	engine  *engine
 	fault   *diag.Fault
@@ -268,7 +236,7 @@ func (f *faultValue) Get(key string) goja.Value {
 	case "details":
 		return f.details
 	case "wrote":
-		return f.engine.vm.ToValue(f.fault.ExitCode() != 1)
+		return f.engine.vm.ToValue(f.fault.MayHaveWritten())
 	}
 	return nil
 }
@@ -291,10 +259,10 @@ func (f *faultValue) Keys() []string {
 
 func (e *engine) throw(fault *diag.Fault) *goja.Object {
 	thrown := e.vm.NewDynamicObject(&faultValue{engine: e, fault: fault, details: e.value(youtrack.NewMap(fault.Details...))})
-	errorClass := e.vm.Get("Error").ToObject(e.vm)
-	if err := thrown.SetPrototype(errorClass.Get("prototype").ToObject(e.vm)); err != nil {
+	if err := thrown.SetPrototype(e.errorPrototype); err != nil {
 		panic(err)
 	}
+	e.thrown[thrown] = fault
 	return thrown
 }
 
@@ -307,36 +275,48 @@ func (e *engine) warn(call goja.FunctionCall) goja.Value {
 	return goja.Undefined()
 }
 
+// script_failed is missing: only ytrack says a script failed, so its place in a script cannot be forged.
+var scriptCodes = []youtrack.Code{youtrack.CodeBadUsage, youtrack.CodeUnknownName, youtrack.CodeMissingRequired,
+	youtrack.CodeNotFound, youtrack.CodeDenied, youtrack.CodeRejected, youtrack.CodeUpstreamFailed,
+	youtrack.CodeUpstreamInvalid, youtrack.CodeWriteUncertain}
+
 func (e *engine) faultArguments(name string, call goja.FunctionCall) *diag.Fault {
 	if len(call.Arguments) < 2 || len(call.Arguments) > 3 {
 		panic(e.throw(e.callerFault(name + " takes a code, a message and, if the fault has them, its details")))
 	}
-	code, isString := call.Argument(0).Export().(string)
-	// Only ytrack says a script failed, so the place in a script_failed cannot be forged.
-	given := slices.DeleteFunc(diag.Codes(), func(known youtrack.Code) bool { return known == diag.CodeScriptFailed })
-	if !isString || !slices.Contains(given, youtrack.Code(code)) {
-		codes := make([]string, 0, len(given))
-		for _, known := range given {
+	var code youtrack.Code
+	if goja.IsString(call.Argument(0)) {
+		code = youtrack.Code(call.Argument(0).String())
+	}
+	if !slices.Contains(scriptCodes, code) {
+		codes := make([]string, 0, len(scriptCodes))
+		for _, known := range scriptCodes {
 			codes = append(codes, string(known))
 		}
-		panic(e.throw(e.callerFault(fmt.Sprintf("%s takes a code of the dictionary, and %s is none of %s", name,
-			call.Argument(0).String(), strings.Join(codes, ", ")))))
+		panic(e.throw(e.callerFault(fmt.Sprintf("%s takes a string code of the dictionary: %s", name,
+			strings.Join(codes, ", ")))))
 	}
-	message, isString := call.Argument(1).Export().(string)
-	if !isString || !goja.IsString(call.Argument(1)) {
+	if !goja.IsString(call.Argument(1)) {
 		panic(e.throw(e.callerFault(name + " takes its message as a string")))
 	}
-	fault := &diag.Fault{Code: youtrack.Code(code), Message: message}
-	if details := call.Argument(2); !goja.IsUndefined(details) {
-		node, err := e.node(details, 0)
-		if err == nil && node.Kind() != youtrack.MapNode {
-			err = fmt.Errorf("is no object")
-		}
-		if err != nil {
-			panic(e.throw(e.callerFault(name + ": the details " + err.Error())))
-		}
-		fault.Details = node.Pairs()
+	fault := &diag.Fault{Code: code, Message: call.Argument(1).String()}
+	details := call.Argument(2)
+	if goja.IsUndefined(details) {
+		return fault
 	}
+	node, err := e.node(details, 0)
+	if err == nil && node.Kind() != youtrack.MapNode {
+		err = errors.New("is no object")
+	}
+	if err == nil && slices.ContainsFunc(node.Pairs(), func(pair youtrack.Pair) bool {
+		return pair.Key == "code" || pair.Key == "message"
+	}) {
+		err = errors.New("hold code or message, which the fault has already")
+	}
+	if err != nil {
+		panic(e.throw(e.callerFault(name + ": the details " + err.Error())))
+	}
+	fault.Details = node.Pairs()
 	return fault
 }
 

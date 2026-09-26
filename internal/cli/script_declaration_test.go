@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const checkDeclaration = `exports.command = { short: "Check an issue", ` +
+const checkDeclaration = `exports.command = { short: "Check an issue", long: "Check an issue against a report.", ` +
 	`args: [{ name: "id", type: "string" }, { name: "report", type: "path" }], flags: {` +
 	` mode: { type: "string", usage: "a ` + "`mode`" + `", choices: ["fast", "slow"] },` +
 	` count: { type: "int", usage: "how many" },` +
@@ -39,6 +39,7 @@ func TestScriptCallIsRefusedByItsDeclarationBeforeItRuns(t *testing.T) {
 		{name: "an argument too many", argv: []string{"check", "DEV-1", "r.txt", "extra"}},
 		{name: "an argument too few", argv: []string{"check", "DEV-1"}},
 		{name: "an int that is no number", argv: []string{"check", "DEV-1", "r.txt", "--count", "two"}},
+		{name: "an int wider than 32 bits", argv: []string{"check", "DEV-1", "r.txt", "--count", "3000000000"}},
 		{name: "a flag given twice", argv: []string{"check", "DEV-1", "r.txt", "--mode", "fast", "--mode", "slow"}},
 	}
 	for _, tc := range tests {
@@ -82,14 +83,9 @@ func TestScriptRunIsGivenOnlyTheDeclaredInput(t *testing.T) {
 	}
 }
 
-func completingWith(t *testing.T, env []string, words ...string) completed {
-	t.Helper()
-	return requireCompleted(t, runWith(t, env, append([]string{"__complete"}, words...)...))
-}
-
 func TestCompleteOffersWhatTheDeclarationOfAScriptTakes(t *testing.T) {
 	t.Parallel()
-	env := scriptEnv(fake.ServeNothing(t), scriptsHome(t, map[string]string{"acme/check.js": checkReaching}))
+	env := atHome(fake.ServeNothing(t), scriptsHome(t, map[string]string{"acme/check.js": checkReaching}))
 	tests := []struct {
 		name      string
 		words     []string
@@ -116,7 +112,7 @@ func TestCompleteOffersWhatTheDeclarationOfAScriptTakes(t *testing.T) {
 			t.Parallel()
 			got := completingWith(t, env, tc.words...)
 
-			assert.Equal(t, completed{suggestions: got.suggestions, directive: tc.directive}, got)
+			assert.Equal(t, tc.directive, got.directive)
 			assert.Equal(t, tc.names, got.names())
 		})
 	}
@@ -126,7 +122,7 @@ func TestHelpAndCompletionRunNoScript(t *testing.T) {
 	t.Parallel()
 	source := lines(
 		`require("ytrack/v1").project.list({ fields: "shortName", limit: 1, skip: 0 });`,
-		`exports.command = { short: "Reach the instance on load" };`,
+		`exports.command = { short: "Reach the instance on load", long: "Reach the instance when loaded." };`,
 		`exports.run = () => ({});`,
 	)
 	tests := []struct {
@@ -155,7 +151,7 @@ func TestHelpListsTheScriptsUnderTheirRoot(t *testing.T) {
 	t.Parallel()
 	home := scriptsHome(t, map[string]string{"acme/check.js": checkReaching})
 
-	got := runWith(t, scriptEnv(fake.ServeNothing(t), home), "--help")
+	got := runWith(t, atHome(fake.ServeNothing(t), home), "--help")
 
 	require.Equal(t, 0, got.code)
 	assert.Regexp(t, regexp.QuoteMeta(scriptsRoot(home))+`:\n  acme\s`, got.stdout)
@@ -164,7 +160,7 @@ func TestHelpListsTheScriptsUnderTheirRoot(t *testing.T) {
 func TestHelpOfAScriptPrintsItsExample(t *testing.T) {
 	t.Parallel()
 	source := lines(
-		`exports.command = { short: "Show", example: { id: "DEV-1", text: "one\ntwo", "Odd key": [1, true, null] } };`,
+		`exports.command = { short: "Show", long: "Show it.", example: { id: "DEV-1", text: "one\ntwo", "Odd key": [1, true, null] } };`,
 		`exports.run = () => ({});`,
 	)
 

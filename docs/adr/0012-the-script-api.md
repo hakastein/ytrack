@@ -31,7 +31,7 @@ status: accepted, partly implemented
   `script_failed`.
 - **Скрипт не добавляет кодов,** потому что агент, который читает `code`, знает все значения заранее. Код не из
   словаря [ADR-0005](0005-an-error-is-a-document.md) в `fail` и `warn` даёт `script_failed`, и сам `script_failed`
-  тоже: его даёт только ytrack.
+  тоже: его даёт только ytrack. Детали `fail` и `warn` не содержат `code` и `message`: они у ошибки уже есть.
 
 ## Ответ
 
