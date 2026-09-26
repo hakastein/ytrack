@@ -60,13 +60,18 @@ type Flag struct {
 const fieldsUsage = "YouTrack fields `expression`; +expr adds to the default"
 
 func (f Flag) fields(given string) string {
+	return Fields(f.Default.(string), given)
+}
+
+// The SDK's fields= has no defaults, so a command that has them adds them itself.
+func Fields(defaults, given string) string {
 	given = strings.TrimSpace(given)
 	added, adds := strings.CutPrefix(given, "+")
 	switch {
 	case given == "" || adds && strings.TrimSpace(added) == "":
-		return f.Default.(string)
+		return defaults
 	case adds:
-		return f.Default.(string) + "," + strings.TrimSpace(added)
+		return defaults + "," + strings.TrimSpace(added)
 	}
 	return given
 }
