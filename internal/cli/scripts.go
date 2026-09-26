@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"slices"
 	"strconv"
@@ -143,6 +144,12 @@ func newScriptCommand(command *script.Command, env []string, stdout io.Writer, r
 	cmd.Annotations = map[string]string{completesPathAt: strings.Join(paths, ",")}
 	cmd.Short = command.Short
 	cmd.Long = command.Long
+	if len(command.Args) > 0 {
+		cmd.Long += "\n\nArguments:"
+		for _, arg := range command.Args {
+			cmd.Long += fmt.Sprintf("\n  <%s>  %s", arg.Name, arg.Usage)
+		}
+	}
 	if command.Example != nil {
 		cmd.Long += "\n\n" + example(command.Example)
 	}
@@ -167,11 +174,14 @@ func declareFlag(cmd *cobra.Command, flag script.Flag) func() any {
 		given := &choicesValue{kind: flag.Type, choices: flag.Choices}
 		flags.Var(given, flag.Name, flag.Usage)
 		read = func() any { return given.values }
-		if flag.Type == script.StringFlag {
+		if flag.Type != script.StringsFlag {
 			read = func() any { return given.values[0] }
 		}
 	}
 	declared := flags.Lookup(flag.Name)
+	if flag.Default != nil {
+		declared.DefValue = fmt.Sprint(flag.Default)
+	}
 	if flag.Type != script.StringsFlag {
 		rejectRepeat(declared)
 	}

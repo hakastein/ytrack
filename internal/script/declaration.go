@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"regexp"
 	"slices"
 	"strings"
@@ -36,8 +37,9 @@ func (c *Command) Root() *Root {
 }
 
 type Arg struct {
-	Name string
-	Path bool
+	Name  string
+	Path  bool
+	Usage string
 }
 
 type FlagType string
@@ -47,13 +49,30 @@ const (
 	IntFlag     FlagType = "int"
 	BoolFlag    FlagType = "bool"
 	StringsFlag FlagType = "strings"
+	FieldsFlag  FlagType = "fields"
 )
 
+// Default is nil for a flag without one, and otherwise a string, an int, a bool or a []string by the type.
 type Flag struct {
 	Name    string
 	Type    FlagType
 	Usage   string
 	Choices []string
+	Default any
+}
+
+const fieldsUsage = "YouTrack fields `expression`; +expr adds to the default"
+
+func (f Flag) fields(given string) string {
+	given = strings.TrimSpace(given)
+	added, adds := strings.CutPrefix(given, "+")
+	switch {
+	case given == "" || adds && strings.TrimSpace(added) == "":
+		return f.Default.(string)
+	case adds:
+		return f.Default.(string) + "," + strings.TrimSpace(added)
+	}
+	return given
 }
 
 type unreadable struct {
@@ -238,16 +257,19 @@ func (r *literalReader) command(value literal, at ast.Expression) *Command {
 		}
 		command.Example = node
 	}
-	names := []string{"help"}
+	argNames := []string{}
 	for _, arg := range command.Args {
-		names = append(names, arg.Name)
+		argNames = append(argNames, arg.Name)
 	}
+	flagNames := []string{"help"}
 	for _, flag := range command.Flags {
-		names = append(names, flag.Name)
+		flagNames = append(flagNames, flag.Name)
 	}
-	for i, name := range names {
-		if slices.Contains(names[:i], name) {
-			r.fail(at, "names %s twice among its arguments, its flags and --help", render.Quote(name))
+	for _, names := range [][]string{argNames, flagNames} {
+		for i, name := range names {
+			if slices.Contains(names[:i], name) {
+				r.fail(at, "names %s twice", render.Quote(name))
+			}
 		}
 	}
 	return command
@@ -274,32 +296,41 @@ func (r *literalReader) text(declared *object, key string, at ast.Node) string {
 	return text
 }
 
-func (r *literalReader) args(declared *object) []Arg {
-	value, given := declared.values["args"]
+func (r *literalReader) items(declared *object, key string, allowed ...string) ([]*object, []ast.Expression) {
+	value, given := declared.values[key]
 	if !given {
-		return nil
+		return nil, nil
 	}
-	items, isArray := value.([]literal)
+	listed, isArray := value.([]literal)
 	if !isArray {
-		r.fail(declared.nodes["args"], "args is no array")
-		return nil
+		r.fail(declared.nodes[key], "%s is no array", key)
+		return nil, nil
 	}
-	at := declared.nodes["args"].(*ast.ArrayLiteral)
-	args := make([]Arg, 0, len(items))
-	for i, item := range items {
-		arg, isObject := item.(*object)
+	at := declared.nodes[key].(*ast.ArrayLiteral).Value
+	read := make([]*object, 0, len(listed))
+	for i, item := range listed {
+		held, isObject := item.(*object)
 		if !isObject {
-			r.fail(at.Value[i], "holds an argument that is no object")
-			return nil
+			r.fail(at[i], "%s holds an item that is no object", key)
+			return nil, nil
 		}
-		r.onlyKeys(arg, at.Value[i], "name", "type")
-		name := r.name(arg, at.Value[i])
-		kind := r.text(arg, "type", at.Value[i])
+		r.onlyKeys(held, at[i], allowed...)
+		read = append(read, held)
+	}
+	return read, at
+}
+
+func (r *literalReader) args(declared *object) []Arg {
+	items, at := r.items(declared, "args", "name", "type", "usage")
+	args := make([]Arg, 0, len(items))
+	for i, arg := range items {
+		name := r.name(arg, at[i])
+		kind := r.text(arg, "type", at[i])
 		if kind != "string" && kind != "path" && r.fault == nil {
 			r.fail(arg.nodes["type"], "gives argument %s the type %s, which is neither string nor path",
 				render.Quote(name), render.Quote(kind))
 		}
-		args = append(args, Arg{Name: name, Path: kind == "path"})
+		args = append(args, Arg{Name: name, Path: kind == "path", Usage: r.text(arg, "usage", at[i])})
 	}
 	return args
 }
@@ -312,65 +343,116 @@ func (r *literalReader) name(declared *object, at ast.Node) string {
 	return name
 }
 
+var flagTypes = []FlagType{StringFlag, IntFlag, BoolFlag, StringsFlag, FieldsFlag}
+
 func (r *literalReader) flags(declared *object) []Flag {
-	value, given := declared.values["flags"]
+	items, at := r.items(declared, "flags", "name", "type", "usage", "choices", "default")
+	flags := make([]Flag, 0, len(items))
+	for i, held := range items {
+		flag := Flag{Name: r.name(held, at[i]), Type: FlagType(r.text(held, "type", at[i]))}
+		if !slices.Contains(flagTypes, flag.Type) && r.fault == nil {
+			r.fail(held.nodes["type"], "gives --%s the type %s, which is none of %s", flag.Name,
+				render.Quote(string(flag.Type)), joined(flagTypes))
+		}
+		if _, given := held.values["usage"]; flag.Type == FieldsFlag && given {
+			r.fail(held.nodes["usage"], "gives --%s a usage, and the usage of a fields flag is the rule of +", flag.Name)
+		}
+		flag.Usage = fieldsUsage
+		if flag.Type != FieldsFlag {
+			flag.Usage = r.text(held, "usage", at[i])
+		}
+		flag.Choices = r.choices(held, flag)
+		flag.Default = r.flagDefault(held, flag, at[i])
+		flags = append(flags, flag)
+	}
+	return flags
+}
+
+func joined(types []FlagType) string {
+	names := make([]string, 0, len(types))
+	for _, kind := range types {
+		names = append(names, string(kind))
+	}
+	return strings.Join(names, ", ")
+}
+
+func (r *literalReader) choices(held *object, flag Flag) []string {
+	value, given := held.values["choices"]
 	if !given {
 		return nil
 	}
-	flags, isObject := value.(*object)
-	if !isObject {
-		r.fail(declared.nodes["flags"], "flags is no object")
+	at := held.nodes["choices"]
+	if flag.Type != StringFlag && flag.Type != StringsFlag {
+		r.fail(at, "gives choices to --%s, which is neither string nor strings", flag.Name)
 		return nil
 	}
-	read := make([]Flag, 0, len(flags.keys))
-	for _, name := range flags.keys {
-		at := flags.nodes[name]
-		if !wordGrammar.MatchString(name) {
-			r.fail(at, "names the flag %s, which is not %s", render.Quote(name), wordRule)
-			return nil
+	choices, isStrings := stringsOf(value)
+	if !isStrings || len(choices) == 0 {
+		r.fail(at, "gives --%s choices that are no array of strings", flag.Name)
+	}
+	return choices
+}
+
+func stringsOf(value literal) ([]string, bool) {
+	items, isArray := value.([]literal)
+	texts := make([]string, 0, len(items))
+	for _, item := range items {
+		text, isString := item.(string)
+		if !isString {
+			return nil, false
 		}
-		flag, isObject := flags.values[name].(*object)
-		if !isObject {
-			r.fail(at, "declares --%s with no object", name)
-			return nil
+		texts = append(texts, text)
+	}
+	return texts, isArray
+}
+
+func (r *literalReader) flagDefault(held *object, flag Flag, at ast.Node) any {
+	value, given := held.values["default"]
+	if !given {
+		if flag.Type == FieldsFlag {
+			r.fail(at, "gives --%s no default, and + adds to the default", flag.Name)
 		}
-		r.onlyKeys(flag, at, "type", "usage", "choices")
-		kind := FlagType(r.text(flag, "type", at))
-		if !slices.Contains([]FlagType{StringFlag, IntFlag, BoolFlag, StringsFlag}, kind) && r.fault == nil {
-			r.fail(flag.nodes["type"], "gives --%s the type %s, which is none of string, int, bool and strings",
-				name, render.Quote(string(kind)))
-		}
-		read = append(read, Flag{Name: name, Type: kind, Usage: r.text(flag, "usage", at),
-			Choices: r.choices(flag, name, kind)})
+		return nil
+	}
+	read, fits := defaultOf(flag.Type, value)
+	switch {
+	case !fits:
+		r.fail(held.nodes["default"], "gives --%s a default that is no %s", flag.Name, flag.Type)
+	case !chosen(flag.Choices, read):
+		r.fail(held.nodes["default"], "gives --%s a default outside its choices", flag.Name)
 	}
 	return read
 }
 
-func (r *literalReader) choices(flag *object, name string, kind FlagType) []string {
-	value, given := flag.values["choices"]
-	if !given {
-		return nil
+func defaultOf(kind FlagType, value literal) (any, bool) {
+	switch kind {
+	case StringFlag, FieldsFlag:
+		text, isString := value.(string)
+		return text, isString && (kind != FieldsFlag || strings.TrimSpace(text) != "")
+	case IntFlag:
+		number, isNumber := value.(float64)
+		return int(number), isNumber && number == math.Trunc(number) && number >= math.MinInt32 && number <= math.MaxInt32
+	case BoolFlag:
+		set, isBool := value.(bool)
+		return set, isBool
 	}
-	at := flag.nodes["choices"]
-	if kind != StringFlag && kind != StringsFlag {
-		r.fail(at, "gives choices to --%s, which takes no strings", name)
-		return nil
+	return stringsOf(value)
+}
+
+func chosen(choices []string, value any) bool {
+	if len(choices) == 0 {
+		return true
 	}
-	items, isArray := value.([]literal)
-	if !isArray || len(items) == 0 {
-		r.fail(at, "gives --%s choices that are no array of strings", name)
-		return nil
+	texts, isList := value.([]string)
+	if !isList {
+		texts = []string{value.(string)}
 	}
-	choices := make([]string, 0, len(items))
-	for _, item := range items {
-		choice, isString := item.(string)
-		if !isString {
-			r.fail(at, "gives --%s choices that are no array of strings", name)
-			return nil
+	for _, text := range texts {
+		if !slices.Contains(choices, text) {
+			return false
 		}
-		choices = append(choices, choice)
 	}
-	return choices
+	return true
 }
 
 func literalNode(value literal) (*youtrack.Node, error) {

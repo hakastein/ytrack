@@ -10,11 +10,13 @@ import (
 )
 
 const checkDeclaration = `exports.command = { short: "Check an issue", long: "Check an issue against a report.", ` +
-	`args: [{ name: "id", type: "string" }, { name: "report", type: "path" }], flags: {` +
-	` mode: { type: "string", usage: "a ` + "`mode`" + `", choices: ["fast", "slow"] },` +
-	` count: { type: "int", usage: "how many" },` +
-	` verbose: { type: "bool", usage: "say more" },` +
-	` tag: { type: "strings", usage: "a tag; repeatable", choices: ["a", "b", "c"] } } };`
+	`args: [{ name: "id", type: "string", usage: "the issue" }, { name: "report", type: "path", usage: "the report" }],` +
+	` flags: [` +
+	` { name: "mode", type: "string", usage: "a ` + "`mode`" + `", choices: ["fast", "slow"], default: "fast" },` +
+	` { name: "count", type: "int", usage: "how many" },` +
+	` { name: "verbose", type: "bool", usage: "say more" },` +
+	` { name: "tag", type: "strings", usage: "a tag; repeatable", choices: ["a", "b", "c"] },` +
+	` { name: "fields", type: "fields", default: "id,summary" } ] };`
 
 var checkReaching = lines(
 	`const { project } = require("ytrack/v1");`,
@@ -24,7 +26,7 @@ var checkReaching = lines(
 
 var checkEchoing = lines(
 	checkDeclaration,
-	`exports.run = (input) => ({ input });`,
+	`exports.run = (id, report, flags) => ({ id, report, flags });`,
 )
 
 func TestScriptCallIsRefusedByItsDeclarationBeforeItRuns(t *testing.T) {
@@ -55,7 +57,7 @@ func TestScriptCallIsRefusedByItsDeclarationBeforeItRuns(t *testing.T) {
 	}
 }
 
-func TestScriptRunIsGivenOnlyTheDeclaredInput(t *testing.T) {
+func TestScriptRunIsGivenTheArgumentsInOrderAndTheFlagsLast(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
@@ -63,14 +65,16 @@ func TestScriptRunIsGivenOnlyTheDeclaredInput(t *testing.T) {
 		want string
 	}{
 		{
-			name: "the arguments alone",
+			name: "the arguments and the flags with a default",
 			argv: []string{"check", "DEV-1", "r.txt"},
-			want: "input:\n  id: \"DEV-1\"\n  report: \"r.txt\"",
+			want: "id: \"DEV-1\"\nreport: \"r.txt\"\nflags:\n  mode: \"fast\"\n  fields: \"id,summary\"",
 		},
 		{
 			name: "every flag",
-			argv: []string{"check", "DEV-1", "r.txt", "--mode", "slow", "--count", "3", "--verbose", "--tag", "b", "--tag", "a"},
-			want: "input:\n  id: \"DEV-1\"\n  report: \"r.txt\"\n  mode: \"slow\"\n  count: 3\n  verbose: true\n  tag:\n    - \"b\"\n    - \"a\"",
+			argv: []string{"check", "DEV-1", "r.txt", "--mode", "slow", "--count", "3", "--verbose", "--tag", "b", "--tag", "a",
+				"--fields", "key"},
+			want: "id: \"DEV-1\"\nreport: \"r.txt\"\nflags:\n  mode: \"slow\"\n  count: 3\n  verbose: true\n  tag:\n" +
+				"    - \"b\"\n    - \"a\"\n  fields: \"key\"",
 		},
 	}
 	for _, tc := range tests {
@@ -79,6 +83,31 @@ func TestScriptRunIsGivenOnlyTheDeclaredInput(t *testing.T) {
 			got := runScripts(t, fake.ServeNothing(t), map[string]string{"check.js": checkEchoing}, tc.argv...)
 
 			assert.Equal(t, outcome{stdout: tc.want + "\n"}, got)
+		})
+	}
+}
+
+func TestFieldsFlagAddsToItsDefault(t *testing.T) {
+	t.Parallel()
+	source := lines(checkDeclaration, `exports.run = (id, report, flags) => ({ fields: flags.fields });`)
+	tests := []struct {
+		name  string
+		given []string
+		want  string
+	}{
+		{name: "none given", want: "id,summary"},
+		{name: "an expression", given: []string{"--fields", "key"}, want: "key"},
+		{name: "an expression added to the default", given: []string{"--fields", "+key"}, want: "id,summary,key"},
+		{name: "an empty expression", given: []string{"--fields", ""}, want: "id,summary"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			argv := append([]string{"check", "DEV-1", "r.txt"}, tc.given...)
+
+			got := runScripts(t, fake.ServeNothing(t), map[string]string{"check.js": source}, argv...)
+
+			assert.Equal(t, outcome{stdout: "fields: \"" + tc.want + "\"\n"}, got)
 		})
 	}
 }
@@ -97,7 +126,7 @@ func TestCompleteOffersWhatTheDeclarationOfAScriptTakes(t *testing.T) {
 		{name: "the script under its word", words: []string{"acme", ""}, names: []string{"check"},
 			directive: shellOffersNoFileNames},
 		{name: "its flags", words: []string{"acme", "check", "--"},
-			names: []string{"--count", "--help", "--mode", "--tag", "--verbose"}, directive: shellOffersNoFileNames},
+			names: []string{"--count", "--fields", "--help", "--mode", "--tag", "--verbose"}, directive: shellOffersNoFileNames},
 		{name: "the choices of a flag", words: []string{"acme", "check", "--mode", ""}, names: []string{"fast", "slow"},
 			directive: shellOffersNoFileNames},
 		{name: "the choices of a repeatable flag", words: []string{"acme", "check", "--tag", "a", "--tag", ""},

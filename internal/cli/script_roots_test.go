@@ -247,12 +247,12 @@ func TestUnreadableDeclarationFailsTheCallAtItsPlace(t *testing.T) {
 	t.Parallel()
 	home := scriptsHome(t, map[string]string{"bad.js": lines(
 		`// a command`,
-		`exports.command = { short: "Bad", long: "Bad.", flags: { mode: { type: "string", usage: "m" + "n" } } };`,
+		`exports.command = { short: "Bad", long: "Bad.", flags: [{ name: "mode", type: "string", usage: "m" + "n" }] };`,
 	)})
 
 	got := runWith(t, atHome(fake.ServeNothing(t), home), "bad")
 
-	assert.Equal(t, scriptFailedIn(home, "bad.js", detail{"line", 2}, detail{"column", 89}), requireFault(t, got))
+	assert.Equal(t, scriptFailedIn(home, "bad.js", detail{"line", 2}, detail{"column", 96}), requireFault(t, got))
 }
 
 func TestDeclarationThatIsNoPureLiteralIsUnreadable(t *testing.T) {
@@ -270,15 +270,24 @@ func TestDeclarationThatIsNoPureLiteralIsUnreadable(t *testing.T) {
 		{name: "no short", source: `exports.command = { long: "Bad." };`},
 		{name: "no long", source: `exports.command = { short: "Bad" };`},
 		{name: "a short of two lines", source: `exports.command = { short: "Bad\nworse", long: "Bad." };`},
-		{name: "an argument of no type", source: head + `args: [{ name: "id" }] };`},
+		{name: "an argument of no type", source: head + `args: [{ name: "id", usage: "id" }] };`},
+		{name: "an argument with no usage", source: head + `args: [{ name: "id", type: "string" }] };`},
 		{name: "an argument named twice", source: head +
-			`args: [{ name: "id", type: "string" }, { name: "id", type: "string" }] };`},
-		{name: "a flag of a type it does not know", source: head + `flags: { n: { type: "float", usage: "n" } } };`},
-		{name: "a flag with no usage", source: head + `flags: { n: { type: "int" } } };`},
-		{name: "choices of a number flag", source: head + `flags: { n: { type: "int", usage: "n", choices: ["1"] } } };`},
-		{name: "a flag named as an argument", source: head +
-			`args: [{ name: "id", type: "string" }], flags: { id: { type: "string", usage: "id" } } };`},
-		{name: "a flag named help", source: head + `flags: { help: { type: "bool", usage: "h" } } };`},
+			`args: [{ name: "id", type: "string", usage: "id" }, { name: "id", type: "string", usage: "id" }] };`},
+		{name: "flags that are no array", source: head + `flags: { n: { type: "int", usage: "n" } } };`},
+		{name: "a flag with no name", source: head + `flags: [{ type: "int", usage: "n" }] };`},
+		{name: "a flag named twice", source: head +
+			`flags: [{ name: "n", type: "int", usage: "n" }, { name: "n", type: "int", usage: "n" }] };`},
+		{name: "a flag of a type it does not know", source: head + `flags: [{ name: "n", type: "float", usage: "n" }] };`},
+		{name: "a flag with no usage", source: head + `flags: [{ name: "n", type: "int" }] };`},
+		{name: "choices of a number flag", source: head + `flags: [{ name: "n", type: "int", usage: "n", choices: ["1"] }] };`},
+		{name: "a flag named help", source: head + `flags: [{ name: "help", type: "bool", usage: "h" }] };`},
+		{name: "a default of another type", source: head + `flags: [{ name: "n", type: "int", usage: "n", default: "1" }] };`},
+		{name: "a default outside the choices", source: head +
+			`flags: [{ name: "m", type: "string", usage: "m", choices: ["a"], default: "b" }] };`},
+		{name: "a fields flag with no default", source: head + `flags: [{ name: "fields", type: "fields" }] };`},
+		{name: "a fields flag with a usage of its own", source: head +
+			`flags: [{ name: "fields", type: "fields", default: "id", usage: "f" }] };`},
 		{name: "an example that is no object", source: head + `example: [1] };`},
 		{name: "a syntax error", source: head},
 	}

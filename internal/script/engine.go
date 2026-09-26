@@ -100,7 +100,7 @@ func (e *engine) answer(command *Command, input Input) (*youtrack.Node, *diag.Fa
 	if run == nil {
 		return nil, fileFault("exports.run is no function, and a command script is run by calling it", e.file)
 	}
-	returned, err := run(goja.Undefined(), e.input(command, input))
+	returned, err := run(goja.Undefined(), e.call(command, input)...)
 	if err != nil {
 		panic(err)
 	}
@@ -114,17 +114,27 @@ func (e *engine) answer(command *Command, input Input) (*youtrack.Node, *diag.Fa
 	return document, nil
 }
 
-func (e *engine) input(command *Command, input Input) *goja.Object {
-	given := e.vm.NewObject()
-	for i, arg := range command.Args {
-		e.define(given, arg.Name, e.vm.ToValue(input.Args[i]))
+// run takes the arguments of the call in order and its flags last, as a function of the API does.
+func (e *engine) call(command *Command, input Input) []goja.Value {
+	values := make([]goja.Value, 0, len(input.Args)+1)
+	for _, arg := range input.Args {
+		values = append(values, e.vm.ToValue(arg))
 	}
+	flags := e.vm.NewObject()
 	for _, flag := range command.Flags {
-		if value, isGiven := input.Flags[flag.Name]; isGiven {
-			e.define(given, flag.Name, e.vm.ToValue(value))
+		value, given := input.Flags[flag.Name]
+		switch {
+		case flag.Type == FieldsFlag:
+			text, _ := value.(string)
+			value, given = flag.fields(text), true
+		case !given && flag.Default != nil:
+			value, given = flag.Default, true
+		}
+		if given {
+			e.define(flags, flag.Name, e.vm.ToValue(value))
 		}
 	}
-	return given
+	return append(values, flags)
 }
 
 func (e *engine) define(object *goja.Object, key string, value goja.Value) {
