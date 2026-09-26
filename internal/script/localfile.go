@@ -12,42 +12,53 @@ import (
 	"github.com/hakastein/ytrack/internal/render"
 )
 
-func openLocalFile(path string) (*os.File, *diag.Fault) {
+type irregularFile struct {
+	mode fs.FileMode
+}
+
+func (i *irregularFile) Error() string {
+	return "is " + describeFileMode(i.mode)
+}
+
+var errSwapped = errors.New("is no longer the file it stood for a moment ago")
+
+func openRegular(path string) (*os.File, error) {
 	// Stat before Open: opening a named pipe blocks until a writer appears.
 	before, err := os.Stat(path)
 	if err != nil {
-		return nil, unreadableFile(path, err)
+		return nil, err
 	}
 	if !before.Mode().IsRegular() {
-		return nil, invalidFileFault(path, "is "+describeFileMode(before.Mode()))
+		return nil, &irregularFile{mode: before.Mode()}
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, unreadableFile(path, err)
+		return nil, err
 	}
 	opened, err := file.Stat()
 	if err != nil {
 		_ = file.Close()
-		return nil, unreadableFile(path, err)
+		return nil, err
 	}
 	if !os.SameFile(before, opened) {
 		_ = file.Close()
-		return nil, invalidFileFault(path, "is no longer the file it stood for a moment ago")
+		return nil, errSwapped
 	}
 	return file, nil
 }
 
-func unreadableFile(path string, err error) *diag.Fault {
-	var failed *fs.PathError
-	if errors.As(err, &failed) {
-		err = failed.Err
+func openLocalFile(path string) (*os.File, *diag.Fault) {
+	file, err := openRegular(path)
+	var irregular *irregularFile
+	switch {
+	case err == nil:
+		return file, nil
+	case errors.As(err, &irregular), errors.Is(err, errSwapped):
+		message := fmt.Sprintf("file %s %s, and an attachment is the bytes of one regular file", render.Quote(path), err)
+		return nil, &diag.Fault{Code: youtrack.CodeBadUsage, Message: message}
 	}
-	return &diag.Fault{Code: youtrack.CodeBadUsage, Message: fmt.Sprintf("file %s cannot be read: %s", render.Quote(path), err)}
-}
-
-func invalidFileFault(path, because string) *diag.Fault {
-	message := fmt.Sprintf("file %s %s, and an attachment is the bytes of one regular file", render.Quote(path), because)
-	return &diag.Fault{Code: youtrack.CodeBadUsage, Message: message}
+	return nil, &diag.Fault{Code: youtrack.CodeBadUsage, Message: fmt.Sprintf("file %s cannot be read: %s",
+		render.Quote(path), unwrapPath(err))}
 }
 
 func describeFileMode(mode fs.FileMode) string {

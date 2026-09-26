@@ -10,7 +10,7 @@
 - Ошибка — тоже YAML-документ с машинным кодом, в stderr.
 - Кастом-поля любых типов, включая множественные enum'ы, читаются и пишутся корректно.
 - Свои команды — скрипты в `.ytrack/scripts` репозитория над API YouTrack из самого
-  `ytrack`: без Node, без внешних программ, с той же справкой, выводом и ошибками, что
+  `ytrack`: без установленного Node, без внешних программ, с той же справкой, выводом и ошибками, что
   у встроенных. Встроенные команды написаны так же.
 
 ```bash
@@ -46,18 +46,20 @@ mv ~/.local/bin/ytrack-linux-amd64 ~/.local/bin/ytrack && chmod +x ~/.local/bin/
 
 Собрать из исходников: `make build` кладёт бинарник в `bin/ytrack`.
 
-### Скилл для агента
+### Скиллы для агента
 
 Скилл [`youtrack`](skills/youtrack/SKILL.md) говорит агенту в любом репозитории, что
-с YouTrack работают через `ytrack`. Формат — [Agent Skills](https://agentskills.io),
-его читают Claude Code, Codex, OpenCode, Gemini CLI, Copilot и Cursor.
+с YouTrack работают через `ytrack`, а [`ytrack-scripts`](skills/ytrack-scripts/SKILL.md) —
+как написать свою команду: справочник API и декларации `v1.d.ts` лежат рядом с ним.
+Формат — [Agent Skills](https://agentskills.io), его читают Claude Code, Codex, OpenCode,
+Gemini CLI, Copilot и Cursor.
 
 ```bash
 npx skills add hakastein/ytrack -g -y
 ```
 
-Без Node скопируйте `skills/youtrack/SKILL.md` в `~/.claude/skills/youtrack/` (Claude
-Code) и в `~/.agents/skills/youtrack/` (остальные агенты).
+Без Node скопируйте каталоги `skills/youtrack` и `skills/ytrack-scripts` в
+`~/.claude/skills/` (Claude Code) и в `~/.agents/skills/` (остальные агенты).
 
 ## Авторизация
 
@@ -228,8 +230,14 @@ ytrack triage --help
   ключ, которого нет, часть не трогает, `null` её очищает. Ответ — тот же документ, что
   печатает команда, только для чтения. Ошибка бросается с `code`, `message`, `details`
   и `wrote`, и её можно поймать.
-- Декларации для редактора — [`internal/script/v1.d.ts`](internal/script/v1.d.ts);
-  решения о форме — [ADR-0011](docs/adr/0011-a-command-is-a-script.md) и
+- **Файлы и HTTP — как в Node:** `require("fs")` (`readFileSync`, `writeFileSync`,
+  `mkdirSync`, `existsSync`, `readdirSync`, `statSync`), глобальные `Buffer` и `fetch`.
+  `fetch` синхронный и требует `timeout`, `maxBytes` и `redirect`; токен YouTrack он не
+  отправляет никуда. Скачанное прикладывается к задаче через
+  `attachments.create({ owner, name, content, fields })`.
+- Справочник, декларации для редактора и скилл для агента, который пишет скрипт, —
+  [`skills/ytrack-scripts/`](skills/ytrack-scripts/); решения о форме —
+  [ADR-0011](docs/adr/0011-a-command-is-a-script.md) и
   [ADR-0012](docs/adr/0012-the-script-api.md).
 
 Скрипт работает синхронно, без `await`. Общий код кладётся в модуль того же каталога

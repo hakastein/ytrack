@@ -38,6 +38,8 @@ const (
 	attributesParam
 	// "all" or the count of the latest comments.
 	commentsParam
+	// A string, written in UTF-8, or the bytes of a Buffer, a Uint8Array or an ArrayBuffer.
+	bytesParam
 )
 
 type param struct {
@@ -53,6 +55,7 @@ type function struct {
 	params []param
 	// A script that called a function which writes exits 2 on any fault after it.
 	writes bool
+	refuse func(opts options) string
 	// bind refuses as bad_usage what the SDK would take for another call, before the login is looked up.
 	bind binder
 }
@@ -89,6 +92,11 @@ func (o options) optional(name string) *string {
 func (o options) int(name string) int {
 	number, _ := o[name].(int)
 	return number
+}
+
+func (o options) bytes(name string) []byte {
+	content, _ := o[name].([]byte)
+	return content
 }
 
 func (o options) strings(name string) []string {
@@ -194,6 +202,11 @@ func (e *engine) options(name string, f function, given []goja.Value) options {
 				signature(f)))))
 		}
 	}
+	if f.refuse != nil {
+		if reason := f.refuse(opts); reason != "" {
+			panic(e.throw(e.callerFault(fmt.Sprintf("%s: %s", name, reason))))
+		}
+	}
 	return opts
 }
 
@@ -212,6 +225,14 @@ func readParam(kind paramKind, value goja.Value) (any, string) {
 		return readFieldValues(value)
 	case attributesParam:
 		return readAttributes(value)
+	case bytesParam:
+		if goja.IsString(value) {
+			return []byte(value.String()), ""
+		}
+		if content, isBytes := bytesOf(value); isBytes {
+			return content, ""
+		}
+		return nil, "is neither a string nor a Buffer, a Uint8Array or an ArrayBuffer"
 	case commentsParam:
 		if goja.IsString(value) && value.String() == everyComment {
 			return youtrack.AllComments(), ""

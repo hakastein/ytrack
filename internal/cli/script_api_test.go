@@ -309,7 +309,7 @@ func TestScriptRequiresNothingButAModuleOfItsRootAndAVersionOfTheAPI(t *testing.
 		{name: "a module outside the root", files: map[string]string{"greet.js": lines(`require("../outside.js");`, greeting)}},
 		{name: "a version of the API ytrack does not have",
 			files: map[string]string{"greet.js": lines(`require("ytrack/v2");`, greeting)}},
-		{name: "a module by name", files: map[string]string{"greet.js": lines(`require("fs");`, greeting)}},
+		{name: "a module by name", files: map[string]string{"greet.js": lines(`require("child_process");`, greeting)}},
 		{name: "a command script", files: map[string]string{"greet.js": lines(`require("./other.js");`, greeting),
 			"other.js": greeting}},
 		{name: "a module with an unreadable declaration", files: map[string]string{
@@ -433,6 +433,56 @@ func TestScriptReadsTheModelOfTheSDK(t *testing.T) {
 			got := runScripts(t, fake.Serve(t, fake.JSON(http.StatusOK, tc.answer)), running(tc.body), "run")
 
 			assert.Equal(t, outcome{stdout: tc.want}, got)
+		})
+	}
+}
+
+func TestScriptAttachesBytesItHolds(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{name: "a buffer", content: `Buffer.from("ytrack")`},
+		{name: "a string", content: `"ytrack"`},
+		{name: "an array buffer", content: `new Uint8Array([121, 116, 114, 97, 99, 107]).buffer`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := fake.Serve(t, fake.JSON(http.StatusOK, filed("note.txt", 6)))
+			body := `exports.command = () => require("ytrack/v1").attachments.create({ owner: "DEV-1", name: "note.txt", ` +
+				`content: ` + tc.content + `, fields: "id,name" });`
+
+			got := runScripts(t, server, running(body), "run")
+
+			assert.Equal(t, outcome{stdout: "id: \"12-9\"\nname: \"note.txt\"\n"}, got)
+			sent := requireSentFile(t, server)
+			assert.Equal(t, "note.txt", sent.file)
+			assert.Equal(t, "ytrack", sent.content)
+		})
+	}
+}
+
+func TestScriptAttachesEitherAFileOrBytes(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		call string
+	}{
+		{name: "both a path and content", call: `{ owner: "DEV-1", path: "a.txt", name: "a.txt", content: "x", fields: "id" }`},
+		{name: "content without a name", call: `{ owner: "DEV-1", content: "x", fields: "id" }`},
+		{name: "neither a path nor content", call: `{ owner: "DEV-1", name: "a.txt", fields: "id" }`},
+		{name: "content of no kind of bytes", call: `{ owner: "DEV-1", name: "a.txt", content: 1, fields: "id" }`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			body := `exports.command = () => require("ytrack/v1").attachments.create(` + tc.call + `);`
+
+			got := runScripts(t, fake.ServeNothing(t), running(body), "run")
+
+			assert.Equal(t, "script_failed", requireFault(t, got).code)
 		})
 	}
 }

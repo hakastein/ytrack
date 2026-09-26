@@ -132,8 +132,13 @@ declare module "ytrack/v1" {
 
   export const attachments: {
     list(call: Page & { owner: string }): Answer;
-    // path is a local file, relative to the working directory of ytrack.
-    create(call: { owner: string; path: string; fields: string }): Answer;
+    // Either path, a local file relative to the working directory of ytrack, or content under name; name given with
+    // path renames the file. A string content is written in UTF-8.
+    create(
+      call:
+        | { owner: string; path: string; name?: string; fields: string }
+        | { owner: string; name: string; content: string | Uint8Array | ArrayBuffer; fields: string },
+    ): Answer;
     delete(call: { owner: string; id: string }): Answer;
   };
 
