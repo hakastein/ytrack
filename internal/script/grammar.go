@@ -1,25 +1,102 @@
-package cli
+package script
 
 import (
+	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/hakastein/go-youtrack"
-	"github.com/spf13/cobra"
 
 	"github.com/hakastein/ytrack/internal/diag"
 	"github.com/hakastein/ytrack/internal/render"
 )
 
-// The module reads an empty string as a part the call does not give, so a flag given empty is refused here.
-func rejectEmptyFlag(cmd *cobra.Command, flag, value, because string) *diag.Fault {
-	if !cmd.Flags().Changed(flag) || value != "" {
+// The SDK reads an empty string as a part the call does not give, so a flag given empty is refused here.
+func rejectEmpty(opts options, flag, because string) *diag.Fault {
+	if !opts.given(flag) || opts.string(flag) != "" {
 		return nil
 	}
 	return &diag.Fault{Code: youtrack.CodeBadUsage, Message: "--" + flag + " " + because}
 }
+
+func rejectNoQuery(opts options, carries, thing string) *diag.Fault {
+	if opts.given(queryFlag) {
+		return nil
+	}
+	message := fmt.Sprintf(`no --query was given: it carries %s, and --query "" finds every %s`, carries, thing)
+	return &diag.Fault{Code: youtrack.CodeBadUsage, Message: message}
+}
+
+func requireFlag(opts options, flag, message string) *diag.Fault {
+	if opts.given(flag) {
+		return nil
+	}
+	return &diag.Fault{Code: youtrack.CodeBadUsage, Message: message}
+}
+
+// The SDK reads a limit of 0 as its own default page.
+func checkPage(opts options) *diag.Fault {
+	if limit := opts.int(limitFlag); limit < 1 {
+		message := fmt.Sprintf("--limit %d: a page holds at least one record", limit)
+		return &diag.Fault{Code: youtrack.CodeBadUsage, Message: message}
+	}
+	return nil
+}
+
+func pageOf(opts options) youtrack.Page {
+	return youtrack.Page{Limit: opts.int(limitFlag), Skip: opts.int(skipFlag)}
+}
+
+const everyComment = "all"
+
+func commentsOf(opts options) (youtrack.Comments, *diag.Fault) {
+	text := opts.string(commentsFlag)
+	if text == everyComment {
+		return youtrack.AllComments(), nil
+	}
+	last, err := strconv.Atoi(text)
+	var because string
+	switch {
+	case errors.Is(err, strconv.ErrRange):
+		because = "is a larger number than there could ever be comments"
+	case err != nil:
+		because = "is neither " + everyComment + " nor a whole number of comments"
+	case last < 0:
+		because = "is negative, and a number of comments is not"
+	default:
+		return youtrack.LastComments(last), nil
+	}
+	message := fmt.Sprintf("--%s %s %s", commentsFlag, render.Quote(text), because)
+	return youtrack.Comments{}, &diag.Fault{Code: youtrack.CodeBadUsage, Message: message}
+}
+
+const (
+	queryFlag        = "query"
+	fieldsFlag       = "fields"
+	limitFlag        = "limit"
+	skipFlag         = "skip"
+	commentsFlag     = "comments"
+	summaryFlag      = "summary"
+	descriptionFlag  = "description"
+	contentFlag      = "content"
+	textFlag         = "text"
+	fieldFlag        = "field"
+	attributeFlag    = "attribute"
+	clearFlag        = "clear"
+	parentFlag       = "parent"
+	nameFlag         = "name"
+	visibleForFlag   = "visible-for"
+	updateableByFlag = "updateable-by"
+	taggableByFlag   = "taggable-by"
+	ownedByFlag      = "owned-by"
+	dateFlag         = "date"
+	typeFlag         = "type"
+	durationFlag     = "duration"
+	categoryFlag     = "category"
+)
 
 const (
 	emptyDescription = "is empty, and YouTrack keeps an empty description as none: leave the flag out to file the " +

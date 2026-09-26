@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const apiHead = `const { project, fail, warn } = require("ytrack/v1");`
+const apiHead = `const { project, comment, issue, fail, warn } = require("ytrack/v1");`
 
 func running(body string) map[string]string {
 	return map[string]string{"run.js": lines(apiHead, `exports.command = { short: "Run", long: "Run it." };`, body)}
@@ -153,6 +153,46 @@ func TestScriptFailsWithACodeOfTheDictionary(t *testing.T) {
 	}
 }
 
+func TestFaultAfterAWriteOfAScriptExitsTwo(t *testing.T) {
+	t.Parallel()
+	const written = `comment.create("DEV-7", { text: "Text", fields: "id,text" })`
+	tests := []struct {
+		name string
+		body string
+		want faultDocument
+		exit int
+	}{
+		{name: "a fault after a write", body: `exports.run = () => { ` + written + `; fail("rejected", "no"); };`,
+			want: faultDocument{code: "rejected"}, exit: 2},
+		{name: "a defect after a write", body: `exports.run = () => { ` + written + `; missing(); };`,
+			want: faultDocument{code: "script_failed"}, exit: 2},
+		{name: "a fault after a read", body: `exports.run = () => { project.show("DEV", { fields: "shortName" }); ` +
+			`fail("rejected", "no"); };`,
+			want: faultDocument{code: "rejected"}, exit: 1},
+		{name: "a fault after a write refused before the network",
+			body: `exports.run = () => { try { comment.create("DEV-7", { fields: "id" }); } catch (e) {} ` +
+				`fail("rejected", "no"); };`,
+			want: faultDocument{code: "rejected"}, exit: 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost {
+					fake.JSON(http.StatusOK, createdComment("7-12", "Text"))(w, r)
+					return
+				}
+				fake.JSON(http.StatusOK, listedDEV)(w, r)
+			})
+
+			got := runScripts(t, server, running(tc.body), "run")
+
+			assert.Equal(t, tc.exit, got.code)
+			assert.Equal(t, tc.want.code, requireFaultDocument(t, got).code)
+		})
+	}
+}
+
 func TestWarningOfAScriptGoesToStderr(t *testing.T) {
 	t.Parallel()
 	body := `exports.run = () => { warn("unknown_name", "no such tag", { name: "urgent" }); return { done: true }; };`
@@ -180,6 +220,10 @@ func TestDefectOfAScriptIsScriptFailedAtItsLine(t *testing.T) {
 		{name: "a flag left out", body: `exports.run = () => project.show("DEV");`, column: 33},
 		{name: "a flag it does not take", body: `exports.run = () => project.show("DEV", { fields: "id", limit: 1 });`, column: 33},
 		{name: "a flag of the wrong type", body: `exports.run = () => project.list({ fields: "id", limit: "1", skip: 0 });`, column: 33},
+		{name: "a repeatable flag that is no array",
+			body: `exports.run = () => issue.update("DEV-1", { fields: "id", field: "Type=Bug" });`, column: 33},
+		{name: "a repeatable flag that holds no string",
+			body: `exports.run = () => issue.update("DEV-1", { fields: "id", field: [1] });`, column: 33},
 		{name: "fields that add to the default", body: `exports.run = () => project.show("DEV", { fields: "+id" });`, column: 33},
 		{name: "fields that name none", body: `exports.run = () => project.show("DEV", { fields: "" });`, column: 33},
 		{name: "a code out of the dictionary", body: `exports.run = () => fail("broken", "no");`, column: 25},

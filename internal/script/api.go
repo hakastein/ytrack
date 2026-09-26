@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/dop251/goja"
@@ -23,24 +24,43 @@ var versions = map[int]func(e *engine) *goja.Object{
 }
 
 type param struct {
-	name   string
-	kind   FlagType
-	refuse func(value any) string
+	name     string
+	kind     FlagType
+	optional bool
+	refuse   func(value any) string
 }
+
+type call func(ctx context.Context, c *youtrack.Client) (*youtrack.Node, error)
 
 type function struct {
 	args   []string
 	params []param
-	// Refused as bad_usage before the login is looked up.
-	check func(opts options) *diag.Fault
-	call  func(ctx context.Context, c *youtrack.Client, args []string, opts options) (*youtrack.Node, error)
+	// A script that called a function which writes exits 2 on any fault after it.
+	writes bool
+	// bind refuses as bad_usage what the command refuses, before the login is looked up.
+	bind binder
 }
 
+type binder func(args []string, opts options) (call, *diag.Fault)
+
 type options map[string]any
+
+func (o options) given(name string) bool {
+	_, given := o[name]
+	return given
+}
 
 func (o options) string(name string) string {
 	text, _ := o[name].(string)
 	return text
+}
+
+func (o options) optional(name string) *string {
+	text, given := o[name].(string)
+	if !given {
+		return nil
+	}
+	return &text
 }
 
 func (o options) int(name string) int {
@@ -48,51 +68,9 @@ func (o options) int(name string) int {
 	return number
 }
 
-func v1(e *engine) *goja.Object {
-	api := e.vm.NewObject()
-	e.define(api, "project", e.entity("project", map[string]function{
-		"show": {
-			args:   []string{"code"},
-			params: []param{fieldsParam()},
-			call: func(ctx context.Context, c *youtrack.Client, args []string, opts options) (*youtrack.Node, error) {
-				return c.Projects.Show(ctx, args[0], &youtrack.ShowProjectOptions{Fields: opts.string("fields")})
-			},
-		},
-		"list": {
-			params: []param{fieldsParam(), {name: "limit", kind: IntFlag}, {name: "skip", kind: IntFlag}},
-			check:  checkPage,
-			call: func(ctx context.Context, c *youtrack.Client, _ []string, opts options) (*youtrack.Node, error) {
-				page := youtrack.Page{Limit: opts.int("limit"), Skip: opts.int("skip")}
-				return c.Projects.List(ctx, &youtrack.ListProjectsOptions{Fields: opts.string("fields"), Page: page})
-			},
-		},
-	}))
-	e.define(api, "fail", e.vm.ToValue(e.fail))
-	e.define(api, "warn", e.vm.ToValue(e.warn))
-	if err := api.DefineAccessorProperty("address", e.vm.ToValue(e.address), nil, goja.FLAG_FALSE, goja.FLAG_TRUE); err != nil {
-		panic(err)
-	}
-	return api
-}
-
-// The answer of a function must not change when ytrack changes the default fields of a command.
-func fieldsParam() param {
-	return param{name: "fields", kind: StringFlag, refuse: func(value any) string {
-		expression := strings.TrimSpace(value.(string))
-		if expression == "" || strings.HasPrefix(expression, "+") {
-			return "names the default fields, and a function has no default: it takes the whole expression"
-		}
-		return ""
-	}}
-}
-
-// The module reads a limit of 0 as its own default page.
-func checkPage(opts options) *diag.Fault {
-	if limit := opts.int("limit"); limit < 1 {
-		message := fmt.Sprintf("--limit %d: a page holds at least one record", limit)
-		return &diag.Fault{Code: youtrack.CodeBadUsage, Message: message}
-	}
-	return nil
+func (o options) strings(name string) []string {
+	texts, _ := o[name].([]string)
+	return texts
 }
 
 func (e *engine) entity(name string, functions map[string]function) *goja.Object {
@@ -109,21 +87,21 @@ func (e *engine) entity(name string, functions map[string]function) *goja.Object
 }
 
 func (e *engine) commandFunction(name string, f function) func(goja.FunctionCall) goja.Value {
-	return func(call goja.FunctionCall) goja.Value {
-		args, opts := e.arguments(name, f, call.Arguments)
-		if f.check != nil {
-			if fault := f.check(opts); fault != nil {
-				panic(e.throw(fault))
-			}
+	return func(given goja.FunctionCall) goja.Value {
+		args, opts := e.arguments(name, f, given.Arguments)
+		bound, fault := f.bind(args, opts)
+		if fault != nil {
+			panic(e.throw(fault))
 		}
-		node, fault := e.host.Call(e.ctx, func(ctx context.Context, c *youtrack.Client) (*youtrack.Node, error) {
-			return f.call(ctx, c, args, opts)
-		})
+		node, fault := e.host.Call(e.ctx, bound)
 		if fault != nil {
 			if fault.MayHaveWritten() {
 				e.wrote = true
 			}
 			panic(e.throw(fault))
+		}
+		if f.writes {
+			e.wrote = true
 		}
 		return e.value(node)
 	}
@@ -149,7 +127,7 @@ func (e *engine) arguments(name string, f function, given []goja.Value) ([]strin
 		opts = e.options(name, f, given[len(f.args)])
 	}
 	for _, p := range f.params {
-		if _, isGiven := opts[p.name]; !isGiven {
+		if !p.optional && !opts.given(p.name) {
 			panic(e.throw(e.callerFault(fmt.Sprintf("%s was not given %s, and a function has no default values",
 				name, p.name))))
 		}
@@ -205,11 +183,14 @@ func (e *engine) options(name string, f function, value goja.Value) options {
 
 // An int is 32 bits, as the int flag of a declaration is, so whatever the command line gives a function takes.
 func readParam(kind FlagType, value goja.Value) (any, string) {
-	if kind == StringFlag {
+	switch kind {
+	case StringFlag:
 		if !goja.IsString(value) {
 			return nil, "is no string"
 		}
 		return value.String(), ""
+	case StringsFlag:
+		return readStrings(value)
 	}
 	if !goja.IsNumber(value) {
 		return nil, "is no number"
@@ -219,6 +200,22 @@ func readParam(kind FlagType, value goja.Value) (any, string) {
 		return nil, "is no whole number of 32 bits"
 	}
 	return int(number), ""
+}
+
+func readStrings(value goja.Value) (any, string) {
+	list, isObject := value.(*goja.Object)
+	if !isObject || list.ClassName() != "Array" {
+		return nil, "is no array of strings"
+	}
+	texts := []string{}
+	for index := range list.Get("length").ToInteger() {
+		item := list.Get(strconv.FormatInt(index, 10))
+		if !goja.IsString(item) {
+			return nil, "is no array of strings"
+		}
+		texts = append(texts, item.String())
+	}
+	return texts, ""
 }
 
 type faultValue struct {

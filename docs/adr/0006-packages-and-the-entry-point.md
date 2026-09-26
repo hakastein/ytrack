@@ -13,8 +13,8 @@ status: accepted, partly implemented
   файл, потому что граница пакета заставляет экспортировать то, что должно быть внутри.
   ```
   cmd/ytrack             процесс: вызов, сигналы, штамп бинарника, os.Exit
-  internal/cli           cobra, Run, вход, грамматика флагов, вызов SDK, команды на Go
-  internal/script        движок скриптов команд, объявление, корни, API скриптов
+  internal/cli           cobra, Run, вход, auth, completion, протокол автодополнения
+  internal/script        движок скриптов команд, объявление, корни, API скриптов, грамматика флагов
   internal/render        Renderer и YAML документа youtrack.Node
   internal/diag          Fault, перевод ошибки SDK, поток stderr
   ```
@@ -28,8 +28,9 @@ status: accepted, partly implemented
   `youtrack.NewClient(адрес, токен, youtrack.WithMetadataCache(каталог))`.
 - **Импорты:** `cmd/ytrack → cli → script → youtrack, render, diag`; `cli → youtrack, render, diag`;
   `diag → render, youtrack`; `render → youtrack`. `fake` SDK импортируют только тесты `cli`.
-- **CLI держит только грамматику флагов** (`internal/cli/write.go`): `Name=value` у `--field` и `--attribute`, слова
-  `--clear`, период `PT1H30M`, `--comments`, `--limit`, отказ на пустом флаге, который SDK прочёл бы как «не дан»
+- **ytrack держит только грамматику флагов,** и проверяет её функция команды API скриптов
+  (`internal/script/grammar.go`): `Name=value` у `--field` и `--attribute`, слова `--clear`, период `PT1H30M`,
+  `--comments`, `--limit`, отказ на пустом флаге, который SDK прочёл бы как «не дан»
   ([ADR-0002](0002-field-metadata-is-a-struct.md), [ADR-0010](0010-a-list-page.md)). Остальные аргументы уходят в
   SDK как написаны.
 - **Ограничителя частоты нет, пока запросы идут по одному.**
