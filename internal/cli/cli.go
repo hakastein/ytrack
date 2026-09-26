@@ -128,9 +128,7 @@ func newTagRemove(env []string, stdout io.Writer, renderer render.Renderer) *cob
 	})
 	remove.Args = cobra.ExactArgs(1)
 	remove.Short = "Untag an issue or article"
-	remove.Long = "Untag an issue or article. The tag stays.\n\n" +
-		example(youtrack.NewMap(youtrack.Pair{Key: "idReadable", Value: youtrack.NewString("DEV-1")},
-			youtrack.Pair{Key: "removed", Value: youtrack.NewMap(youtrack.Pair{Key: "name", Value: youtrack.NewString("Tag")}, youtrack.Pair{Key: "owner", Value: byLogin()})}))
+	remove.Long = "Untag an issue or article. The tag stays."
 	remove.Flags().StringVar(&name, nameFlag, "", "tag `name`")
 	rejectRepeat(remove.Flags().Lookup(nameFlag))
 	ownedByFlagOf(remove, &ownedBy)
@@ -149,9 +147,7 @@ func newTagAdd(env []string, stdout io.Writer, renderer render.Renderer) *cobra.
 	})
 	add.Args = cobra.ExactArgs(1)
 	add.Short = "Tag an issue or article"
-	add.Long = "Tag an issue or article.\n\n" +
-		example(youtrack.NewMap(youtrack.Pair{Key: "idReadable", Value: youtrack.NewString("DEV-1")},
-			youtrack.Pair{Key: "added", Value: youtrack.NewMap(youtrack.Pair{Key: "name", Value: youtrack.NewString("Tag")}, youtrack.Pair{Key: "owner", Value: byLogin()})}))
+	add.Long = "Tag an issue or article."
 	add.Flags().StringVar(&name, nameFlag, "", "tag `name`")
 	rejectRepeat(add.Flags().Lookup(nameFlag))
 	ownedByFlagOf(add, &ownedBy)
@@ -169,10 +165,6 @@ func newTagCreate(env []string, stdout io.Writer, renderer render.Renderer) *cob
 	create.Args = cobra.ExactArgs(0)
 	create.Short = "Create a tag"
 	create.Long = "Create a tag owned by you.\n\n" +
-		example(youtrack.NewMap(youtrack.Pair{Key: "name", Value: youtrack.NewString("Tag")}, youtrack.Pair{Key: "owner", Value: byLogin()},
-			youtrack.Pair{Key: "readSharingSettings", Value: sharedWith(named("Group"))},
-			youtrack.Pair{Key: "updateSharingSettings", Value: sharedWith()},
-			youtrack.Pair{Key: "tagSharingSettings", Value: sharedWith()})) + "\n\n" +
 		"Without flags only the owner sees the tag. Only --taggable-by lets a group hang it."
 	create.Flags().StringVar(&name, nameFlag, "", "tag `name`")
 	rejectRepeat(create.Flags().Lookup(nameFlag))
@@ -199,7 +191,6 @@ func newTagDelete(env []string, stdout io.Writer, renderer render.Renderer) *cob
 	remove.Args = cobra.ExactArgs(0)
 	remove.Short = "Delete a tag"
 	remove.Long = "Delete a tag everywhere.\n\n" +
-		example(youtrack.NewMap(youtrack.Pair{Key: "name", Value: youtrack.NewString("Tag")}, youtrack.Pair{Key: "owner", Value: byLogin()})) + "\n\n" +
 		"An administrator's token deletes a tag of another user as well."
 	remove.Flags().StringVar(&name, nameFlag, "", "tag `name`")
 	rejectRepeat(remove.Flags().Lookup(nameFlag))
@@ -222,9 +213,7 @@ func newTagList(env []string, stdout io.Writer, renderer render.Renderer) *cobra
 	})
 	list.Args = cobra.ExactArgs(0)
 	list.Short = "List tags"
-	list.Long = "List tags you own or that are shared with you. Names may clash across owners.\n\n" +
-		example(listed(1, false, "tags", youtrack.NewMap(youtrack.Pair{Key: "name", Value: youtrack.NewString("Tag")}, youtrack.Pair{Key: "owner", Value: byLogin()},
-			youtrack.Pair{Key: "readSharingSettings", Value: sharedWith(named("Group"))})))
+	list.Long = "List tags you own or that are shared with you. Names may clash across owners."
 	fieldsFlag(list, &fields, youtrack.TagListFields)
 	pageFlags(list, &page, "tags")
 	return list
@@ -241,7 +230,6 @@ func newLink(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Co
 	list.Short = "List links of an issue"
 	list.Long = "List links of an issue by phrase.\n\n" +
 		"A phrase reads from this issue to the linked ones.\n\n" +
-		example(linksOf(2)) + "\n\n" +
 		"--fields applies to the linked issues."
 	fieldsFlag(list, &listFields, youtrack.LinkListFields)
 
@@ -255,8 +243,7 @@ func newLink(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Co
 	add.Short = "Link two issues"
 	add.Long = "Link two issues; prints the links of the first.\n\n" +
 		"<phrase> reads from the first issue to the second, such as \"depends on\" or \"is required for\": " +
-		"ytrack link add DEV-1 \"depends on\" DEV-2.\n\n" +
-		example(linksOf(1))
+		"ytrack link add DEV-1 \"depends on\" DEV-2."
 	fieldsFlag(add, &addFields, youtrack.LinkListFields)
 
 	remove := newCommand("remove <id> <phrase> <id>", func(cmd *cobra.Command, args []string) *diag.Fault {
@@ -268,10 +255,7 @@ func newLink(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Co
 	remove.Short = "Unlink two issues"
 	remove.Long = "Unlink two issues.\n\n" +
 		"A link can be named from either end: DEV-1 \"depends on\" DEV-2 and DEV-2 \"is required for\" DEV-1 remove " +
-		"the same link. A state a workflow set when the link was made stays.\n\n" +
-		example(youtrack.NewMap(youtrack.Pair{Key: "idReadable", Value: youtrack.NewString("DEV-1")},
-			youtrack.Pair{Key: "removed", Value: youtrack.NewMap(youtrack.DataPair("depends on",
-				youtrack.NewList(youtrack.NewMap(youtrack.Pair{Key: "idReadable", Value: youtrack.NewString("DEV-2")}))))}))
+		"the same link. A state a workflow set when the link was made stays."
 
 	link := newCommand("link", requireSubcommand)
 	link.Short = "Manage issue links"
@@ -308,8 +292,7 @@ func newArticleCreate(env []string, stdout io.Writer, renderer render.Renderer) 
 	})
 	create.Args = cobra.ExactArgs(1)
 	create.Short = "Create an article"
-	create.Long = "Create an article in a project.\n\n" +
-		example(articleExample(false))
+	create.Long = "Create an article in a project."
 	create.Flags().StringVar(&summary, summaryFlag, "", "`title`")
 	rejectRepeat(create.Flags().Lookup(summaryFlag))
 	create.Flags().StringVar(&content, contentFlag, "", "article `text`")
@@ -337,8 +320,7 @@ func newArticleUpdate(env []string, stdout io.Writer, renderer render.Renderer) 
 	})
 	update.Args = cobra.ExactArgs(1)
 	update.Short = "Update an article"
-	update.Long = "Update an article; unflagged parts stay.\n\n" +
-		example(articleExample(false))
+	update.Long = "Update an article; unflagged parts stay."
 	update.Flags().StringVar(&summary, summaryFlag, "", "`title`")
 	rejectRepeat(update.Flags().Lookup(summaryFlag))
 	update.Flags().StringVar(&content, contentFlag, "", "article `text`")
@@ -358,8 +340,7 @@ func newArticleDelete(env []string, stdout io.Writer, renderer render.Renderer) 
 	})
 	del.Args = cobra.ExactArgs(1)
 	del.Short = "Delete an article with its children"
-	del.Long = "Delete an article with its children.\n\n" +
-		example(youtrack.NewMap(youtrack.Pair{Key: "idReadable", Value: youtrack.NewString("DEV-A-1")}))
+	del.Long = "Delete an article with its children."
 	return del
 }
 
@@ -376,8 +357,6 @@ func newArticleList(env []string, stdout io.Writer, renderer render.Renderer) *c
 	list.Args = cobra.ExactArgs(0)
 	list.Short = "Search articles"
 	list.Long = "Search articles.\n\n" +
-		example(listed(1, false, "articles", youtrack.NewMap(youtrack.Pair{Key: "idReadable", Value: youtrack.NewString("DEV-A-1")},
-			youtrack.Pair{Key: "summary", Value: youtrack.NewString("Summary")}))) + "\n\n" +
 		"--query takes the search attributes of articles: project or in, title, content, author, article id, tag, " +
 		"created, updated, updater, has, sort by. An attribute of issues, such as summary, finds nothing, and a query " +
 		"the server cannot parse finds every article, neither with an error.\n\n" +
@@ -419,8 +398,7 @@ func newArticleShow(env []string, stdout io.Writer, renderer render.Renderer) *c
 	})
 	show.Args = cobra.ExactArgs(1)
 	show.Short = "Show an article"
-	show.Long = "Show an article with comments, oldest first.\n\n" +
-		example(articleExample(true))
+	show.Long = "Show an article with comments, oldest first."
 	fieldsFlag(show, &fields, youtrack.ArticleShowFields)
 	commentsFlag(show, &comments)
 	return show
@@ -444,9 +422,7 @@ func newAttachmentDelete(env []string, stdout io.Writer, renderer render.Rendere
 	remove.Short = "Delete an attachment"
 	remove.Long = "Delete an attachment.\n\n" +
 		"<owner> is a readable id such as DEV-1 or DEV-A-1. <id> is the attachment id such as 12-1 that ytrack " +
-		"attachment list prints, not a file name. A file attached to a comment belongs to the issue.\n\n" +
-		example(youtrack.NewMap(youtrack.Pair{Key: "id", Value: youtrack.NewString("12-1")}, youtrack.Pair{Key: "name", Value: youtrack.NewString("file.txt")},
-			youtrack.Pair{Key: "issue", Value: youtrack.NewMap(youtrack.Pair{Key: "idReadable", Value: youtrack.NewString("DEV-1")})}))
+		"attachment list prints, not a file name. A file attached to a comment belongs to the issue."
 	return remove
 }
 
@@ -467,8 +443,7 @@ func newAttachmentCreate(env []string, stdout io.Writer, renderer render.Rendere
 	create.Annotations = map[string]string{completesPathAt: "2"}
 	create.Short = "Attach a file"
 	create.Long = "Attach a local file.\n\n" +
-		"<owner> is a readable id such as DEV-1 or DEV-A-1.\n\n" +
-		example(attachmentExample())
+		"<owner> is a readable id such as DEV-1 or DEV-A-1."
 	fieldsFlag(create, &fields, youtrack.AttachmentListFields)
 	return create
 }
@@ -486,7 +461,6 @@ func newAttachmentList(env []string, stdout io.Writer, renderer render.Renderer)
 	list.Long = "List attachments, including those of comments; " +
 		"--fields +comment(id) says which comment.\n\n" +
 		"<owner> is a readable id such as DEV-1 or DEV-A-1.\n\n" +
-		example(listed(1, false, "attachments", attachmentExample())) + "\n\n" +
 		"url downloads the file without a token for up to three days: keep it as secret as a token."
 	fieldsFlag(list, &fields, youtrack.AttachmentListFields)
 	pageFlags(list, &page, "attachments")
@@ -513,11 +487,6 @@ func newCommentList(env []string, stdout io.Writer, renderer render.Renderer) *c
 	list.Short = "List comments"
 	list.Long = "List comments, oldest first.\n\n" +
 		"<owner> is a readable id such as DEV-1 or DEV-A-1.\n\n" +
-		example(listed(2, false, "comments",
-			youtrack.NewMap(youtrack.Pair{Key: "id", Value: youtrack.NewString("7-1")}, youtrack.Pair{Key: "author", Value: byLogin()}, youtrack.Pair{Key: "created", Value: moment()},
-				youtrack.Pair{Key: "text", Value: youtrack.NewString("Text")}, youtrack.Pair{Key: "deleted", Value: youtrack.NewBool(false)}),
-			youtrack.NewMap(youtrack.Pair{Key: "id", Value: youtrack.NewString("7-2")}, youtrack.Pair{Key: "author", Value: byLogin()}, youtrack.Pair{Key: "created", Value: moment()},
-				youtrack.Pair{Key: "text", Value: youtrack.NewNull()}, youtrack.Pair{Key: "deleted", Value: youtrack.NewBool(true)}))) + "\n\n" +
 		"Comments of an article have no deleted. --limit keeps the oldest; ytrack issue show --comments 5 prints " +
 		"the latest five."
 	fieldsFlag(list, &fields, youtrack.CommentListFields)
@@ -545,7 +514,7 @@ func newCommentCreate(env []string, stdout io.Writer, renderer render.Renderer) 
 	create.Short = "Add a comment"
 	create.Long = "Add a comment.\n\n" +
 		"<owner> is a readable id such as DEV-1 or DEV-A-1.\n\n" +
-		example(commentExample(youtrack.NewNull())) + "\n\n" + commentOwner
+		commentOwner
 	create.Flags().StringVar(&text, textFlag, "", "comment `text`")
 	rejectRepeat(create.Flags().Lookup(textFlag))
 	fieldsFlag(create, &fields, youtrack.CommentFields)
@@ -567,7 +536,7 @@ func newCommentUpdate(env []string, stdout io.Writer, renderer render.Renderer) 
 	update.Long = "Replace a comment's text.\n\n" +
 		"<owner> is a readable id such as DEV-1 or DEV-A-1. <id> is the comment id such as 7-1 that ytrack comment " +
 		"list prints.\n\n" +
-		example(commentExample(moment())) + "\n\n" + commentOwner
+		commentOwner
 	update.Flags().StringVar(&text, textFlag, "", "comment `text`")
 	rejectRepeat(update.Flags().Lookup(textFlag))
 	fieldsFlag(update, &fields, youtrack.CommentFields)
@@ -584,8 +553,7 @@ func newCommentDelete(env []string, stdout io.Writer, renderer render.Renderer) 
 	del.Short = "Delete a comment"
 	del.Long = "Delete a comment.\n\n" +
 		"<owner> is a readable id such as DEV-1 or DEV-A-1. <id> is the comment id such as 7-1 that ytrack comment " +
-		"list prints.\n\n" +
-		example(youtrack.NewMap(youtrack.Pair{Key: "id", Value: youtrack.NewString("7-1")}))
+		"list prints."
 	return del
 }
 
@@ -609,11 +577,10 @@ func newIssueShow(env []string, stdout io.Writer, renderer render.Renderer) *cob
 	show.Args = cobra.ExactArgs(1)
 	show.Short = "Show an issue"
 	show.Long = "Show an issue with comments, oldest first.\n\n" +
-		example(issueExample(true)) + "\n\n" +
 		"Custom fields are named inside customFields by name or localized name, in any letter case, quoted where " +
 		"they hold a space: --fields '+customFields(Priority,\"Due Date\")'. A bare customFields prints every field " +
 		"that holds something; a named field is printed even when empty, and one the issue does not have is left out.\n\n" +
-		"Comments print these keys whatever --fields says, and deleted ones are left out."
+		"Comments print id, author(login), created and text whatever --fields says, and deleted ones are left out."
 	fieldsFlag(show, &fields, youtrack.IssueShowFields)
 	commentsFlag(show, &comments)
 	return show
@@ -633,9 +600,6 @@ func newIssueList(env []string, stdout io.Writer, renderer render.Renderer, stre
 	list.Args = cobra.ExactArgs(0)
 	list.Short = "Search issues"
 	list.Long = "Search issues.\n\n" +
-		example(listed(1, false, "issues", youtrack.NewMap(youtrack.Pair{Key: "idReadable", Value: youtrack.NewString("DEV-1")}, youtrack.Pair{Key: "summary", Value: youtrack.NewString("Summary")},
-			youtrack.Pair{Key: "customFields", Value: youtrack.NewMap(youtrack.DataPair("State", youtrack.NewString("Open")), youtrack.DataPair("Type", youtrack.NewString("Task")))},
-			youtrack.Pair{Key: "created", Value: moment()}))) + "\n\n" +
 		"Custom fields are named inside customFields by name or localized name, in any letter case, quoted where " +
 		"they hold a space: --fields '+customFields(Priority,\"Due Date\")'. A bare customFields prints every field " +
 		"that holds something; a named field is printed even when empty, and one the issue does not have is left out. " +
@@ -669,8 +633,7 @@ func newIssueCreate(env []string, stdout io.Writer, renderer render.Renderer) *c
 	})
 	create.Args = cobra.ExactArgs(1)
 	create.Short = "Create an issue"
-	create.Long = "Create an issue in a project.\n\n" +
-		example(issueExample(false))
+	create.Long = "Create an issue in a project."
 	create.Flags().StringVar(&summary, summaryFlag, "", "`title`")
 	rejectRepeat(create.Flags().Lookup(summaryFlag))
 	create.Flags().StringVar(&description, descriptionFlag, "", "`text` of the description")
@@ -700,8 +663,7 @@ func newIssueUpdate(env []string, stdout io.Writer, renderer render.Renderer) *c
 	update.Short = "Update an issue"
 	update.Long = "Update an issue; unflagged parts stay.\n\n" +
 		"--field on a field of several values leaves it holding exactly the values given, not the old ones plus " +
-		"them.\n\n" +
-		example(issueExample(false))
+		"them."
 	update.Flags().StringVar(&summary, summaryFlag, "", "`title`")
 	rejectRepeat(update.Flags().Lookup(summaryFlag))
 	update.Flags().StringVar(&description, descriptionFlag, "", "`text` of the description")
@@ -722,8 +684,7 @@ func newIssueDelete(env []string, stdout io.Writer, renderer render.Renderer) *c
 	})
 	del.Args = cobra.ExactArgs(1)
 	del.Short = "Delete an issue"
-	del.Long = "Delete an issue.\n\n" +
-		example(youtrack.NewMap(youtrack.Pair{Key: "idReadable", Value: youtrack.NewString("DEV-1")}))
+	del.Long = "Delete an issue."
 	return del
 }
 
@@ -738,15 +699,7 @@ func newActivity(env []string, stdout io.Writer, renderer render.Renderer) *cobr
 	})
 	list.Args = cobra.ExactArgs(1)
 	list.Short = "List activities of an issue"
-	list.Long = "List activities of an issue, newest first.\n\n" +
-		example(listed(uncounted, true, "activities",
-			youtrack.NewMap(youtrack.Pair{Key: "timestamp", Value: moment()}, youtrack.Pair{Key: "author", Value: byLogin()}, youtrack.Pair{Key: "category", Value: youtrack.NewString("CustomFieldCategory")},
-				youtrack.Pair{Key: "field", Value: youtrack.NewString("State")},
-				youtrack.Pair{Key: "added", Value: youtrack.NewList(youtrack.NewMap(youtrack.Pair{Key: "id", Value: youtrack.NewString("150-2")}, youtrack.Pair{Key: "name", Value: youtrack.NewString("Value")}))},
-				youtrack.Pair{Key: "removed", Value: youtrack.NewList(youtrack.NewMap(youtrack.Pair{Key: "id", Value: youtrack.NewString("150-1")}, youtrack.Pair{Key: "name", Value: youtrack.NewString("Value")}))}),
-			youtrack.NewMap(youtrack.Pair{Key: "timestamp", Value: moment()}, youtrack.Pair{Key: "author", Value: byLogin()}, youtrack.Pair{Key: "category", Value: youtrack.NewString("DescriptionCategory")},
-				youtrack.Pair{Key: "field", Value: youtrack.NewNull()},
-				youtrack.Pair{Key: "added", Value: youtrack.NewList(youtrack.NewString("New text"))}, youtrack.Pair{Key: "removed", Value: youtrack.NewList(youtrack.NewString("Old text"))}))) +
+	list.Long = "List activities of an issue, newest first." +
 		"\n\n" +
 		"Changes of a description, a summary or a comment carry the whole text before and after. Narrow with " +
 		"--category, or leave added and removed out of --fields.\n\n" +
@@ -799,9 +752,7 @@ func newUser(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Co
 	show.Args = cobra.ExactArgs(1)
 	show.Short = "Show a user"
 	show.Long = "Show a user.\n\n" +
-		"<login> is a login, not a full name; ytrack user list --query finds one by name.\n\n" +
-		example(youtrack.NewMap(youtrack.Pair{Key: "login", Value: youtrack.NewString("user")}, youtrack.Pair{Key: "fullName", Value: youtrack.NewString("User")},
-			youtrack.Pair{Key: "email", Value: youtrack.NewString("user@example.com")}, youtrack.Pair{Key: "banned", Value: youtrack.NewBool(false)}))
+		"<login> is a login, not a full name; ytrack user list --query finds one by name."
 	fieldsFlag(show, &showFields, youtrack.UserShowFields)
 
 	var listFields, search string
@@ -817,9 +768,7 @@ func newUser(env []string, stdout io.Writer, renderer render.Renderer) *cobra.Co
 	list.Args = cobra.ExactArgs(0)
 	list.Short = "Search users"
 	list.Long = "Search users by login or name prefix. " +
-		"An email address matches nothing.\n\n" +
-		example(listed(1, false, "users", youtrack.NewMap(youtrack.Pair{Key: "login", Value: youtrack.NewString("user")}, youtrack.Pair{Key: "fullName", Value: youtrack.NewString("User")},
-			youtrack.Pair{Key: "banned", Value: youtrack.NewBool(false)})))
+		"An email address matches nothing."
 	list.Flags().StringVar(&search, "query", "", "login or name prefix")
 	rejectRepeat(list.Flags().Lookup("query"))
 	fieldsFlag(list, &listFields, youtrack.UserListFields)
@@ -840,8 +789,7 @@ func newField(env []string, stdout io.Writer, renderer render.Renderer) *cobra.C
 	})
 	list.Args = cobra.ExactArgs(1)
 	list.Short = "List custom fields of a project"
-	list.Long = "List custom fields of a project.\n\n" +
-		example(listed(1, false, "fields", fieldOf()))
+	list.Long = "List custom fields of a project."
 	fieldsFlag(list, &listFields, youtrack.FieldListFields)
 
 	var showFields string
@@ -853,7 +801,6 @@ func newField(env []string, stdout io.Writer, renderer render.Renderer) *cobra.C
 	show.Args = cobra.ExactArgs(2)
 	show.Short = "Show a custom field"
 	show.Long = "Show a custom field with its allowed values.\n\n" +
-		example(fieldOf(youtrack.Pair{Key: "bundle", Value: youtrack.NewMap(youtrack.Pair{Key: "values", Value: youtrack.NewList(youtrack.NewMap(youtrack.Pair{Key: "name", Value: youtrack.NewString("Open")}, youtrack.Pair{Key: "archived", Value: youtrack.NewBool(false)}))})})) + "\n\n" +
 		"A field of users prints bundle.aggregatedUsers(login) instead, where an empty list means anyone."
 	fieldsFlag(show, &showFields, defaultFieldsDependOnFieldType)
 
@@ -881,10 +828,7 @@ func newTimeList(env []string, stdout io.Writer, renderer render.Renderer) *cobr
 	})
 	list.Args = cobra.ExactArgs(1)
 	list.Short = "List work items"
-	list.Long = "List work items, oldest first.\n\n" +
-		example(listed(1, false, "workItems", youtrack.NewMap(youtrack.Pair{Key: "id", Value: youtrack.NewString("150-1")}, youtrack.Pair{Key: "duration", Value: youtrack.NewString("PT1H30M")},
-			youtrack.Pair{Key: "type", Value: named("Type")}, youtrack.Pair{Key: "attributes", Value: youtrack.NewMap(youtrack.DataPair("Attribute", youtrack.NewString("Value")))},
-			youtrack.Pair{Key: "author", Value: byLogin()}, youtrack.Pair{Key: "date", Value: moment()}, youtrack.Pair{Key: "text", Value: youtrack.NewString("Text")}))) +
+	list.Long = "List work items, oldest first." +
 		"\n\n" +
 		"date is a day, printed as its midnight UTC."
 	fieldsFlag(list, &fields, youtrack.WorkItemListFields)
@@ -919,8 +863,7 @@ func newTimeCreate(env []string, stdout io.Writer, renderer render.Renderer) *co
 	create.Short = "Log time"
 	create.Long = "Log time as you.\n\n" +
 		"<duration> is an ISO 8601 period of hours and minutes, such as PT1H30M. --date is today if left out. " +
-		"--type is one of the workItemTypes ytrack project show prints, --attribute one of its attributes.\n\n" +
-		example(workItemExample())
+		"--type is one of the workItemTypes ytrack project show prints, --attribute one of its attributes."
 	create.Flags().StringVar(&date, dateFlag, "", "`day`, as in 2026-09-01")
 	rejectRepeat(create.Flags().Lookup(dateFlag))
 	create.Flags().StringVar(&workType, typeFlag, "", "work item type `name`")
@@ -961,8 +904,7 @@ func newTimeUpdate(env []string, stdout io.Writer, renderer render.Renderer) *co
 	update.Args = cobra.ExactArgs(2)
 	update.Short = "Update a work item"
 	update.Long = "Update a work item; unflagged parts stay.\n\n" +
-		"<id> is the work item id such as 150-1 that ytrack time list prints.\n\n" +
-		example(workItemExample())
+		"<id> is the work item id such as 150-1 that ytrack time list prints."
 	update.Flags().StringVar(&spent, durationFlag, "", "`duration`, as in PT1H30M")
 	rejectRepeat(update.Flags().Lookup(durationFlag))
 	update.Flags().StringVar(&date, dateFlag, "", "`day`, as in 2026-09-01")
@@ -986,8 +928,7 @@ func newTimeDelete(env []string, stdout io.Writer, renderer render.Renderer) *co
 	del.Args = cobra.ExactArgs(2)
 	del.Short = "Delete a work item"
 	del.Long = "Delete a work item.\n\n" +
-		"<id> is the work item id such as 150-1 that ytrack time list prints.\n\n" +
-		example(youtrack.NewMap(youtrack.Pair{Key: "id", Value: youtrack.NewString("150-1")}, youtrack.Pair{Key: "issue", Value: youtrack.NewMap(youtrack.Pair{Key: "idReadable", Value: youtrack.NewString("DEV-1")})}))
+		"<id> is the work item id such as 150-1 that ytrack time list prints."
 	return del
 }
 

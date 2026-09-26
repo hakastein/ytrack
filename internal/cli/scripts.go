@@ -150,9 +150,6 @@ func newScriptCommand(command *script.Command, env []string, stdout io.Writer, r
 			cmd.Long += fmt.Sprintf("\n  <%s>  %s", arg.Name, arg.Usage)
 		}
 	}
-	if command.Example != nil {
-		cmd.Long += "\n\n" + example(command.Example)
-	}
 	for _, flag := range command.Flags {
 		values[flag.Name] = declareFlag(cmd, flag)
 	}
