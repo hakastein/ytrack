@@ -7,7 +7,7 @@ exports.command = {
     { name: "issue", type: "string", usage: "readable id of the issue, such as DEV-1" },
   ],
   flags: [
-    { name: "category", type: "strings", usage: "`category` to print; repeatable; default all", choices: ["AttachmentsCategory", "CommentTextCategory", "CommentsCategory", "CustomFieldCategory", "DescriptionCategory", "IssueCreatedCategory", "IssueResolvedCategory", "LinksCategory", "SummaryCategory", "TagsCategory", "VcsChangeCategory", "WorkItemCategory"] },
+    { name: "category", type: "string", multiple: true, usage: "`category` to print; repeatable; default all", choices: ["AttachmentsCategory", "CommentTextCategory", "CommentsCategory", "CustomFieldCategory", "DescriptionCategory", "IssueCreatedCategory", "IssueResolvedCategory", "LinksCategory", "SummaryCategory", "TagsCategory", "VcsChangeCategory", "WorkItemCategory"] },
     { name: "fields", type: "fields", default: "timestamp,author(login),category,field,added(id,idReadable,login,name,urls),removed(id,idReadable,login,name,urls)" },
     { name: "limit", type: "int", usage: "max activities", default: 50 },
     { name: "skip", type: "int", usage: "activities to pass over before the first", default: 0 },

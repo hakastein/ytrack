@@ -26,6 +26,7 @@ var versions = map[int]func(e *engine) *goja.Object{
 type param struct {
 	name     string
 	kind     FlagType
+	multiple bool
 	optional bool
 	refuse   func(value any) string
 }
@@ -169,7 +170,7 @@ func (e *engine) options(name string, f function, value goja.Value) options {
 			continue
 		}
 		p := f.params[at]
-		read, reason := readParam(p.kind, given)
+		read, reason := readParam(p, given)
 		if reason == "" && p.refuse != nil {
 			reason = p.refuse(read)
 		}
@@ -182,15 +183,15 @@ func (e *engine) options(name string, f function, value goja.Value) options {
 }
 
 // An int is 32 bits, as the int flag of a declaration is, so whatever the command line gives a function takes.
-func readParam(kind FlagType, value goja.Value) (any, string) {
-	switch kind {
-	case StringFlag:
+func readParam(p param, value goja.Value) (any, string) {
+	switch {
+	case p.multiple:
+		return readStrings(value)
+	case p.kind == StringFlag:
 		if !goja.IsString(value) {
 			return nil, "is no string"
 		}
 		return value.String(), ""
-	case StringsFlag:
-		return readStrings(value)
 	}
 	if !goja.IsNumber(value) {
 		return nil, "is no number"

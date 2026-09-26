@@ -9,8 +9,8 @@ exports.command = {
   flags: [
     { name: "summary", type: "string", usage: "`title`" },
     { name: "description", type: "string", usage: "`text` of the description" },
-    { name: "field", type: "strings", usage: "custom field `Name=value`; repeatable" },
-    { name: "clear", type: "strings", usage: "empty a custom field or description by `name`" },
+    { name: "field", type: "string", multiple: true, usage: "custom field `Name=value`; repeatable" },
+    { name: "clear", type: "string", multiple: true, usage: "empty a custom field or description by `name`" },
     { name: "fields", type: "fields", default: "idReadable,summary,reporter(login),created,updated,resolved,tags(name),customFields,links(issues(idReadable,summary)),description" },
   ],
 };

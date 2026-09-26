@@ -12,8 +12,8 @@ exports.command = {
     { name: "date", type: "string", usage: "`day`, as in 2026-09-01" },
     { name: "type", type: "string", usage: "work item type `name`" },
     { name: "text", type: "string", usage: "work item `text`" },
-    { name: "attribute", type: "strings", usage: "work item attribute `Name=value`; repeatable" },
-    { name: "clear", type: "strings", usage: "empty a `part`: type, text or an attribute name" },
+    { name: "attribute", type: "string", multiple: true, usage: "work item attribute `Name=value`; repeatable" },
+    { name: "clear", type: "string", multiple: true, usage: "empty a `part`: type, text or an attribute name" },
     { name: "fields", type: "fields", default: "id,duration,type(name),attributes,author(login),date,issue(idReadable,customFields),text" },
   ],
 };

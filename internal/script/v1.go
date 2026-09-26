@@ -55,12 +55,12 @@ func pageParams() []param {
 	return []param{{name: limitFlag, kind: IntFlag}, {name: skipFlag, kind: IntFlag}}
 }
 
-func text(name string) param {
+func optionalString(name string) param {
 	return param{name: name, kind: StringFlag, optional: true}
 }
 
-func texts(name string) param {
-	return param{name: name, kind: StringsFlag, optional: true}
+func multipleString(name string) param {
+	return param{name: name, kind: StringFlag, multiple: true, optional: true}
 }
 
 func listParams(own ...param) []param {
@@ -118,7 +118,7 @@ func userFunctions() map[string]function {
 			}),
 		},
 		"list": {
-			params: listParams(text(queryFlag)),
+			params: listParams(optionalString(queryFlag)),
 			bind: func(args []string, opts options) (call, *diag.Fault) {
 				if fault := rejectNoQuery(opts, "the text to search for", "user"); fault != nil {
 					return nil, fault
@@ -152,7 +152,7 @@ func fieldFunctions() map[string]function {
 }
 
 func tagFunctions() map[string]function {
-	byName := []param{text(nameFlag), text(ownedByFlag)}
+	byName := []param{optionalString(nameFlag), optionalString(ownedByFlag)}
 	return map[string]function{
 		"list": {
 			params: listParams(),
@@ -161,7 +161,7 @@ func tagFunctions() map[string]function {
 			}),
 		},
 		"create": {
-			params: []param{text(nameFlag), texts(visibleForFlag), texts(updateableByFlag), texts(taggableByFlag), fieldsParam()},
+			params: []param{optionalString(nameFlag), multipleString(visibleForFlag), multipleString(updateableByFlag), multipleString(taggableByFlag), fieldsParam()},
 			writes: true,
 			bind: always(func(ctx context.Context, c *youtrack.Client, _ []string, opts options) (*youtrack.Node, error) {
 				shared := youtrack.TagSharing{VisibleFor: opts.strings(visibleForFlag),
@@ -249,7 +249,7 @@ func commentFunctions() map[string]function {
 		},
 		"create": {
 			args:   []string{"owner"},
-			params: []param{text(textFlag), fieldsParam()},
+			params: []param{optionalString(textFlag), fieldsParam()},
 			writes: true,
 			bind: withText(func(ctx context.Context, c *youtrack.Client, args []string, opts options) (*youtrack.Node, error) {
 				return c.Comments.Create(ctx, args[0], opts.string(textFlag), writeOptions(opts))
@@ -257,7 +257,7 @@ func commentFunctions() map[string]function {
 		},
 		"update": {
 			args:   []string{"owner", "id"},
-			params: []param{text(textFlag), fieldsParam()},
+			params: []param{optionalString(textFlag), fieldsParam()},
 			writes: true,
 			bind: withText(func(ctx context.Context, c *youtrack.Client, args []string, opts options) (*youtrack.Node, error) {
 				return c.Comments.Update(ctx, args[0], args[1], opts.string(textFlag), writeOptions(opts))
@@ -334,14 +334,14 @@ func timeFunctions() map[string]function {
 		},
 		"create": {
 			args:   []string{"issue", "duration"},
-			params: []param{text(dateFlag), text(typeFlag), text(textFlag), texts(attributeFlag), fieldsParam()},
+			params: []param{optionalString(dateFlag), optionalString(typeFlag), optionalString(textFlag), multipleString(attributeFlag), fieldsParam()},
 			writes: true,
 			bind:   bindWorkItemCreate,
 		},
 		"update": {
 			args: []string{"issue", "id"},
-			params: []param{text(durationFlag), text(dateFlag), text(typeFlag), text(textFlag), texts(attributeFlag),
-				texts(clearFlag), fieldsParam()},
+			params: []param{optionalString(durationFlag), optionalString(dateFlag), optionalString(typeFlag), optionalString(textFlag), multipleString(attributeFlag),
+				multipleString(clearFlag), fieldsParam()},
 			writes: true,
 			bind:   bindWorkItemUpdate,
 		},
@@ -405,7 +405,7 @@ func activityFunctions() map[string]function {
 	return map[string]function{
 		"list": {
 			args:   []string{"issue"},
-			params: listParams(texts(categoryFlag)),
+			params: listParams(multipleString(categoryFlag)),
 			bind: paged(func(ctx context.Context, c *youtrack.Client, args []string, opts options) (*youtrack.Node, error) {
 				list := &youtrack.ListActivitiesOptions{Fields: opts.string(fieldsFlag), Page: pageOf(opts),
 					Categories: opts.strings(categoryFlag)}
@@ -432,18 +432,18 @@ func articleFunctions() map[string]function {
 			},
 		},
 		"list": {
-			params: listParams(text(queryFlag), text(parentFlag)),
+			params: listParams(optionalString(queryFlag), optionalString(parentFlag)),
 			bind:   bindArticleList,
 		},
 		"create": {
 			args:   []string{"project"},
-			params: []param{text(summaryFlag), text(contentFlag), text(parentFlag), fieldsParam()},
+			params: []param{optionalString(summaryFlag), optionalString(contentFlag), optionalString(parentFlag), fieldsParam()},
 			writes: true,
 			bind:   bindArticleCreate,
 		},
 		"update": {
 			args:   []string{"id"},
-			params: []param{text(summaryFlag), text(contentFlag), text(parentFlag), texts(clearFlag), fieldsParam()},
+			params: []param{optionalString(summaryFlag), optionalString(contentFlag), optionalString(parentFlag), multipleString(clearFlag), fieldsParam()},
 			writes: true,
 			bind: func(args []string, opts options) (call, *diag.Fault) {
 				clearsContent, clearsParent, fault := articleClears(opts.strings(clearFlag))
@@ -524,7 +524,7 @@ func issueFunctions(warn func(*youtrack.Warning)) map[string]function {
 			},
 		},
 		"list": {
-			params: listParams(text(queryFlag)),
+			params: listParams(optionalString(queryFlag)),
 			bind: func(args []string, opts options) (call, *diag.Fault) {
 				if fault := rejectNoQuery(opts, "the search to run", "issue"); fault != nil {
 					return nil, fault
@@ -537,13 +537,13 @@ func issueFunctions(warn func(*youtrack.Warning)) map[string]function {
 		},
 		"create": {
 			args:   []string{"project"},
-			params: []param{text(summaryFlag), text(descriptionFlag), texts(fieldFlag), fieldsParam()},
+			params: []param{optionalString(summaryFlag), optionalString(descriptionFlag), multipleString(fieldFlag), fieldsParam()},
 			writes: true,
 			bind:   bindIssueCreate,
 		},
 		"update": {
 			args:   []string{"id"},
-			params: []param{text(summaryFlag), text(descriptionFlag), texts(fieldFlag), texts(clearFlag), fieldsParam()},
+			params: []param{optionalString(summaryFlag), optionalString(descriptionFlag), multipleString(fieldFlag), multipleString(clearFlag), fieldsParam()},
 			writes: true,
 			bind: func(args []string, opts options) (call, *diag.Fault) {
 				writes, clearsDescription, fault := issueFieldWrites(opts.strings(fieldFlag), opts.strings(clearFlag))

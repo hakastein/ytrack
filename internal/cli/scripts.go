@@ -171,7 +171,7 @@ func declareFlag(cmd *cobra.Command, flag script.Flag) func() any {
 		given := &choicesValue{kind: flag.Type, choices: flag.Choices}
 		flags.Var(given, flag.Name, flag.Usage)
 		read = func() any { return given.values }
-		if flag.Type != script.StringsFlag {
+		if !flag.Multiple {
 			read = func() any { return given.values[0] }
 		}
 	}
@@ -179,7 +179,7 @@ func declareFlag(cmd *cobra.Command, flag script.Flag) func() any {
 	if flag.Default != nil {
 		declared.DefValue = fmt.Sprint(flag.Default)
 	}
-	if flag.Type != script.StringsFlag {
+	if !flag.Multiple {
 		rejectRepeat(declared)
 	}
 	closedSet(declared, flag.Choices)

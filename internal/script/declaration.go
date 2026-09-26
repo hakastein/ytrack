@@ -41,20 +41,22 @@ type Arg struct {
 type FlagType string
 
 const (
-	StringFlag  FlagType = "string"
-	IntFlag     FlagType = "int"
-	BoolFlag    FlagType = "bool"
-	StringsFlag FlagType = "strings"
-	FieldsFlag  FlagType = "fields"
+	StringFlag FlagType = "string"
+	IntFlag    FlagType = "int"
+	BoolFlag   FlagType = "bool"
+	FieldsFlag FlagType = "fields"
 )
 
-// Default is nil for a flag without one, and otherwise a string, an int, a bool or a []string by the type.
+// Default is nil for a flag without one, and otherwise a string, an int or a bool by the type, or a []string for
+// a multiple flag.
 type Flag struct {
-	Name    string
-	Type    FlagType
-	Usage   string
-	Choices []string
-	Default any
+	Name string
+	Type FlagType
+	// Multiple is a string flag given any number of times, and run takes its values as an array.
+	Multiple bool
+	Usage    string
+	Choices  []string
+	Default  any
 }
 
 const fieldsUsage = "YouTrack fields `expression`; +expr adds to the default"
@@ -331,10 +333,10 @@ func (r *literalReader) name(declared *object, at ast.Node) string {
 	return name
 }
 
-var flagTypes = []FlagType{StringFlag, IntFlag, BoolFlag, StringsFlag, FieldsFlag}
+var flagTypes = []FlagType{StringFlag, IntFlag, BoolFlag, FieldsFlag}
 
 func (r *literalReader) flags(declared *object) []Flag {
-	items, at := r.items(declared, "flags", "name", "type", "usage", "choices", "default")
+	items, at := r.items(declared, "flags", "name", "type", "multiple", "usage", "choices", "default")
 	flags := make([]Flag, 0, len(items))
 	for i, held := range items {
 		flag := Flag{Name: r.name(held, at[i]), Type: FlagType(r.text(held, "type", at[i]))}
@@ -345,6 +347,7 @@ func (r *literalReader) flags(declared *object) []Flag {
 		if _, given := held.values["usage"]; flag.Type == FieldsFlag && given {
 			r.fail(held.nodes["usage"], "gives --%s a usage, and the usage of a fields flag is the rule of +", flag.Name)
 		}
+		flag.Multiple = r.multiple(held, flag)
 		flag.Usage = fieldsUsage
 		if flag.Type != FieldsFlag {
 			flag.Usage = r.text(held, "usage", at[i])
@@ -354,6 +357,21 @@ func (r *literalReader) flags(declared *object) []Flag {
 		flags = append(flags, flag)
 	}
 	return flags
+}
+
+func (r *literalReader) multiple(held *object, flag Flag) bool {
+	value, given := held.values["multiple"]
+	if !given {
+		return false
+	}
+	multiple, isBool := value.(bool)
+	switch {
+	case !isBool:
+		r.fail(held.nodes["multiple"], "gives --%s a multiple that is neither true nor false", flag.Name)
+	case multiple && flag.Type != StringFlag:
+		r.fail(held.nodes["multiple"], "gives --%s multiple, and only a string flag is given more than once", flag.Name)
+	}
+	return multiple
 }
 
 func joined(types []FlagType) string {
@@ -370,8 +388,8 @@ func (r *literalReader) choices(held *object, flag Flag) []string {
 		return nil
 	}
 	at := held.nodes["choices"]
-	if flag.Type != StringFlag && flag.Type != StringsFlag {
-		r.fail(at, "gives choices to --%s, which is neither string nor strings", flag.Name)
+	if flag.Type != StringFlag {
+		r.fail(at, "gives choices to --%s, which is no string flag", flag.Name)
 		return nil
 	}
 	choices, isStrings := stringsOf(value)
@@ -402,8 +420,10 @@ func (r *literalReader) flagDefault(held *object, flag Flag, at ast.Node) any {
 		}
 		return nil
 	}
-	read, fits := defaultOf(flag.Type, value)
+	read, fits := defaultOf(flag, value)
 	switch {
+	case !fits && flag.Multiple:
+		r.fail(held.nodes["default"], "gives --%s a default that is no array of strings", flag.Name)
 	case !fits:
 		r.fail(held.nodes["default"], "gives --%s a default that is no %s", flag.Name, flag.Type)
 	case !chosen(flag.Choices, read):
@@ -412,7 +432,11 @@ func (r *literalReader) flagDefault(held *object, flag Flag, at ast.Node) any {
 	return read
 }
 
-func defaultOf(kind FlagType, value literal) (any, bool) {
+func defaultOf(flag Flag, value literal) (any, bool) {
+	if flag.Multiple {
+		return stringsOf(value)
+	}
+	kind := flag.Type
 	switch kind {
 	case StringFlag, FieldsFlag:
 		text, isString := value.(string)
@@ -424,7 +448,7 @@ func defaultOf(kind FlagType, value literal) (any, bool) {
 		set, isBool := value.(bool)
 		return set, isBool
 	}
-	return stringsOf(value)
+	return nil, false
 }
 
 func chosen(choices []string, value any) bool {

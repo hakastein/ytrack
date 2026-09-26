@@ -10,7 +10,7 @@ exports.command = {
     { name: "summary", type: "string", usage: "`title`" },
     { name: "content", type: "string", usage: "article `text`" },
     { name: "parent", type: "string", usage: "parent article `id`" },
-    { name: "clear", type: "strings", usage: "empty a `part`: content or parent" },
+    { name: "clear", type: "string", multiple: true, usage: "empty a `part`: content or parent" },
     { name: "fields", type: "fields", default: "idReadable,summary,reporter(login),created,updated,tags(name),parentArticle(idReadable,summary),childArticles(idReadable,summary),content" },
   ],
 };

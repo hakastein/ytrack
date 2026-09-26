@@ -157,10 +157,10 @@ declare module "ytrack/v1" {
   }
 
   // Given to run in its last parameter under name; one without a default is there only when the call gives it.
-  // strings is repeatable, int is 32 bits, fields is default when not given or empty and +expr adds expr to default.
+  // multiple repeats a string flag into an array, int is 32 bits, fields is default when not given or empty and +expr adds expr to default.
   export type Flag =
-    | { name: string; type: "string"; usage: string; choices?: string[]; default?: string }
-    | { name: string; type: "strings"; usage: string; choices?: string[]; default?: string[] }
+    | { name: string; type: "string"; multiple?: false; usage: string; choices?: string[]; default?: string }
+    | { name: string; type: "string"; multiple: true; usage: string; choices?: string[]; default?: string[] }
     | { name: string; type: "int"; usage: string; default?: number }
     | { name: string; type: "bool"; usage: string; default?: boolean }
     | { name: string; type: "fields"; default: string };
