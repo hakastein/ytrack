@@ -1,8 +1,10 @@
-const { link } = require("ytrack/v1");
+const { links } = require("ytrack/v1");
 
-exports.command = {
+exports.definition = {
   short: "List links of an issue",
-  long: "List links of an issue by phrase.\n\nA phrase reads from this issue to the linked ones.\n\n--fields applies to the linked issues.",
+  long:
+    "List links of an issue by phrase.\n\nA phrase reads from this issue to the linked ones.\n\n--fields " +
+    "applies to the linked issues.",
   args: [
     { name: "issue", type: "string", usage: "readable id of the issue, such as DEV-1" },
   ],
@@ -11,4 +13,4 @@ exports.command = {
   ],
 };
 
-exports.run = (issue, flags) => link.list(issue, flags);
+exports.command = (issue, flags) => links.list({ issue, fields: flags.fields });

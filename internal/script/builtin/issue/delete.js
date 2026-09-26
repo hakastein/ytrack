@@ -1,6 +1,6 @@
-const { issue } = require("ytrack/v1");
+const { issues } = require("ytrack/v1");
 
-exports.command = {
+exports.definition = {
   short: "Delete an issue",
   long: "Delete an issue.",
   args: [
@@ -8,4 +8,4 @@ exports.command = {
   ],
 };
 
-exports.run = (id) => issue.delete(id);
+exports.command = (id) => issues.delete({ id });

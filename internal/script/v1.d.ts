@@ -1,5 +1,3 @@
-// Arguments in order, then an object of flags named as after --: ytrack project show DEV --fields name is
-// project.show("DEV", { fields: "name" }), and a script of that command is run as exports.run("DEV", { fields: "name" }).
 declare module "ytrack/v1" {
   // A value of an answer. A map and a list are read-only and print as the answer printed them. A number the double
   // cannot hold exactly is a bigint. A key the answer does not hold reads as undefined, one it holds empty as null.
@@ -29,109 +27,187 @@ declare module "ytrack/v1" {
     readonly wrote: boolean;
   }
 
-  // A function has no default values: every flag it takes whose command has a default is given, and the others may
-  // be left out. A flag repeated on the command line is an array.
+  // fields is the whole expression of the answer, with no default; limit left out is the SDK's default page.
   interface Page {
     fields: string;
-    limit: number;
-    skip: number;
+    limit?: number;
+    skip?: number;
   }
 
-  export const project: {
-    show(code: string, flags: { fields: string }): Answer;
-    list(flags: Page): Answer;
+  // "all" or the count of the latest comments; none when left out.
+  type Comments = "all" | number;
+
+  // A key left out is not written, and null empties the field: so for every part of a write.
+  type CustomFields = { [name: string]: string | string[] | null };
+
+  export interface FieldType {
+    readonly valueType: string;
+    readonly isMultiValue: boolean;
+  }
+  export interface Issue {
+    readonly id: string;
+    readonly idReadable: string;
+    readonly summary: string;
+    readonly description: string;
+    readonly project: { readonly id: string; readonly shortName: string; readonly name: string };
+    readonly fields: readonly {
+      readonly name: string;
+      readonly localizedName: string;
+      readonly type: FieldType;
+      readonly values: readonly { readonly id: string; readonly text: string; readonly localizedName: string }[];
+    }[];
+    readonly links: readonly {
+      readonly direction: string;
+      readonly type: { readonly name: string; readonly sourceToTarget: string; readonly targetToSource: string };
+      readonly issues: readonly { readonly id: string; readonly idReadable: string }[];
+    }[];
+  }
+  export interface ProjectField {
+    readonly id: string;
+    readonly name: string;
+    readonly localizedName: string;
+    readonly type: FieldType;
+    readonly canBeEmpty: boolean;
+  }
+  export interface Metadata {
+    readonly fields: readonly ProjectField[];
+    readonly fromCache: boolean;
+  }
+  export interface Bundle {
+    readonly field: ProjectField;
+    readonly values: readonly { readonly id: string; readonly name: string; readonly archived: boolean }[];
+  }
+  export interface User {
+    readonly id: string;
+    readonly login: string;
+    readonly fullName: string;
+    readonly email: string;
+    readonly banned: boolean;
+  }
+
+  export const issues: {
+    show(call: { id: string; fields: string; comments?: Comments }): Answer;
+    list(call: Page & { query: string }): Answer;
+    create(call: {
+      project: string;
+      summary: string;
+      description?: string;
+      customFields?: CustomFields;
+      fields: string;
+    }): Answer;
+    update(call: {
+      id: string;
+      summary?: string;
+      description?: string | null;
+      customFields?: CustomFields;
+      fields: string;
+    }): Answer;
+    delete(call: { id: string }): Answer;
+    get(call: { id: string }): Issue;
+    writeFields(call: { id: string; customFields: CustomFields }): Issue;
   };
 
-  export const user: {
-    show(login: string, flags: { fields: string }): Answer;
-    list(flags: Page & { query?: string }): Answer;
+  export const articles: {
+    show(call: { id: string; fields: string; comments?: Comments }): Answer;
+    list(call: Page & { query: string }): Answer;
+    children(call: Page & { parent: string }): Answer;
+    create(call: { project: string; summary: string; content?: string; parent?: string; fields: string }): Answer;
+    update(call: {
+      id: string;
+      summary?: string;
+      content?: string | null;
+      parent?: string | null;
+      fields: string;
+    }): Answer;
+    delete(call: { id: string }): Answer;
   };
 
-  export const field: {
-    list(project: string, flags: { fields: string }): Answer;
-    show(project: string, field: string, flags: { fields: string }): Answer;
+  // owner is the readable id of an issue or an article.
+  export const comments: {
+    list(call: Page & { owner: string }): Answer;
+    create(call: { owner: string; text: string; fields: string }): Answer;
+    update(call: { owner: string; id: string; text: string; fields: string }): Answer;
+    delete(call: { owner: string; id: string }): Answer;
   };
 
-  export const issue: {
-    show(id: string, flags: { fields: string; comments: string }): Answer;
-    list(flags: Page & { query?: string }): Answer;
-    create(
-      project: string,
-      flags: { fields: string; summary?: string; description?: string; field?: string[] },
-    ): Answer;
-    update(
-      id: string,
-      flags: { fields: string; summary?: string; description?: string; field?: string[]; clear?: string[] },
-    ): Answer;
-    delete(id: string): Answer;
-  };
-
-  export const article: {
-    show(id: string, flags: { fields: string; comments: string }): Answer;
-    list(flags: Page & { query?: string; parent?: string }): Answer;
-    create(project: string, flags: { fields: string; summary?: string; content?: string; parent?: string }): Answer;
-    update(
-      id: string,
-      flags: { fields: string; summary?: string; content?: string; parent?: string; clear?: string[] },
-    ): Answer;
-    delete(id: string): Answer;
-  };
-
-  export const comment: {
-    list(owner: string, flags: Page): Answer;
-    create(owner: string, flags: { fields: string; text?: string }): Answer;
-    update(owner: string, id: string, flags: { fields: string; text?: string }): Answer;
-    delete(owner: string, id: string): Answer;
-  };
-
-  export const attachment: {
-    list(owner: string, flags: Page): Answer;
+  export const attachments: {
+    list(call: Page & { owner: string }): Answer;
     // path is a local file, relative to the working directory of ytrack.
-    create(owner: string, path: string, flags: { fields: string }): Answer;
-    delete(owner: string, id: string): Answer;
+    create(call: { owner: string; path: string; fields: string }): Answer;
+    delete(call: { owner: string; id: string }): Answer;
   };
 
-  export const link: {
-    list(issue: string, flags: { fields: string }): Answer;
-    add(issue: string, phrase: string, target: string, flags: { fields: string }): Answer;
-    remove(issue: string, phrase: string, target: string): Answer;
+  // phrase reads from issue to target, such as "depends on".
+  export const links: {
+    list(call: { issue: string; fields: string }): Answer;
+    add(call: { issue: string; phrase: string; target: string; fields: string }): Answer;
+    remove(call: { issue: string; phrase: string; target: string }): Answer;
   };
 
-  export const tag: {
-    list(flags: Page): Answer;
-    create(
-      flags: { fields: string; name?: string; "visible-for"?: string[]; "updateable-by"?: string[]; "taggable-by"?: string[] },
-    ): Answer;
-    delete(flags: { name?: string; "owned-by"?: string }): Answer;
-    add(owner: string, flags: { name?: string; "owned-by"?: string }): Answer;
-    remove(owner: string, flags: { name?: string; "owned-by"?: string }): Answer;
+  // id is the readable id of the issue or the article a tag hangs on; ownedBy the login of the owner of the tag.
+  export const tags: {
+    list(call: Page): Answer;
+    create(call: {
+      name: string;
+      visibleFor?: string[];
+      updatableBy?: string[];
+      taggableBy?: string[];
+      fields: string;
+    }): Answer;
+    delete(call: { name: string; ownedBy?: string }): Answer;
+    add(call: { id: string; name: string; ownedBy?: string }): Answer;
+    remove(call: { id: string; name: string; ownedBy?: string }): Answer;
   };
 
-  export const time: {
-    list(issue: string, flags: Page): Answer;
-    create(
-      issue: string,
-      duration: string,
-      flags: { fields: string; date?: string; type?: string; text?: string; attribute?: string[] },
-    ): Answer;
-    update(
-      issue: string,
-      id: string,
-      flags: {
-        fields: string;
-        duration?: string;
-        date?: string;
-        type?: string;
-        text?: string;
-        attribute?: string[];
-        clear?: string[];
-      },
-    ): Answer;
-    delete(issue: string, id: string): Answer;
+  // A work item is whole minutes; date is a day, as 2026-09-01.
+  export const workItems: {
+    list(call: Page & { issue: string }): Answer;
+    create(call: {
+      issue: string;
+      minutes: number;
+      date?: string;
+      type?: string;
+      text?: string;
+      attributes?: { [name: string]: string };
+      fields: string;
+    }): Answer;
+    update(call: {
+      issue: string;
+      id: string;
+      minutes?: number;
+      date?: string;
+      type?: string | null;
+      text?: string | null;
+      attributes?: { [name: string]: string | null };
+      fields: string;
+    }): Answer;
+    delete(call: { issue: string; id: string }): Answer;
   };
 
-  export const activity: {
-    list(issue: string, flags: Page & { category?: string[] }): Answer;
+  export const activities: {
+    list(call: Page & { issue: string; categories?: string[] }): Answer;
+  };
+
+  export const projects: {
+    show(call: { project: string; fields: string }): Answer;
+    list(call: Page): Answer;
+  };
+
+  // name is the name or the localized name of a custom field of the project.
+  export const customFields: {
+    list(call: { project: string; fields: string }): Answer;
+    show(call: { project: string; name: string; fields: string }): Answer;
+    // From the metadata cache when it holds the project; readMetadata reads the server.
+    metadata(call: { project: string }): Metadata;
+    readMetadata(call: { project: string }): Metadata;
+    bundle(call: { project: string; name: string }): Bundle;
+  };
+
+  export const users: {
+    show(call: { login: string; fields: string }): Answer;
+    list(call: Page & { query: string }): Answer;
+    me(): User;
+    find(call: { query: string; limit?: number }): readonly User[];
   };
 
   export function fail(code: Code, message: string, details?: { [key: string]: unknown }): never;
@@ -140,8 +216,9 @@ declare module "ytrack/v1" {
   // The address of the login, its password masked. Reading it looks up the login.
   export const address: string;
 
-  // exports.command: a pure literal, read without running the module.
-  export interface Command {
+  // exports.definition: a pure literal, read without running the module; a text may be strings joined by +.
+  // exports.command takes the arguments in the order declared, then an object of the flags by name.
+  export interface Definition {
     // One line, capitalized, no full stop, at most 60 characters.
     short: string;
     long: string;
@@ -149,18 +226,20 @@ declare module "ytrack/v1" {
     flags?: Flag[];
   }
 
-  // Given to run in the order declared; a path completes as a file name.
+  // A path completes as a file name; a duration, as PT1H30M, is given as its minutes.
   export interface Arg {
     name: string;
-    type: "string" | "path";
+    type: "string" | "path" | "duration";
     usage: string;
   }
 
-  // Given to run in its last parameter under name; one without a default is there only when the call gives it.
-  // multiple repeats a string flag into an array, int is 32 bits, fields is default when not given or empty and +expr adds expr to default.
+  // A flag without a default is absent unless given. Name=value is { Name: "value" }, a name repeated an array;
+  // int is 32 bits; fields is default when empty, and +expr adds expr to default.
   export type Flag =
     | { name: string; type: "string"; multiple?: false; usage: string; choices?: string[]; default?: string }
     | { name: string; type: "string"; multiple: true; usage: string; choices?: string[]; default?: string[] }
+    | { name: string; type: "pair"; multiple?: boolean; usage: string }
+    | { name: string; type: "duration"; usage: string }
     | { name: string; type: "int"; usage: string; default?: number }
     | { name: string; type: "bool"; usage: string; default?: boolean }
     | { name: string; type: "fields"; default: string };

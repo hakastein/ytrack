@@ -1,8 +1,10 @@
-const { attachment } = require("ytrack/v1");
+const { attachments } = require("ytrack/v1");
 
-exports.command = {
+exports.definition = {
   short: "List attachments",
-  long: "List attachments, including those of comments; --fields +comment(id) says which comment.\n\nurl downloads the file without a token for up to three days: keep it as secret as a token.",
+  long:
+    "List attachments, including those of comments; --fields +comment(id) says which comment.\n\nurl " +
+    "downloads the file without a token for up to three days: keep it as secret as a token.",
   args: [
     { name: "owner", type: "string", usage: "readable id of the issue or article, such as DEV-1 or DEV-A-1" },
   ],
@@ -13,4 +15,4 @@ exports.command = {
   ],
 };
 
-exports.run = (owner, flags) => attachment.list(owner, flags);
+exports.command = (owner, flags) => attachments.list({ owner, fields: flags.fields, limit: flags.limit, skip: flags.skip });

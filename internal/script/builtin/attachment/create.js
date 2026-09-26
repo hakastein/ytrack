@@ -1,6 +1,6 @@
-const { attachment } = require("ytrack/v1");
+const { attachments } = require("ytrack/v1");
 
-exports.command = {
+exports.definition = {
   short: "Attach a file",
   long: "Attach a local file.",
   args: [
@@ -12,4 +12,4 @@ exports.command = {
   ],
 };
 
-exports.run = (owner, path, flags) => attachment.create(owner, path, flags);
+exports.command = (owner, path, flags) => attachments.create({ owner, path, fields: flags.fields });

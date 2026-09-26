@@ -1,6 +1,6 @@
-const { comment } = require("ytrack/v1");
+const { comments } = require("ytrack/v1");
 
-exports.command = {
+exports.definition = {
   short: "Delete a comment",
   long: "Delete a comment.",
   args: [
@@ -9,4 +9,4 @@ exports.command = {
   ],
 };
 
-exports.run = (owner, id) => comment.delete(owner, id);
+exports.command = (owner, id) => comments.delete({ owner, id });

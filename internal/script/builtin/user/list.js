@@ -1,6 +1,6 @@
-const { user } = require("ytrack/v1");
+const { users, fail } = require("ytrack/v1");
 
-exports.command = {
+exports.definition = {
   short: "Search users",
   long: "Search users by login or name prefix. An email address matches nothing.",
   flags: [
@@ -11,4 +11,9 @@ exports.command = {
   ],
 };
 
-exports.run = (flags) => user.list(flags);
+exports.command = (flags) => {
+  if (flags.query === undefined) {
+    fail("bad_usage", 'no --query was given: it carries the text to search for, and --query "" finds every user');
+  }
+  return users.list({ query: flags.query, fields: flags.fields, limit: flags.limit, skip: flags.skip });
+};

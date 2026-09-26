@@ -1,6 +1,6 @@
-const { link } = require("ytrack/v1");
+const { links } = require("ytrack/v1");
 
-exports.command = {
+exports.definition = {
   short: "Link two issues",
   long: "Link two issues; prints the links of the first.",
   args: [
@@ -13,4 +13,4 @@ exports.command = {
   ],
 };
 
-exports.run = (issue, phrase, target, flags) => link.add(issue, phrase, target, flags);
+exports.command = (issue, phrase, target, flags) => links.add({ issue, phrase, target, fields: flags.fields });

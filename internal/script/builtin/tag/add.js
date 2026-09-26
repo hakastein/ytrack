@@ -1,10 +1,10 @@
-const { tag } = require("ytrack/v1");
+const { tags, fail } = require("ytrack/v1");
 
-exports.command = {
+exports.definition = {
   short: "Tag an issue or article",
   long: "Tag an issue or article.",
   args: [
-    { name: "owner", type: "string", usage: "readable id of the issue or article, such as DEV-1 or DEV-A-1" },
+    { name: "id", type: "string", usage: "readable id of the issue or article, such as DEV-1 or DEV-A-1" },
   ],
   flags: [
     { name: "name", type: "string", usage: "tag `name`" },
@@ -12,4 +12,9 @@ exports.command = {
   ],
 };
 
-exports.run = (owner, flags) => tag.add(owner, flags);
+exports.command = (id, flags) => {
+  if (flags["owned-by"] === "") {
+    fail("bad_usage", "--owned-by is empty, and YouTrack keeps no user under an empty login: it takes the login of the user the tag belongs to");
+  }
+  return tags.add({ id, name: flags.name ?? "", ownedBy: flags["owned-by"] });
+};

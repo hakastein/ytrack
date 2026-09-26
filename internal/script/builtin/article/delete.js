@@ -1,6 +1,6 @@
-const { article } = require("ytrack/v1");
+const { articles } = require("ytrack/v1");
 
-exports.command = {
+exports.definition = {
   short: "Delete an article with its children",
   long: "Delete an article with its children.",
   args: [
@@ -8,4 +8,4 @@ exports.command = {
   ],
 };
 
-exports.run = (id) => article.delete(id);
+exports.command = (id) => articles.delete({ id });

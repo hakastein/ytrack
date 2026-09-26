@@ -16,8 +16,8 @@ import (
 
 // The descriptor is read instead of the value, since reading address looks up the login.
 const surveying = `const api = require("ytrack/v1");
-exports.command = { short: "Survey the API", long: "List what ytrack/v1 exports." };
-exports.run = () => {
+exports.definition = { short: "Survey the API", long: "List what ytrack/v1 exports." };
+exports.command = () => {
   const names = [];
   for (const key of Object.keys(api)) {
     const value = Object.getOwnPropertyDescriptor(api, key).value;

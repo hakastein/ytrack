@@ -1,6 +1,6 @@
-const { time } = require("ytrack/v1");
+const { workItems } = require("ytrack/v1");
 
-exports.command = {
+exports.definition = {
   short: "Delete a work item",
   long: "Delete a work item.",
   args: [
@@ -9,4 +9,4 @@ exports.command = {
   ],
 };
 
-exports.run = (issue, id) => time.delete(issue, id);
+exports.command = (issue, id) => workItems.delete({ issue, id });

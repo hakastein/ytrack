@@ -1,6 +1,6 @@
-const { user } = require("ytrack/v1");
+const { users } = require("ytrack/v1");
 
-exports.command = {
+exports.definition = {
   short: "Show a user",
   long: "Show a user.",
   args: [
@@ -11,4 +11,4 @@ exports.command = {
   ],
 };
 
-exports.run = (login, flags) => user.show(login, flags);
+exports.command = (login, flags) => users.show({ login, fields: flags.fields });

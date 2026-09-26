@@ -1,8 +1,10 @@
-const { comment } = require("ytrack/v1");
+const { comments } = require("ytrack/v1");
 
-exports.command = {
+exports.definition = {
   short: "List comments",
-  long: "List comments, oldest first.\n\nComments of an article have no deleted. --limit keeps the oldest; ytrack issue show --comments 5 prints the latest five.",
+  long:
+    "List comments, oldest first.\n\nComments of an article have no deleted. --limit keeps the oldest; " +
+    "ytrack issue show --comments 5 prints the latest five.",
   args: [
     { name: "owner", type: "string", usage: "readable id of the issue or article, such as DEV-1 or DEV-A-1" },
   ],
@@ -13,4 +15,4 @@ exports.command = {
   ],
 };
 
-exports.run = (owner, flags) => comment.list(owner, flags);
+exports.command = (owner, flags) => comments.list({ owner, fields: flags.fields, limit: flags.limit, skip: flags.skip });

@@ -1,6 +1,6 @@
-const { attachment } = require("ytrack/v1");
+const { attachments } = require("ytrack/v1");
 
-exports.command = {
+exports.definition = {
   short: "Delete an attachment",
   long: "Delete an attachment. A file attached to a comment belongs to the issue.",
   args: [
@@ -9,4 +9,4 @@ exports.command = {
   ],
 };
 
-exports.run = (owner, id) => attachment.delete(owner, id);
+exports.command = (owner, id) => attachments.delete({ owner, id });

@@ -1,8 +1,10 @@
-const { link } = require("ytrack/v1");
+const { links } = require("ytrack/v1");
 
-exports.command = {
+exports.definition = {
   short: "Unlink two issues",
-  long: "Unlink two issues.\n\nA link can be named from either end: DEV-1 \"depends on\" DEV-2 and DEV-2 \"is required for\" DEV-1 remove the same link. A state a workflow set when the link was made stays.",
+  long:
+    "Unlink two issues.\n\nA link can be named from either end: DEV-1 \"depends on\" DEV-2 and DEV-2 " +
+    "\"is required for\" DEV-1 remove the same link. A state a workflow set when the link was made stays.",
   args: [
     { name: "issue", type: "string", usage: "readable id of the first issue, such as DEV-1" },
     { name: "phrase", type: "string", usage: "phrase of the link read from the first issue to the second, such as \"depends on\"" },
@@ -10,4 +12,4 @@ exports.command = {
   ],
 };
 
-exports.run = (issue, phrase, target) => link.remove(issue, phrase, target);
+exports.command = (issue, phrase, target) => links.remove({ issue, phrase, target });

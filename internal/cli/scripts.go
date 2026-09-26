@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -119,13 +118,21 @@ func newScriptCommand(command *script.Command, env []string, stdout io.Writer, r
 	var paths []string
 	for i, arg := range command.Args {
 		use += " <" + arg.Name + ">"
-		if arg.Path {
+		if arg.Type == script.PathArg {
 			paths = append(paths, strconv.Itoa(i+1))
 		}
 	}
 	values := map[string]func() any{}
 	cmd := newCommand(use, func(cmd *cobra.Command, args []string) *diag.Fault {
-		input := script.Input{Args: args, Flags: map[string]any{}}
+		input := script.Input{Flags: map[string]any{}}
+		for i, text := range args {
+			value, err := command.Args[i].Parse(text)
+			if err != nil {
+				message := fmt.Sprintf("invalid argument %s for <%s>: %v", render.Quote(text), command.Args[i].Name, err)
+				return &diag.Fault{Code: youtrack.CodeBadUsage, Message: message}
+			}
+			input.Args = append(input.Args, value)
+		}
 		for name, value := range values {
 			if cmd.Flags().Changed(name) {
 				input.Flags[name] = value()
@@ -168,12 +175,9 @@ func declareFlag(cmd *cobra.Command, flag script.Flag) func() any {
 		set := flags.Bool(flag.Name, false, flag.Usage)
 		read = func() any { return *set }
 	default:
-		given := &choicesValue{kind: flag.Type, choices: flag.Choices}
+		given := &declaredValue{flag: flag}
 		flags.Var(given, flag.Name, flag.Usage)
-		read = func() any { return given.values }
-		if !flag.Multiple {
-			read = func() any { return given.values[0] }
-		}
+		read = func() any { return flag.Value(given.parsed) }
 	}
 	declared := flags.Lookup(flag.Name)
 	if flag.Default != nil {
@@ -186,26 +190,28 @@ func declareFlag(cmd *cobra.Command, flag script.Flag) func() any {
 	return read
 }
 
-type choicesValue struct {
-	kind    script.FlagType
-	choices []string
-	values  []string
+type declaredValue struct {
+	flag   script.Flag
+	texts  []string
+	parsed []any
 }
 
-func (v *choicesValue) String() string {
-	return strings.Join(v.values, ",")
+func (v *declaredValue) String() string {
+	return strings.Join(v.texts, ",")
 }
 
-func (v *choicesValue) Set(text string) error {
-	if len(v.choices) > 0 && !slices.Contains(v.choices, text) {
-		return errors.New("it is none of " + strings.Join(v.choices, ", "))
+func (v *declaredValue) Set(text string) error {
+	parsed, err := v.flag.Parse(text)
+	if err != nil {
+		return err
 	}
-	v.values = append(v.values, text)
+	v.texts = append(v.texts, text)
+	v.parsed = append(v.parsed, parsed)
 	return nil
 }
 
-func (v *choicesValue) Type() string {
-	return string(v.kind)
+func (v *declaredValue) Type() string {
+	return string(v.flag.Type)
 }
 
 func scriptHost(env []string, stream *diag.Stream) script.Host {

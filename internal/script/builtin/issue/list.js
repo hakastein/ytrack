@@ -1,8 +1,13 @@
-const { issue } = require("ytrack/v1");
+const { issues, fail } = require("ytrack/v1");
 
-exports.command = {
+exports.definition = {
   short: "Search issues",
-  long: "Search issues.\n\nCustom fields are named inside customFields by name or localized name, in any letter case, quoted where they hold a space: --fields '+customFields(Priority,\"Due Date\")'. A bare customFields prints every field that holds something; a named field is printed even when empty, and one the issue does not have is left out. Links print under their phrase: --fields '+links(issues(idReadable))'.",
+  long:
+    "Search issues.\n\nCustom fields are named inside customFields by name or localized name, in any " +
+    "letter case, quoted where they hold a space: --fields '+customFields(Priority,\"Due Date\")'. A " +
+    "bare customFields prints every field that holds something; a named field is printed even when " +
+    "empty, and one the issue does not have is left out. Links print under their phrase: --fields " +
+    "'+links(issues(idReadable))'.",
   flags: [
     { name: "query", type: "string", usage: "YouTrack `search`" },
     { name: "fields", type: "fields", default: "idReadable,summary,resolved,created" },
@@ -11,4 +16,9 @@ exports.command = {
   ],
 };
 
-exports.run = (flags) => issue.list(flags);
+exports.command = (flags) => {
+  if (flags.query === undefined) {
+    fail("bad_usage", 'no --query was given: it carries the search to run, and --query "" finds every issue');
+  }
+  return issues.list({ query: flags.query, fields: flags.fields, limit: flags.limit, skip: flags.skip });
+};

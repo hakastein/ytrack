@@ -28,11 +28,11 @@ status: accepted, partly implemented
   `youtrack.NewClient(адрес, токен, youtrack.WithMetadataCache(каталог))`.
 - **Импорты:** `cmd/ytrack → cli → script → youtrack, render, diag`; `cli → youtrack, render, diag`;
   `diag → render, youtrack`; `render → youtrack`. `fake` SDK импортируют только тесты `cli`.
-- **ytrack держит только грамматику флагов,** и проверяет её функция команды API скриптов
-  (`internal/script/grammar.go`): `Name=value` у `--field` и `--attribute`, слова `--clear`, период `PT1H30M`,
-  `--comments`, `--limit`, отказ на пустом флаге, который SDK прочёл бы как «не дан»
-  ([ADR-0002](0002-field-metadata-is-a-struct.md), [ADR-0010](0010-a-list-page.md)). Остальные аргументы уходят в
-  SDK как написаны.
+- **ytrack держит только грамматику флагов.** Типизированные значения (`Name=value` у `--field` и `--attribute`,
+  период `PT1H30M`, выражение полей) разбирает объявление (`internal/script/flagvalue.go`), а слова `--clear`,
+  `--comments` и отказ на пустом флаге, который SDK прочёл бы как «не дан», — встроенные скрипты
+  ([ADR-0002](0002-field-metadata-is-a-struct.md), [ADR-0010](0010-a-list-page.md), [ADR-0011](0011-a-command-is-a-script.md)).
+  Остальные аргументы уходят в SDK как написаны.
 - **Ограничителя частоты нет, пока запросы идут по одному.**
 - **Ошибка — первая проваленная проверка, и до вызова SDK сеть не используется.** Порядок: разбор cobra, грамматика
   флагов CLI, вход — адрес, его форма, токен, его форма ([ADR-0008](0008-a-login-is-an-address-and-a-token.md)), —

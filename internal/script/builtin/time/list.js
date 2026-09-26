@@ -1,6 +1,6 @@
-const { time } = require("ytrack/v1");
+const { workItems } = require("ytrack/v1");
 
-exports.command = {
+exports.definition = {
   short: "List work items",
   long: "List work items, oldest first.\n\ndate is a day, printed as its midnight UTC.",
   args: [
@@ -13,4 +13,4 @@ exports.command = {
   ],
 };
 
-exports.run = (issue, flags) => time.list(issue, flags);
+exports.command = (issue, flags) => workItems.list({ issue, fields: flags.fields, limit: flags.limit, skip: flags.skip });
