@@ -1,12 +1,17 @@
 # ytrack
 
 Консольный клиент YouTrack, рассчитанный прежде всего на AI-агентов: компактный
-машиночитаемый вывод, ошибки с кодами и команды, которые складываются пайпами.
+машиночитаемый вывод, ошибки с кодами и команды, которые складываются пайпами. Свою
+процедуру из нескольких шагов проект записывает командой на JavaScript, и агент
+вызывает её одним `ytrack <имя>`.
 
 - Один бинарник на Go, без зависимостей и без MCP-сервера.
 - Весь вывод — YAML, который разбирается `yq`.
 - Ошибка — тоже YAML-документ с машинным кодом, в stderr.
 - Кастом-поля любых типов, включая множественные enum'ы, читаются и пишутся корректно.
+- Свои команды — скрипты в `.ytrack/scripts` репозитория над API YouTrack из самого
+  `ytrack`: без Node, без внешних программ, с той же справкой, выводом и ошибками, что
+  у встроенных. Встроенные команды написаны так же.
 
 ```bash
 ytrack issue list --query "project: DEV State: Open" --limit 20
@@ -105,7 +110,9 @@ ytrack auth logout
 | `user` | `list`, `show` |
 | `auth` | `login`, `status`, `logout` |
 
-Подробное описание каждой команды — в `ytrack <команда> <подкоманда> --help`.
+Подробное описание каждой команды — в `ytrack <команда> <подкоманда> --help`. Команды
+проекта и пользователя (см. [Свои команды](#свои-команды)) `ytrack --help` показывает
+отдельным блоком с каталогом, откуда они взяты.
 
 Примеры:
 
@@ -157,9 +164,79 @@ looked_in:
 Коды: `bad_usage`, `unknown_name`, `missing_required`, `not_found`, `denied`,
 `rejected`, `upstream_failed`, `upstream_invalid`, `write_uncertain`.
 
-Коды завершения: `0` — успех, `1` — ошибка, `2` — `write_uncertain`: запись ушла
-на сервер, но неизвестно, применилась ли она. Повторять ли запрос, решает вызывающий,
-сам `ytrack` ничего не ретраит.
+Коды завершения: `0` — успех, `1` — ошибка, `2` — инстанс мог измениться:
+`write_uncertain` (запись ушла на сервер, но неизвестно, применилась ли она) или ошибка
+после записи, например в своей команде, которая успела что-то записать. Повторять ли
+запрос, решает вызывающий, сам `ytrack` ничего не ретраит.
+
+`script_failed` — дефект своей команды проекта или пользователя: ошибка несёт `file`,
+`line` и `column`, и чинить нужно скрипт, а не вызов. Встроенные команды его не дают.
+
+## Свои команды
+
+Процедура, которую агент повторяет из раза в раз, записывается командой: файл на
+JavaScript, путь которого задаёт имя команды.
+
+| Где лежит | Кому доступна |
+|---|---|
+| `.ytrack/scripts` в ближайшем каталоге над текущим | всем в этом репозитории |
+| `~/.ytrack/scripts` | вам во всех проектах |
+
+`.ytrack/scripts/triage.js` — это `ytrack triage`, `.ytrack/scripts/docs/map.js` —
+`ytrack docs map`. Слова встроенных команд (`issue`, `tag`, …) заняты: заменить
+`issue show` или добавить `issue close` нельзя.
+
+```js
+// .ytrack/scripts/triage.js
+const { issues, comments, users } = require("ytrack/v1");
+
+exports.definition = {
+  short: "Take an issue into work",
+  long: "Assign an issue to you, move it to In Progress " + "and leave a comment when --note is given.",
+  args: [{ name: "id", type: "string", usage: "readable id of the issue, such as DEV-1" }],
+  flags: [
+    { name: "note", type: "string", usage: "comment `text`" },
+    { name: "fields", type: "fields", default: "idReadable,summary,customFields(State,Assignee)" },
+  ],
+};
+
+exports.command = (id, flags) => {
+  const me = users.me();
+  issues.update({ id, customFields: { Assignee: me.login, State: "In Progress" }, fields: "idReadable" });
+  if (flags.note !== undefined) {
+    comments.create({ owner: id, text: flags.note, fields: "id" });
+  }
+  return issues.show({ id, fields: flags.fields });
+};
+```
+
+```bash
+ytrack triage DEV-123 --note "Беру"
+ytrack triage --help
+```
+
+- **`exports.definition`** — чистый литерал: справка, автодополнение и разбор вызова
+  строятся по нему без запуска скрипта. Типы флагов: `string`, `int`, `bool`, `fields`
+  (выражение полей с правилом `+`), `pair` (`--field Name=value` приходит как
+  `{ Name: "value" }`) и `duration` (`PT1H30M` приходит как `90`); `multiple: true`
+  делает флаг повторяемым. Неверный вызов отвергается с `bad_usage` до запуска.
+- **`exports.command`** получает аргументы по порядку и объект флагов и возвращает то,
+  что `ytrack` печатает одним YAML-документом.
+- **`require("ytrack/v1")`** — сервисы YouTrack: `issues`, `articles`, `comments`,
+  `attachments`, `links`, `tags`, `workItems`, `activities`, `projects`,
+  `customFields`, `users`, а ещё `fail`, `warn` и `address`. Функция берёт один объект:
+  ключ, которого нет, часть не трогает, `null` её очищает. Ответ — тот же документ, что
+  печатает команда, только для чтения. Ошибка бросается с `code`, `message`, `details`
+  и `wrote`, и её можно поймать.
+- Декларации для редактора — [`internal/script/v1.d.ts`](internal/script/v1.d.ts);
+  решения о форме — [ADR-0011](docs/adr/0011-a-command-is-a-script.md) и
+  [ADR-0012](docs/adr/0012-the-script-api.md).
+
+Скрипт работает синхронно, без `await`. Общий код кладётся в модуль того же каталога
+без `exports.definition` и подключается `require("./lib/x")`. Версия API — в пути
+`require`: скрипт на `ytrack/v1` не ломается, когда выходит следующая. Скрипту
+доверяют как репозиторию, в котором он лежит; токен ему не виден, из входа доступен
+только `address`.
 
 ## Автодополнение
 
@@ -194,7 +271,9 @@ make go         # gofmt, go vet, тесты
 ```
 
 Всё знание о YouTrack — запросы, ответы, кастом-поля, ошибки, фейковый сервер — ytrack берёт из Go SDK
-[`github.com/hakastein/go-youtrack`](https://github.com/hakastein/go-youtrack), а сам держит вход, флаги и печать.
+[`github.com/hakastein/go-youtrack`](https://github.com/hakastein/go-youtrack), а сам держит вход, печать и движок
+скриптов на [goja](https://github.com/dop251/goja) с API `ytrack/v1` поверх SDK. Встроенные команды — такие же скрипты,
+вшитые в бинарник: [`internal/script/builtin/`](internal/script/builtin/).
 Тесты идут против фейкового сервера и живого YouTrack не требуют. Локальный YouTrack — дев-инстанс с проектом `DEV`,
 на котором заведены кастом-поля всех типов: с него `make openapi` SDK снимает спеку, на нём проверяют руками и измеряют факты о сервере для ADR. Поднимается он из `dev/` одной командой, из зависимостей
 нужен только docker — см. [`dev/README.md`](dev/README.md).
