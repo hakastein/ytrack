@@ -48,8 +48,6 @@ declare module "ytrack/v1" {
     long: string;
     args?: Arg[];
     flags?: Flag[];
-    // An answer of the command, printed after long in --help.
-    example?: { [key: string]: unknown };
   }
 
   // Given to run in the order declared; a path completes as a file name.

@@ -288,7 +288,6 @@ func TestDeclarationThatIsNoPureLiteralIsUnreadable(t *testing.T) {
 		{name: "a fields flag with no default", source: head + `flags: [{ name: "fields", type: "fields" }] };`},
 		{name: "a fields flag with a usage of its own", source: head +
 			`flags: [{ name: "fields", type: "fields", default: "id", usage: "f" }] };`},
-		{name: "an example that is no object", source: head + `example: [1] };`},
 		{name: "a syntax error", source: head},
 	}
 	for _, tc := range tests {

@@ -185,16 +185,3 @@ func TestHelpListsTheScriptsUnderTheirRoot(t *testing.T) {
 	require.Equal(t, 0, got.code)
 	assert.Regexp(t, regexp.QuoteMeta(scriptsRoot(home))+`:\n  acme\s`, got.stdout)
 }
-
-func TestHelpOfAScriptPrintsItsExample(t *testing.T) {
-	t.Parallel()
-	source := lines(
-		`exports.command = { short: "Show", long: "Show it.", example: { id: "DEV-1", text: "one\ntwo", "Odd key": [1, true, null] } };`,
-		`exports.run = () => ({});`,
-	)
-
-	got := runScripts(t, fake.ServeNothing(t), map[string]string{"show.js": source}, "show", "--help")
-
-	require.Equal(t, 0, got.code)
-	assert.Contains(t, got.stdout, "  id: \"DEV-1\"\n  text: |-\n    one\n    two\n  \"Odd key\":\n    - 1\n    - true\n    - null\n")
-}

@@ -30,10 +30,7 @@ func newAuth(env []string, stdin *os.File, stdout io.Writer, renderer render.Ren
 	})
 	status.Args = cobra.ExactArgs(0)
 	status.Short = "Show the current login"
-	status.Long = "Show the address, the user, and whether the login comes from the environment or from the settings.\n\n" +
-		example(youtrack.NewMap(youtrack.Pair{Key: "url", Value: youtrack.NewString("https://youtrack.example.com")},
-			fromSettings.pair(),
-			youtrack.Pair{Key: "user", Value: youtrack.NewMap(youtrack.Pair{Key: "login", Value: youtrack.NewString("user")}, youtrack.Pair{Key: "fullName", Value: youtrack.NewString("User")})}))
+	status.Long = "Show the address, the user, and whether the login comes from the environment or from the settings."
 
 	var loginGlobal bool
 	login := newCommand("login", func(cmd *cobra.Command, _ []string) *diag.Fault {

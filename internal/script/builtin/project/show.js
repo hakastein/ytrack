@@ -9,11 +9,6 @@ exports.command = {
   flags: [
     { name: "fields", type: "fields", default: "shortName,name,plugins(timeTrackingSettings(enabled,workItemTypes(name)))" },
   ],
-  example: {
-    shortName: "DEV",
-    name: "Project",
-    plugins: { timeTrackingSettings: { enabled: true, workItemTypes: [{ name: "Type" }] } },
-  },
 };
 
 exports.run = (code, flags) => project.show(code, flags);

@@ -3,7 +3,6 @@ package script
 import (
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"regexp"
 	"slices"
@@ -14,19 +13,16 @@ import (
 	"github.com/dop251/goja/parser"
 	"github.com/dop251/goja/token"
 
-	"github.com/hakastein/go-youtrack"
-
 	"github.com/hakastein/ytrack/internal/render"
 )
 
 // Read from the declaration alone, without running the module.
 type Command struct {
-	Path    []string
-	Short   string
-	Long    string
-	Args    []Arg
-	Flags   []Flag
-	Example *youtrack.Node
+	Path  []string
+	Short string
+	Long  string
+	Args  []Arg
+	Flags []Flag
 
 	root *Root
 	file string
@@ -234,7 +230,7 @@ func (r *literalReader) command(value literal, at ast.Expression) *Command {
 		r.fail(at, "is no object")
 		return nil
 	}
-	r.onlyKeys(declared, at, "short", "long", "args", "flags", "example")
+	r.onlyKeys(declared, at, "short", "long", "args", "flags")
 	command := &Command{}
 	command.Short = r.text(declared, "short", at)
 	if short := command.Short; r.fault == nil && (short == "" || strings.ContainsAny(short, "\r\n") ||
@@ -244,19 +240,6 @@ func (r *literalReader) command(value literal, at ast.Expression) *Command {
 	command.Long = r.text(declared, "long", at)
 	command.Args = r.args(declared)
 	command.Flags = r.flags(declared)
-	if example, given := declared.values["example"]; given {
-		node, err := literalNode(example)
-		if _, isObject := example.(*object); err == nil && !isObject {
-			err = errors.New("is no object")
-		}
-		if err == nil {
-			err = (render.YAML{}).Render(io.Discard, node)
-		}
-		if err != nil {
-			r.fail(declared.nodes["example"], "example %v", err)
-		}
-		command.Example = node
-	}
 	argNames := []string{}
 	for _, arg := range command.Args {
 		argNames = append(argNames, arg.Name)
@@ -453,38 +436,4 @@ func chosen(choices []string, value any) bool {
 		}
 	}
 	return true
-}
-
-func literalNode(value literal) (*youtrack.Node, error) {
-	switch v := value.(type) {
-	case nil:
-		return youtrack.NewNull(), nil
-	case bool:
-		return youtrack.NewBool(v), nil
-	case float64:
-		return numberNode(v)
-	case string:
-		return stringNode(v), nil
-	case []literal:
-		items := make([]*youtrack.Node, 0, len(v))
-		for _, item := range v {
-			node, err := literalNode(item)
-			if err != nil {
-				return nil, err
-			}
-			items = append(items, node)
-		}
-		return youtrack.NewList(items...), nil
-	case *object:
-		pairs := make([]youtrack.Pair, 0, len(v.keys))
-		for _, key := range v.keys {
-			node, err := literalNode(v.values[key])
-			if err != nil {
-				return nil, err
-			}
-			pairs = append(pairs, pairOf(key, node))
-		}
-		return youtrack.NewMap(pairs...), nil
-	}
-	return nil, fmt.Errorf("holds %T", value)
 }
