@@ -108,13 +108,12 @@ func (e *engine) readFileSync(call goja.FunctionCall) goja.Value {
 func (e *engine) writeFileSync(call goja.FunctionCall) goja.Value {
 	path := e.pathArgument(call)
 	encoding := e.encodingArgument(call.Argument(2))
-	content, isBytes := bytesOf(call.Argument(1))
+	content, isBytes := byteArray(call.Argument(1))
 	if goja.IsString(call.Argument(1)) {
 		content, isBytes = buffer.DecodeBytes(e.vm, call.Argument(1), encoding), true
 	}
 	if !isBytes {
-		panic(e.vm.NewTypeError(`The "data" argument must be of type string or an instance of Buffer, Uint8Array ` +
-			`or ArrayBuffer`))
+		panic(e.vm.NewTypeError(`The "data" argument must be of type string or an instance of Buffer or Uint8Array`))
 	}
 	// A named pipe would hold the write until a reader appears.
 	if found, err := os.Stat(path); err == nil && !found.Mode().IsRegular() {
@@ -133,6 +132,10 @@ func (e *engine) mkdirSync(call goja.FunctionCall) goja.Value {
 			panic(e.systemError(err, "mkdir", path))
 		}
 		return goja.Undefined()
+	}
+	// MkdirAll reports a file in the way as ENOTDIR, and Node as EEXIST.
+	if found, err := os.Stat(path); err == nil && !found.IsDir() {
+		panic(e.systemError(fs.ErrExist, "mkdir", path))
 	}
 	first := ""
 	for dir := filepath.Clean(path); ; dir = filepath.Dir(dir) {
@@ -160,7 +163,10 @@ func (e *engine) existsSync(call goja.FunctionCall) goja.Value {
 
 func (e *engine) readdirSync(call goja.FunctionCall) goja.Value {
 	path := e.pathArgument(call)
-	e.optionsArgument(call.Argument(1))
+	if encoding := e.encodingArgument(call.Argument(1)); !goja.IsUndefined(encoding) &&
+		!slices.Contains([]string{"utf8", "utf-8"}, encoding.String()) {
+		panic(e.vm.NewTypeError("readdirSync of ytrack gives the names in utf8 only"))
+	}
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		panic(e.systemError(err, "scandir", path))
@@ -188,18 +194,14 @@ func (e *engine) statSync(call goja.FunctionCall) goja.Value {
 		panic(err)
 	}
 	stats := e.vm.NewObject()
-	for key, value := range map[string]any{
-		"size":           found.Size(),
-		"mtimeMs":        changed,
-		"mtime":          mtime,
-		"isFile":         func() bool { return found.Mode().IsRegular() },
-		"isDirectory":    func() bool { return found.IsDir() },
-		"isSymbolicLink": func() bool { return false },
-	} {
-		if err := stats.Set(key, value); err != nil {
-			panic(err)
-		}
-	}
+	e.set(stats,
+		property{"size", found.Size()},
+		property{"mtimeMs", changed},
+		property{"mtime", mtime},
+		property{"isFile", func() bool { return found.Mode().IsRegular() }},
+		property{"isDirectory", func() bool { return found.IsDir() }},
+		property{"isSymbolicLink", func() bool { return false }},
+	)
 	return stats
 }
 
@@ -237,9 +239,10 @@ func (e *engine) systemError(err error, operation, path string) *goja.Object {
 	case errors.As(err, &irregular), errors.Is(err, errSwapped):
 		code, description = "EINVAL", "path "+err.Error()+", and fs reads and writes only a regular file"
 	default:
-		at := slices.IndexFunc(systemCodes, func(known systemCode) bool { return errors.Is(err, known.errno) })
+		known := append(slices.Clone(platformCodes), systemCodes...)
+		at := slices.IndexFunc(known, func(candidate systemCode) bool { return errors.Is(err, candidate.errno) })
 		if at >= 0 {
-			code, description = systemCodes[at].code, systemCodes[at].description
+			code, description = known[at].code, known[at].description
 		}
 	}
 	message := fmt.Sprintf("%s: %s, %s '%s'", code, description, operation, path)
@@ -247,11 +250,7 @@ func (e *engine) systemError(err error, operation, path string) *goja.Object {
 	if failed != nil {
 		panic(failed)
 	}
-	for key, value := range map[string]string{"code": code, "syscall": operation, "path": path} {
-		if failed := thrown.Set(key, value); failed != nil {
-			panic(failed)
-		}
-	}
+	e.set(thrown, property{"code", code}, property{"syscall", operation}, property{"path", path})
 	e.thrown[thrown] = &diag.Fault{Code: youtrack.CodeBadUsage, Message: message,
 		Details: []youtrack.Pair{{Key: "path", Value: youtrack.NewString(path)}}}
 	return thrown

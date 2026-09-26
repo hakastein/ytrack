@@ -89,28 +89,32 @@ func Run(ctx context.Context, command *Command, input Input, host Host) (answer 
 }
 
 func (e *engine) enableNode() {
-	e.bufferModule = e.vm.NewObject()
-	exports := e.vm.NewObject()
-	if err := e.bufferModule.Set("exports", exports); err != nil {
-		panic(err)
-	}
-	buffer.Require(e.vm, e.bufferModule)
-	e.bufferModule = e.bufferModule.Get("exports").ToObject(e.vm)
+	module := e.vm.NewObject()
+	e.set(module, property{"exports", e.vm.NewObject()})
+	buffer.Require(e.vm, module)
+	e.bufferModule = module.Get("exports").ToObject(e.vm)
 	constructor := e.bufferModule.Get("Buffer").ToObject(e.vm)
 	// goja_nodejs leaves out Buffer.isBuffer, which scripts written for Node call.
 	isBuffer := func(value goja.Value) bool {
 		object, isObject := value.(*goja.Object)
 		return isObject && object.ExportType() == reflect.TypeOf([]byte(nil)) && e.vm.InstanceOf(object, constructor)
 	}
-	if err := constructor.Set("isBuffer", isBuffer); err != nil {
-		panic(err)
-	}
-	if err := e.vm.Set("Buffer", constructor); err != nil {
-		panic(err)
-	}
+	e.set(constructor, property{"isBuffer", isBuffer})
+	e.set(e.vm.GlobalObject(), property{"Buffer", constructor}, property{"fetch", e.fetch})
 	e.buffer = buffer.GetApi(e.vm)
-	if err := e.vm.Set("fetch", e.fetch); err != nil {
-		panic(err)
+}
+
+type property struct {
+	key   string
+	value any
+}
+
+// Properties are set in the order given: a script sees it in Object.keys, and an object it returns prints in it.
+func (e *engine) set(object *goja.Object, properties ...property) {
+	for _, p := range properties {
+		if err := object.Set(p.key, p.value); err != nil {
+			panic(err)
+		}
 	}
 }
 

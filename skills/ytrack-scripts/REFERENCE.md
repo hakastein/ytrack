@@ -1,6 +1,7 @@
 # ytrack command scripts: reference
 
-The signatures of `ytrack/v1` are in [v1.d.ts](v1.d.ts); this file holds the rules they cannot say.
+The signatures are in [v1.d.ts](v1.d.ts) for `ytrack/v1` and in [node.d.ts](node.d.ts) for `fs`, `Buffer` and
+`fetch`, in place of `@types/node`; this file holds the rules they cannot say.
 
 ## Roots and names
 
@@ -47,7 +48,7 @@ extra argument are refused with `bad_usage` before the script runs.
   `limit` left out is the SDK's default page, below 1 is `bad_usage`.
 - `customFields`: `{ Name: value | [values] | null }`. Work time is whole `minutes`. `comments` is `"all"` or a count.
 - `attachments.create` takes either `path` (a local file) or `content` — a string in UTF-8, a `Buffer`, a
-  `Uint8Array` or an `ArrayBuffer` — with `name`.
+  `Uint8Array` or an `ArrayBuffer` — with `name`, which goes only with `content`.
 - An extra key, a key of the wrong type, a missing required key, `path` and `content` together: `script_failed` at the
   line of the call.
 - The login is looked up at the first function call or read of `address`, so a script that never reaches YouTrack
@@ -81,11 +82,11 @@ extra argument are refused with `bad_usage` before the script runs.
 - `readFileSync(path[, encoding | { encoding }])` → a `Buffer`, or a string in the encoding named;
 - `writeFileSync(path, data[, encoding | { encoding }])`, `data` a string, `Buffer` or `Uint8Array`;
 - `mkdirSync(path[, { recursive }])` → with `recursive`, the first directory made or `undefined`;
-- `existsSync(path)`, `readdirSync(path)` (names, sorted);
+- `existsSync(path)`, `readdirSync(path[, "utf8" | { encoding: "utf8" }])` (names, sorted);
 - `statSync(path[, { throwIfNoEntry }])` → `size`, `mtimeMs`, `mtime`, `isFile()`, `isDirectory()`,
   `isSymbolicLink()`.
 
-Encodings are `utf8`, `hex` and `base64`. A relative path is from the working directory of `ytrack`. A path that is
+Encodings are `utf8` (or `utf-8`), `hex` and `base64`; Node's `base64url`, `latin1` and the rest are not there. A relative path is from the working directory of `ytrack`. A path that is
 not a regular file fails (`EISDIR`, `EINVAL`) instead of blocking on a pipe. An error carries `code`, `syscall` and
 `path`; left uncaught it prints as `bad_usage` with `path`. An option Node has and this list lacks is a `TypeError`.
 
@@ -114,8 +115,8 @@ if (answer.ok) fs.writeFileSync("image.png", Buffer.from(answer.arrayBuffer()));
 ## Versions
 
 - The version is the `N` of `require("ytrack/v<N>")`, unrelated to the release version; every module requires its
-  own. The current and the previous version are supported; a deprecated one warns `script_failed` with the date it
-  goes and the version to move to.
+  own. Once `v2` is out, the current and the previous version are supported, and the previous one warns
+  `script_failed` with the date it goes and the version to move to; today `v1` is the only one.
 - A version breaks only by removing or renaming a function, a key, an own key of an answer or a code, changing their
   type or meaning, making an optional key required, or changing the exit-code rule. What the server returns for
   `fields=` is not the version's.

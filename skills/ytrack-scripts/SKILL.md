@@ -9,7 +9,7 @@ nearest `.ytrack/scripts` above the working directory; `~/.ytrack/scripts` holds
 built-in commands use (`issue`, `tag`, …) is theirs: a script cannot add `issue close`.
 
 Every rule of the API, `fs` and `fetch` is in [REFERENCE.md](REFERENCE.md); the signatures are in
-[v1.d.ts](v1.d.ts). Read both before the first call of a function you have not used.
+[v1.d.ts](v1.d.ts) and [node.d.ts](node.d.ts). Read them before the first call of a function you have not used.
 
 ## Shape
 

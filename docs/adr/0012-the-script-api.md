@@ -78,15 +78,19 @@ status: accepted, partly implemented
 - **Опция Node, которой ytrack не знает, — `TypeError`,** а не пропуск: пропущенная опция молча сделала бы не то, что
   просил скрипт. Неверный вызов — тоже `TypeError`, и непойманный он становится `script_failed`.
 - **`fs`:** `readFileSync(path[, encoding | { encoding }])`, `writeFileSync(path, data[, encoding | { encoding }])`,
-  `mkdirSync(path[, { recursive }])`, `existsSync(path)`, `readdirSync(path)` и `statSync(path[, { throwIfNoEntry }])`
-  со `size`, `mtimeMs`, `mtime`, `isFile()`, `isDirectory()` и `isSymbolicLink()`. Путь — по правилам
+  `mkdirSync(path[, { recursive }])`, `existsSync(path)`, `readdirSync(path[, "utf8"])` и
+  `statSync(path[, { throwIfNoEntry }])` со `size`, `mtimeMs`, `mtime`, `isFile()`, `isDirectory()` и
+  `isSymbolicLink()`. Путь — по правилам
   [ADR-0006](0006-packages-and-the-entry-point.md): существующий путь не к обычному файлу читается и пишется ошибкой
   (`EISDIR` для каталога, `EINVAL` для остального), потому что именованный канал ждал бы вечно. Место записи не
   ограничено. Ошибка бросается, как в Node, с `code`, `syscall` и `path`; **непойманная — `bad_usage` с `path`:**
   не удался путь, который скрипту дали.
 - **`Buffer` — из [goja_nodejs](https://github.com/dop251/goja_nodejs)** с кодировками `utf8`, `hex` и `base64`;
   ytrack добавляет `Buffer.isBuffer`, которого там нет. Байты — `Buffer`, `Uint8Array` или `ArrayBuffer`, и в
-  документ ответа они не попадают ([ADR-0003](0003-output-is-one-yaml-document.md)).
+  документ ответа они не попадают ([ADR-0003](0003-output-is-one-yaml-document.md)). `writeFileSync`, как в Node,
+  `ArrayBuffer` не берёт.
+- **Декларации подмножества — [`node.d.ts`](../../skills/ytrack-scripts/node.d.ts), а не `@types/node`,** потому что
+  там `fetch` возвращает `Promise`.
 - **`fetch(url, { timeout, maxBytes, redirect })`** — только `GET` (`method` можно назвать только `"GET"`), без своих
   заголовков, только `http` и `https`. `timeout` в миллисекундах, `maxBytes` и `redirect` обязательны: у запроса
   наружу нет разумного предела по умолчанию. `redirect` — `"follow"`, не дальше 10 редиректов, или `"manual"`.
@@ -99,7 +103,7 @@ status: accepted, partly implemented
 - **Токен инстанса в `fetch` не уходит никогда,** даже на адрес входа. Куки и прокси из окружения не используются,
   запрос не повторяется.
 - **`attachments.create` берёт либо `path`, либо `content` с `name`:** `content` — строка в UTF-8 или байты, так что
-  скачанное `fetch` прикладывается без файла. `name` рядом с `path` переименовывает файл.
+  скачанное `fetch` прикладывается без файла. `name` идёт только с `content`.
 
 ## Версии
 

@@ -61,26 +61,23 @@ func TestScriptReadsAFileAsNodeDoes(t *testing.T) {
 func TestScriptWritesAFileAsNodeDoes(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		body  string
-		want  string
-		given []byte
+		name string
+		body string
+		want string
 	}{
 		{name: "a string", body: `fs.writeFileSync(at, "written")`, want: "written"},
 		{name: "a string in the encoding named", body: `fs.writeFileSync(at, "eXRyYWNr", "base64")`, want: "ytrack"},
 		{name: "a string in the encoding named by options", body: `fs.writeFileSync(at, "7974", { encoding: "hex" })`,
 			want: "yt"},
 		{name: "a buffer", body: `fs.writeFileSync(at, Buffer.from([121, 116]))`, want: "yt"},
+		{name: "a buffer of the buffer module", body: `fs.writeFileSync(at, require("node:buffer").Buffer.from("yt"))`,
+			want: "yt"},
 		{name: "a byte array", body: `fs.writeFileSync(at, new Uint8Array([121, 116]))`, want: "yt"},
-		{name: "over a file that holds more", body: `fs.writeFileSync(at, "new")`, want: "new", given: []byte("older text")},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			path := filepath.Join(t.TempDir(), "written.txt")
-			if tc.given != nil {
-				require.NoError(t, os.WriteFile(path, tc.given, 0o600))
-			}
 
 			got := runScripts(t, fake.ServeNothing(t), onPath(`exports.command = (at) => { `+tc.body+`; return { done: true }; };`), "run", path)
 
@@ -90,6 +87,18 @@ func TestScriptWritesAFileAsNodeDoes(t *testing.T) {
 			assert.Equal(t, tc.want, string(written))
 		})
 	}
+}
+
+func TestScriptWritesOverAFileThatHoldsMore(t *testing.T) {
+	t.Parallel()
+	path := fileWith(t, "older.txt", []byte("older text"))
+
+	got := runScripts(t, fake.ServeNothing(t), onPath(`exports.command = (at) => { fs.writeFileSync(at, "new"); return { done: true }; };`), "run", path)
+
+	assert.Equal(t, outcome{stdout: "done: true\n"}, got)
+	written, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "new", string(written))
 }
 
 func TestScriptMakesADirectoryAsNodeDoes(t *testing.T) {
@@ -121,6 +130,12 @@ func TestScriptMakesADirectoryAsNodeDoes(t *testing.T) {
 			body: `exports.command = (at) => { try { fs.mkdirSync(at); } catch (e) { return { code: e.code }; } };`,
 			want: "code: \"EEXIST\"\n",
 		},
+		{
+			name: "every missing level over a file in the way",
+			body: `exports.command = (at) => { fs.writeFileSync(at + "/file", "x"); ` +
+				`try { fs.mkdirSync(at + "/file", { recursive: true }); } catch (e) { return { code: e.code }; } };`,
+			want: "code: \"EEXIST\"\n",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -142,6 +157,11 @@ func TestScriptLooksAtADirectoryAsNodeDoes(t *testing.T) {
 		{
 			name: "the names in it, sorted",
 			body: `exports.command = (at) => ({ names: fs.readdirSync(at) });`,
+			want: "names:\n  - \"a.txt\"\n  - \"b\"\n",
+		},
+		{
+			name: "the names in it, in the encoding named",
+			body: `exports.command = (at) => ({ names: fs.readdirSync(at, "utf8") });`,
 			want: "names:\n  - \"a.txt\"\n  - \"b\"\n",
 		},
 		{
@@ -237,7 +257,8 @@ func TestScriptCallingFsWrongIsScriptFailed(t *testing.T) {
 		{name: "an option ytrack does not take", call: `fs.readFileSync(at, { flag: "r" })`},
 		{name: "options of mkdir ytrack does not take", call: `fs.mkdirSync(at, { mode: 0o700 })`},
 		{name: "options of readdir", call: `fs.readdirSync(at, { withFileTypes: true })`},
-		{name: "a function fs of ytrack does not have", call: `fs.rmSync(at)`},
+		{name: "an array buffer, which node does not write", call: `fs.writeFileSync(at, new ArrayBuffer(2))`},
+		{name: "names in an encoding other than utf8", call: `fs.readdirSync(at, "hex")`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -249,4 +270,14 @@ func TestScriptCallingFsWrongIsScriptFailed(t *testing.T) {
 			assert.Equal(t, "script_failed", requireFault(t, got).code)
 		})
 	}
+}
+
+func TestFailureOfFsHoldsItsKeysInTheOrderOfNode(t *testing.T) {
+	t.Parallel()
+	at := nothingAt(t)
+	body := `exports.command = (at) => { try { fs.statSync(at); } catch (e) { return { ...e }; } };`
+
+	got := runScripts(t, fake.ServeNothing(t), onPath(body), "run", at)
+
+	assert.Equal(t, outcome{stdout: "code: \"ENOENT\"\nsyscall: \"stat\"\npath: " + strconv.Quote(at) + "\n"}, got)
 }

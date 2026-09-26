@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -229,8 +230,11 @@ func readParam(kind paramKind, value goja.Value) (any, string) {
 		if goja.IsString(value) {
 			return []byte(value.String()), ""
 		}
-		if content, isBytes := bytesOf(value); isBytes {
+		if content, isBytes := byteArray(value); isBytes {
 			return content, ""
+		}
+		if buffer, isArrayBuffer := value.Export().(goja.ArrayBuffer); isArrayBuffer {
+			return slices.Clone(buffer.Bytes()), ""
 		}
 		return nil, "is neither a string nor a Buffer, a Uint8Array or an ArrayBuffer"
 	case commentsParam:
@@ -455,4 +459,13 @@ func (e *engine) address(goja.FunctionCall) goja.Value {
 		panic(e.throw(fault))
 	}
 	return e.vm.ToValue(address)
+}
+
+// A Buffer is a Uint8Array, and both export as a byte slice.
+func byteArray(value goja.Value) ([]byte, bool) {
+	object, isObject := value.(*goja.Object)
+	if !isObject || object.ExportType() != reflect.TypeOf([]byte(nil)) {
+		return nil, false
+	}
+	return slices.Clone(object.Export().([]byte)), true
 }

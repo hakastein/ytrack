@@ -370,8 +370,8 @@ func attachments() map[string]function {
 				switch {
 				case opts.given("path") == opts.given("content"):
 					return "takes either path or content"
-				case opts.given("content") && !opts.given("name"):
-					return "takes the name of the content"
+				case opts.given("content") != opts.given("name"):
+					return "takes name with content and only with it"
 				}
 				return ""
 			},
@@ -383,10 +383,6 @@ func attachments() map[string]function {
 					}, nil
 				}
 				path := opts.string("path")
-				name := filepath.Base(path)
-				if opts.given("name") {
-					name = opts.string("name")
-				}
 				// Checked before the login is looked up, and opened again for the upload.
 				checked, fault := openLocalFile(path)
 				if fault != nil {
@@ -399,7 +395,7 @@ func attachments() map[string]function {
 						return nil, fault
 					}
 					defer file.Close()
-					return c.Attachments.Create(ctx, opts.string("owner"), youtrack.File{Name: name, Content: file}, written(opts))
+					return c.Attachments.Create(ctx, opts.string("owner"), youtrack.File{Name: filepath.Base(path), Content: file}, written(opts))
 				}, nil
 			},
 		},

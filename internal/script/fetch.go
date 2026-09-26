@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -44,8 +43,9 @@ func (e *engine) fetch(call goja.FunctionCall) goja.Value {
 	if err != nil {
 		panic(e.vm.NewTypeError(err.Error()))
 	}
-	// Proxies of the environment are not taken: a script reads no environment.
-	transport := &http.Transport{ForceAttemptHTTP2: true}
+	// Proxies of the environment are not taken: a script reads no environment. With no connection kept, the transport
+	// has none to send the request again on.
+	transport := &http.Transport{ForceAttemptHTTP2: true, DisableKeepAlives: true}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, CheckRedirect: func(_ *http.Request, via []*http.Request) error {
 		if !options.follow {
@@ -58,15 +58,15 @@ func (e *engine) fetch(call goja.FunctionCall) goja.Value {
 	}}
 	answer, err := client.Do(request)
 	if err != nil {
-		panic(e.throw(fetchFault(target, options, ctx, err)))
+		panic(e.throw(e.fetchFault(ctx, target, options.timeout, err)))
 	}
 	defer answer.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(answer.Body, int64(options.maxBytes)+1))
 	if err != nil {
-		panic(e.throw(fetchFault(target, options, ctx, err)))
+		panic(e.throw(e.fetchFault(ctx, target, options.timeout, err)))
 	}
 	if len(body) > options.maxBytes {
-		panic(e.throw(fetchFault(target, options, ctx, fmt.Errorf("the body is longer than maxBytes %d", options.maxBytes))))
+		panic(e.throw(e.fetchFault(ctx, target, options.timeout, fmt.Errorf("the body is longer than maxBytes %d", options.maxBytes))))
 	}
 	return e.response(answer, request, body)
 }
@@ -111,11 +111,11 @@ func (e *engine) fetchWhole(given *goja.Object, key string, least int) int {
 	return read.(int)
 }
 
-func fetchFault(target *url.URL, options fetchOptions, ctx context.Context, err error) *diag.Fault {
+func (e *engine) fetchFault(ctx context.Context, target *url.URL, timeout time.Duration, err error) *diag.Fault {
 	message := fmt.Sprintf("GET %s: %v", target.Redacted(), unwrapURL(err))
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) && e.ctx.Err() == nil {
 		message = fmt.Sprintf("GET %s: no whole answer within the timeout of %d ms", target.Redacted(),
-			options.timeout.Milliseconds())
+			timeout.Milliseconds())
 	}
 	return &diag.Fault{Code: youtrack.CodeUpstreamFailed, Message: message,
 		Details: []youtrack.Pair{{Key: "url", Value: youtrack.NewString(target.Redacted())}}}
@@ -131,32 +131,27 @@ func unwrapURL(err error) error {
 
 func (e *engine) response(answer *http.Response, request *http.Request, body []byte) *goja.Object {
 	response := e.vm.NewObject()
-	values := map[string]any{
-		"status":     answer.StatusCode,
-		"ok":         answer.StatusCode >= 200 && answer.StatusCode < 300,
-		"statusText": strings.TrimPrefix(answer.Status, strconv.Itoa(answer.StatusCode)+" "),
-		"url":        answer.Request.URL.String(),
-		"redirected": answer.Request != request,
-		"headers":    e.headers(answer.Header),
-		// A body not in UTF-8 reads with U+FFFD in place of what does not decode, as in fetch.
-		"text": func() string { return text(body) },
-		"json": func() goja.Value {
+	e.set(response,
+		property{"status", answer.StatusCode},
+		property{"ok", answer.StatusCode >= 200 && answer.StatusCode < 300},
+		property{"statusText", strings.TrimPrefix(answer.Status, strconv.Itoa(answer.StatusCode)+" ")},
+		property{"url", answer.Request.URL.String()},
+		property{"redirected", answer.Request != request},
+		property{"headers", e.headers(answer.Header)},
+		property{"text", func() string { return text(body) }},
+		property{"json", func() goja.Value {
 			parsed, err := e.parseJSON(goja.Undefined(), e.vm.ToValue(text(body)))
 			if err != nil {
 				panic(err)
 			}
 			return parsed
-		},
-		"arrayBuffer": func() goja.ArrayBuffer { return e.vm.NewArrayBuffer(slices.Clone(body)) },
-	}
-	for key, value := range values {
-		if err := response.Set(key, value); err != nil {
-			panic(err)
-		}
-	}
+		}},
+		property{"arrayBuffer", func() goja.ArrayBuffer { return e.vm.NewArrayBuffer(slices.Clone(body)) }},
+	)
 	return response
 }
 
+// A body not in UTF-8 reads with U+FFFD in place of what does not decode, and without a BOM, as in fetch.
 func text(body []byte) string {
 	return strings.TrimPrefix(strings.ToValidUTF8(string(body), "\ufffd"), "\ufeff")
 }
@@ -178,53 +173,35 @@ func (e *engine) headers(header http.Header) *goja.Object {
 		return pairs
 	}
 	headers := e.vm.NewObject()
-	values := map[string]any{
-		"get": func(name string) goja.Value {
+	e.set(headers,
+		property{"get", func(name string) goja.Value {
 			value, held := joined[strings.ToLower(name)]
 			if !held {
 				return goja.Null()
 			}
 			return e.vm.ToValue(value)
-		},
-		"has": func(name string) bool {
+		}},
+		property{"has", func(name string) bool {
 			_, held := joined[strings.ToLower(name)]
 			return held
-		},
-		"getSetCookie": func() []string { return slices.Clone(header.Values("Set-Cookie")) },
-		"keys":         func() []string { return slices.Clone(names) },
-		"values": func() []string {
+		}},
+		property{"getSetCookie", func() []string { return slices.Clone(header.Values("Set-Cookie")) }},
+		property{"keys", func() []string { return slices.Clone(names) }},
+		property{"values", func() []string {
 			held := make([]string, 0, len(names))
 			for _, name := range names {
 				held = append(held, joined[name])
 			}
 			return held
-		},
-		"entries": entries,
-		"forEach": func(each goja.Callable) {
+		}},
+		property{"entries", entries},
+		property{"forEach", func(each goja.Callable) {
 			for _, pair := range entries() {
 				if _, err := each(goja.Undefined(), e.vm.ToValue(pair[1]), e.vm.ToValue(pair[0]), headers); err != nil {
 					panic(err)
 				}
 			}
-		},
-	}
-	for key, value := range values {
-		if err := headers.Set(key, value); err != nil {
-			panic(err)
-		}
-	}
+		}},
+	)
 	return headers
-}
-
-// Buffer is a Uint8Array, which exports as a byte slice.
-func bytesOf(value goja.Value) ([]byte, bool) {
-	switch exported := value.Export().(type) {
-	case goja.ArrayBuffer:
-		return slices.Clone(exported.Bytes()), true
-	case []byte:
-		if object, isObject := value.(*goja.Object); isObject && object.ExportType() == reflect.TypeOf([]byte(nil)) {
-			return slices.Clone(exported), true
-		}
-	}
-	return nil, false
 }

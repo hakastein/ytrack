@@ -472,6 +472,7 @@ func TestScriptAttachesEitherAFileOrBytes(t *testing.T) {
 	}{
 		{name: "both a path and content", call: `{ owner: "DEV-1", path: "a.txt", name: "a.txt", content: "x", fields: "id" }`},
 		{name: "content without a name", call: `{ owner: "DEV-1", content: "x", fields: "id" }`},
+		{name: "a name with a path", call: `{ owner: "DEV-1", path: "a.txt", name: "b.txt", fields: "id" }`},
 		{name: "neither a path nor content", call: `{ owner: "DEV-1", name: "a.txt", fields: "id" }`},
 		{name: "content of no kind of bytes", call: `{ owner: "DEV-1", name: "a.txt", content: 1, fields: "id" }`},
 	}

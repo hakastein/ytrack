@@ -33,3 +33,14 @@ func TestFsRefusesANamedPipeRatherThanWaitForIt(t *testing.T) {
 		})
 	}
 }
+
+func TestFsThrowsEINVALForANamedPipe(t *testing.T) {
+	t.Parallel()
+	pipe := filepath.Join(t.TempDir(), "pipe")
+	require.NoError(t, syscall.Mkfifo(pipe, 0o600))
+	body := `exports.command = (at) => { try { fs.readFileSync(at); } catch (e) { return { code: e.code, syscall: e.syscall }; } };`
+
+	got := runScripts(t, fake.ServeNothing(t), onPath(body), "run", pipe)
+
+	assert.Equal(t, outcome{stdout: "code: \"EINVAL\"\nsyscall: \"open\"\n"}, got)
+}

@@ -2,7 +2,7 @@ package cli_test
 
 import (
 	"net/http"
-	"strings"
+	"strconv"
 	"testing"
 	"time"
 
@@ -134,12 +134,11 @@ func TestFetchThatGetsNoWholeAnswerIsUpstreamFailed(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			body := `exports.command = (url) => fetch(url, ` + tc.options + `);`
+			url := tc.target(t)
 
-			got := runScripts(t, fake.ServeNothing(t), fetching(body), "run", tc.target(t))
+			got := runScripts(t, fake.ServeNothing(t), fetching(body), "run", url)
 
-			found := requireFault(t, got)
-			assert.Equal(t, "upstream_failed", found.code)
-			assert.True(t, strings.HasPrefix(detailNamed(t, found, "url").(string), "http://"))
+			assert.Equal(t, faultDocument{code: "upstream_failed", details: []detail{{"url", url}}}, requireFault(t, got))
 		})
 	}
 }
@@ -157,11 +156,9 @@ func TestFetchSendsNoTokenEvenToTheInstance(t *testing.T) {
 	got := runWith(t, atHome(server, scriptsHome(t, fetching(body))), "run", "unused")
 
 	assert.Equal(t, outcome{stdout: "done: true\n"}, got)
-	for _, sent := range server.Requests() {
-		assert.Empty(t, sent.Header.Values("Authorization"))
-		assert.Empty(t, sent.Header.Values("Cookie"))
-	}
-	assert.Len(t, server.Requests(), 2)
+	assert.Empty(t, server.Request(t, 0).Header.Values("Authorization"))
+	assert.Empty(t, server.Request(t, 1).Header.Values("Authorization"))
+	assert.Empty(t, server.Request(t, 1).Header.Values("Cookie"))
 }
 
 func TestScriptCallingFetchWrongIsScriptFailed(t *testing.T) {
@@ -192,6 +189,40 @@ func TestScriptCallingFetchWrongIsScriptFailed(t *testing.T) {
 				"run", target.URL)
 
 			assert.Equal(t, "script_failed", requireFault(t, got).code)
+		})
+	}
+}
+
+func TestScriptFetchesWithTheMethodGETNamed(t *testing.T) {
+	t.Parallel()
+	target := fake.Serve(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("said")) })
+	body := `exports.command = (url) => ({ text: fetch(url, { method: "get", timeout: 5000, maxBytes: 64, redirect: "follow" }).text() });`
+
+	got := runScripts(t, fake.ServeNothing(t), fetching(body), "run", target.URL)
+
+	assert.Equal(t, outcome{stdout: "text: \"said\"\n"}, got)
+	assert.Equal(t, []string{http.MethodGet}, target.Methods())
+}
+
+func TestScriptReadsTextAsFetchDecodesIt(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "a byte order mark dropped", body: "\ufeffsaid", want: "said"},
+		{name: "bytes that are no UTF-8 read as U+FFFD", body: "sa\xffid", want: "sa\ufffdid"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			target := fake.Serve(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(tc.body)) })
+			body := `exports.command = (url) => ({ text: fetch(url, { timeout: 5000, maxBytes: 64, redirect: "follow" }).text() });`
+
+			got := runScripts(t, fake.ServeNothing(t), fetching(body), "run", target.URL)
+
+			assert.Equal(t, outcome{stdout: "text: " + strconv.Quote(tc.want) + "\n"}, got)
 		})
 	}
 }
