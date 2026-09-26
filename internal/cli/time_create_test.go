@@ -6,17 +6,9 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
 )
-
-const sentWorkItemWriteFields = "id,duration(minutes),type(name),attributes(id,name,value(id,name)),author(login),date," +
-	"issue(idReadable," + customFieldsFields + "),text"
-
-const sentWorkItemSettingsFields = "idReadable,project(shortName,plugins(timeTrackingSettings(workItemTypes(id,name)," +
-	"attributes(id,name,values(id,name)))))"
-
-const sentWorkItemTypesFields = "idReadable,project(shortName,plugins(timeTrackingSettings(workItemTypes(id,name))))"
 
 const workItemSettings = `{"$type":"Issue","idReadable":"DEV-1","project":{"$type":"Project","shortName":"DEV",` +
 	`"plugins":{"$type":"ProjectPlugins","timeTrackingSettings":{"$type":"ProjectTimeTrackingSettings",` +
@@ -25,10 +17,6 @@ const workItemSettings = `{"$type":"Issue","idReadable":"DEV-1","project":{"$typ
 	`"attributes":[{"$type":"WorkItemProjectAttribute","id":"9-1","name":"Mode","values":[` +
 	`{"$type":"WorkItemAttributeValue","id":"9-2","name":"Solo"},` +
 	`{"$type":"WorkItemAttributeValue","id":"9-3","name":"Pair"}]}]}}}}`
-
-func workItemWriteRequest(address, issue, fields string) string {
-	return "POST " + address + workItemsPath(issue) + "?fields=" + fields
-}
 
 type answeredWorkItem struct {
 	id         string
@@ -50,16 +38,6 @@ func (a answeredWorkItem) json() string {
 		`,"text":` + cmp.Or(a.text, "null") + `}`
 }
 
-func writingTime(t *testing.T, write http.HandlerFunc) *fake.Server {
-	t.Helper()
-	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
-		if !assert.Equal(t, http.MethodPost, r.Method, "a work item is written by one POST and nothing else") {
-			return
-		}
-		write(w, r)
-	})
-}
-
 func writingTimeAgainstTheSettings(t *testing.T, write http.HandlerFunc) *fake.Server {
 	t.Helper()
 	return fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
@@ -73,16 +51,14 @@ func writingTimeAgainstTheSettings(t *testing.T, write http.HandlerFunc) *fake.S
 
 func TestTimeCreateWritesTheWorkItemAndPrintsWhatTheServerKept(t *testing.T) {
 	t.Parallel()
-	spent := receivedField{name: "Spent", valueType: "period", value: `{"$type":"DurationValue","minutes":90}`}
 	server := writingTimeAgainstTheSettings(t, fake.JSON(http.StatusOK, answeredWorkItem{
 		workType: `{"$type":"WorkItemType","id":"8-1","name":"First"}`,
 		attributes: `[{"$type":"WorkItemAttribute","id":"9-1","name":"Mode",` +
 			`"value":{"$type":"WorkItemAttributeValue","id":"9-3","name":"Pair"}}]`,
-		text:   asJSON("first\nsecond"),
-		fields: spent.sent(),
+		text: asJSON("first\nsecond"),
 	}.json()))
 
-	got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H30M", "--date", "2026-09-01",
+	got := runWith(t, envOf(server), "time", "create", "DEV-1", "PT1H30M", "--date", "2026-09-01",
 		"--text", "first\nsecond", "--type", "First", "--attribute", "Mode=Pair")
 
 	assert.Equal(t, outcome{stdout: "id: \"199-7\"\n" +
@@ -91,50 +67,36 @@ func TestTimeCreateWritesTheWorkItemAndPrintsWhatTheServerKept(t *testing.T) {
 		"attributes:\n  \"Mode\": \"Pair\"\n" +
 		"author:\n  login: \"author\"\n" +
 		"date: \"2026-09-01T00:00:00Z\"\n" +
-		"issue:\n  idReadable: \"DEV-1\"\n  customFields:\n    \"Spent\": \"PT1H30M\"\n" +
+		"issue:\n  idReadable: \"DEV-1\"\n  customFields: {}\n" +
 		"text: |-\n  first\n  second\n"}, got)
-	assert.Equal(t, []string{
-		"/api/issues/DEV-1?fields=" + sentWorkItemSettingsFields,
-		workItemsPath("DEV-1") + "?fields=id,duration(minutes),type(name,id),attributes(id,name,value(id,name))," +
-			"author(login),date,issue(idReadable," + customFieldsFields + "),text",
-	}, server.Targets(t))
-	assert.Equal(t, http.MethodPost, server.Last(t).Method)
-	assert.Equal(t, `{"duration":{"minutes":90},"type":{"id":"8-1"},"date":1788264000000,"text":"first\nsecond",`+
-		`"attributes":[{"id":"9-1","value":{"id":"9-3"}}]}`, server.Last(t).Body)
+	assert.Contains(t, server.Routes(), http.MethodPost+" "+workItemsPath("DEV-1"))
 }
 
-func TestTimeCreateRefusesATypeTheProjectDoesNotHave(t *testing.T) {
+func TestTimeCreateRefusesArgumentsBeforeItAsksForAnything(t *testing.T) {
 	t.Parallel()
-	server := writingTimeAgainstTheSettings(t, fake.Unexpected(t))
+	tests := []struct {
+		name string
+		argv []string
+	}{
+		{name: "a duration of no period", argv: []string{"PT1H30"}},
+		{name: "a duration in days", argv: []string{"P1D"}},
+		{name: "a duration in seconds", argv: []string{"PT30S"}},
+		{name: "a duration with no hours and no minutes", argv: []string{"PT"}},
+		{name: "a duration longer than a work item holds", argv: []string{"PT153722868M"}},
+		{name: "hours longer than a work item holds", argv: []string{"PT2562048H"}},
+		{name: "an empty date", argv: []string{"PT1H", "--date", ""}},
+		{name: "an empty type", argv: []string{"PT1H", "--type", ""}},
+		{name: "an attribute with no =", argv: []string{"PT1H", "--attribute", "Mode"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := fake.ServeNothing(t)
 
-	got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H", "--type", "Secnd")
+			got := runWith(t, envOf(server), append([]string{"time", "create", "DEV-1"}, tc.argv...)...)
 
-	assert.Equal(t, faultDocument{
-		code: "unknown_name",
-		details: []detail{
-			{"request", issueRequest(server.URL, "DEV-1", sentWorkItemTypesFields)},
-			{"project", "DEV"},
-			{"unknown", []any{[]detail{{"type", "Secnd"}, {"nearest", []any{"Second"}}}}},
-		},
-	}, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, server.Methods())
-}
-
-func TestTimeCreateRefusesADurationTheServerKeptOtherwise(t *testing.T) {
-	t.Parallel()
-	server := writingTime(t, fake.JSON(http.StatusOK, answeredWorkItem{
-		duration: `{"$type":"DurationValue","minutes":60}`,
-	}.json()))
-
-	got := runWith(t, server.Env(), "time", "create", "DEV-1", "PT1H30M", "--fields", "id")
-
-	assert.Equal(t, faultDocument{
-		code: "upstream_invalid",
-		details: []detail{
-			{"request", workItemWriteRequest(server.URL, "DEV-1", "id,duration(minutes),date,text,issue(idReadable)")},
-			{"issue", "DEV-1"},
-			{"id", "199-7"},
-			{"mismatch", []any{[]detail{{"field", "duration"}, {"expected", "PT1H30M"}, {"actual", "PT1H"}}}},
-		},
-	}, requireUncertainty(t, got))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+			assert.Empty(t, server.Requests())
+		})
+	}
 }

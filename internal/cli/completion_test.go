@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -41,7 +41,7 @@ func requireCompleted(t *testing.T, got outcome) completed {
 
 func completing(t *testing.T, words ...string) completed {
 	t.Helper()
-	return requireCompleted(t, runWith(t, fake.ServeNothing(t).Env(), append([]string{"__complete"}, words...)...))
+	return requireCompleted(t, runWith(t, envOf(fake.ServeNothing(t)), append([]string{"__complete"}, words...)...))
 }
 
 func (c completed) names() []string {
@@ -115,7 +115,7 @@ func TestCompleteNoDescOffersTheNamesWithoutTheText(t *testing.T) {
 			described := completing(t, tc.words...)
 			require.NotEqual(t, described.names(), described.suggestions)
 
-			got := runWith(t, fake.ServeNothing(t).Env(), append([]string{"__completeNoDesc"}, tc.words...)...)
+			got := runWith(t, envOf(fake.ServeNothing(t)), append([]string{"__completeNoDesc"}, tc.words...)...)
 
 			assert.Equal(t, described.names(), requireCompleted(t, got).suggestions)
 		})
@@ -141,14 +141,14 @@ func TestCompleteOffersTheSubcommandsPastAFlagAndItsValue(t *testing.T) {
 
 func TestCompleteOffersNothingForACommandLineThatNamesNoCommand(t *testing.T) {
 	t.Parallel()
-	got := runWith(t, fake.ServeNothing(t).Env(), "__complete", "bogus", "")
+	got := runWith(t, envOf(fake.ServeNothing(t)), "__complete", "bogus", "")
 
 	assert.Equal(t, outcome{stdout: shellOffersNoFileNames + "\n"}, got)
 }
 
 func TestCompleteWithNoCommandLineIsRefused(t *testing.T) {
 	t.Parallel()
-	got := runWith(t, fake.ServeNothing(t).Env(), "__complete")
+	got := runWith(t, envOf(fake.ServeNothing(t)), "__complete")
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 }
@@ -237,7 +237,7 @@ func TestCompletionPrintsTheScriptOfTheShellItIsGiven(t *testing.T) {
 			var script bytes.Buffer
 			require.NoError(t, tc.generate(&cobra.Command{Use: "ytrack"}, &script))
 
-			got := runWith(t, fake.ServeNothing(t).Env(), "completion", tc.shell)
+			got := runWith(t, envOf(fake.ServeNothing(t)), "completion", tc.shell)
 
 			assert.Equal(t, outcome{stdout: script.String()}, got)
 		})
@@ -246,7 +246,7 @@ func TestCompletionPrintsTheScriptOfTheShellItIsGiven(t *testing.T) {
 
 func TestCompletionRefusesAShellItHasNoScriptFor(t *testing.T) {
 	t.Parallel()
-	got := runWith(t, fake.ServeNothing(t).Env(), "completion", "tcsh")
+	got := runWith(t, envOf(fake.ServeNothing(t)), "completion", "tcsh")
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 }

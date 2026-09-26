@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"github.com/hakastein/go-youtrack"
+
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -8,7 +10,7 @@ import (
 	"github.com/hakastein/ytrack/internal/render"
 )
 
-func example(document *render.Node) string {
+func example(document *youtrack.Node) string {
 	var out strings.Builder
 	if err := (render.YAML{}).Render(&out, document); err != nil {
 		panic("the example of a help does not render: " + err.Error())
@@ -18,138 +20,138 @@ func example(document *render.Node) string {
 
 const uncounted = -1
 
-func listed(total int, truncated bool, plural string, records ...*render.Node) *render.Node {
-	counted := render.NewNull()
+func listed(total int, truncated bool, plural string, records ...*youtrack.Node) *youtrack.Node {
+	counted := youtrack.NewNull()
 	if total != uncounted {
-		counted = render.NewNumber(json.Number(strconv.Itoa(total)))
+		counted = youtrack.NewNumber(json.Number(strconv.Itoa(total)))
 	}
-	return render.NewMap(
-		render.Pair{Key: "total", Value: counted},
-		render.Pair{Key: "returned", Value: render.NewNumber(json.Number(strconv.Itoa(len(records))))},
-		render.Pair{Key: "truncated", Value: render.NewBool(truncated)},
-		render.Pair{Key: plural, Value: render.NewList(records...)},
+	return youtrack.NewMap(
+		youtrack.Pair{Key: "total", Value: counted},
+		youtrack.Pair{Key: "returned", Value: youtrack.NewNumber(json.Number(strconv.Itoa(len(records))))},
+		youtrack.Pair{Key: "truncated", Value: youtrack.NewBool(truncated)},
+		youtrack.Pair{Key: plural, Value: youtrack.NewList(records...)},
 	)
 }
 
-func moment() *render.Node {
-	return render.NewString("2026-01-01T00:00:00Z")
+func moment() *youtrack.Node {
+	return youtrack.NewString("2026-01-01T00:00:00Z")
 }
 
-func byLogin() *render.Node {
-	return render.NewMap(render.Pair{Key: "login", Value: render.NewString("user")})
+func byLogin() *youtrack.Node {
+	return youtrack.NewMap(youtrack.Pair{Key: "login", Value: youtrack.NewString("user")})
 }
 
-func named(name string) *render.Node {
-	return render.NewMap(render.Pair{Key: "name", Value: render.NewString(name)})
+func named(name string) *youtrack.Node {
+	return youtrack.NewMap(youtrack.Pair{Key: "name", Value: youtrack.NewString(name)})
 }
 
-func sharedWith(groups ...*render.Node) *render.Node {
-	return render.NewMap(render.Pair{Key: "permittedGroups", Value: render.NewList(groups...)}, render.Pair{Key: "permittedUsers", Value: render.NewList()})
+func sharedWith(groups ...*youtrack.Node) *youtrack.Node {
+	return youtrack.NewMap(youtrack.Pair{Key: "permittedGroups", Value: youtrack.NewList(groups...)}, youtrack.Pair{Key: "permittedUsers", Value: youtrack.NewList()})
 }
 
-func linksOf(phrases int) *render.Node {
-	linked := func(id string) *render.Node {
-		return render.NewList(render.NewMap(render.Pair{Key: "idReadable", Value: render.NewString(id)}, render.Pair{Key: "summary", Value: render.NewString("Summary")}))
+func linksOf(phrases int) *youtrack.Node {
+	linked := func(id string) *youtrack.Node {
+		return youtrack.NewList(youtrack.NewMap(youtrack.Pair{Key: "idReadable", Value: youtrack.NewString(id)}, youtrack.Pair{Key: "summary", Value: youtrack.NewString("Summary")}))
 	}
-	links := []render.Pair{render.FromData("depends on", linked("DEV-2"))}
+	links := []youtrack.Pair{youtrack.DataPair("depends on", linked("DEV-2"))}
 	if phrases > 1 {
-		links = append(links, render.FromData("subtask of", linked("DEV-3")))
+		links = append(links, youtrack.DataPair("subtask of", linked("DEV-3")))
 	}
-	return render.NewMap(
-		render.Pair{Key: "total", Value: render.NewNumber(json.Number(strconv.Itoa(len(links))))},
-		render.Pair{Key: "returned", Value: render.NewNumber(json.Number(strconv.Itoa(len(links))))},
-		render.Pair{Key: "truncated", Value: render.NewBool(false)},
-		render.Pair{Key: "links", Value: render.NewMap(links...)},
+	return youtrack.NewMap(
+		youtrack.Pair{Key: "total", Value: youtrack.NewNumber(json.Number(strconv.Itoa(len(links))))},
+		youtrack.Pair{Key: "returned", Value: youtrack.NewNumber(json.Number(strconv.Itoa(len(links))))},
+		youtrack.Pair{Key: "truncated", Value: youtrack.NewBool(false)},
+		youtrack.Pair{Key: "links", Value: youtrack.NewMap(links...)},
 	)
 }
 
-func articleExample(withComments bool) *render.Node {
-	pairs := []render.Pair{
-		render.Pair{Key: "idReadable", Value: render.NewString("DEV-A-2")},
-		render.Pair{Key: "summary", Value: render.NewString("Summary")},
-		render.Pair{Key: "reporter", Value: byLogin()},
-		render.Pair{Key: "created", Value: moment()},
-		render.Pair{Key: "updated", Value: moment()},
-		render.Pair{Key: "tags", Value: render.NewList(named("Tag"))},
-		render.Pair{Key: "parentArticle", Value: render.NewMap(render.Pair{Key: "idReadable", Value: render.NewString("DEV-A-1")}, render.Pair{Key: "summary", Value: render.NewString("Summary")})},
-		render.Pair{Key: "childArticles", Value: render.NewList()},
-		render.Pair{Key: "content", Value: render.NewText("Text")},
+func articleExample(withComments bool) *youtrack.Node {
+	pairs := []youtrack.Pair{
+		youtrack.Pair{Key: "idReadable", Value: youtrack.NewString("DEV-A-2")},
+		youtrack.Pair{Key: "summary", Value: youtrack.NewString("Summary")},
+		youtrack.Pair{Key: "reporter", Value: byLogin()},
+		youtrack.Pair{Key: "created", Value: moment()},
+		youtrack.Pair{Key: "updated", Value: moment()},
+		youtrack.Pair{Key: "tags", Value: youtrack.NewList(named("Tag"))},
+		youtrack.Pair{Key: "parentArticle", Value: youtrack.NewMap(youtrack.Pair{Key: "idReadable", Value: youtrack.NewString("DEV-A-1")}, youtrack.Pair{Key: "summary", Value: youtrack.NewString("Summary")})},
+		youtrack.Pair{Key: "childArticles", Value: youtrack.NewList()},
+		youtrack.Pair{Key: "content", Value: youtrack.NewText("Text")},
 	}
 	if withComments {
-		pairs = append(pairs, render.Pair{Key: "comments", Value: render.NewList(render.NewMap(render.Pair{Key: "id", Value: render.NewString("8-1")},
-			render.Pair{Key: "author", Value: byLogin()}, render.Pair{Key: "created", Value: moment()}, render.Pair{Key: "text", Value: render.NewText("Text")}))})
+		pairs = append(pairs, youtrack.Pair{Key: "comments", Value: youtrack.NewList(youtrack.NewMap(youtrack.Pair{Key: "id", Value: youtrack.NewString("8-1")},
+			youtrack.Pair{Key: "author", Value: byLogin()}, youtrack.Pair{Key: "created", Value: moment()}, youtrack.Pair{Key: "text", Value: youtrack.NewText("Text")}))})
 	}
-	return render.NewMap(pairs...)
+	return youtrack.NewMap(pairs...)
 }
 
-func attachmentExample() *render.Node {
-	return render.NewMap(
-		render.Pair{Key: "id", Value: render.NewString("12-1")},
-		render.Pair{Key: "name", Value: render.NewString("file.txt")},
-		render.Pair{Key: "size", Value: render.NewNumber(json.Number(strconv.Itoa(4)))},
-		render.Pair{Key: "mimeType", Value: render.NewString("text/plain")},
-		render.Pair{Key: "url", Value: render.NewString("https://youtrack.example.com/api/files/12-1?sign=SIGNATURE")},
+func attachmentExample() *youtrack.Node {
+	return youtrack.NewMap(
+		youtrack.Pair{Key: "id", Value: youtrack.NewString("12-1")},
+		youtrack.Pair{Key: "name", Value: youtrack.NewString("file.txt")},
+		youtrack.Pair{Key: "size", Value: youtrack.NewNumber(json.Number(strconv.Itoa(4)))},
+		youtrack.Pair{Key: "mimeType", Value: youtrack.NewString("text/plain")},
+		youtrack.Pair{Key: "url", Value: youtrack.NewString("https://youtrack.example.com/api/files/12-1?sign=SIGNATURE")},
 	)
 }
 
-func commentExample(updated *render.Node) *render.Node {
-	return render.NewMap(
-		render.Pair{Key: "id", Value: render.NewString("7-1")},
-		render.Pair{Key: "author", Value: byLogin()},
-		render.Pair{Key: "created", Value: moment()},
-		render.Pair{Key: "updated", Value: updated},
-		render.Pair{Key: "text", Value: render.NewText("Text")},
+func commentExample(updated *youtrack.Node) *youtrack.Node {
+	return youtrack.NewMap(
+		youtrack.Pair{Key: "id", Value: youtrack.NewString("7-1")},
+		youtrack.Pair{Key: "author", Value: byLogin()},
+		youtrack.Pair{Key: "created", Value: moment()},
+		youtrack.Pair{Key: "updated", Value: updated},
+		youtrack.Pair{Key: "text", Value: youtrack.NewText("Text")},
 	)
 }
 
-func issueExample(withComments bool) *render.Node {
-	pairs := []render.Pair{
-		render.Pair{Key: "idReadable", Value: render.NewString("DEV-1")},
-		render.Pair{Key: "summary", Value: render.NewString("Summary")},
-		render.Pair{Key: "reporter", Value: byLogin()},
-		render.Pair{Key: "created", Value: moment()},
-		render.Pair{Key: "updated", Value: moment()},
-		render.Pair{Key: "resolved", Value: render.NewNull()},
-		render.Pair{Key: "tags", Value: render.NewList(named("Tag"))},
-		render.Pair{Key: "customFields", Value: render.NewMap(
-			render.FromData("State", render.NewString("Open")),
-			render.FromData("Assignee", render.NewString("user")),
-			render.FromData("Fix versions", render.NewList(render.NewString("1.0"))),
+func issueExample(withComments bool) *youtrack.Node {
+	pairs := []youtrack.Pair{
+		youtrack.Pair{Key: "idReadable", Value: youtrack.NewString("DEV-1")},
+		youtrack.Pair{Key: "summary", Value: youtrack.NewString("Summary")},
+		youtrack.Pair{Key: "reporter", Value: byLogin()},
+		youtrack.Pair{Key: "created", Value: moment()},
+		youtrack.Pair{Key: "updated", Value: moment()},
+		youtrack.Pair{Key: "resolved", Value: youtrack.NewNull()},
+		youtrack.Pair{Key: "tags", Value: youtrack.NewList(named("Tag"))},
+		youtrack.Pair{Key: "customFields", Value: youtrack.NewMap(
+			youtrack.DataPair("State", youtrack.NewString("Open")),
+			youtrack.DataPair("Assignee", youtrack.NewString("user")),
+			youtrack.DataPair("Fix versions", youtrack.NewList(youtrack.NewString("1.0"))),
 		)},
-		render.Pair{Key: "links", Value: render.NewMap(render.FromData("depends on", render.NewList(
-			render.NewMap(render.Pair{Key: "idReadable", Value: render.NewString("DEV-2")}, render.Pair{Key: "summary", Value: render.NewString("Summary")}))))},
-		render.Pair{Key: "description", Value: render.NewText("Text")},
+		youtrack.Pair{Key: "links", Value: youtrack.NewMap(youtrack.DataPair("depends on", youtrack.NewList(
+			youtrack.NewMap(youtrack.Pair{Key: "idReadable", Value: youtrack.NewString("DEV-2")}, youtrack.Pair{Key: "summary", Value: youtrack.NewString("Summary")}))))},
+		youtrack.Pair{Key: "description", Value: youtrack.NewText("Text")},
 	}
 	if withComments {
-		pairs = append(pairs, render.Pair{Key: "comments", Value: render.NewList(render.NewMap(render.Pair{Key: "id", Value: render.NewString("7-1")},
-			render.Pair{Key: "author", Value: byLogin()}, render.Pair{Key: "created", Value: moment()}, render.Pair{Key: "text", Value: render.NewText("Text")}))})
+		pairs = append(pairs, youtrack.Pair{Key: "comments", Value: youtrack.NewList(youtrack.NewMap(youtrack.Pair{Key: "id", Value: youtrack.NewString("7-1")},
+			youtrack.Pair{Key: "author", Value: byLogin()}, youtrack.Pair{Key: "created", Value: moment()}, youtrack.Pair{Key: "text", Value: youtrack.NewText("Text")}))})
 	}
-	return render.NewMap(pairs...)
+	return youtrack.NewMap(pairs...)
 }
 
-func fieldOf(after ...render.Pair) *render.Node {
-	return render.NewMap(append([]render.Pair{
-		render.Pair{Key: "field", Value: render.NewMap(
-			render.Pair{Key: "name", Value: render.NewString("State")},
-			render.Pair{Key: "localizedName", Value: render.NewNull()},
-			render.Pair{Key: "fieldType", Value: render.NewMap(render.Pair{Key: "valueType", Value: render.NewString("state")}, render.Pair{Key: "isMultiValue", Value: render.NewBool(false)})},
+func fieldOf(after ...youtrack.Pair) *youtrack.Node {
+	return youtrack.NewMap(append([]youtrack.Pair{
+		youtrack.Pair{Key: "field", Value: youtrack.NewMap(
+			youtrack.Pair{Key: "name", Value: youtrack.NewString("State")},
+			youtrack.Pair{Key: "localizedName", Value: youtrack.NewNull()},
+			youtrack.Pair{Key: "fieldType", Value: youtrack.NewMap(youtrack.Pair{Key: "valueType", Value: youtrack.NewString("state")}, youtrack.Pair{Key: "isMultiValue", Value: youtrack.NewBool(false)})},
 		)},
-		render.Pair{Key: "canBeEmpty", Value: render.NewBool(false)},
+		youtrack.Pair{Key: "canBeEmpty", Value: youtrack.NewBool(false)},
 	}, after...)...)
 }
 
-func workItemExample() *render.Node {
-	return render.NewMap(
-		render.Pair{Key: "id", Value: render.NewString("150-1")},
-		render.Pair{Key: "duration", Value: render.NewString("PT1H30M")},
-		render.Pair{Key: "type", Value: named("Type")},
-		render.Pair{Key: "attributes", Value: render.NewMap(render.FromData("Attribute", render.NewString("Value")))},
-		render.Pair{Key: "author", Value: byLogin()},
-		render.Pair{Key: "date", Value: moment()},
-		render.Pair{Key: "issue", Value: render.NewMap(
-			render.Pair{Key: "idReadable", Value: render.NewString("DEV-1")},
-			render.Pair{Key: "customFields", Value: render.NewMap(render.FromData("Spent time", render.NewString("PT1H30M")))},
+func workItemExample() *youtrack.Node {
+	return youtrack.NewMap(
+		youtrack.Pair{Key: "id", Value: youtrack.NewString("150-1")},
+		youtrack.Pair{Key: "duration", Value: youtrack.NewString("PT1H30M")},
+		youtrack.Pair{Key: "type", Value: named("Type")},
+		youtrack.Pair{Key: "attributes", Value: youtrack.NewMap(youtrack.DataPair("Attribute", youtrack.NewString("Value")))},
+		youtrack.Pair{Key: "author", Value: byLogin()},
+		youtrack.Pair{Key: "date", Value: moment()},
+		youtrack.Pair{Key: "issue", Value: youtrack.NewMap(
+			youtrack.Pair{Key: "idReadable", Value: youtrack.NewString("DEV-1")},
+			youtrack.Pair{Key: "customFields", Value: youtrack.NewMap(youtrack.DataPair("Spent time", youtrack.NewString("PT1H30M")))},
 		)},
-		render.Pair{Key: "text", Value: render.NewText("Text")},
+		youtrack.Pair{Key: "text", Value: youtrack.NewText("Text")},
 	)
 }

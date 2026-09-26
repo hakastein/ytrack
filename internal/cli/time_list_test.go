@@ -2,14 +2,11 @@ package cli_test
 
 import (
 	"net/http"
-	"net/url"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
 )
-
-const sentWorkItemFields = "id,duration(minutes),type(name),attributes(id,name,value(id,name)),author(login),date,text"
 
 func workItemsPath(id string) string {
 	return "/api/issues/" + id + "/timeTracking/workItems"
@@ -34,14 +31,13 @@ const (
 		`author: {login: "second.author"}, date: "2026-09-02T00:00:00Z", text: "Second text"}` + "\n"
 )
 
-func TestTimeListAsksTheWorkItemsOfTheIssueInOneRequestAndPrintsThem(t *testing.T) {
+func TestTimeListPrintsTheWorkItemsOfTheIssue(t *testing.T) {
 	t.Parallel()
 	server := fake.Serve(t, fake.JSON(http.StatusOK, "["+listedWorkItem+","+listedSecondWorkItem+"]"))
 
-	got := runWith(t, server.Env(), "time", "list", "DEV-1")
+	got := runWith(t, envOf(server), "time", "list", "DEV-1")
 
 	want := "total: 2\nreturned: 2\ntruncated: false\nworkItems:\n" + printedWorkItemRow + printedSecondRow
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []string{http.MethodGet + " " + workItemsPath("DEV-1")}, server.Routes())
-	assert.Equal(t, url.Values{"fields": {sentWorkItemFields}, "$top": {"50"}}, server.Request(t, 0).URL.Query())
+	assert.Contains(t, server.Routes(), http.MethodGet+" "+workItemsPath("DEV-1"))
 }

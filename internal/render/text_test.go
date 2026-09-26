@@ -1,13 +1,13 @@
 package render_test
 
 import (
+	"github.com/hakastein/go-youtrack"
+
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
-
-	"github.com/hakastein/ytrack/internal/render"
 )
 
 func TestYAMLWritesTextAsALiteralBlockThatReadsBackByteForByte(t *testing.T) {
@@ -40,7 +40,7 @@ func TestYAMLWritesTextAsALiteralBlockThatReadsBackByteForByte(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			document := rendered(t, render.NewMap(render.Pair{Key: "text", Value: render.NewText(tc.text)}))
+			document := rendered(t, youtrack.NewMap(youtrack.Pair{Key: "text", Value: youtrack.NewText(tc.text)}))
 			assert.Equal(t, tc.want, document)
 			assert.Equal(t, map[string]string{"text": tc.text}, readBack(t, document))
 		})
@@ -69,7 +69,7 @@ func TestYAMLQuotesTextALiteralBlockCannotHold(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			document := rendered(t, render.NewMap(render.Pair{Key: "text", Value: render.NewText(tc.text)}))
+			document := rendered(t, youtrack.NewMap(youtrack.Pair{Key: "text", Value: youtrack.NewText(tc.text)}))
 			assert.Equal(t, tc.want, document)
 			assert.Equal(t, map[string]string{"text": tc.text}, readBack(t, document))
 		})
@@ -112,7 +112,7 @@ func TestYAMLEscapesTheUnprintableInAStringAndLeavesThePrintableRaw(t *testing.T
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			document := rendered(t, render.NewMap(render.Pair{Key: "value", Value: render.NewString(tc.value)}))
+			document := rendered(t, youtrack.NewMap(youtrack.Pair{Key: "value", Value: youtrack.NewString(tc.value)}))
 			assert.Equal(t, tc.want, document)
 			assert.Equal(t, map[string]string{"value": tc.value}, readBack(t, document))
 		})
@@ -123,57 +123,57 @@ func TestYAMLPrintsInvalidUTF8AsTheReplacementCharacter(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
-		value *render.Node
+		value *youtrack.Node
 		want  string
 	}{
-		{name: "string", value: render.NewString("First\xffSecond"), want: lines("value: \"First\U0000FFFDSecond\"")},
-		{name: "text", value: render.NewText("First\n\xff"), want: lines("value: \"First\\n\U0000FFFD\"")},
-		{name: "cut sequence", value: render.NewString("First\xe2\x80"), want: lines("value: \"First\U0000FFFD\U0000FFFD\"")},
+		{name: "string", value: youtrack.NewString("First\xffSecond"), want: lines("value: \"First\U0000FFFDSecond\"")},
+		{name: "text", value: youtrack.NewText("First\n\xff"), want: lines("value: \"First\\n\U0000FFFD\"")},
+		{name: "cut sequence", value: youtrack.NewString("First\xe2\x80"), want: lines("value: \"First\U0000FFFD\U0000FFFD\"")},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tc.want, rendered(t, render.NewMap(render.Pair{Key: "value", Value: tc.value})))
+			assert.Equal(t, tc.want, rendered(t, youtrack.NewMap(youtrack.Pair{Key: "value", Value: tc.value})))
 		})
 	}
 }
 
 func TestYAMLWritesARecordHoldingTextAsABlock(t *testing.T) {
 	t.Parallel()
-	first := render.Pair{Key: "id", Value: render.NewString("1")}
+	first := youtrack.Pair{Key: "id", Value: youtrack.NewString("1")}
 	tests := []struct {
 		name     string
-		document *render.Node
+		document *youtrack.Node
 		want     string
 	}{
 		{
 			name:     "text in a record",
-			document: render.NewMap(render.Pair{Key: "records", Value: render.NewList(render.NewMap(first, render.Pair{Key: "text", Value: render.NewText("First\nSecond")}))}),
+			document: youtrack.NewMap(youtrack.Pair{Key: "records", Value: youtrack.NewList(youtrack.NewMap(first, youtrack.Pair{Key: "text", Value: youtrack.NewText("First\nSecond")}))}),
 			want:     lines(`records:`, `  - id: "1"`, `    text: |-`, `      First`, `      Second`),
 		},
 		{
 			name: "records with and without text",
-			document: render.NewMap(render.Pair{Key: "records", Value: render.NewList(
-				render.NewMap(first),
-				render.NewMap(render.Pair{Key: "text", Value: render.NewText("First")}, render.Pair{Key: "tags", Value: render.NewList(render.NewString("First"))}),
+			document: youtrack.NewMap(youtrack.Pair{Key: "records", Value: youtrack.NewList(
+				youtrack.NewMap(first),
+				youtrack.NewMap(youtrack.Pair{Key: "text", Value: youtrack.NewText("First")}, youtrack.Pair{Key: "tags", Value: youtrack.NewList(youtrack.NewString("First"))}),
 			)}),
 			want: lines(`records:`, `  - {id: "1"}`, `  - text: |-`, `      First`, `    tags:`, `      - "First"`),
 		},
 		{
 			name:     "text in a mapping in a record",
-			document: render.NewMap(render.Pair{Key: "records", Value: render.NewList(render.NewMap(first, render.Pair{Key: "body", Value: render.NewMap(render.Pair{Key: "text", Value: render.NewText("First")})}))}),
+			document: youtrack.NewMap(youtrack.Pair{Key: "records", Value: youtrack.NewList(youtrack.NewMap(first, youtrack.Pair{Key: "body", Value: youtrack.NewMap(youtrack.Pair{Key: "text", Value: youtrack.NewText("First")})}))}),
 			want:     lines(`records:`, `  - id: "1"`, `    body:`, `      text: |-`, `        First`),
 		},
 		{
 			name: "text in a record in a record",
-			document: render.NewMap(render.Pair{Key: "records", Value: render.NewList(render.NewMap(first, render.Pair{Key: "replies", Value: render.NewList(
-				render.NewMap(render.Pair{Key: "text", Value: render.NewText("First")}),
+			document: youtrack.NewMap(youtrack.Pair{Key: "records", Value: youtrack.NewList(youtrack.NewMap(first, youtrack.Pair{Key: "replies", Value: youtrack.NewList(
+				youtrack.NewMap(youtrack.Pair{Key: "text", Value: youtrack.NewText("First")}),
 			)}))}),
 			want: lines(`records:`, `  - id: "1"`, `    replies:`, `      - text: |-`, `          First`),
 		},
 		{
 			name:     "text a record cannot hold in a block",
-			document: render.NewMap(render.Pair{Key: "records", Value: render.NewList(render.NewMap(render.Pair{Key: "text", Value: render.NewText("First\r\n")}))}),
+			document: youtrack.NewMap(youtrack.Pair{Key: "records", Value: youtrack.NewList(youtrack.NewMap(youtrack.Pair{Key: "text", Value: youtrack.NewText("First\r\n")}))}),
 			want:     lines(`records:`, `  - text: "First\r\n"`),
 		},
 	}
@@ -187,8 +187,8 @@ func TestYAMLWritesARecordHoldingTextAsABlock(t *testing.T) {
 
 func TestYAMLIndentsTextInARecordRelativeToTheRecord(t *testing.T) {
 	t.Parallel()
-	document := rendered(t, render.NewMap(render.Pair{Key: "records", Value: render.NewList(
-		render.NewMap(render.Pair{Key: "text", Value: render.NewText("  First\nSecond\n\n")}),
+	document := rendered(t, youtrack.NewMap(youtrack.Pair{Key: "records", Value: youtrack.NewList(
+		youtrack.NewMap(youtrack.Pair{Key: "text", Value: youtrack.NewText("  First\nSecond\n\n")}),
 	)}))
 	assert.Equal(t, lines(`records:`, `  - text: |2+`, `        First`, `      Second`, ``), document)
 	var read map[string][]map[string]string
@@ -200,10 +200,10 @@ func TestYAMLRefusesTextOutsideARecord(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name     string
-		document *render.Node
+		document *youtrack.Node
 	}{
-		{name: "text as a list item", document: render.NewMap(render.Pair{Key: "items", Value: render.NewList(render.NewString("First"), render.NewText("Second"))})},
-		{name: "text in a list in a list", document: render.NewMap(render.Pair{Key: "items", Value: render.NewList(render.NewList(render.NewText("First")))})},
+		{name: "text as a list item", document: youtrack.NewMap(youtrack.Pair{Key: "items", Value: youtrack.NewList(youtrack.NewString("First"), youtrack.NewText("Second"))})},
+		{name: "text in a list in a list", document: youtrack.NewMap(youtrack.Pair{Key: "items", Value: youtrack.NewList(youtrack.NewList(youtrack.NewText("First")))})},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

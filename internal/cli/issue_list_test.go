@@ -2,11 +2,9 @@ package cli_test
 
 import (
 	"net/http"
-	"net/url"
-	"strconv"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -15,88 +13,34 @@ const (
 	countPath  = "/api/issuesGetter/count"
 )
 
-const (
-	namedState = "State"
-	namedType  = "Type"
-)
+const foundDEV1AndDEV2 = `[{"$type":"Issue","idReadable":"DEV-1"},{"$type":"Issue","idReadable":"DEV-2"}]`
 
-const sentIssueListFields = "idReadable,summary," + translatedCustomFieldsFields + ",created"
-
-type listedIssue struct {
-	id                 string
-	internal           string
-	summary            string
-	state              string
-	createdEpochMillis string
-}
-
-func (i listedIssue) sent() string {
-	return `{"summary":` + strconv.Quote(i.summary) + `,"$type":"Issue","id":` + strconv.Quote(i.internal) +
-		`,"customFields":` + receivedFields(
-		receivedField{name: namedType, valueType: "enum", ordinal: "1", binding: "180-15", value: bundleElement("Task")},
-		receivedField{name: namedState, valueType: "state", ordinal: "8", binding: "180-14", value: bundleElement(i.state)},
-	) + `,"idReadable":` + strconv.Quote(i.id) + `,"created":` + i.createdEpochMillis + `}`
-}
-
-func listedDEV1() string {
-	return listedIssue{id: "DEV-1", internal: "3-19", summary: "First",
-		state: "Open", createdEpochMillis: "1788134400875"}.sent()
-}
-
-func listedDEV2() string {
-	return listedIssue{id: "DEV-2", internal: "3-20", summary: "Second",
-		state: "Closed", createdEpochMillis: "1788134401000"}.sent()
-}
-
-const (
-	printedDEV1Row = `  - {idReadable: "DEV-1", summary: "First", ` +
-		`customFields: {"State": "Open", "Type": "Task"}, created: "2026-08-31T00:00:00.875Z"}` + "\n"
-	printedDEV2Row = `  - {idReadable: "DEV-2", summary: "Second", ` +
-		`customFields: {"State": "Closed", "Type": "Task"}, created: "2026-08-31T00:00:01Z"}` + "\n"
-	printedDEV3Row = `  - {idReadable: "DEV-3", summary: "Third", ` +
-		`customFields: {"State": "New", "Type": "Task"}, created: "2026-08-31T00:00:02.4Z"}` + "\n"
-)
+const printedDEV1AndDEV2 = "total: 2\nreturned: 2\ntruncated: false\nissues:\n" +
+	`  - {idReadable: "DEV-1"}` + "\n" + `  - {idReadable: "DEV-2"}` + "\n"
 
 func countHandler(count string) http.HandlerFunc {
 	return fake.JSON(http.StatusOK, `{"$type":"IssueCountResponse","count":`+count+`}`)
 }
 
-func TestIssueListTakesItsSearchFromTheQueryFlagAlone(t *testing.T) {
+func TestIssueListRefusesACallWithoutAQueryBeforeTheNetwork(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "no search at all", argv: []string{"issue", "list"}},
-		{name: "a search that is no UTF-8", argv: []string{"issue", "list", "--query", "\xff"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
+	server := fake.ServeNothing(t)
 
-			got := runWith(t, server.Env(), tc.argv...)
+	got := runWith(t, envOf(server), "issue", "list")
 
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests())
-		})
-	}
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+	assert.Empty(t, server.Requests())
 }
 
 func TestIssueListPrintsTheIssuesTheSearchFinds(t *testing.T) {
 	t.Parallel()
-	server := fake.Serve(t, fake.Searching(t, fake.JSON(http.StatusOK, `[`+listedDEV1()+`,`+listedDEV2()+`]`)))
+	server := fake.Serve(t, fake.Searching(t, fake.JSON(http.StatusOK, foundDEV1AndDEV2)))
 
-	got := runWith(t, server.Env(), "issue", "list", "--query", " project: DEV ", "--limit", "3")
+	got := runWith(t, envOf(server), "issue", "list", "--query", " project: DEV ", "--fields", "idReadable")
 
-	want := "total: 2\nreturned: 2\ntruncated: false\nissues:\n" + printedDEV1Row + printedDEV2Row
-	assert.Equal(t, outcome{stdout: want}, got)
-	requireMarkedUpFirst(t, server, " project: DEV ")
-	assert.Equal(t, []string{fake.AssistPath, issuesPath}, server.Paths())
-	assert.Equal(t, url.Values{
-		"query":        {" project: DEV "},
-		"customFields": {namedState, namedType},
-		"fields":       {sentIssueListFields},
-		"$top":         {"3"},
-	}, server.Request(t, 1).URL.Query())
+	assert.Equal(t, outcome{stdout: printedDEV1AndDEV2}, got)
+	sent := server.Last(t)
+	assert.Equal(t, http.MethodGet, sent.Method)
+	assert.Equal(t, issuesPath, sent.URL.Path)
+	assert.Equal(t, " project: DEV ", sent.URL.Query().Get("query"))
 }

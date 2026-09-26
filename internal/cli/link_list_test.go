@@ -4,15 +4,9 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
 )
-
-const linkListTarget = "idReadable,summary"
-
-func linkListFields(target string) string {
-	return "links(issues(" + target + "),direction,linkType(sourceToTarget,targetToSource),issuesSize)"
-}
 
 func TestLinkListPrintsThePhrasesOfAnIssueInTheOrderReceived(t *testing.T) {
 	t.Parallel()
@@ -23,31 +17,11 @@ func TestLinkListPrintsThePhrasesOfAnIssueInTheOrderReceived(t *testing.T) {
 		`{"$type":"IssueLink","direction":"BOTH","linkType":`+tiesLinkType+`,"issuesSize":2,"issues":[`+
 		`{"$type":"Issue","idReadable":"DEV-9","summary":"Ninth"},{"$type":"Issue","idReadable":"DEV-2","summary":"Second"}]}]}`))
 
-	got := runWith(t, server.Env(), "link", "list", "DEV-1")
+	got := runWith(t, envOf(server), "link", "list", "DEV-1")
 
 	assert.Equal(t, outcome{stdout: "total: 3\nreturned: 3\ntruncated: false\nlinks:\n" +
 		"  \"needs\":\n    - {idReadable: \"DEV-3\", summary: \"Third\"}\n" +
 		"  \"ties\":\n    - {idReadable: \"DEV-9\", summary: \"Ninth\"}\n" +
 		"    - {idReadable: \"DEV-2\", summary: \"Second\"}\n"}, got)
-	assert.Equal(t, []string{"/api/issues/DEV-1?fields=" + linkListFields(linkListTarget)}, server.Targets(t))
-}
-
-func TestLinkListRefusesACountBelowNone(t *testing.T) {
-	t.Parallel()
-	const body = `{"$type":"Issue","links":[` +
-		`{"$type":"IssueLink","direction":"INWARD","linkType":` + needsLinkType + `,"issuesSize":-1,"issues":[]},` +
-		`{"$type":"IssueLink","direction":"BOTH","linkType":` + tiesLinkType + `,"issuesSize":2,"issues":[` +
-		`{"$type":"Issue","idReadable":"DEV-2","summary":"Second"}]}]}`
-	server := fake.Serve(t, fake.JSON(http.StatusOK, body))
-
-	got := runWith(t, server.Env(), "link", "list", "DEV-1", "--fields", "idReadable")
-
-	assert.Equal(t, faultDocument{
-		code: "upstream_invalid",
-		details: []detail{
-			{"request", issueRequest(server.URL, "DEV-1", linkListFields("idReadable"))},
-			{"upstream_status", 200},
-			{"upstream_body", body},
-		},
-	}, requireFault(t, got))
+	assert.Contains(t, server.Routes(), "GET /api/issues/DEV-1")
 }

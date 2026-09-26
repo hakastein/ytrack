@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -73,10 +73,9 @@ func TestAttachmentCreateRefusesAFileThatIsNoOrdinaryOneOnUnix(t *testing.T) {
 			server := fake.ServeNothing(t)
 			path := tc.path(t)
 
-			got := runWith(t, server.Env(), "attachment", "create", "DEV-1", path)
+			got := runWith(t, envOf(server), "attachment", "create", "DEV-1", path)
 
-			found := requireFault(t, got)
-			assert.Equal(t, "bad_usage", found.code)
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 			assert.Empty(t, server.Requests())
 		})
 	}
@@ -95,7 +94,7 @@ func TestAttachmentCreateRefusesAPathThatNoLongerPointsToTheCheckedFile(t *testi
 	var got outcome
 
 	require.Eventually(t, func() bool {
-		got = runWith(t, server.Env(), "attachment", "create", "DEV-1", path, "--fields", "name")
+		got = runWith(t, envOf(server), "attachment", "create", "DEV-1", path, "--fields", "name")
 		return got.code != 0
 	}, 10*time.Second, time.Millisecond, "the path never changed between the two calls")
 

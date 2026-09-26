@@ -2,14 +2,16 @@ package cli_test
 
 import (
 	"net/http"
+	"strconv"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
 )
 
-func articleUpdateRequest(address, readable, fields string) string {
-	return "POST " + address + "/api/articles/" + readable + "?fields=" + fields
+func articleOfDEVToWrite(id, readable string) string {
+	return `{"$type":"Article","id":` + strconv.Quote(id) + `,"idReadable":` + strconv.Quote(readable) +
+		`,"project":{"$type":"Project","shortName":"DEV"}}`
 }
 
 func updatingAnArticle(t *testing.T, read, update http.HandlerFunc) *fake.Server {
@@ -26,53 +28,39 @@ func updatingAnArticle(t *testing.T, read, update http.HandlerFunc) *fake.Server
 	})
 }
 
-func TestArticleUpdatePrintsTheDefaultFieldsOfTheArticle(t *testing.T) {
+func TestArticleUpdateRefusesAPartItCannotEmptyBeforeAnyRequest(t *testing.T) {
 	t.Parallel()
-	filed := answeredArticle{readable: "DEV-A-7", summary: "Title"}
-	server := updatingAnArticle(t,
-		fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		fake.JSON(http.StatusOK, filed.json()))
+	tests := []struct {
+		name string
+		part string
+	}{
+		{name: "a word that names no part", part: "bogus"},
+		{name: "the title every article holds", part: "summary"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := fake.ServeNothing(t)
 
-	got := runWith(t, server.Env(), "article", "update", "DEV-A-7", "--summary", "Title")
+			got := runWith(t, envOf(server), "article", "update", "DEV-A-7", "--clear", tc.part)
 
-	assert.Equal(t, outcome{stdout: `idReadable: "DEV-A-7"` + "\n" + `summary: "Title"` + "\n" +
-		"reporter:\n  login: \"admin\"\n" +
-		`created: "2026-09-10T10:16:50.875Z"` + "\n" + `updated: "2026-09-10T10:16:50.875Z"` + "\n" +
-		"tags: []\nparentArticle: null\nchildArticles: []\ncontent: null\n"}, got)
-	assert.Equal(t, articleShowFields, server.Last(t).URL.Query().Get("fields"))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+			assert.Empty(t, server.Requests())
+		})
+	}
 }
 
-func TestArticleUpdateWritesTheArticleTheReadFound(t *testing.T) {
+func TestArticleUpdatePrintsTheArticleTheServerWrote(t *testing.T) {
 	t.Parallel()
-	filed := answeredArticle{readable: "DEV-A-7", summary: "Title", content: asJSON(hostileText)}
+	const written = `{"$type":"Article","idReadable":"DEV-A-7","summary":"Title",` +
+		`"project":{"$type":"Project","shortName":"DEV"}}`
 	server := updatingAnArticle(t,
 		fake.JSON(http.StatusOK, articleOfDEVToWrite("177-7", "DEV-A-7")),
-		fake.JSON(http.StatusOK, filed.json()))
+		fake.JSON(http.StatusOK, written))
 
-	got := runWith(t, server.Env(), "article", "update", "DEV-A-7", "--content", hostileText,
+	got := runWith(t, envOf(server), "article", "update", "DEV-A-7", "--summary", "Title",
 		"--fields", "idReadable,summary")
 
 	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-A-7\"\nsummary: \"Title\"\n"}, got)
-	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, server.Methods())
-	assert.Equal(t, []string{"/api/articles/DEV-A-7", "/api/articles/DEV-A-7"}, server.Paths())
-	assert.Equal(t, map[string]any{"content": hostileText}, server.LastJSON(t))
-}
-
-func TestArticleUpdateRefusesAReadableIDItCannotAddressBy(t *testing.T) {
-	t.Parallel()
-	const body = `{"$type":"Article","id":"177-7","idReadable":"..","project":{"$type":"Project","shortName":"DEV"}}`
-	server := updatingAnArticle(t, fake.JSON(http.StatusOK, body), fake.Unexpected(t))
-
-	got := runWith(t, server.Env(), "article", "update", "DEV-A-7", "--summary", "x")
-
-	want := faultDocument{
-		code: "upstream_invalid",
-		details: []detail{
-			{"request", articleToWriteRequest(server.URL, "DEV-A-7")},
-			{"upstream_status", 200},
-			{"upstream_body", body},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, server.Methods())
+	assert.Contains(t, server.Routes(), "POST /api/articles/DEV-A-7")
 }

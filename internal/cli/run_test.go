@@ -14,8 +14,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
 
+	"github.com/hakastein/go-youtrack/fake"
+
 	"github.com/hakastein/ytrack/internal/cli"
 )
+
+func envOf(server *fake.Server) []string {
+	return []string{"YTRACK_URL=" + server.URL, "YTRACK_TOKEN=" + fake.Token}
+}
 
 type outcome struct {
 	code   int

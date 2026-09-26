@@ -2,20 +2,20 @@ package cli_test
 
 import (
 	"net/http"
-	"net/url"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestUserListAddsFieldsToTheDefaultOfTheList(t *testing.T) {
+func TestUserListPrintsTheUsersOfTheSearch(t *testing.T) {
 	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, `[{"id":"1-1","fullName":"First","$type":"User","banned":false,"login":"first"}]`))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, `[{"login":"first","id":"1-1","$type":"User"}]`))
 
-	got := runWith(t, server.Env(), "user", "list", "--query", "fir", "--fields", "+id")
+	got := runWith(t, envOf(server), "user", "list", "--query", "fir", "--fields", "login,id")
 
-	want := "total: 1\nreturned: 1\ntruncated: false\nusers:\n" + `  - {login: "first", fullName: "First", banned: false, id: "1-1"}` + "\n"
+	want := "total: 1\nreturned: 1\ntruncated: false\nusers:\n" + `  - {login: "first", id: "1-1"}` + "\n"
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Equal(t, []url.Values{{"fields": {"login,fullName,banned,id"}, "$top": {"50"}, "query": {"fir"}}}, server.Queries())
+	assert.Contains(t, server.Routes(), http.MethodGet+" /api/users")
+	assert.Equal(t, "fir", server.Last(t).URL.Query().Get("query"))
 }

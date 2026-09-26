@@ -6,12 +6,6 @@ import (
 	"strings"
 )
 
-const customFieldsFields = "customFields(name,value(name,login,minutes,text)," +
-	"projectCustomField(id,ordinal,field(fieldType(valueType,isMultiValue))))"
-
-const translatedCustomFieldsFields = "customFields(name,value(name,login,minutes,text)," +
-	"projectCustomField(id,ordinal,field(fieldType(valueType,isMultiValue),localizedName)))"
-
 type receivedField struct {
 	name         string
 	translate    string

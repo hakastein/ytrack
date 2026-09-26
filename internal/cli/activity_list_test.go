@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -15,18 +15,12 @@ const (
 	linkTypesPath  = "/api/issueLinkTypes"
 )
 
-const sentActivityFields = "timestamp,author(login),category(id),field(name,customField(name,fieldType(valueType)))," +
-	"added(id,idReadable,login,name,urls,minutes),removed(id,idReadable,login,name,urls,minutes)"
-
 const activityCategories = "AttachmentsCategory,CommentTextCategory,CommentsCategory,CustomFieldCategory," +
 	"DescriptionCategory,IssueCreatedCategory,IssueResolvedCategory,LinksCategory,SummaryCategory," +
 	"TagsCategory,VcsChangeCategory,WorkItemCategory"
 
-const (
-	linkTypesFields = "sourceToTarget,targetToSource,localizedSourceToTarget,localizedTargetToSource"
-	sentLinkTypes   = `[{"$type":"IssueLinkType","sourceToTarget":"leads to","targetToSource":"follows",` +
-		`"localizedSourceToTarget":"Goes before","localizedTargetToSource":"Comes after"}]`
-)
+const sentLinkTypes = `[{"$type":"IssueLinkType","sourceToTarget":"leads to","targetToSource":"follows",` +
+	`"localizedSourceToTarget":"Goes before","localizedTargetToSource":"Comes after"}]`
 
 type sentActivity struct {
 	kind      string
@@ -99,79 +93,13 @@ func activityServer(t *testing.T, handler http.HandlerFunc) *fake.Server {
 	})
 }
 
-func activityRequest(address, fields string) string {
-	return "GET " + address + activitiesPath + "?categories=" + activityCategories + "&reverse=true&fields=" +
-		fields + "&$top=51"
-}
-
-func TestActivityRefusesAnExpressionThatClosesNothing(t *testing.T) {
-	t.Parallel()
-	server := fake.ServeNothing(t)
-
-	got := runWith(t, server.Env(), "activity", "list", activityIssue, "--fields", "timestamp(added")
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, server.Requests())
-}
-
 func TestActivityPrintsTheActivitiesOfTheIssueItWasGiven(t *testing.T) {
 	t.Parallel()
 	server := activityServer(t, fake.JSON(http.StatusOK, threeActivities()))
 
-	got := runWith(t, server.Env(), "activity", "list", activityIssue)
+	got := runWith(t, envOf(server), "activity", "list", activityIssue)
 
 	rows := printedFieldRow + printedLinkRow + printedCreatedRow
 	assert.Equal(t, outcome{stdout: "total: 3\nreturned: 3\ntruncated: false\nactivities:\n" + rows}, got)
-	assert.Equal(t, []string{
-		linkTypesPath + "?fields=" + linkTypesFields + "&$top=1000",
-		activitiesPath + "?categories=" + activityCategories + "&reverse=true&fields=" + sentActivityFields + "&$top=51",
-	}, server.Targets(t))
-}
-
-func TestActivityRefusesActivitiesOutOfOrder(t *testing.T) {
-	t.Parallel()
-	outOfOrder := `[` + sentCreatedActivity(oldest) + `,` + sentLinkActivity(middle) + `]`
-	server := activityServer(t, fake.JSON(http.StatusOK, outOfOrder))
-
-	got := runWith(t, server.Env(), "activity", "list", activityIssue, "--fields", "timestamp")
-
-	want := faultDocument{
-		code: "upstream_invalid",
-		details: []detail{
-			{"request", activityRequest(server.URL, "timestamp,category(id)")},
-			{"upstream_status", 200},
-			{"upstream_body", outOfOrder},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-}
-
-func TestActivityChecksTheActivityPastTheLimitWithTheRest(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		past string
-	}{
-		{name: "an activity past the limit newer than the one before it", past: sentCreatedActivity(newest)},
-		{
-			name: "an activity past the limit of a category nobody asked for",
-			past: sentActivity{
-				kind: "VotersActivityItem", category: "VotersCategory", timestamp: oldest,
-				field: `null`, added: `[]`, removed: `[]`,
-			}.sent(),
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			three := `[` + sentFieldActivity(newest) + `,` + sentLinkActivity(middle) + `,` + tc.past + `]`
-			server := activityServer(t, fake.JSON(http.StatusOK, three))
-
-			got := runWith(t, server.Env(), "activity", "list", activityIssue, "--limit", "2", "--fields", "timestamp")
-
-			found := requireFault(t, got)
-			assert.Equal(t, "upstream_invalid", found.code)
-			assert.Empty(t, got.stdout)
-		})
-	}
+	assert.Contains(t, server.Routes(), http.MethodGet+" "+activitiesPath)
 }

@@ -9,16 +9,18 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/hakastein/go-youtrack"
 )
 
 type YAML struct{}
 
-func (YAML) Render(w io.Writer, n *Node) error {
-	if n == nil || n.kind != Map {
+func (YAML) Render(w io.Writer, n *youtrack.Node) error {
+	if n == nil || n.Kind() != youtrack.MapNode {
 		return errors.New("render: the document is not a mapping")
 	}
 	var doc strings.Builder
-	if err := writeMap(&doc, n.pairs, ""); err != nil {
+	if err := writeMap(&doc, n.Pairs(), ""); err != nil {
 		return err
 	}
 	_, err := io.WriteString(w, doc.String())
@@ -30,11 +32,11 @@ const (
 	listDash   = "- "
 )
 
-func writeMap(doc *strings.Builder, pairs []Pair, indent string) error {
+func writeMap(doc *strings.Builder, pairs []youtrack.Pair, indent string) error {
 	return writePairs(doc, pairs, indent, indent)
 }
 
-func writePairs(doc *strings.Builder, pairs []Pair, firstLinePrefix, indent string) error {
+func writePairs(doc *strings.Builder, pairs []youtrack.Pair, firstLinePrefix, indent string) error {
 	seen := make(map[string]bool, len(pairs))
 	linePrefix := firstLinePrefix
 	for _, pair := range pairs {
@@ -52,17 +54,17 @@ func writePairs(doc *strings.Builder, pairs []Pair, firstLinePrefix, indent stri
 	return nil
 }
 
-func writeValue(doc *strings.Builder, key string, n *Node, indent string) error {
+func writeValue(doc *strings.Builder, key string, n *youtrack.Node, indent string) error {
 	switch {
-	case n != nil && n.kind == Text:
-		writeTextBlock(doc, n.text, indent)
+	case n != nil && n.Kind() == youtrack.TextNode:
+		writeTextBlock(doc, n.Value(), indent)
 		return nil
-	case n != nil && n.kind == Map && len(n.pairs) > 0:
+	case n != nil && n.Kind() == youtrack.MapNode && len(n.Pairs()) > 0:
 		doc.WriteByte('\n')
-		return writeMap(doc, n.pairs, indent)
-	case n != nil && n.kind == List && len(n.items) > 0:
+		return writeMap(doc, n.Pairs(), indent)
+	case n != nil && n.Kind() == youtrack.ListNode && len(n.Items()) > 0:
 		doc.WriteByte('\n')
-		for _, item := range n.items {
+		for _, item := range n.Items() {
 			if containsText(item) {
 				if err := writeListItem(doc, key, item, indent+listDash, indent+indentStep); err != nil {
 					return err
@@ -83,45 +85,43 @@ func writeValue(doc *strings.Builder, key string, n *Node, indent string) error 
 	return err
 }
 
-func writeListItem(doc *strings.Builder, key string, n *Node, dashedPrefix, indent string) error {
-	if n.kind != Map || len(n.pairs) == 0 {
+func writeListItem(doc *strings.Builder, key string, n *youtrack.Node, dashedPrefix, indent string) error {
+	if n.Kind() != youtrack.MapNode || len(n.Pairs()) == 0 {
 		return fmt.Errorf("render: an item under %s is prose rather than a record holding it", Quote(key))
 	}
-	return writePairs(doc, n.pairs, dashedPrefix, indent)
+	return writePairs(doc, n.Pairs(), dashedPrefix, indent)
 }
 
-func containsText(n *Node) bool {
+func containsText(n *youtrack.Node) bool {
 	if n == nil {
 		return false
 	}
-	if n.kind == Text {
+	if n.Kind() == youtrack.TextNode {
 		return true
 	}
-	for _, pair := range n.pairs {
+	for _, pair := range n.Pairs() {
 		if containsText(pair.Value) {
 			return true
 		}
 	}
-	return slices.ContainsFunc(n.items, containsText)
+	return slices.ContainsFunc(n.Items(), containsText)
 }
 
-func writeFlow(doc *strings.Builder, key string, n *Node) error {
+func writeFlow(doc *strings.Builder, key string, n *youtrack.Node) error {
 	if n == nil {
 		return fmt.Errorf("render: a value under %s is a nil node", Quote(key))
 	}
-	switch n.kind {
-	case Null:
+	switch n.Kind() {
+	case youtrack.NullNode:
 		doc.WriteString("null")
-	case Scalar:
-		if n.bare {
-			doc.WriteString(n.text)
-		} else {
-			writeQuoted(doc, n.text)
-		}
-	case Map:
-		seen := make(map[string]bool, len(n.pairs))
+	case youtrack.NumberNode, youtrack.BoolNode:
+		doc.WriteString(n.Value())
+	case youtrack.StringNode:
+		writeQuoted(doc, n.Value())
+	case youtrack.MapNode:
+		seen := make(map[string]bool, len(n.Pairs()))
 		doc.WriteByte('{')
-		for i, pair := range n.pairs {
+		for i, pair := range n.Pairs() {
 			if err := checkMappingKey(pair, seen); err != nil {
 				return err
 			}
@@ -135,9 +135,9 @@ func writeFlow(doc *strings.Builder, key string, n *Node) error {
 			}
 		}
 		doc.WriteByte('}')
-	case List:
+	case youtrack.ListNode:
 		doc.WriteByte('[')
-		for i, item := range n.items {
+		for i, item := range n.Items() {
 			if i > 0 {
 				doc.WriteString(", ")
 			}
@@ -152,32 +152,7 @@ func writeFlow(doc *strings.Builder, key string, n *Node) error {
 	return nil
 }
 
-func CheckKey(key string) error {
-	for i, c := range []byte(key) {
-		switch {
-		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', c == '_', c == '$':
-		case '0' <= c && c <= '9' && i > 0:
-		case '0' <= c && c <= '9':
-			return fmt.Errorf("the key %s starts with a digit", Quote(key))
-		default:
-			return fmt.Errorf("the key %s is not one of ytrack's own names", Quote(key))
-		}
-	}
-	if readsAsBoolOrNullInYAML11(key) {
-		return fmt.Errorf("the key %s reads as a bool or null", Quote(key))
-	}
-	return nil
-}
-
-func readsAsBoolOrNullInYAML11(key string) bool {
-	switch strings.ToLower(key) {
-	case "", "null", "true", "false", "yes", "no", "on", "off", "y", "n":
-		return true
-	}
-	return false
-}
-
-func writeKey(doc *strings.Builder, pair Pair) {
+func writeKey(doc *strings.Builder, pair youtrack.Pair) {
 	if pair.FromData {
 		writeQuoted(doc, pair.Key)
 		return
@@ -185,9 +160,9 @@ func writeKey(doc *strings.Builder, pair Pair) {
 	doc.WriteString(pair.Key)
 }
 
-func checkMappingKey(pair Pair, seen map[string]bool) error {
+func checkMappingKey(pair youtrack.Pair, seen map[string]bool) error {
 	if !pair.FromData {
-		if err := CheckKey(pair.Key); err != nil {
+		if err := youtrack.CheckKey(pair.Key); err != nil {
 			return fmt.Errorf("render: %w", err)
 		}
 	}

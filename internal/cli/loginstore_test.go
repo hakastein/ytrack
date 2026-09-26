@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -61,8 +61,12 @@ func serveUserOfTheToken(t *testing.T, users map[string]string) *fake.Server {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, fmt.Sprintf(`{"login":%q,"fullName":%q,"$type":"Me"}`, user, user))
+		_, _ = io.WriteString(w, currentUser(user, user))
 	})
+}
+
+func currentUser(login, fullName string) string {
+	return fmt.Sprintf(`{"$type":"Me","id":"1-1","login":%q,"fullName":%q,"email":null,"banned":false}`, login, fullName)
 }
 
 func status(address, from, login, fullName string) string {
@@ -106,7 +110,7 @@ func TestAuthStatusDoesNotReadTheFileWhenTheEnvironmentHasBothValues(t *testing.
 	server := serveUserOfTheToken(t, map[string]string{fake.Token: envUser})
 	home, _ := homeWith(t, "not a file of login records")
 
-	got := runWith(t, append(server.Env(), "HOME="+home), "auth", "status")
+	got := runWith(t, append(envOf(server), "HOME="+home), "auth", "status")
 
 	assert.Equal(t, 0, got.code)
 	assert.Equal(t, bearing(fake.Token), server.Request(t, 0).Header.Get("Authorization"))

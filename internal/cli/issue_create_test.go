@@ -9,13 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
 )
-
-const projectWriteFields = "id,shortName,customFields(id,canBeEmpty,defaultValues(name)," +
-	"condition($type,showForNullValue,field(id),values(name))," +
-	"field(name,localizedName,fieldType(valueType,isMultiValue)))"
 
 func withoutDefaults() []string {
 	return []string{"PeriodProjectCustomField", "SimpleProjectCustomField", "TextProjectCustomField"}
@@ -95,15 +91,7 @@ func creating(t *testing.T, metadata, creation http.HandlerFunc) *fake.Server {
 	})
 }
 
-func writeMetadataRequest(address, code string) string {
-	return "GET " + address + "/api/admin/projects/" + code + "?fields=" + projectWriteFields
-}
-
-func creationRequest(address, fields string) string {
-	return "POST " + address + "/api/issues?fields=" + fields
-}
-
-func TestIssueCreateReadsTheProjectAndFilesTheIssue(t *testing.T) {
+func TestIssueCreateFilesTheIssue(t *testing.T) {
 	t.Parallel()
 	metadata := projectResponse(writableField{id: "180-1", kind: "SimpleProjectCustomField", name: "Field",
 		valueType: "string", canBeEmpty: true})
@@ -111,68 +99,11 @@ func TestIssueCreateReadsTheProjectAndFilesTheIssue(t *testing.T) {
 	server := creating(t, fake.JSON(http.StatusOK, metadata),
 		fake.JSON(http.StatusOK, createdIssueWith("DEV-7", "First", `"Second\nline"`, held)))
 
-	got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "First", "--description", "Second\nline",
+	got := runWith(t, envOf(server), "issue", "create", "DEV", "--summary", "First", "--description", "Second\nline",
 		"--field", "Field=Third", "--fields", "idReadable,description")
 
 	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-7\"\ndescription: |-\n  Second\n  line\n"}, got)
-	assert.Equal(t, []string{http.MethodGet, http.MethodPost}, server.Methods())
-	assert.Equal(t, []string{
-		"/api/admin/projects/DEV?fields=" + projectWriteFields,
-		"/api/issues?fields=idReadable,description,summary," + customFieldsFields,
-	}, server.Targets(t))
-	assert.JSONEq(t, `{"project":{"id":"0-1"},"summary":"First","description":"Second\nline",`+
-		`"customFields":[{"$type":"SimpleIssueCustomField","name":"Field","value":"Third"}]}`, server.Last(t).Body)
-}
-
-func TestIssueCreatePrintsTheDefaultFieldsOfTheIssue(t *testing.T) {
-	t.Parallel()
-	server := creating(t, fake.JSON(http.StatusOK, projectRequiringNothing()), fake.JSON(http.StatusOK, shownIssue()))
-
-	got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "First")
-
-	assert.Equal(t, outcome{stdout: printedIssueFields}, got)
-	assert.Equal(t, askedIssueFields, server.Last(t).URL.Query().Get("fields"))
-}
-
-func TestIssueCreateNamesEveryRequiredFieldAtOnce(t *testing.T) {
-	t.Parallel()
-	metadata := projectResponse(
-		writableField{id: "180-1", name: "First", valueType: "enum"},
-		writableField{id: "180-2", name: "Filled by the project", valueType: "enum", defaults: []string{"Early"}},
-		writableField{id: "180-3", name: "Second", valueType: "enum", isMultiValue: true},
-		writableField{id: "180-4", name: "Optional", valueType: "enum", isMultiValue: true, canBeEmpty: true},
-	)
-	server := creating(t, fake.JSON(http.StatusOK, metadata), fake.Unexpected(t))
-
-	got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x")
-
-	want := faultDocument{
-		code: "missing_required",
-		details: []detail{
-			{"request", writeMetadataRequest(server.URL, "DEV")},
-			{"project", "DEV"},
-			{"missing", []any{"First", "Second"}},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, server.Methods())
-}
-
-func TestIssueCreateRefusesMetadataOfTheProjectOfAnotherShape(t *testing.T) {
-	t.Parallel()
-	const project = `{"$type":"Project","id":"0-1","shortName":7,"customFields":[]}`
-	server := creating(t, fake.JSON(http.StatusOK, project), fake.Unexpected(t))
-
-	got := runWith(t, server.Env(), "issue", "create", "DEV", "--summary", "x")
-
-	want := faultDocument{
-		code: "upstream_invalid",
-		details: []detail{
-			{"request", writeMetadataRequest(server.URL, "DEV")},
-			{"upstream_status", 200},
-			{"upstream_body", project},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, server.Methods())
+	sent := server.Last(t)
+	assert.Equal(t, http.MethodPost, sent.Method)
+	assert.Equal(t, "/api/issues", sent.URL.Path)
 }

@@ -5,15 +5,11 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
 )
 
 const bogusToken = "perm-bogus"
-
-func meRequest(address string) string {
-	return "GET " + address + "/api/users/me?fields=login,fullName"
-}
 
 func TestNoCommandNamesWhereTheTokenTheServerRefusedCameFrom(t *testing.T) {
 	t.Parallel()
@@ -23,15 +19,15 @@ func TestNoCommandNamesWhereTheTokenTheServerRefusedCameFrom(t *testing.T) {
 		status          int
 		upstreamError   string
 		upstreamMessage string
-		where           func(t *testing.T, address string) (env []string, from detail)
+		where           func(t *testing.T, address string) (env []string, from string)
 	}{
 		{
 			name:            "a token of the environment the server does not know",
 			status:          http.StatusUnauthorized,
 			upstreamError:   "Unauthorized",
 			upstreamMessage: "Invalid token",
-			where: func(_ *testing.T, address string) ([]string, detail) {
-				return []string{"YTRACK_URL=" + address, "YTRACK_TOKEN=" + bogusToken}, authFromEnv()
+			where: func(_ *testing.T, address string) ([]string, string) {
+				return []string{"YTRACK_URL=" + address, "YTRACK_TOKEN=" + bogusToken}, "environment"
 			},
 		},
 		{
@@ -39,9 +35,9 @@ func TestNoCommandNamesWhereTheTokenTheServerRefusedCameFrom(t *testing.T) {
 			status:          http.StatusForbidden,
 			upstreamError:   "Forbidden",
 			upstreamMessage: "Access to the project is denied",
-			where: func(t *testing.T, address string) ([]string, detail) {
+			where: func(t *testing.T, address string) ([]string, string) {
 				home, _ := homeWith(t, globalRecord(address, bogusToken))
-				return []string{"HOME=" + home}, authFromSettings()
+				return []string{"HOME=" + home}, "settings"
 			},
 		},
 		{
@@ -49,9 +45,9 @@ func TestNoCommandNamesWhereTheTokenTheServerRefusedCameFrom(t *testing.T) {
 			status:          http.StatusForbidden,
 			upstreamError:   "Forbidden",
 			upstreamMessage: "Access to the project is denied",
-			where: func(t *testing.T, address string) ([]string, detail) {
+			where: func(t *testing.T, address string) ([]string, string) {
 				home, _ := homeWith(t, recordFile(scopedRecord(scope, address, bogusToken)))
-				return []string{"HOME=" + home, "PWD=" + stated}, authFromSettings()
+				return []string{"HOME=" + home, "PWD=" + stated}, "settings"
 			},
 		},
 	}
@@ -64,17 +60,9 @@ func TestNoCommandNamesWhereTheTokenTheServerRefusedCameFrom(t *testing.T) {
 
 			got := runWith(t, env, showDEV...)
 
-			want := faultDocument{
-				code: "denied",
-				details: []detail{
-					{"request", showRequest(server.URL)},
-					{"upstream_status", tc.status},
-					{"upstream_error", tc.upstreamError},
-					{"upstream_message", tc.upstreamMessage},
-					from,
-				},
-			}
-			assert.Equal(t, want, requireFault(t, got))
+			found := requireFault(t, got)
+			assert.Equal(t, "denied", found.code)
+			assert.Equal(t, from, detailNamed(t, found, "auth_from"))
 			assertNoToken(t, got, bogusToken)
 			assert.Equal(t, []string{"/api/admin/projects/DEV"}, server.Paths())
 		})

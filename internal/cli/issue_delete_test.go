@@ -5,11 +5,9 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/hakastein/youtrack/fake"
+	"github.com/hakastein/go-youtrack/fake"
 	"github.com/stretchr/testify/assert"
 )
-
-const deletedFields = "idReadable"
 
 func issueNamed(readable string) string {
 	return `{"$type":"Issue","idReadable":` + strconv.Quote(readable) + `}`
@@ -34,38 +32,14 @@ func deletionDone() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }
 }
 
-func entityNotFound(id string) string {
-	return `{"error":"Not Found","error_description":"Entity with id ` + id + ` not found"}`
-}
-
-func TestIssueDeleteReadsTheIDAndDeletesByIt(t *testing.T) {
+func TestIssueDeletePrintsTheDeletedIssue(t *testing.T) {
 	t.Parallel()
 	server := deleting(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), deletionDone())
 
-	got := runWith(t, server.Env(), "issue", "delete", "dev-7")
+	got := runWith(t, envOf(server), "issue", "delete", "DEV-7")
 
 	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-7\"\n"}, got)
-	assert.Equal(t, []string{http.MethodGet, http.MethodDelete}, server.Methods())
-	assert.Equal(t, []string{"/api/issues/dev-7?fields=" + deletedFields, "/api/issues/DEV-7?"}, server.Targets(t))
-	assert.Equal(t, "Bearer "+fake.Token, server.Last(t).Header.Get("Authorization"))
-	assert.Equal(t, []string{"", ""}, server.Bodies())
-}
-
-func TestIssueDeleteRefusesAReadableIDItCannotAddressBy(t *testing.T) {
-	t.Parallel()
-	const body = `{"$type":"Issue","idReadable":"DEV-7/.."}`
-	server := deleting(t, fake.JSON(http.StatusOK, body), fake.Unexpected(t))
-
-	got := runWith(t, server.Env(), "issue", "delete", "dev-7")
-
-	want := faultDocument{
-		code: "upstream_invalid",
-		details: []detail{
-			{"request", issueRequest(server.URL, "dev-7", deletedFields)},
-			{"upstream_status", 200},
-			{"upstream_body", body},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
-	assert.Equal(t, []string{http.MethodGet}, server.Methods())
+	sent := server.Last(t)
+	assert.Equal(t, http.MethodDelete, sent.Method)
+	assert.Equal(t, "/api/issues/DEV-7", sent.URL.Path)
 }

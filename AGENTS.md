@@ -9,16 +9,10 @@ CLI для YouTrack, рассчитанный на агента. Задачи и
 - Перед изучением кода — словарь [`CONTEXT.md`](CONTEXT.md) и принятые решения в
   [`docs/adr/`](docs/adr/); до того, как писать код, проверь там, что нужное решение
   уже принято
-- Транспорт, сгенерированный клиент `ytapi` со спецификацией, таблица типов кастом-полей, кэш
-  метаданных и фейковый сервер `fake` живут в модуле
-  [`github.com/hakastein/youtrack`](https://github.com/hakastein/youtrack)
-  ([ADR-0006](docs/adr/0006-packages-and-the-entry-point.md)): их меняют релизом модуля, а
-  ytrack поднимает его версию в `go.mod`
-- Перед правкой `internal/youtrack/ytapi.go` или `internal/youtrack/catalogue.gen.go` —
-  [ADR-0004](docs/adr/0004-the-generator-owns-the-operation-surface.md) и
-  [ADR-0007](docs/adr/0007-missing-fields-are-checked-by-server-type.md): `ytapi` модуля и
-  `Client.API()` зовёт только адаптер `ytapi.go`, `catalogue.gen.go` только регенерируется
-  (`make generate`) из спецификации модуля, проверка — `make ytapi`
+- Знание о YouTrack — запросы, документ `youtrack.Node`, ошибки с кодами, фейковый сервер `fake` — живёт в SDK
+  [`github.com/hakastein/go-youtrack`](https://github.com/hakastein/go-youtrack)
+  ([ADR-0006](docs/adr/0006-packages-and-the-entry-point.md)). ytrack зовёт его сервисы напрямую и держит только
+  вход, грамматику флагов, печать и коды возврата. SDK меняют релизом модуля, а ytrack поднимает его версию в `go.mod`
 - Перед правкой того, как находятся адрес и токен (`internal/cli/credentials.go`,
   `loginstore.go`, `terminal.go`, `auth.go`) —
   [ADR-0008](docs/adr/0008-a-login-is-an-address-and-a-token.md):
@@ -31,18 +25,20 @@ CLI для YouTrack, рассчитанный на агента. Задачи и
   настоящего времени, с заглавной, без точки, до 60 символов, называющая, что делает команда.
   Подробности уходят в `Long`, который пишется отдельно, а не выводится из `Short`. В `Long` остаётся
   только то, что меняет вызов и больше ниоткуда не узнаётся, а форму вывода показывает пример из узлов
-  `render` (`example` в `internal/cli/example.go`)
+  `youtrack.Node` (`example` в `internal/cli/example.go`)
 - Токен агенту дают `YTRACK_URL` и `YTRACK_TOKEN` либо запись `~/.ytrack/auth.json`,
   сделанная человеком: `auth login` спрашивает токен на терминале, а у агента
   терминала нет — `tty` отвечает `not a tty`
 - Перед тем как писать или править тест — раздел «Тесты»
-  [ADR-0006](docs/adr/0006-packages-and-the-entry-point.md). Знание о YouTrack проверяется юнитом
-  `internal/youtrack` через конструкторы команд и `Call`, через `Run` — только склейка команды и то, что принадлежит
-  CLI: вход, коды возврата, транспорт, автодополнение. Фейковый сервер — `fake` модуля, один на тестовый
-  пакет. Прозу не сверяют, чужой код и сам YouTrack не проверяют
+  [ADR-0006](docs/adr/0006-packages-and-the-entry-point.md). ytrack не тестирует SDK: его покрывают тесты SDK.
+  Юнит-слой — `internal/render` и `internal/diag`; через `Run` тест сверяет только принадлежащее CLI — грамматику
+  флагов и её отказ до сети, вход, склейку argv в вызов SDK (один успешный путь на команду), документ ошибки и код
+  возврата, рендер, автодополнение, `--version`. Какой `fields=` шлёт SDK, тела записи, проверки ответа и детали
+  его ошибок остаются тестам SDK. Фейковый сервер — `fake` SDK, один на тестовый пакет. Прозу не сверяют, чужой код
+  и сам YouTrack не проверяют
 - Сборка бинарника — `make build`, он кладёт `bin/ytrack`. Ревизию кладёт в бинарник
   сам `go build`, и `ytrack --version` читает положенное; версию тоже, если сборке не
-  передан `VERSION=`. CI — `.github/workflows/ci.yml`: джобы `go`, `ytapi` и `build` на
+  передан `VERSION=`. CI — `.github/workflows/ci.yml`: джобы `go` и `build` на
   каждый push и пулл-реквест, а на push в `main` после них джоба `release` собирает и
   выкладывает релиз: `make dist` кладёт бинарники под все платформы в `dist/` со штампом
   календарной версии `v<ГГ>.<М>.<Д>.<номер запуска>`, а `gh release create` заводит с ними
