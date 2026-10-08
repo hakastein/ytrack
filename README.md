@@ -129,7 +129,7 @@ ytrack link add DEV-123 "depends on" DEV-100
 
 # Выбрать нужные поля: --fields принимает выражение полей YouTrack,
 # а с плюсом добавляет поля к набору по умолчанию
-ytrack issue show DEV-123 --fields 'customFields(State,"Due Date")'
+ytrack issue show DEV-123 --fields 'customFields(State,Категория,"Due Date")'
 ytrack issue list --query "#Unresolved" --fields '+customFields(Priority)'
 
 # Коммиты задачи: ссылка на каждый и, с плюсом, его сообщение

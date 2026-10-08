@@ -4,11 +4,11 @@ exports.definition = {
   short: "Show an issue",
   long:
     "Show an issue with comments, oldest first.\n\nCustom fields are named inside customFields by name " +
-    "or localized name, in any letter case, quoted where they hold a space: --fields " +
-    "'+customFields(Priority,\"Due Date\")'. A bare customFields prints every field that holds " +
-    "something; a named field is printed even when empty, and one the issue does not have is left " +
-    "out.\n\nComments print id, author(login), created and text whatever --fields says, and deleted ones " +
-    "are left out.",
+    "or localized name, in any letter case, quoted where they hold anything but letters, digits, _ and $: " +
+    "--fields '+customFields(Priority,Категория,\"Due Date\")'. A bare customFields prints every field " +
+    "that holds something; a named field is printed even when empty, and one the issue does not have " +
+    "is left out.\n\nComments print id, author(login), created and text whatever --fields says, and " +
+    "deleted ones are left out.",
   args: [
     { name: "id", type: "string", usage: "readable id of the issue, such as DEV-1" },
   ],
