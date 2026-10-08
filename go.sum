@@ -24,8 +24,8 @@ github.com/google/pprof v0.0.0-20240727154555-813a5fbdbec8 h1:FKHo8hFI3A+7w0aUQu
 github.com/google/pprof v0.0.0-20240727154555-813a5fbdbec8/go.mod h1:K1liHPHnj73Fdn/EKuT8nrFqBihUSKXoLYU0BuatOYo=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
-github.com/hakastein/go-youtrack v0.5.1 h1:YhtUn/xR8ebjR/XzbTt/ffgfiI8/1tBfxG7ePZtmDDs=
-github.com/hakastein/go-youtrack v0.5.1/go.mod h1:wkg3/H+VPca95qpJ5kx14TOhI05i1cD+MXKXCIKidfE=
+github.com/hakastein/go-youtrack v0.6.0 h1:qfxmLNxdu77WSSdN0n2+j6E8QYlVSLnz5LHukm+vTcQ=
+github.com/hakastein/go-youtrack v0.6.0/go.mod h1:wkg3/H+VPca95qpJ5kx14TOhI05i1cD+MXKXCIKidfE=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/juju/gnuflag v0.0.0-20171113085948-2ce1bb71843d/go.mod h1:2PavIy+JPciBPrBUjwbNvtwB6RQlve+hkpll6QSNmOE=
