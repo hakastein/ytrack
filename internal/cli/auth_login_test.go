@@ -9,7 +9,6 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -202,20 +201,6 @@ func TestAuthLoginGlobalReplacesTheSavedGlobalLogin(t *testing.T) {
 	assert.Equal(t, savedFile(unscopedRecord(server.URL, typedToken), held), fileBytes(t, path))
 }
 
-func TestAuthLoginPrintsTheAddressWithoutItsPassword(t *testing.T) {
-	t.Parallel()
-	scope := here(t)
-	server := serveUserOfTheToken(t, map[string]string{typedToken: typedUser})
-	behind := server.Address(t)
-	behind.User = url.UserPassword("svc", "secret")
-	home, path := emptyHome(t)
-
-	got, _ := runOnATerminal(t, []string{"HOME=" + home}, typeAnswers(behind.String(), typedToken), "auth", "login")
-
-	assert.Equal(t, "http://svc:xxxxx@"+behind.Host+behind.Path, urlPrinted(t, got))
-	assert.Equal(t, savedFile(scopedRecord(scope, behind.String(), typedToken)), fileBytes(t, path))
-}
-
 func TestAuthLoginReplacesTheLoginSavedForTheSameDirectory(t *testing.T) {
 	t.Parallel()
 	scope := here(t)
@@ -264,6 +249,7 @@ func TestAuthLoginRefusesAnAddressItCannotUseBeforeAskingForTheToken(t *testing.
 		address string
 	}{
 		{name: "another scheme", address: "ftp://h"},
+		{name: "a user and a password", address: "http://svc:secret@h"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

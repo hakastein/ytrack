@@ -3,7 +3,6 @@ package cli_test
 import (
 	"fmt"
 	"net/http"
-	"net/url"
 	"slices"
 	"testing"
 
@@ -83,15 +82,4 @@ func TestAuthStatusPrintsTheAddressInOneSpelling(t *testing.T) {
 			assert.Equal(t, tc.path, server.Request(t, 0).URL.EscapedPath())
 		})
 	}
-}
-
-func TestAuthStatusPrintsTheAddressWithoutItsPassword(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, currentUser("login", "Full Name")))
-	address := server.Address(t)
-	address.User = url.UserPassword("svc", "secret")
-
-	got := runWith(t, []string{"YTRACK_URL=" + address.String(), "YTRACK_TOKEN=" + fake.Token}, "auth", "status")
-
-	assert.Equal(t, "http://svc:xxxxx@"+address.Host+address.Path, urlPrinted(t, got))
 }

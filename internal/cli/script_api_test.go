@@ -2,7 +2,6 @@ package cli_test
 
 import (
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/hakastein/go-youtrack/fake"
@@ -318,15 +317,14 @@ func TestScriptRequiresNothingButAModuleOfItsRootAndAVersionOfTheAPI(t *testing.
 	}
 }
 
-func TestScriptReadsTheAddressOfTheLoginWithoutItsPassword(t *testing.T) {
+func TestScriptReadsADomainOfTheLoginAsAnAddressOverHTTPS(t *testing.T) {
 	t.Parallel()
 	body := `exports.command = () => ({ address: require("ytrack/v1").address });`
-	host := strings.TrimPrefix(fake.ServeNothing(t).URL, "http://")
-	env := []string{"YTRACK_URL=http://svc:secret@" + host, "YTRACK_TOKEN=" + fake.Token, "HOME=" + scriptsHome(t, running(body))}
+	env := []string{"YTRACK_URL=yt.example.org", "YTRACK_TOKEN=" + fake.Token, "HOME=" + scriptsHome(t, running(body))}
 
 	got := runWith(t, env, "run")
 
-	assert.Equal(t, outcome{stdout: "address: \"http://svc:xxxxx@" + host + "\"\n"}, got)
+	assert.Equal(t, outcome{stdout: "address: \"https://yt.example.org\"\n"}, got)
 }
 
 func TestScriptThatReachesNoInstanceNeedsNoLogin(t *testing.T) {

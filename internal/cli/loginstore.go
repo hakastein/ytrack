@@ -130,7 +130,7 @@ func readRecord(item json.RawMessage) (record, bool) {
 		return record{}, false
 	}
 	address, reason := parseAddress(held.URL, "")
-	if reason != "" || validateToken(held.Token, "") != "" {
+	if reason != "" || youtrack.CheckToken(held.Token) != nil {
 		return record{}, false
 	}
 	read := record{address: address, token: held.Token, savedAs: item}

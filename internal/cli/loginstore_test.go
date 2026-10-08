@@ -282,6 +282,7 @@ func TestNoCommandPrintsThePasswordOfAnAddressItCannotUse(t *testing.T) {
 		name    string
 		address string
 	}{
+		{name: "a user and a password", address: "http://svc:secret@h"},
 		{name: "another scheme", address: "ftp://svc:secret@h"},
 		{name: "a query", address: "http://svc:secret@h/?q=1"},
 		{name: "an escape that does not parse", address: "http://svc:secret@h/%zz"},
