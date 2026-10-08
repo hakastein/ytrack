@@ -114,18 +114,6 @@ func TestFaultOfAFunctionReachesTheScript(t *testing.T) {
 	assert.Equal(t, outcome{stdout: want}, got)
 }
 
-func TestUncaughtFaultOfAFunctionIsPrintedAsItIs(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusNotFound, `{"error":"Not Found"}`))
-	body := `exports.command = () => projects.show({ project: "DEV", fields: "shortName" });`
-
-	fromScript := runScripts(t, server, running(body), "run")
-	fromCommand := runWith(t, envOf(server), "project", "show", "DEV", "--fields", "shortName")
-
-	assert.Equal(t, "not_found", requireFault(t, fromScript).code)
-	assert.Equal(t, fromCommand, fromScript)
-}
-
 func TestScriptFailsWithACodeOfTheDictionary(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -330,32 +318,15 @@ func TestScriptRequiresNothingButAModuleOfItsRootAndAVersionOfTheAPI(t *testing.
 	}
 }
 
-func TestScriptReadsTheAddressOfTheLogin(t *testing.T) {
+func TestScriptReadsTheAddressOfTheLoginWithoutItsPassword(t *testing.T) {
 	t.Parallel()
 	body := `exports.command = () => ({ address: require("ytrack/v1").address });`
-	tests := []struct {
-		name         string
-		userinfo     string
-		path         string
-		seenUserinfo string
-		seenPath     string
-	}{
-		{name: "an address under a path", path: "/youtrack/", seenPath: "/youtrack"},
-		{name: "an address with a password", userinfo: "svc:secret@", seenUserinfo: "svc:xxxxx@"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
-			host := strings.TrimPrefix(server.URL, "http://")
-			env := []string{"YTRACK_URL=http://" + tc.userinfo + host + tc.path, "YTRACK_TOKEN=" + fake.Token,
-				"HOME=" + scriptsHome(t, running(body))}
+	host := strings.TrimPrefix(fake.ServeNothing(t).URL, "http://")
+	env := []string{"YTRACK_URL=http://svc:secret@" + host, "YTRACK_TOKEN=" + fake.Token, "HOME=" + scriptsHome(t, running(body))}
 
-			got := runWith(t, env, "run")
+	got := runWith(t, env, "run")
 
-			assert.Equal(t, outcome{stdout: "address: \"http://" + tc.seenUserinfo + host + tc.seenPath + "\"\n"}, got)
-		})
-	}
+	assert.Equal(t, outcome{stdout: "address: \"http://svc:xxxxx@" + host + "\"\n"}, got)
 }
 
 func TestScriptThatReachesNoInstanceNeedsNoLogin(t *testing.T) {

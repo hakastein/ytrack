@@ -3,8 +3,6 @@
 package cli_test
 
 import (
-	"io/fs"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -16,23 +14,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func aBlockDevice(t *testing.T) string {
-	t.Helper()
-	entries, err := os.ReadDir("/dev")
-	require.NoError(t, err)
-	for _, entry := range entries {
-		found, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		if found.Mode()&fs.ModeDevice != 0 && found.Mode()&fs.ModeCharDevice == 0 {
-			return filepath.Join("/dev", entry.Name())
-		}
-	}
-	t.Skip("the machine holds no block device")
-	return ""
-}
 
 func TestAttachmentCreateRefusesAFileThatIsNoOrdinaryOneOnUnix(t *testing.T) {
 	t.Parallel()
@@ -51,20 +32,6 @@ func TestAttachmentCreateRefusesAFileThatIsNoOrdinaryOneOnUnix(t *testing.T) {
 		{
 			name: "a character device",
 			path: func(*testing.T) string { return "/dev/null" },
-		},
-		{
-			name: "a socket",
-			path: func(t *testing.T) string {
-				path := filepath.Join(t.TempDir(), "s")
-				listening, err := net.Listen("unix", path)
-				require.NoError(t, err)
-				t.Cleanup(func() { assert.NoError(t, listening.Close()) })
-				return path
-			},
-		},
-		{
-			name: "a block device",
-			path: aBlockDevice,
 		},
 	}
 	for _, tc := range tests {

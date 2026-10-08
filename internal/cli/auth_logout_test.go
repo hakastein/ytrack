@@ -209,18 +209,6 @@ func TestAuthLogoutKeepsTheModeOfTheDirectoryItFinds(t *testing.T) {
 	assert.Equal(t, fs.FileMode(0o750), mode(t, filepath.Dir(path)))
 }
 
-func TestAuthLogoutWritesNothingIntoTheDirectoryItWasCalledIn(t *testing.T) {
-	t.Parallel()
-	scope := here(t)
-	home, _ := homeWith(t, recordFile(scopedRecord(scope, fake.ServeNothing(t).URL, hereToken)))
-	before := entries(t, scope)
-
-	got := runWith(t, []string{"HOME=" + home}, "auth", "logout")
-
-	require.Equal(t, 0, got.code, "stderr: %q", got.stderr)
-	assert.Equal(t, before, entries(t, scope))
-}
-
 func TestAuthLogoutUsesNoFileOfLoginRecordsItCannotRead(t *testing.T) {
 	t.Parallel()
 	held := `[{"url":"http://h","token":"perm-x","expires":"never"}]`

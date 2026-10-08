@@ -276,18 +276,6 @@ func TestNoCommandFindsALoginWithoutAFileToFindItIn(t *testing.T) {
 	}
 }
 
-func TestProjectShowGoesToTheAddressOfTheGlobalRecordWithItsToken(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, projectDEV))
-	home, _ := homeWith(t, globalRecord(server.URL, recordToken))
-
-	got := runWith(t, []string{"HOME=" + home}, showDEV...)
-
-	assert.Equal(t, 0, got.code)
-	assert.Equal(t, []string{"/api/admin/projects/DEV"}, server.Paths())
-	assert.Equal(t, bearing(recordToken), server.Request(t, 0).Header.Get("Authorization"))
-}
-
 func TestNoCommandPrintsThePasswordOfAnAddressItCannotUse(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

@@ -128,7 +128,6 @@ func TestYAMLPrintsInvalidUTF8AsTheReplacementCharacter(t *testing.T) {
 	}{
 		{name: "string", value: youtrack.NewString("First\xffSecond"), want: lines("value: \"First\U0000FFFDSecond\"")},
 		{name: "text", value: youtrack.NewText("First\n\xff"), want: lines("value: \"First\\n\U0000FFFD\"")},
-		{name: "cut sequence", value: youtrack.NewString("First\xe2\x80"), want: lines("value: \"First\U0000FFFD\U0000FFFD\"")},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

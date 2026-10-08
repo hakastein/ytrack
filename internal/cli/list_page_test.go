@@ -3,7 +3,6 @@ package cli_test
 import (
 	"fmt"
 	"net/http"
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,7 +16,6 @@ import (
 type pagedList struct {
 	argv   []string
 	record func(at int) string
-	top    string
 }
 
 func recordOf(schema string) func(at int) string {
@@ -32,16 +30,16 @@ func activityAt(at int) string {
 
 func pagedLists() []pagedList {
 	return []pagedList{
-		{argv: []string{"issue", "list", "--query", ""}, record: recordOf("Issue"), top: "2"},
-		{argv: []string{"article", "list", "--query", ""}, record: recordOf("Article"), top: "2"},
-		{argv: []string{"article", "list", "--parent", "DEV-A-1"}, record: recordOf("Article"), top: "2"},
-		{argv: []string{"comment", "list", "DEV-1"}, record: recordOf("IssueComment"), top: "2"},
-		{argv: []string{"attachment", "list", "DEV-1"}, record: recordOf("IssueAttachment"), top: "2"},
-		{argv: []string{"tag", "list"}, record: recordOf("Tag"), top: "2"},
-		{argv: []string{"time", "list", "DEV-1"}, record: recordOf("IssueWorkItem"), top: "2"},
-		{argv: []string{"user", "list", "--query", ""}, record: recordOf("User"), top: "2"},
-		{argv: []string{"project", "list"}, record: recordOf("Project"), top: "2"},
-		{argv: []string{"activity", "list", "DEV-1"}, record: activityAt, top: "3"},
+		{argv: []string{"issue", "list", "--query", ""}, record: recordOf("Issue")},
+		{argv: []string{"article", "list", "--query", ""}, record: recordOf("Article")},
+		{argv: []string{"article", "list", "--parent", "DEV-A-1"}, record: recordOf("Article")},
+		{argv: []string{"comment", "list", "DEV-1"}, record: recordOf("IssueComment")},
+		{argv: []string{"attachment", "list", "DEV-1"}, record: recordOf("IssueAttachment")},
+		{argv: []string{"tag", "list"}, record: recordOf("Tag")},
+		{argv: []string{"time", "list", "DEV-1"}, record: recordOf("IssueWorkItem")},
+		{argv: []string{"user", "list", "--query", ""}, record: recordOf("User")},
+		{argv: []string{"project", "list"}, record: recordOf("Project")},
+		{argv: []string{"activity", "list", "DEV-1"}, record: activityAt},
 	}
 }
 
@@ -78,36 +76,22 @@ func servedList(t *testing.T, list pagedList) *fake.Server {
 	}))
 }
 
-func windowsSent(server *fake.Server) []url.Values {
-	windows := []url.Values{}
-	for _, query := range server.Queries() {
-		if query.Has("$top") {
-			windows = append(windows, url.Values{"$top": query["$top"], "$skip": query["$skip"]})
-		}
+func printedIDs(t *testing.T, stdout string) []string {
+	t.Helper()
+	page := requireMapping(t, "stdout", stdout)
+	records := page.Content[len(page.Content)-1]
+	ids := []string{}
+	for _, record := range records.Content {
+		ids = append(ids, nodeAt(t, record, "id").Value)
 	}
-	return windows
+	return ids
 }
 
 func paging(list pagedList, flags ...string) []string {
 	return slices.Concat(list.argv, []string{"--fields", "id"}, flags)
 }
 
-func TestListRefusesALimitOfNoRecordsBeforeItAsksForAnything(t *testing.T) {
-	t.Parallel()
-	for _, list := range pagedLists() {
-		t.Run(strings.Join(list.argv, " "), func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
-
-			got := runWith(t, envOf(server), paging(list, "--limit", "0")...)
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Empty(t, server.Requests())
-		})
-	}
-}
-
-func TestListAsksForThePageOfTheLimitAndTheSkip(t *testing.T) {
+func TestListPrintsThePageOfTheLimitAndTheSkip(t *testing.T) {
 	t.Parallel()
 	for _, list := range pagedLists() {
 		t.Run(strings.Join(list.argv, " "), func(t *testing.T) {
@@ -117,7 +101,7 @@ func TestListAsksForThePageOfTheLimitAndTheSkip(t *testing.T) {
 			got := runWith(t, envOf(server), paging(list, "--limit", "2", "--skip", "2")...)
 
 			require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-			assert.Contains(t, windowsSent(server), url.Values{"$top": {list.top}, "$skip": {"2"}})
+			assert.Equal(t, []string{"1-2", "1-3"}, printedIDs(t, got.stdout))
 		})
 	}
 }

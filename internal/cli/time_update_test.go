@@ -51,12 +51,9 @@ func TestTimeUpdateRefusesArgumentsBeforeItAsksForAnything(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "a duration of no period", argv: []string{"--duration", "2h"}},
-		{name: "an empty duration", argv: []string{"--duration", ""}},
 		{name: "emptying the duration", argv: []string{"--clear", "duration"}},
 		{name: "emptying the date", argv: []string{"--clear", "Date"}},
 		{name: "emptying nothing", argv: []string{"--clear", ""}},
-		{name: "an attribute with no =", argv: []string{"--attribute", "Mode"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

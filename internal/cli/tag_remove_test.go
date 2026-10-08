@@ -26,9 +26,9 @@ func TestTagRemovePrintsTheTagTakenOffTheOwner(t *testing.T) {
 	t.Parallel()
 	server := takingATagOff(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), shownTags(), deletionDone())
 
-	got := runWith(t, envOf(server), "tag", "remove", "DEV-7", "--name", "Ready")
+	got := runWith(t, envOf(server), "tag", "remove", "DEV-7", "--name", "Shared", "--owned-by", "second")
 
-	want := "idReadable: \"DEV-7\"\n" + "removed:\n  name: \"Ready\"\n  owner:\n    login: \"first\"\n"
+	want := "idReadable: \"DEV-7\"\n" + "removed:\n  name: \"Shared\"\n  owner:\n    login: \"second\"\n"
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Contains(t, server.Routes(), "DELETE /api/issues/DEV-7/tags/10-5")
+	assert.Contains(t, server.Routes(), "DELETE /api/issues/DEV-7/tags/10-7")
 }

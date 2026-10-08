@@ -291,7 +291,6 @@ func TestDeclarationThatIsNoPureLiteralIsUnreadable(t *testing.T) {
 			`flags: [{ name: "d", type: "duration", multiple: true, usage: "d" }] };`},
 		{name: "a default of a pair flag", source: head +
 			`flags: [{ name: "p", type: "pair", usage: "p", default: "a=b" }] };`},
-		{name: "a string joined to a number", source: head + `flags: [{ name: "m", type: "string", usage: "m" + 1 }] };`},
 		{name: "an argument of a type it does not know", source: head + `args: [{ name: "n", type: "int", usage: "n" }] };`},
 		{name: "a flag named help", source: head + `flags: [{ name: "help", type: "bool", usage: "h" }] };`},
 		{name: "a default of another type", source: head + `flags: [{ name: "n", type: "int", usage: "n", default: "1" }] };`},

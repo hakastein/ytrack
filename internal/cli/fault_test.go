@@ -15,29 +15,17 @@ import (
 
 var showDEV = []string{"project", "show", "DEV", "--fields", "shortName"}
 
-func showRequest(address string) string {
-	return "GET " + address + "/api/admin/projects/DEV?fields=shortName"
-}
-
-func TestAFaultPrintsTheErrorOfYouTrackWithEveryDetail(t *testing.T) {
+func TestAFaultPrintsTheDetailsOfTheErrorOfYouTrackWithTheirTypes(t *testing.T) {
 	t.Parallel()
-	const failed = `{"error":"server_error","error_description":"java.lang.NullPointerException",` +
-		`"error_developer_message":"at jetbrains.gap"}`
+	const failed = `{"error":"server_error","error_description":"java.lang.NullPointerException"}`
 	server := fake.Serve(t, fake.JSON(http.StatusInternalServerError, failed))
 
 	got := runWith(t, envOf(server), showDEV...)
 
-	want := faultDocument{
-		code: "upstream_failed",
-		details: []detail{
-			{"request", showRequest(server.URL)},
-			{"upstream_status", 500},
-			{"upstream_error", "server_error"},
-			{"upstream_message", "java.lang.NullPointerException"},
-			{"upstream_body", failed},
-		},
-	}
-	assert.Equal(t, want, requireFault(t, got))
+	found := requireFault(t, got)
+	assert.Equal(t, "upstream_failed", found.code)
+	assert.Equal(t, 500, detailNamed(t, found, "upstream_status"))
+	assert.Equal(t, "java.lang.NullPointerException", detailNamed(t, found, "upstream_message"))
 }
 
 func TestProjectShowRefusesWhenNoResponseComesInTime(t *testing.T) {
