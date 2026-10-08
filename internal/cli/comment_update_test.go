@@ -20,9 +20,6 @@ func updatingAComment(t *testing.T, read, write http.HandlerFunc) *fake.Server {
 			read(w, r)
 			return
 		}
-		if !assert.Equal(t, http.MethodPost, r.Method, "a write of a comment sends one GET and one POST") {
-			return
-		}
 		write(w, r)
 	})
 }

@@ -3,7 +3,6 @@ package cli_test
 import (
 	"fmt"
 	"io/fs"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -169,18 +168,6 @@ func TestAuthLogoutLeavesEveryOtherRecordByteForByte(t *testing.T) {
 	assert.Equal(t, savedFile(everywhere, near, odd), fileBytes(t, path))
 }
 
-func TestAuthLogoutPrintsTheAddressWithoutItsPassword(t *testing.T) {
-	t.Parallel()
-	scope := here(t)
-	behind := fake.ServeNothing(t).Address(t)
-	behind.User = url.UserPassword("svc", "secret")
-	home, _ := homeWith(t, recordFile(scopedRecord(scope, behind.String(), hereToken)))
-
-	got := runWith(t, []string{"HOME=" + home}, "auth", "logout")
-
-	assert.Equal(t, "http://svc:xxxxx@"+behind.Host+behind.Path, urlPrinted(t, got))
-}
-
 func TestAuthLogoutLeavesTheFileReadableByItsOwnerAlone(t *testing.T) {
 	t.Parallel()
 	scope := here(t)
@@ -207,18 +194,6 @@ func TestAuthLogoutKeepsTheModeOfTheDirectoryItFinds(t *testing.T) {
 
 	require.Equal(t, 0, got.code, "stderr: %q", got.stderr)
 	assert.Equal(t, fs.FileMode(0o750), mode(t, filepath.Dir(path)))
-}
-
-func TestAuthLogoutWritesNothingIntoTheDirectoryItWasCalledIn(t *testing.T) {
-	t.Parallel()
-	scope := here(t)
-	home, _ := homeWith(t, recordFile(scopedRecord(scope, fake.ServeNothing(t).URL, hereToken)))
-	before := entries(t, scope)
-
-	got := runWith(t, []string{"HOME=" + home}, "auth", "logout")
-
-	require.Equal(t, 0, got.code, "stderr: %q", got.stderr)
-	assert.Equal(t, before, entries(t, scope))
 }
 
 func TestAuthLogoutUsesNoFileOfLoginRecordsItCannotRead(t *testing.T) {

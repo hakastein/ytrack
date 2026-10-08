@@ -32,9 +32,9 @@ func TestTagDeletePrintsTheDeletedTag(t *testing.T) {
 	t.Parallel()
 	server := resolvingTags(t, tagsOfTwoOwners(), deletionDone())
 
-	got := runWith(t, envOf(server), "tag", "delete", "--name", "Ready")
+	got := runWith(t, envOf(server), "tag", "delete", "--name", "Shared", "--owned-by", "second")
 
-	want := `name: "Ready"` + "\n" + "owner:\n" + `  login: "first"` + "\n"
+	want := `name: "Shared"` + "\n" + "owner:\n" + `  login: "second"` + "\n"
 	assert.Equal(t, outcome{stdout: want}, got)
-	assert.Contains(t, server.Routes(), "DELETE /api/tags/10-5")
+	assert.Contains(t, server.Routes(), "DELETE /api/tags/10-7")
 }

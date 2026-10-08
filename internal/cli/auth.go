@@ -13,12 +13,7 @@ import (
 	"github.com/hakastein/ytrack/internal/render"
 )
 
-const (
-	addressTyped = "the address typed"
-	tokenTyped   = "the token typed"
-
-	noTokenTyped = "no token was typed, and a login is its token, so nothing was kept"
-)
+const addressTyped = "the address typed"
 
 func newAuth(env []string, stdin *os.File, stdout io.Writer, renderer render.Renderer) *cobra.Command {
 	status := newCommand("status", func(cmd *cobra.Command, _ []string) *diag.Fault {
@@ -82,12 +77,6 @@ func login(ctx context.Context, env []string, stdin *os.File, stdout io.Writer, 
 	if fault != nil {
 		return fault
 	}
-	if secret == "" {
-		return &diag.Fault{Code: youtrack.CodeBadUsage, Message: noTokenTyped}
-	}
-	if reason := validateToken(secret, tokenTyped); reason != "" {
-		return &diag.Fault{Code: youtrack.CodeBadUsage, Message: reason}
-	}
 	client, err := youtrack.NewClient(address.String(), secret)
 	if err != nil {
 		return diag.FromError(err)
@@ -100,7 +89,7 @@ func login(ctx context.Context, env []string, stdin *os.File, stdout io.Writer, 
 		return fault
 	}
 	return printNode(stdout, renderer, youtrack.NewMap(
-		youtrack.Pair{Key: "url", Value: youtrack.NewString(address.Redacted())},
+		youtrack.Pair{Key: "url", Value: youtrack.NewString(address.String())},
 		youtrack.Pair{Key: "scope", Value: youtrack.NewString(kept.String())},
 		youtrack.Pair{Key: "user", Value: user},
 	))
@@ -123,7 +112,7 @@ func logout(env []string, stdout io.Writer, renderer render.Renderer, global boo
 		return fault
 	}
 	return printNode(stdout, renderer, youtrack.NewMap(
-		youtrack.Pair{Key: "url", Value: youtrack.NewString(taken.address.Redacted())},
+		youtrack.Pair{Key: "url", Value: youtrack.NewString(taken.address.String())},
 		youtrack.Pair{Key: "scope", Value: youtrack.NewString(kept.String())},
 	))
 }
@@ -164,7 +153,7 @@ func describeScope(held record) string {
 
 func statusDocument(c connection, user *youtrack.Node) *youtrack.Node {
 	return youtrack.NewMap(
-		youtrack.Pair{Key: "url", Value: youtrack.NewString(c.address.Redacted())},
+		youtrack.Pair{Key: "url", Value: youtrack.NewString(c.address.String())},
 		c.from.pair(),
 		youtrack.Pair{Key: "user", Value: user},
 	)

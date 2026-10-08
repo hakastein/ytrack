@@ -31,11 +31,11 @@ func shownTags() http.HandlerFunc {
 func TestTagAddPrintsTheTagAddedToTheOwner(t *testing.T) {
 	t.Parallel()
 	server := addingATag(t, fake.JSON(http.StatusOK, issueNamed("DEV-7")), shownTags(),
-		fake.JSON(http.StatusOK, catalogueTag("10-5", "Ready", "first")))
+		fake.JSON(http.StatusOK, catalogueTag("10-7", "Shared", "second")))
 
-	got := runWith(t, envOf(server), "tag", "add", "DEV-7", "--name", "Ready")
+	got := runWith(t, envOf(server), "tag", "add", "DEV-7", "--name", "Shared", "--owned-by", "second")
 
-	want := "idReadable: \"DEV-7\"\n" + "added:\n  name: \"Ready\"\n  owner:\n    login: \"first\"\n"
+	want := "idReadable: \"DEV-7\"\n" + "added:\n  name: \"Shared\"\n  owner:\n    login: \"second\"\n"
 	assert.Equal(t, outcome{stdout: want}, got)
 	assert.Contains(t, server.Routes(), "POST /api/issues/DEV-7/tags")
 }

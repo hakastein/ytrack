@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -9,7 +8,6 @@ import (
 	"github.com/hakastein/go-youtrack"
 
 	"github.com/hakastein/ytrack/internal/diag"
-	"github.com/hakastein/ytrack/internal/render"
 )
 
 type connection struct {
@@ -58,9 +56,6 @@ func partialEnvFault(set, unset string) *diag.Fault {
 func fromEnvironmentVariables(env []string, raw, token string) (connection, *diag.Fault) {
 	address, reason := parseAddress(raw, urlVariable)
 	if reason != "" {
-		return connection{}, &diag.Fault{Code: youtrack.CodeBadUsage, Message: reason}
-	}
-	if reason := validateToken(token, tokenVariable); reason != "" {
 		return connection{}, &diag.Fault{Code: youtrack.CodeBadUsage, Message: reason}
 	}
 	client, err := youtrack.NewClient(address.String(), token, youtrack.WithMetadataCache(cacheDirectory(lookup(env, homeVariable))))
@@ -112,66 +107,17 @@ func noLoginFoundFault(message string, lookedIn ...string) *diag.Fault {
 	return &diag.Fault{Code: youtrack.CodeDenied, Message: message, Details: details}
 }
 
-func requotedURLReason(err error) string {
-	var escape url.EscapeError
-	var host url.InvalidHostError
-	switch {
-	case errors.As(err, &escape):
-		return "invalid URL escape " + render.Quote(string(escape))
-	case errors.As(err, &host):
-		return "invalid character " + render.Quote(string(host)) + " in host name"
-	}
-	return err.Error()
-}
-
+// A domain alone is the address of an instance over https; any other spelling is a link ParseAddress takes or refuses.
 func parseAddress(raw, source string) (*url.URL, string) {
-	address, err := url.Parse(raw)
+	spelled := raw
+	if !strings.Contains(raw, "://") {
+		spelled = "https://" + raw
+	}
+	address, err := youtrack.ParseAddress(spelled)
 	if err != nil {
-		var parse *url.Error
-		if errors.As(err, &parse) {
-			return nil, fmt.Sprintf("%s: %s %s: %s", source, parse.Op, render.Quote(redactedRaw(parse.URL)), requotedURLReason(parse.Err))
-		}
-		return nil, fmt.Sprintf("%s: %v", source, err)
-	}
-	if (address.Scheme != "http" && address.Scheme != "https") || address.Host == "" {
-		return nil, fmt.Sprintf("%s %s is not an absolute http or https URL", source, render.Quote(redactedRaw(raw)))
-	}
-	if strings.ContainsAny(raw, "?#") {
-		return nil, fmt.Sprintf("%s %s has a query or a fragment", source, render.Quote(redactedRaw(raw)))
+		return nil, source + " is neither a domain nor a link like https://example.com"
 	}
 	return canonical(address), ""
-}
-
-const asciiDelete = 0x7f
-
-func headerForbids(r rune) bool {
-	return (r < ' ' && r != '\t') || r == asciiDelete
-}
-
-func validateToken(token, source string) string {
-	if strings.ContainsFunc(token, headerForbids) {
-		return source + " holds a control character, such as a line ending, and a request header cannot carry one"
-	}
-	return ""
-}
-
-const redactedPassword = "xxxxx"
-
-func redactedRaw(raw string) string {
-	slashes := strings.Index(raw, "//")
-	if slashes < 0 {
-		return raw
-	}
-	authorityStart := slashes + len("//")
-	authority := raw[authorityStart:]
-	if end := strings.IndexAny(authority, "/?#"); end >= 0 {
-		authority = authority[:end]
-	}
-	userinfoEnd, passwordColon := strings.LastIndex(authority, "@"), strings.Index(authority, ":")
-	if userinfoEnd < 0 || passwordColon < 0 || passwordColon > userinfoEnd {
-		return raw
-	}
-	return raw[:authorityStart+passwordColon+1] + redactedPassword + raw[authorityStart+userinfoEnd:]
 }
 
 func canonical(address *url.URL) *url.URL {

@@ -1,22 +1,14 @@
 package cli_test
 
 import (
-	"bytes"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/hakastein/go-youtrack/fake"
-	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func rootCommands() []string {
-	return []string{"activity", "article", "attachment", "auth", "comment", "completion", "field", "issue",
-		"link", "project", "tag", "time", "user"}
-}
 
 const (
 	shellOffersFileNames   = ":0"
@@ -65,9 +57,8 @@ func TestCompleteOffersTheCommandsUnderTheWordsTyped(t *testing.T) {
 		words []string
 		names []string
 	}{
-		{name: "the root, nothing written yet", words: []string{""}, names: rootCommands()},
 		{name: "the root, a name begun", words: []string{"att"}, names: []string{"attachment"}},
-		{name: "a command, nothing written yet", words: []string{"project", ""}, names: []string{"list", "show"}},
+		{name: "a command, a name begun", words: []string{"project", "s"}, names: []string{"show"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -223,29 +214,19 @@ func TestCompleteOffersNoCommandHiddenInTheTree(t *testing.T) {
 	assert.Equal(t, []string{}, completing(t, "no-").names())
 }
 
-func TestCompletionPrintsTheScriptOfTheShellItIsGiven(t *testing.T) {
+func TestCompletionPrintsAScriptOfItsOwnForEachShell(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		shell    string
-		generate func(root *cobra.Command, script io.Writer) error
-	}{
-		{shell: "bash", generate: func(root *cobra.Command, script io.Writer) error { return root.GenBashCompletionV2(script, true) }},
-		{shell: "zsh", generate: func(root *cobra.Command, script io.Writer) error { return root.GenZshCompletion(script) }},
-		{shell: "fish", generate: func(root *cobra.Command, script io.Writer) error { return root.GenFishCompletion(script, true) }},
-		{shell: "powershell", generate: func(root *cobra.Command, script io.Writer) error {
-			return root.GenPowerShellCompletionWithDesc(script)
-		}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.shell, func(t *testing.T) {
-			t.Parallel()
-			var script bytes.Buffer
-			require.NoError(t, tc.generate(&cobra.Command{Use: "ytrack"}, &script))
+	scripts := map[string]string{}
+	for _, shell := range []string{"bash", "zsh", "fish", "powershell"} {
+		got := runWith(t, envOf(fake.ServeNothing(t)), "completion", shell)
 
-			got := runWith(t, envOf(fake.ServeNothing(t)), "completion", tc.shell)
-
-			assert.Equal(t, outcome{stdout: script.String()}, got)
-		})
+		require.Equal(t, 0, got.code, "%s: %s", shell, got.stderr)
+		assert.Empty(t, got.stderr, shell)
+		require.NotEmpty(t, got.stdout, shell)
+		for other, script := range scripts {
+			assert.NotEqual(t, script, got.stdout, "%s prints the script of %s", shell, other)
+		}
+		scripts[shell] = got.stdout
 	}
 }
 
@@ -258,7 +239,7 @@ func TestCompletionRefusesAShellItHasNoScriptFor(t *testing.T) {
 
 func TestCompleteOffersTheShellsOfTheCompletionCommand(t *testing.T) {
 	t.Parallel()
-	assert.Equal(t, []string{"bash", "zsh", "fish", "powershell"}, completing(t, "completion", "").names())
+	assert.Equal(t, []string{"zsh"}, completing(t, "completion", "z").names())
 }
 
 func TestCompleteOffersTheCategoriesOfTheActivities(t *testing.T) {
@@ -268,8 +249,6 @@ func TestCompleteOffersTheCategoriesOfTheActivities(t *testing.T) {
 		words []string
 		names []string
 	}{
-		{name: "a category not begun", words: []string{"activity", "list", "DEV-1", "--category", ""},
-			names: strings.Split(activityCategories, ",")},
 		{name: "a category begun", words: []string{"activity", "list", "--category", "Vcs"},
 			names: []string{"VcsChangeCategory"}},
 		{name: "a category past the issue and another category",

@@ -6,7 +6,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/dop251/goja v0.0.0-20260925200140-d00dd0475abd
 	github.com/dop251/goja_nodejs v0.0.0-20260918173711-b481721df8a2
-	github.com/hakastein/go-youtrack v0.5.1
+	github.com/hakastein/go-youtrack v0.6.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.9
 	github.com/stretchr/testify v1.12.1

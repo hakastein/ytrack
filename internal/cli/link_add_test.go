@@ -3,6 +3,7 @@ package cli_test
 import (
 	"net/http"
 	"path"
+	"strings"
 	"testing"
 
 	"github.com/hakastein/go-youtrack/fake"
@@ -35,20 +36,27 @@ func linking(t *testing.T, write http.HandlerFunc) *fake.Server {
 	})
 }
 
+func routesUnder(server *fake.Server, prefix string) []string {
+	under := []string{}
+	for _, route := range server.Routes() {
+		if strings.HasPrefix(route, prefix) {
+			under = append(under, route)
+		}
+	}
+	return under
+}
+
 func TestLinkAddWritesTheLinkAndPrintsTheLinksOfTheIssue(t *testing.T) {
 	t.Parallel()
 	server := linking(t, fake.JSON(http.StatusOK, `{"$type":"Issue","id":"3-2","links":[`+
 		`{"$type":"IssueLink","direction":"OUTWARD","linkType":`+needsLinkType+`,"issues":[`+
 		`{"$type":"Issue","id":"3-1","links":[`+
 		`{"$type":"IssueLink","direction":"INWARD","linkType":`+needsLinkType+`,"issuesSize":1,"issues":[`+
-		`{"$type":"Issue","id":"3-2","idReadable":"DEV-2","summary":"Second"}]},`+
-		`{"$type":"IssueLink","direction":"BOTH","linkType":`+tiesLinkType+`,"issuesSize":1,"issues":[`+
-		`{"$type":"Issue","id":"3-4","idReadable":"DEV-4","summary":"Fourth"}]}]}]}]}`))
+		`{"$type":"Issue","id":"3-2","idReadable":"DEV-2","summary":"Second"}]}]}]}]}`))
 
 	got := runWith(t, envOf(server), "link", "add", "DEV-1", "needs", "DEV-2")
 
-	assert.Equal(t, outcome{stdout: "total: 2\nreturned: 2\ntruncated: false\nlinks:\n" +
-		"  \"needs\":\n    - {idReadable: \"DEV-2\", summary: \"Second\"}\n" +
-		"  \"ties\":\n    - {idReadable: \"DEV-4\", summary: \"Fourth\"}\n"}, got)
-	assert.Contains(t, server.Routes(), "POST /api/issues/DEV-1/links/5-1t/issues")
+	assert.Equal(t, outcome{stdout: "total: 1\nreturned: 1\ntruncated: false\nlinks:\n" +
+		"  \"needs\":\n    - {idReadable: \"DEV-2\", summary: \"Second\"}\n"}, got)
+	assert.Len(t, routesUnder(server, "POST /api/issues/DEV-1/"), 1)
 }

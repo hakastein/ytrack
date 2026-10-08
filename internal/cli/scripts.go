@@ -240,7 +240,7 @@ func scriptHost(env []string, stream *diag.Stream) script.Host {
 			if fault != nil {
 				return "", fault
 			}
-			return c.address.Redacted(), nil
+			return c.address.String(), nil
 		},
 		Warn: stream.Warn,
 	}

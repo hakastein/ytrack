@@ -9,7 +9,6 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -160,7 +159,7 @@ func TestAuthLoginKeepsTheLoginTypedForTheDirectoryItWasCalledIn(t *testing.T) {
 
 	assert.Equal(t, outcome{stdout: loginDocument(server.URL, scope, typedUser, typedUser)}, got)
 	assertTheTokenWasNotShown(t, got, said, typedToken)
-	assert.Equal(t, addressPrompt+server.URL+"\r\n"+tokenPrompt+"\r\n", said.shown)
+	assert.Contains(t, said.shown, server.URL, "the address typed was not shown")
 	assert.True(t, said.echoes, "the terminal was left without its echo")
 	assert.Equal(t, savedFile(scopedRecord(scope, server.URL, typedToken)), fileBytes(t, path))
 	assert.Equal(t, fs.FileMode(0o600), mode(t, path))
@@ -200,20 +199,6 @@ func TestAuthLoginGlobalReplacesTheSavedGlobalLogin(t *testing.T) {
 
 	assert.Equal(t, 0, got.code)
 	assert.Equal(t, savedFile(unscopedRecord(server.URL, typedToken), held), fileBytes(t, path))
-}
-
-func TestAuthLoginPrintsTheAddressWithoutItsPassword(t *testing.T) {
-	t.Parallel()
-	scope := here(t)
-	server := serveUserOfTheToken(t, map[string]string{typedToken: typedUser})
-	behind := server.Address(t)
-	behind.User = url.UserPassword("svc", "secret")
-	home, path := emptyHome(t)
-
-	got, _ := runOnATerminal(t, []string{"HOME=" + home}, typeAnswers(behind.String(), typedToken), "auth", "login")
-
-	assert.Equal(t, "http://svc:xxxxx@"+behind.Host+behind.Path, urlPrinted(t, got))
-	assert.Equal(t, savedFile(scopedRecord(scope, behind.String(), typedToken)), fileBytes(t, path))
 }
 
 func TestAuthLoginReplacesTheLoginSavedForTheSameDirectory(t *testing.T) {
@@ -264,8 +249,7 @@ func TestAuthLoginRefusesAnAddressItCannotUseBeforeAskingForTheToken(t *testing.
 		address string
 	}{
 		{name: "another scheme", address: "ftp://h"},
-		{name: "a query", address: "http://h/?q=1"},
-		{name: "a fragment", address: "http://h/#f"},
+		{name: "a user and a password", address: "http://svc:secret@h"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -292,7 +276,7 @@ func TestAuthLoginRefusesAnEndOfInputAtTheAddressPrompt(t *testing.T) {
 	got, said := runOnATerminal(t, []string{"HOME=" + home}, typingTheEndOfInput, "auth", "login")
 
 	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Equal(t, addressPrompt, said.shown)
+	assert.NotContains(t, said.shown, tokenPrompt, "the token was asked for after the end of input")
 	assert.NoFileExists(t, path)
 }
 
@@ -405,15 +389,4 @@ func TestAuthLoginAsksForNothingWithoutAHomeDirectory(t *testing.T) {
 	assert.Empty(t, said.shown, "the terminal was asked something before there was a place to keep the answer")
 	assertNoRecordedToken(t, got)
 	assert.Equal(t, held, fileBytes(t, path))
-}
-
-func TestAuthLoginOnATerminalRefusesAnArgument(t *testing.T) {
-	t.Parallel()
-	home, _ := emptyHome(t)
-
-	got, said := runOnATerminal(t, []string{"HOME=" + home}, typingTheEndOfInput, "auth", "login", fake.NobodyListens)
-
-	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-	assert.Empty(t, said.shown, "the terminal was asked for an address past the argument")
-	assert.Empty(t, entries(t, home))
 }

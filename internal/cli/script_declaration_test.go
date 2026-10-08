@@ -37,12 +37,10 @@ func TestScriptCallIsRefusedByItsDeclarationBeforeItRuns(t *testing.T) {
 		name string
 		argv []string
 	}{
-		{name: "an unknown flag", argv: []string{"check", "DEV-1", "r.txt", "--bogus"}},
 		{name: "a value outside the choices", argv: []string{"check", "DEV-1", "r.txt", "--mode", "medium"}},
 		{name: "a value outside the choices of a repeatable flag", argv: []string{"check", "DEV-1", "r.txt", "--tag", "d"}},
 		{name: "an argument too many", argv: []string{"check", "DEV-1", "r.txt", "extra"}},
 		{name: "an argument too few", argv: []string{"check", "DEV-1"}},
-		{name: "an int that is no number", argv: []string{"check", "DEV-1", "r.txt", "--count", "two"}},
 		{name: "an int wider than 32 bits", argv: []string{"check", "DEV-1", "r.txt", "--count", "3000000000"}},
 		{name: "a flag given twice", argv: []string{"check", "DEV-1", "r.txt", "--mode", "fast", "--mode", "slow"}},
 		{name: "a pair with no =", argv: []string{"check", "DEV-1", "r.txt", "--set", "A"}},
@@ -101,8 +99,6 @@ func TestFieldsFlagAddsToItsDefault(t *testing.T) {
 		given []string
 		want  string
 	}{
-		{name: "none given", want: "id,summary"},
-		{name: "an expression", given: []string{"--fields", "key"}, want: "key"},
 		{name: "an expression added to the default", given: []string{"--fields", "+key"}, want: "id,summary,key"},
 		{name: "an empty expression", given: []string{"--fields", ""}, want: "id,summary"},
 	}

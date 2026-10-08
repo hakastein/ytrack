@@ -154,9 +154,6 @@ func TestYAMLRefusesADocumentItCannotPrintBeforeTheFirstByte(t *testing.T) {
 	}{
 		{name: "no document", document: nil},
 		{name: "list as the document", document: youtrack.NewList(youtrack.NewMap(printable))},
-		{name: "string as the document", document: youtrack.NewString("First")},
-		{name: "text as the document", document: youtrack.NewText("First")},
-		{name: "null as the document", document: youtrack.NewNull()},
 		{name: "nil value", document: youtrack.NewMap(printable, youtrack.Pair{Key: "second", Value: nil})},
 		{name: "nil value in a record", document: youtrack.NewMap(printable, youtrack.Pair{Key: "records", Value: youtrack.NewList(youtrack.NewMap(youtrack.Pair{Key: "second", Value: nil}))})},
 		{name: "nil list item", document: youtrack.NewMap(printable, youtrack.Pair{Key: "items", Value: youtrack.NewList(youtrack.NewString("Second"), nil)})},

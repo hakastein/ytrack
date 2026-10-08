@@ -72,6 +72,9 @@ export YTRACK_URL=https://youtrack.example.com
 export YTRACK_TOKEN=perm:...
 ```
 
+Адрес — домен (`youtrack.example.com`, это `https://youtrack.example.com`) или ссылка `http(s)://`
+с хостом и, если нужно, путём.
+
 **Сохранённый вход** — удобно человеку:
 
 ```bash

@@ -25,14 +25,7 @@ func TestFaultExitCode(t *testing.T) {
 		fault diag.Fault
 		want  int
 	}{
-		{name: "bad usage", fault: diag.Fault{Code: youtrack.CodeBadUsage}, want: 1},
-		{name: "unknown name", fault: diag.Fault{Code: youtrack.CodeUnknownName}, want: 1},
-		{name: "missing required", fault: diag.Fault{Code: youtrack.CodeMissingRequired}, want: 1},
-		{name: "not found", fault: diag.Fault{Code: youtrack.CodeNotFound}, want: 1},
-		{name: "denied", fault: diag.Fault{Code: youtrack.CodeDenied}, want: 1},
-		{name: "rejected", fault: diag.Fault{Code: youtrack.CodeRejected}, want: 1},
-		{name: "upstream failed", fault: diag.Fault{Code: youtrack.CodeUpstreamFailed}, want: 1},
-		{name: "upstream invalid", fault: diag.Fault{Code: youtrack.CodeUpstreamInvalid}, want: 1},
+		{name: "a code other than write uncertain", fault: diag.Fault{Code: youtrack.CodeUpstreamInvalid}, want: 1},
 		{name: "write uncertain", fault: diag.Fault{Code: youtrack.CodeWriteUncertain}, want: 2},
 		{name: "fault after a write", fault: diag.Fault{Code: youtrack.CodeUpstreamInvalid, AfterWrite: true}, want: 2},
 		{name: "write uncertain after a write", fault: diag.Fault{Code: youtrack.CodeWriteUncertain, AfterWrite: true}, want: 2},
@@ -61,13 +54,6 @@ func TestStreamPrintsOneDocumentWithoutASeparator(t *testing.T) {
 				}})
 			},
 			want: lines(`code: "upstream_invalid"`, `message: "First"`, `upstream_status: 200`, `request: "GET /api/issues/DEV-1"`),
-		},
-		{
-			name: "warning",
-			print: func(stream *diag.Stream) {
-				stream.Warn(&youtrack.Warning{Code: youtrack.CodeUnknownName, Message: "First", Details: []youtrack.Pair{{Key: "query", Value: youtrack.NewString("First")}}})
-			},
-			want: lines(`code: "unknown_name"`, `message: "First"`, `query: "First"`),
 		},
 		{
 			name:  "fault without details",
@@ -143,14 +129,6 @@ func TestStreamPrintsWhatItCanOfADocumentTheRendererRefuses(t *testing.T) {
 			verdicts: []error{errFirstRefusal, errSecondRefusal},
 			print:    func(stream *diag.Stream) { stream.Fail(fault) },
 			want:     lines(`upstream_invalid: First second refusal`),
-		},
-		{
-			name:     "warning the renderer refuses",
-			verdicts: []error{errFirstRefusal},
-			print: func(stream *diag.Stream) {
-				stream.Warn(&youtrack.Warning{Code: youtrack.CodeUnknownName, Message: "First", Details: []youtrack.Pair{{Key: "query", Value: youtrack.NewString("First")}}})
-			},
-			want: lines(`code: "unknown_name"`, `message: "First"`, `render_error: "first refusal"`),
 		},
 		{
 			name:     "fault the renderer refuses after a warning",

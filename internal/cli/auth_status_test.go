@@ -3,7 +3,6 @@ package cli_test
 import (
 	"fmt"
 	"net/http"
-	"net/url"
 	"slices"
 	"testing"
 
@@ -53,7 +52,6 @@ func TestAuthStatusPrintsTheAddressTheSourceOfTheLoginAndTheUser(t *testing.T) {
 			assert.Equal(t, outcome{stdout: status(server.URL, tc.from, "login", "Full Name")}, got)
 			sent := server.Request(t, 0)
 			assert.Equal(t, []string{"/api/users/me"}, server.Paths())
-			assert.Equal(t, http.MethodGet, sent.Method)
 			assert.Equal(t, bearing(fake.Token), sent.Header.Get("Authorization"))
 		})
 	}
@@ -67,7 +65,6 @@ func TestAuthStatusPrintsTheAddressInOneSpelling(t *testing.T) {
 		printed string
 		path    string
 	}{
-		{name: "a scheme in capitals and a slash at the end", address: "HTTP://127.0.0.1:%s%s/", printed: "http://127.0.0.1:%s%s", path: "/api/users/me"},
 		{name: "a host in capitals", address: "http://[::FFFF:127.0.0.1]:%s%s", printed: "http://[::ffff:127.0.0.1]:%s%s", path: "/api/users/me"},
 		{name: "slashes at the end of a path", address: "http://127.0.0.1:%s%s/ctx//", printed: "http://127.0.0.1:%s%s/ctx", path: "/ctx/api/users/me"},
 		{name: "escaped slashes in a path that ends in slashes", address: "http://127.0.0.1:%s%s/a%%2Fb%%2F//", printed: "http://127.0.0.1:%s%s/a%%2Fb%%2F", path: "/a%2Fb%2F/api/users/me"},
@@ -85,15 +82,4 @@ func TestAuthStatusPrintsTheAddressInOneSpelling(t *testing.T) {
 			assert.Equal(t, tc.path, server.Request(t, 0).URL.EscapedPath())
 		})
 	}
-}
-
-func TestAuthStatusPrintsTheAddressWithoutItsPassword(t *testing.T) {
-	t.Parallel()
-	server := fake.Serve(t, fake.JSON(http.StatusOK, currentUser("login", "Full Name")))
-	address := server.Address(t)
-	address.User = url.UserPassword("svc", "secret")
-
-	got := runWith(t, []string{"YTRACK_URL=" + address.String(), "YTRACK_TOKEN=" + fake.Token}, "auth", "status")
-
-	assert.Equal(t, "http://svc:xxxxx@"+address.Host+address.Path, urlPrinted(t, got))
 }

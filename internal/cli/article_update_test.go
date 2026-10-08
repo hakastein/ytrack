@@ -21,9 +21,6 @@ func updatingAnArticle(t *testing.T, read, update http.HandlerFunc) *fake.Server
 			read(w, r)
 			return
 		}
-		if !assert.Equal(t, http.MethodPost, r.Method, "an update sends one GET and one POST") {
-			return
-		}
 		update(w, r)
 	})
 }

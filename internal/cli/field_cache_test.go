@@ -4,6 +4,8 @@ import (
 	"io/fs"
 	"net/http"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/hakastein/go-youtrack/fake"
@@ -47,7 +49,7 @@ func TestFieldShowKeepsNoCacheWithoutAnAbsoluteHome(t *testing.T) {
 			runWith(t, env, showType...)
 
 			require.Equal(t, 0, first.code, "stderr: %s", first.stderr)
-			assert.Equal(t, []string{metadataPath, firstFieldPath, metadataPath, firstFieldPath}, server.Paths())
+			assert.Equal(t, 2, timesAsked(server, metadataPath), "paths: %v", server.Paths())
 		})
 	}
 }
@@ -59,19 +61,33 @@ func TestFieldShowWritesTheCacheUnderTheYtrackDirectoryOfHome(t *testing.T) {
 	got := runWith(t, atHome(server, home), showType...)
 
 	require.Equal(t, 0, got.code, "stderr: %s", got.stderr)
-	assert.Equal(t, []string{filepath.Join(".ytrack", "cache")}, cacheRootsOfFilesUnder(t, home))
+	assert.Equal(t, []string{filepath.Join(".ytrack", "cache")}, directoriesHoldingFilesUnder(t, home))
 }
 
-func cacheRootsOfFilesUnder(t *testing.T, home string) []string {
+func timesAsked(server *fake.Server, path string) int {
+	asked := 0
+	for _, sent := range server.Paths() {
+		if sent == path {
+			asked++
+		}
+	}
+	return asked
+}
+
+// The two directories of HOME each file lies under, once each.
+func directoriesHoldingFilesUnder(t *testing.T, home string) []string {
 	t.Helper()
-	var roots []string
+	var held []string
 	require.NoError(t, filepath.WalkDir(home, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err
 		}
 		relative, err := filepath.Rel(home, path)
-		roots = append(roots, filepath.Dir(filepath.Dir(relative)))
+		parts := strings.SplitN(relative, string(filepath.Separator), 3)
+		if under := filepath.Join(parts[:min(2, len(parts))]...); !slices.Contains(held, under) {
+			held = append(held, under)
+		}
 		return err
 	}))
-	return roots
+	return held
 }
