@@ -90,6 +90,32 @@ func (o options) optional(name string) *string {
 	return &text
 }
 
+func (o options) issue(name string) youtrack.IssueID {
+	return youtrack.IssueID(o.string(name))
+}
+
+func (o options) article(name string) youtrack.ArticleID {
+	return youtrack.ArticleID(o.string(name))
+}
+
+func (o options) optionalArticle(name string) *youtrack.ArticleID {
+	text := o.optional(name)
+	if text == nil {
+		return nil
+	}
+	return new(youtrack.ArticleID(*text))
+}
+
+// withOwner reads the issue or the article under name by the form of its id; an id of neither form is the refusal of
+// the SDK.
+func withOwner(opts options, name string, do func(owner youtrack.Owner) (*youtrack.Node, error)) (*youtrack.Node, error) {
+	owner, err := youtrack.OwnerOf(opts.string(name))
+	if err != nil {
+		return nil, err
+	}
+	return do(owner)
+}
+
 func (o options) int(name string) int {
 	number, _ := o[name].(int)
 	return number

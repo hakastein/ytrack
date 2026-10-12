@@ -65,3 +65,30 @@ func TestActivityPrintsTheActivitiesOfTheIssueItWasGiven(t *testing.T) {
 	assert.Equal(t, outcome{stdout: "total: 1\nreturned: 1\ntruncated: false\nactivities:\n" + printedCreatedRow}, got)
 	assert.Contains(t, server.Routes(), http.MethodGet+" "+activitiesPath)
 }
+
+// --category is read as a category of the kind of the owner: the SDK refuses a category of an issue asked of an
+// article.
+func TestActivityAsksForTheCategoriesOfTheKindOfTheOwner(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		owner    string
+		category string
+		path     string
+	}{
+		{name: "an issue", owner: activityIssue, category: "SummaryCategory", path: activitiesPath},
+		{name: "an article", owner: "DEV-A-3", category: "ArticleSummaryCategory", path: "/api/articles/DEV-A-3/activities"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := activityServer(t, fake.JSON(http.StatusOK, `[]`))
+
+			got := runWith(t, envOf(server), "activity", "list", tc.owner, "--category", tc.category, "--fields", "timestamp")
+
+			assert.Equal(t, 0, got.code)
+			assert.Equal(t, tc.path, server.Last(t).URL.Path)
+			assert.Equal(t, []string{tc.category}, server.Last(t).URL.Query()["categories"])
+		})
+	}
+}

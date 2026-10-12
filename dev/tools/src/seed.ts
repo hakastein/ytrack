@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import {
-  ALL_TYPES_ISSUE, ARTICLE_TREE, ATTACHMENT, COMMENT, COMMON_VALUES, DOCS, COPY_LINK, HISTORY, HISTORY_EDIT_KINDS, ISSUES,
+  ALL_TYPES_ISSUE, ARTICLE_HISTORY, ARTICLE_TREE, ATTACHMENT, COMMENT, COMMON_VALUES, DOCS, COPY_LINK, HISTORY, HISTORY_EDIT_KINDS, ISSUES,
   LINKS, TIME_TRACKING, WORK_ITEM, WORK_ITEM_ATTRIBUTE, WORK_ITEM_TYPES, type Article, type FieldValue, type HistoryEdit, type Issue,
   type WorkItem,
 } from "./content.ts";
@@ -1022,6 +1022,80 @@ async function createArticles(api: Api, projectId: string): Promise<CreatedArtic
   return articles;
 }
 
+type ArticleHistoryCheck = { article: string; categories: Record<string, number> };
+
+/** Заголовок, содержимое, тег навешен и снят, вложение загружено и удалено, комментарий написан и правлен */
+async function editArticleHistory(api: Api, projectId: string): Promise<string> {
+  const h = ARTICLE_HISTORY;
+  const article: Tree = await api.post("/api/articles",
+    { project: { id: projectId }, summary: h.summary.from, content: h.content.from }, "id,idReadable");
+  const at = `/api/articles/${article.id}`;
+  const written: Tree = await api.post(at, { summary: h.summary.to }, "summary");
+  if (written.summary !== h.summary.to) {
+    fail("summary_mismatch", `заголовок ${article.idReadable} ${JSON.stringify(written.summary)} вместо ${JSON.stringify(h.summary.to)}`);
+  }
+  const content: Tree = await api.post(at, { content: h.content.to }, "content");
+  if (content.content !== h.content.to) {
+    fail("content_mismatch", `содержимое ${article.idReadable} ${JSON.stringify(content.content)} вместо ${JSON.stringify(h.content.to)}`);
+  }
+  const tag: Tree = await api.post("/api/tags", { name: h.tag }, "id,name");
+  const hung: Tree = await api.post(`${at}/tags`, { id: tag.id }, "name");
+  if (hung.name !== h.tag) {
+    fail("tag_mismatch", `к ${article.idReadable} навешен тег ${JSON.stringify(hung.name)} вместо ${JSON.stringify(h.tag)}`);
+  }
+  await api.delete(`${at}/tags/${tag.id}`);
+  const form = new FormData();
+  form.append("files[0]", new Blob([h.attachment.content]), h.attachment.name);
+  const uploaded: Tree[] = await api.upload(`${at}/attachments`, form, "id,name");
+  if (uploaded.length !== 1 || uploaded[0].name !== h.attachment.name) {
+    fail("attachment_mismatch", `вложение у ${article.idReadable} расходится с загруженным: ${JSON.stringify(uploaded)}`);
+  }
+  await api.delete(`${at}/attachments/${uploaded[0].id}`);
+  const comment: Tree = await api.post(`${at}/comments`, { text: h.comment.from }, "id,text");
+  const edited: Tree = await api.post(`${at}/comments/${comment.id}`, { text: h.comment.to }, "text");
+  if (edited.text !== h.comment.to) {
+    fail("comment_mismatch", `текст комментария у ${article.idReadable} ${JSON.stringify(edited.text)} вместо ${JSON.stringify(h.comment.to)}`);
+  }
+  return article.idReadable;
+}
+
+/** Правка текста комментария своей записи не даёт: комментарий — одна запись с текущим текстом */
+async function checkArticleHistory(api: Api, article: string): Promise<ArticleHistoryCheck> {
+  const h = ARTICLE_HISTORY;
+  const exact: Activity[] = [
+    { category: "ArticleCreatedCategory", added: [], removed: [] },
+    { category: "ArticleSummaryCategory", removed: h.summary.from, added: h.summary.to },
+    { category: "ArticleDescriptionCategory", removed: h.content.from, added: h.content.to },
+    { category: "ArticleTagsCategory", added: [h.tag], removed: [] },
+    { category: "ArticleTagsCategory", added: [], removed: [h.tag] },
+    { category: "ArticleAttachmentsCategory", added: [h.attachment.name], removed: [] },
+    { category: "ArticleAttachmentsCategory", added: [], removed: [h.attachment.name] },
+    { category: "ArticleCommentsCategory", added: [h.comment.to], removed: [] },
+  ];
+  const categories = [...new Set(exact.map((activity) => activity.category))];
+  const records: Activity[] = (await api.get(`/api/articles/${article}/activities?categories=${categories.join(",")}&$top=100`,
+    "category(id),added($type,name,login,text),removed($type,name,login,text)"))
+    .map((record: Tree): Activity => ({ category: record.category.id, added: named(record.added), removed: named(record.removed) }));
+  const matches = (want: Activity, got: Activity): boolean => Object.entries(want)
+    .every(([key, value]) => JSON.stringify(got[key as keyof Activity]) === JSON.stringify(value));
+  const diverged: string[] = [];
+  for (const category of categories) {
+    const want = exact.filter((activity) => activity.category === category);
+    const got = records.filter((activity) => activity.category === category);
+    if (got.length !== want.length || !want.every((activity, i) => matches(activity, got[i]))) {
+      diverged.push(`${JSON.stringify(got)} вместо ${JSON.stringify(want)}`);
+    }
+  }
+  if (diverged.length) {
+    fail("article_history_mismatch", `история ${article} расходится с записанной: ${diverged.join("; ")}`);
+  }
+  return {
+    article,
+    categories: Object.fromEntries(categories.map((category) =>
+      [category, records.filter((activity) => activity.category === category).length])),
+  };
+}
+
 async function editHistory(api: Api, issue: CreatedIssue): Promise<[edited: CreatedIssue, comments: CreatedComment[]]> {
   let edited = issue;
   const comments: CreatedComment[] = [];
@@ -1210,6 +1284,7 @@ async function main(): Promise<void> {
   const attachment = await createAttachment(api, issues);
   const comment = await createComment(api, ADMIN_LOGIN, issues.get(COMMENT.issue)!, COMMENT.text);
   const articles = await createArticles(api, projectId);
+  const articleHistory = await checkArticleHistory(api, await editArticleHistory(api, projectId));
   const [historyIssue, historyComments] = await editHistory(api, issues.get(HISTORY.issue)!);
   const [memberComment, vote] = await voteByComment(memberApi, historyIssue);
   const memberWorkItem = await createWorkItem(memberApi, MEMBER.login, historyIssue, workItemTypes,
@@ -1306,6 +1381,10 @@ async function main(): Promise<void> {
   console.log(`  issue: ${JSON.stringify(history.issue)}`);
   console.log("  categories:");
   for (const [category, count] of Object.entries(history.categories)) console.log(`    ${category}: ${count}`);
+  console.log("article_history:");
+  console.log(`  article: ${JSON.stringify(articleHistory.article)}`);
+  console.log("  categories:");
+  for (const [category, count] of Object.entries(articleHistory.categories)) console.log(`    ${category}: ${count}`);
   console.log("votes:");
   console.log(`  - {issue: ${JSON.stringify(vote.issue)}, voter: ${JSON.stringify(vote.voter)}}`);
   const valued = issues.get(ALL_TYPES_ISSUE)!;

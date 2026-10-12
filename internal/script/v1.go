@@ -208,7 +208,7 @@ func issues(warn func(*youtrack.Warning)) map[string]function {
 			params: []param{required("id", textParam), fieldsParam(), optional("comments", commentsParam)},
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
 				show := &youtrack.ShowIssueOptions{Fields: opts.string("fields"), Comments: opts.comments("comments")}
-				return c.Issues.Show(ctx, opts.string("id"), show)
+				return c.Issues.Show(ctx, opts.issue("id"), show)
 			}),
 		},
 		"list": {
@@ -235,20 +235,20 @@ func issues(warn func(*youtrack.Warning)) map[string]function {
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
 				in := &youtrack.IssueUpdate{Summary: opts.optional("summary"), Description: opts.optional("description"),
 					ClearDescription: opts.cleared("description"), Fields: opts.fieldWrites("customFields")}
-				return c.Issues.Update(ctx, opts.string("id"), in, written(opts))
+				return c.Issues.Update(ctx, opts.issue("id"), in, written(opts))
 			}),
 		},
 		"delete": {
 			params: []param{required("id", textParam)},
 			writes: true,
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
-				return c.Issues.Delete(ctx, opts.string("id"))
+				return c.Issues.Delete(ctx, opts.issue("id"))
 			}),
 		},
 		"get": {
 			params: []param{required("id", textParam)},
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
-				issue, err := c.Issues.Get(ctx, opts.string("id"))
+				issue, err := c.Issues.Get(ctx, opts.issue("id"))
 				if err != nil {
 					return nil, err
 				}
@@ -259,7 +259,7 @@ func issues(warn func(*youtrack.Warning)) map[string]function {
 			params: []param{required("id", textParam), required("customFields", fieldValuesParam)},
 			writes: true,
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
-				issue, err := c.Issues.WriteFields(ctx, opts.string("id"), opts.fieldWrites("customFields"))
+				issue, err := c.Issues.WriteFields(ctx, opts.issue("id"), opts.fieldWrites("customFields"))
 				if err != nil {
 					return nil, err
 				}
@@ -275,7 +275,7 @@ func articles() map[string]function {
 			params: []param{required("id", textParam), fieldsParam(), optional("comments", commentsParam)},
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
 				show := &youtrack.ShowArticleOptions{Fields: opts.string("fields"), Comments: opts.comments("comments")}
-				return c.Articles.Show(ctx, opts.string("id"), show)
+				return c.Articles.Show(ctx, opts.article("id"), show)
 			}),
 		},
 		"list": {
@@ -287,7 +287,7 @@ func articles() map[string]function {
 		"children": {
 			params: paged(required("parent", textParam)),
 			bind: replyPage(func(ctx context.Context, c *youtrack.Client, opts options, page youtrack.Page) (*youtrack.Node, error) {
-				return c.Articles.Children(ctx, opts.string("parent"), &youtrack.ListArticlesOptions{Fields: opts.string("fields"), Page: page})
+				return c.Articles.Children(ctx, opts.article("parent"), &youtrack.ListArticlesOptions{Fields: opts.string("fields"), Page: page})
 			}),
 		},
 		"create": {
@@ -296,7 +296,7 @@ func articles() map[string]function {
 			writes: true,
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
 				in := &youtrack.ArticleInput{Summary: opts.string("summary"), Content: opts.string("content"),
-					Parent: opts.string("parent")}
+					Parent: opts.article("parent")}
 				return c.Articles.Create(ctx, opts.string("project"), in, written(opts))
 			}),
 		},
@@ -306,16 +306,16 @@ func articles() map[string]function {
 			writes: true,
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
 				in := &youtrack.ArticleUpdate{Summary: opts.optional("summary"), Content: opts.optional("content"),
-					Parent: opts.optional("parent"), ClearContent: opts.cleared("content"),
+					Parent: opts.optionalArticle("parent"), ClearContent: opts.cleared("content"),
 					ClearParent: opts.cleared("parent")}
-				return c.Articles.Update(ctx, opts.string("id"), in, written(opts))
+				return c.Articles.Update(ctx, opts.article("id"), in, written(opts))
 			}),
 		},
 		"delete": {
 			params: []param{required("id", textParam)},
 			writes: true,
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
-				return c.Articles.Delete(ctx, opts.string("id"))
+				return c.Articles.Delete(ctx, opts.article("id"))
 			}),
 		},
 	}
@@ -326,14 +326,18 @@ func comments() map[string]function {
 		"list": {
 			params: paged(required("owner", textParam)),
 			bind: replyPage(func(ctx context.Context, c *youtrack.Client, opts options, page youtrack.Page) (*youtrack.Node, error) {
-				return c.Comments.List(ctx, opts.string("owner"), &youtrack.ListCommentsOptions{Fields: opts.string("fields"), Page: page})
+				return withOwner(opts, "owner", func(owner youtrack.Owner) (*youtrack.Node, error) {
+					return c.Comments.List(ctx, owner, &youtrack.ListCommentsOptions{Fields: opts.string("fields"), Page: page})
+				})
 			}),
 		},
 		"create": {
 			params: []param{required("owner", textParam), required("text", textParam), fieldsParam()},
 			writes: true,
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
-				return c.Comments.Create(ctx, opts.string("owner"), opts.string("text"), written(opts))
+				return withOwner(opts, "owner", func(owner youtrack.Owner) (*youtrack.Node, error) {
+					return c.Comments.Create(ctx, owner, opts.string("text"), written(opts))
+				})
 			}),
 		},
 		"update": {
@@ -341,14 +345,18 @@ func comments() map[string]function {
 				fieldsParam()},
 			writes: true,
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
-				return c.Comments.Update(ctx, opts.string("owner"), opts.string("id"), opts.string("text"), written(opts))
+				return withOwner(opts, "owner", func(owner youtrack.Owner) (*youtrack.Node, error) {
+					return c.Comments.Update(ctx, owner, opts.string("id"), opts.string("text"), written(opts))
+				})
 			}),
 		},
 		"delete": {
 			params: []param{required("owner", textParam), required("id", textParam)},
 			writes: true,
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
-				return c.Comments.Delete(ctx, opts.string("owner"), opts.string("id"))
+				return withOwner(opts, "owner", func(owner youtrack.Owner) (*youtrack.Node, error) {
+					return c.Comments.Delete(ctx, owner, opts.string("id"))
+				})
 			}),
 		},
 	}
@@ -359,7 +367,9 @@ func attachments() map[string]function {
 		"list": {
 			params: paged(required("owner", textParam)),
 			bind: replyPage(func(ctx context.Context, c *youtrack.Client, opts options, page youtrack.Page) (*youtrack.Node, error) {
-				return c.Attachments.List(ctx, opts.string("owner"), &youtrack.ListAttachmentsOptions{Fields: opts.string("fields"), Page: page})
+				return withOwner(opts, "owner", func(owner youtrack.Owner) (*youtrack.Node, error) {
+					return c.Attachments.List(ctx, owner, &youtrack.ListAttachmentsOptions{Fields: opts.string("fields"), Page: page})
+				})
 			}),
 		},
 		"create": {
@@ -379,7 +389,9 @@ func attachments() map[string]function {
 				if opts.given("content") {
 					return func(ctx context.Context, c *youtrack.Client) (*youtrack.Node, error) {
 						sent := youtrack.File{Name: opts.string("name"), Content: bytes.NewReader(opts.bytes("content"))}
-						return c.Attachments.Create(ctx, opts.string("owner"), sent, written(opts))
+						return withOwner(opts, "owner", func(owner youtrack.Owner) (*youtrack.Node, error) {
+							return c.Attachments.Create(ctx, owner, sent, written(opts))
+						})
 					}, nil
 				}
 				path := opts.string("path")
@@ -395,7 +407,9 @@ func attachments() map[string]function {
 						return nil, fault
 					}
 					defer file.Close()
-					return c.Attachments.Create(ctx, opts.string("owner"), youtrack.File{Name: filepath.Base(path), Content: file}, written(opts))
+					return withOwner(opts, "owner", func(owner youtrack.Owner) (*youtrack.Node, error) {
+						return c.Attachments.Create(ctx, owner, youtrack.File{Name: filepath.Base(path), Content: file}, written(opts))
+					})
 				}, nil
 			},
 		},
@@ -403,7 +417,9 @@ func attachments() map[string]function {
 			params: []param{required("owner", textParam), required("id", textParam)},
 			writes: true,
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
-				return c.Attachments.Delete(ctx, opts.string("owner"), opts.string("id"))
+				return withOwner(opts, "owner", func(owner youtrack.Owner) (*youtrack.Node, error) {
+					return c.Attachments.Delete(ctx, owner, opts.string("id"))
+				})
 			}),
 		},
 	}
@@ -415,21 +431,21 @@ func links() map[string]function {
 		"list": {
 			params: []param{required("issue", textParam), fieldsParam()},
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
-				return c.Links.List(ctx, opts.string("issue"), &youtrack.ListLinksOptions{Fields: opts.string("fields")})
+				return c.Links.List(ctx, opts.issue("issue"), &youtrack.ListLinksOptions{Fields: opts.string("fields")})
 			}),
 		},
 		"add": {
 			params: append(slices.Clone(ends), fieldsParam()),
 			writes: true,
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
-				return c.Links.Add(ctx, opts.string("issue"), opts.string("phrase"), opts.string("target"), written(opts))
+				return c.Links.Add(ctx, opts.issue("issue"), opts.string("phrase"), opts.issue("target"), written(opts))
 			}),
 		},
 		"remove": {
 			params: ends,
 			writes: true,
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
-				return c.Links.Remove(ctx, opts.string("issue"), opts.string("phrase"), opts.string("target"))
+				return c.Links.Remove(ctx, opts.issue("issue"), opts.string("phrase"), opts.issue("target"))
 			}),
 		},
 	}
@@ -470,14 +486,18 @@ func tags() map[string]function {
 			params: byName(required("id", textParam)),
 			writes: true,
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
-				return c.Tags.Add(ctx, opts.string("id"), opts.string("name"), tagOptions(opts))
+				return withOwner(opts, "id", func(owner youtrack.Owner) (*youtrack.Node, error) {
+					return c.Tags.Add(ctx, owner, opts.string("name"), tagOptions(opts))
+				})
 			}),
 		},
 		"remove": {
 			params: byName(required("id", textParam)),
 			writes: true,
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
-				return c.Tags.Remove(ctx, opts.string("id"), opts.string("name"), tagOptions(opts))
+				return withOwner(opts, "id", func(owner youtrack.Owner) (*youtrack.Node, error) {
+					return c.Tags.Remove(ctx, owner, opts.string("name"), tagOptions(opts))
+				})
 			}),
 		},
 	}
@@ -488,7 +508,7 @@ func workItems() map[string]function {
 		"list": {
 			params: paged(required("issue", textParam)),
 			bind: replyPage(func(ctx context.Context, c *youtrack.Client, opts options, page youtrack.Page) (*youtrack.Node, error) {
-				return c.WorkItems.List(ctx, opts.string("issue"), &youtrack.ListWorkItemsOptions{Fields: opts.string("fields"), Page: page})
+				return c.WorkItems.List(ctx, opts.issue("issue"), &youtrack.ListWorkItemsOptions{Fields: opts.string("fields"), Page: page})
 			}),
 		},
 		"create": {
@@ -504,7 +524,7 @@ func workItems() map[string]function {
 				in := &youtrack.WorkItemInput{Duration: spent, Date: opts.string("date"), Text: opts.string("text"),
 					Type: opts.string("type"), Attributes: opts.attributeWrites("attributes")}
 				return func(ctx context.Context, c *youtrack.Client) (*youtrack.Node, error) {
-					return c.WorkItems.Create(ctx, opts.string("issue"), in, written(opts))
+					return c.WorkItems.Create(ctx, opts.issue("issue"), in, written(opts))
 				}, nil
 			},
 		},
@@ -525,7 +545,7 @@ func workItems() map[string]function {
 					in.Duration = &spent
 				}
 				return func(ctx context.Context, c *youtrack.Client) (*youtrack.Node, error) {
-					return c.WorkItems.Update(ctx, opts.string("issue"), opts.string("id"), in, written(opts))
+					return c.WorkItems.Update(ctx, opts.issue("issue"), opts.string("id"), in, written(opts))
 				}, nil
 			},
 		},
@@ -533,7 +553,7 @@ func workItems() map[string]function {
 			params: []param{required("issue", textParam), required("id", textParam)},
 			writes: true,
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
-				return c.WorkItems.Delete(ctx, opts.string("issue"), opts.string("id"))
+				return c.WorkItems.Delete(ctx, opts.issue("issue"), opts.string("id"))
 			}),
 		},
 	}
@@ -547,14 +567,33 @@ func minutesOf(minutes int) (time.Duration, *diag.Fault) {
 	return time.Duration(minutes) * time.Minute, nil
 }
 
+// A name is a category of the kind of the owner: the SDK refuses a name that is none of them.
+func categoriesOf(owner youtrack.Owner, names []string) []youtrack.ActivityCategory {
+	if len(names) == 0 {
+		return nil
+	}
+	categories := make([]youtrack.ActivityCategory, 0, len(names))
+	_, article := owner.(youtrack.ArticleID)
+	for _, name := range names {
+		if article {
+			categories = append(categories, youtrack.ArticleActivityCategory(name))
+		} else {
+			categories = append(categories, youtrack.IssueActivityCategory(name))
+		}
+	}
+	return categories
+}
+
 func activities() map[string]function {
 	return map[string]function{
 		"list": {
-			params: paged(required("issue", textParam), optional("categories", textsParam)),
+			params: paged(required("owner", textParam), optional("categories", textsParam)),
 			bind: replyPage(func(ctx context.Context, c *youtrack.Client, opts options, page youtrack.Page) (*youtrack.Node, error) {
-				list := &youtrack.ListActivitiesOptions{Fields: opts.string("fields"), Page: page,
-					Categories: opts.strings("categories")}
-				return c.Activities.List(ctx, opts.string("issue"), list)
+				return withOwner(opts, "owner", func(owner youtrack.Owner) (*youtrack.Node, error) {
+					list := &youtrack.ListActivitiesOptions{Fields: opts.string("fields"), Page: page,
+						Categories: categoriesOf(owner, opts.strings("categories"))}
+					return c.Activities.List(ctx, owner, list)
+				})
 			}),
 		},
 	}

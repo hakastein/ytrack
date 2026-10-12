@@ -205,3 +205,20 @@ export const ARTICLE_TREE: { parent: Article; child: Article } = {
   parent: { summary: "Родительская статья", content: "Статья, в которую вложена дочерняя." },
   child: { summary: "Дочерняя статья", content: "Статья, вложенная в родительскую." },
 };
+
+/** Статья с историей: каждая правка — свой запрос, и каждая даёт свою запись истории статьи */
+export type ArticleHistory = {
+  summary: { from: string; to: string };
+  content: { from: string; to: string };
+  tag: string;
+  attachment: { name: string; content: string };
+  comment: { from: string; to: string };
+};
+
+export const ARTICLE_HISTORY: ArticleHistory = {
+  summary: { from: "Статья с историей правок: заголовок до правки", to: "Статья с историей правок" },
+  content: { from: "Содержимое статьи с историей до правки.", to: "Содержимое статьи с историей после правки." },
+  tag: "история-статьи-полигона",
+  attachment: { name: "заметка-статьи.txt", content: "Вложение статьи с историей.\n" },
+  comment: { from: "Комментарий к статье до правки.", to: "Комментарий к статье после правки." },
+};
