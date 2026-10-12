@@ -189,8 +189,9 @@ declare module "ytrack/v1" {
     delete(call: { issue: string; id: string }): Answer;
   };
 
+  // owner is the readable id of an issue or an article; categories are of its kind, an issue's or an article's.
   export const activities: {
-    list(call: Page & { issue: string; categories?: string[] }): Answer;
+    list(call: Page & { owner: string; categories?: string[] }): Answer;
   };
 
   export const projects: {
