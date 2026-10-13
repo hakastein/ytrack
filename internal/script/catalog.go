@@ -2,40 +2,20 @@ package script
 
 import (
 	"embed"
-	"errors"
 	"fmt"
 	"io/fs"
-	"os"
-	"path"
 	"path/filepath"
 	"slices"
 	"strings"
 
+	"github.com/hakastein/cliche"
 	"github.com/hakastein/go-youtrack"
 
-	"github.com/hakastein/ytrack/internal/diag"
 	"github.com/hakastein/ytrack/internal/render"
 )
 
 //go:embed builtin
 var builtinFiles embed.FS
-
-type Root struct {
-	// Dir is empty for the scripts built into ytrack.
-	Dir  string
-	fsys fs.FS
-}
-
-func (r *Root) Builtin() bool {
-	return r.Dir == ""
-}
-
-func (r *Root) display(name string) string {
-	if r.Builtin() {
-		return "builtin:" + name
-	}
-	return filepath.Join(r.Dir, filepath.FromSlash(name))
-}
 
 // An empty place is unknown, and no root is looked up from it.
 type Places struct {
@@ -44,16 +24,13 @@ type Places struct {
 }
 
 type Catalog struct {
-	Commands []*Command
-	// Broken are paths that enter no command tree: a call of one ends in its fault, and --help above it warns.
-	Broken []Broken
+	// Scripts are the commands and the broken paths that enter the tree: a call of a broken path ends in its error,
+	// and --help above it warns.
+	Scripts *cliche.Catalog
 	// Hidden are first words a builtin command holds in a root of scripts: every call under that word warns.
 	Hidden []Hidden
-}
-
-type Broken struct {
-	Path  []string
-	Fault *diag.Fault
+	// Roots names the directory of the root whose commands a first word holds; builtin words are absent.
+	Roots map[string]string
 }
 
 type Hidden struct {
@@ -61,212 +38,105 @@ type Hidden struct {
 	Warning *youtrack.Warning
 }
 
-const scriptsDir = ".ytrack/scripts"
+const appName = "ytrack"
 
-// reserved are the first words of the commands written in Go.
+// Load reads the roots by the rule of ytrack: a first word belongs to one root, the builtin one before the project's
+// and the project's before the user's. reserved are the first words of the commands written in Go.
 func Load(reserved []string, places Places) *Catalog {
-	builtinRoot, err := fs.Sub(builtinFiles, "builtin")
+	builtin, err := fs.Sub(builtinFiles, "builtin")
 	if err != nil {
 		panic(err)
 	}
-	catalog := &Catalog{}
-	owner := map[string]*Root{}
-	builtin := &Root{fsys: builtinRoot}
-	for _, word := range reserved {
-		owner[word] = builtin
+	home := places.Home
+	if !filepath.IsAbs(home) {
+		home = ""
 	}
-	for _, root := range roots(builtin, places, catalog) {
-		scanned, err := root.scan(".", nil)
-		if err != nil {
-			catalog.unreadable(root.Dir, err)
+	// Sources nil would make cliche look up the directory and the home of the process itself.
+	sources := append([]cliche.Source{}, cliche.DefaultSources(appName, places.WorkingDir, home)...)
+	config := cliche.Config{Name: appName, Builtin: builtin, Sources: sources, Types: types()}
+	catalog := &Catalog{Scripts: &cliche.Catalog{}, Roots: map[string]string{}}
+	reservedRoot := &cliche.Root{Builtin: true}
+	owner := map[string]*cliche.Root{}
+	for _, word := range reserved {
+		owner[word] = reservedRoot
+	}
+	roots := config.Scan()
+	for i := range roots {
+		root := &roots[i]
+		if root.Err != nil {
+			catalog.Scripts.Broken = append(catalog.Scripts.Broken, cliche.Broken{Err: root.Err})
+			continue
 		}
-		for _, word := range sortedWords(scanned) {
-			entry := scanned[word]
-			if root.Builtin() && len(entry.broken) > 0 {
-				defect(entry.broken[0].Fault)
+		for _, word := range root.Words {
+			commands, broken := restrict(word)
+			if root.Builtin && len(broken) > 0 {
+				defect(FaultOf(broken[0].Err))
 			}
-			switch held := owner[word]; {
-			case entry.empty():
+			switch held := owner[word.Word]; {
 			case held == nil:
-				owner[word] = root
-				catalog.Commands = append(catalog.Commands, entry.commands...)
-				catalog.Broken = append(catalog.Broken, entry.broken...)
-			case held.Builtin() && !root.Builtin():
+				owner[word.Word] = root
+				catalog.Scripts.Commands = append(catalog.Scripts.Commands, commands...)
+				catalog.Scripts.Broken = append(catalog.Scripts.Broken, broken...)
+				if !root.Builtin && len(commands) > 0 {
+					catalog.Roots[word.Word] = root.Name
+				}
+			case held.Builtin && !root.Builtin:
 				message := fmt.Sprintf("%s is not a command: the command %s is built into ytrack, and no script "+
-					"adds to or replaces a builtin command", render.Quote(entry.display), render.Quote(word))
-				catalog.Hidden = append(catalog.Hidden, Hidden{Word: word, Warning: fileFault(message, entry.display).Warning()})
+					"adds to or replaces a builtin command", render.Quote(word.File), render.Quote(word.Word))
+				hidden := FaultOf(&cliche.ScriptError{Message: message, File: word.File})
+				catalog.Hidden = append(catalog.Hidden, Hidden{Word: word.Word, Warning: hidden.Warning()})
 			}
 		}
 	}
 	return catalog
 }
 
-func roots(builtin *Root, places Places, catalog *Catalog) []*Root {
-	found := []*Root{builtin}
-	var user string
-	if filepath.IsAbs(places.Home) {
-		user = filepath.Join(places.Home, filepath.FromSlash(scriptsDir))
+var (
+	argTypes  = []string{"string", "path", "duration"}
+	flagTypes = []string{"string", "int", "bool", fieldsType, "pair", "duration"}
+)
+
+// restrict turns a command that declares more than ytrack takes into a broken path: cliche also reads optional,
+// multiple and grouped arguments, int and pair arguments and path flags, which no command of ytrack has.
+func restrict(word cliche.Word) ([]*cliche.Command, []cliche.Broken) {
+	var commands []*cliche.Command
+	broken := slices.Clone(word.Broken)
+	for _, command := range word.Commands {
+		if reason := refusal(command); reason != "" {
+			broken = append(broken, cliche.Broken{Path: command.Path,
+				Err: &cliche.ScriptError{Message: "exports.definition " + reason, File: command.File()}})
+			continue
+		}
+		commands = append(commands, command)
 	}
-	if project := projectRoot(places.WorkingDir, user, catalog); project != nil {
-		found = append(found, project)
-	}
-	if user != "" && isDir(user, catalog) {
-		found = append(found, &Root{Dir: user, fsys: os.DirFS(user)})
-	}
-	return found
+	return commands, broken
 }
 
-func projectRoot(from, user string, catalog *Catalog) *Root {
-	if from == "" {
-		return nil
-	}
-	for dir := from; ; dir = filepath.Dir(dir) {
-		candidate := filepath.Join(dir, filepath.FromSlash(scriptsDir))
+func refusal(command *cliche.Command) string {
+	for _, arg := range command.Args {
 		switch {
-		case candidate == user:
-			return nil
-		case isDir(candidate, catalog):
-			return &Root{Dir: candidate, fsys: os.DirFS(candidate)}
-		case filepath.Dir(dir) == dir:
-			return nil
+		case arg.Group != nil:
+			return fmt.Sprintf("gives argument %s a group, and an argument is one value", render.Quote(arg.Name))
+		case arg.Optional, arg.Multiple:
+			return fmt.Sprintf("makes argument %s optional or multiple, and every argument is given once",
+				render.Quote(arg.Name))
+		case !slices.Contains(argTypes, arg.Type):
+			return fmt.Sprintf("gives argument %s the type %s, which is none of %s", render.Quote(arg.Name),
+				render.Quote(arg.Type), strings.Join(argTypes, ", "))
 		}
 	}
-}
-
-func isDir(dir string, catalog *Catalog) bool {
-	info, err := os.Stat(dir)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		return false
-	case err != nil:
-		catalog.unreadable(dir, unwrapPath(err))
-		return false
-	}
-	return info.IsDir()
-}
-
-func (c *Catalog) unreadable(root string, err error) {
-	message := fmt.Sprintf("the root of scripts %s cannot be read: %v", render.Quote(root), err)
-	c.Broken = append(c.Broken, Broken{Fault: fileFault(message, root)})
-}
-
-// entry is everything a root holds at one path and below it.
-type entry struct {
-	display  string
-	commands []*Command
-	broken   []Broken
-}
-
-func (e *entry) empty() bool {
-	return len(e.commands) == 0 && len(e.broken) == 0
-}
-
-func brokenEntry(path []string, display, message string) *entry {
-	return &entry{display: display, broken: []Broken{{Path: path, Fault: fileFault(message, display)}}}
-}
-
-// A symlink that leads back up would otherwise be followed forever.
-const deepestPath = 8
-
-func (r *Root) scan(dir string, words []string) (map[string]*entry, error) {
-	listed, err := fs.ReadDir(r.fsys, dir)
-	if err != nil {
-		return nil, unwrapPath(err)
-	}
-	files, dirs := map[string]*entry{}, map[string]*entry{}
-	for _, item := range listed {
-		name := item.Name()
-		if strings.HasPrefix(name, ".") {
-			continue
-		}
-		at, display := path.Join(dir, name), r.display(path.Join(dir, name))
-		info, err := fs.Stat(r.fsys, at)
-		word, isScript := strings.CutSuffix(name, ".js")
-		here := append(slices.Clip(words), word)
+	for _, flag := range command.Flags {
 		switch {
-		case err != nil:
-			files[word] = brokenEntry(here, display, fmt.Sprintf("%s cannot be read: %v", render.Quote(display), unwrapPath(err)))
-		case info.IsDir() && len(here) >= deepestPath:
-			dirs[name] = brokenEntry(here, display, fmt.Sprintf("directory %s lies %d directories deep, and a command "+
-				"path is shorter", render.Quote(display), len(here)))
-		case info.IsDir():
-			dirs[name] = r.subdir(at, here)
-		case info.Mode().IsRegular() && isScript:
-			files[word] = r.file(at, here)
+		case !slices.Contains(flagTypes, flag.Type):
+			return fmt.Sprintf("gives --%s the type %s, which is none of %s", flag.Name, render.Quote(flag.Type),
+				strings.Join(flagTypes, ", "))
+		case flag.Type == fieldsType:
+			if text, isText := flag.Default.(string); !isText || strings.TrimSpace(text) == "" {
+				return fmt.Sprintf("gives --%s a default that is no fields expression", flag.Name)
+			}
 		}
 	}
-	return join(files, dirs, words), nil
-}
-
-func (r *Root) subdir(dir string, words []string) *entry {
-	display := r.display(dir)
-	below, err := r.scan(dir, words)
-	if err != nil {
-		return brokenEntry(words, display, fmt.Sprintf("directory %s cannot be read: %v", render.Quote(display), err))
-	}
-	joined := &entry{display: display}
-	for _, word := range sortedWords(below) {
-		joined.commands = append(joined.commands, below[word].commands...)
-		joined.broken = append(joined.broken, below[word].broken...)
-	}
-	return joined
-}
-
-func join(files, dirs map[string]*entry, words []string) map[string]*entry {
-	joined := map[string]*entry{}
-	for word, script := range files {
-		joined[word] = script
-	}
-	for word, below := range dirs {
-		script, clash := joined[word]
-		if !clash {
-			joined[word] = below
-			continue
-		}
-		if script.empty() && below.empty() {
-			continue
-		}
-		here := append(slices.Clip(words), word)
-		joined[word] = brokenEntry(here, script.display, fmt.Sprintf("%s and %s both name the command %s, which is "+
-			"either a script or a directory of its subcommands", render.Quote(script.display), render.Quote(below.display),
-			render.Quote(strings.Join(here, " "))))
-	}
-	for word, held := range joined {
-		if held.empty() || wordGrammar.MatchString(word) {
-			continue
-		}
-		here := append(slices.Clip(words), word)
-		joined[word] = brokenEntry(here, held.display,
-			fmt.Sprintf("%s names the command word %s, which is %s", render.Quote(held.display), render.Quote(word), wordRule))
-	}
-	return joined
-}
-
-func (r *Root) file(name string, words []string) *entry {
-	display := r.display(name)
-	source, err := fs.ReadFile(r.fsys, name)
-	if err != nil {
-		return brokenEntry(words, display, fmt.Sprintf("%s cannot be read: %v", render.Quote(display), unwrapPath(err)))
-	}
-	command, err := declaration(display, string(source))
-	var failed *unreadable
-	switch {
-	case errors.As(err, &failed):
-		return &entry{display: display, broken: []Broken{{Path: words, Fault: scriptFault(failed.message, failed.at)}}}
-	case command == nil:
-		return &entry{display: display}
-	}
-	command.Path, command.root, command.file = words, r, name
-	return &entry{display: display, commands: []*Command{command}}
-}
-
-func sortedWords(entries map[string]*entry) []string {
-	words := make([]string, 0, len(entries))
-	for word := range entries {
-		words = append(words, word)
-	}
-	slices.Sort(words)
-	return words
+	return ""
 }
 
 func (c *Catalog) Warnings(under []string) []*youtrack.Warning {
@@ -276,9 +146,9 @@ func (c *Catalog) Warnings(under []string) []*youtrack.Warning {
 			warnings = append(warnings, hidden.Warning)
 		}
 	}
-	for _, broken := range c.Broken {
+	for _, broken := range c.Scripts.Broken {
 		if len(broken.Path) >= len(under) && slices.Equal(broken.Path[:len(under)], under) {
-			warnings = append(warnings, broken.Fault.Warning())
+			warnings = append(warnings, FaultOf(broken.Err).Warning())
 		}
 	}
 	return warnings

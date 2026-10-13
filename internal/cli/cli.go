@@ -36,6 +36,9 @@ func Run(ctx context.Context, argv, env []string, build *debug.BuildInfo, stdin 
 	}
 	var fault *diag.Fault
 	if !errors.As(err, &fault) {
+		fault = script.FaultOf(err)
+	}
+	if fault == nil {
 		fault = &diag.Fault{Code: youtrack.CodeBadUsage, Message: cobraMessage(err)}
 	}
 	stream.Fail(fault)
@@ -130,23 +133,6 @@ func printNode(stdout io.Writer, renderer render.Renderer, node *youtrack.Node) 
 		return &diag.Fault{Code: youtrack.CodeUpstreamFailed, Message: err.Error()}
 	}
 	return nil
-}
-
-func rejectRepeat(flag *pflag.Flag) {
-	flag.Value = &onceValue{Value: flag.Value}
-}
-
-type onceValue struct {
-	pflag.Value
-	given bool
-}
-
-func (v *onceValue) Set(value string) error {
-	if v.given {
-		return errors.New("the flag is given more than once")
-	}
-	v.given = true
-	return v.Value.Set(value)
 }
 
 func requireSubcommand(cmd *cobra.Command, args []string) *diag.Fault {

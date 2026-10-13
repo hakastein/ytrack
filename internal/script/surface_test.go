@@ -8,9 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hakastein/cliche"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/hakastein/ytrack/internal/diag"
 	"github.com/hakastein/ytrack/internal/script"
 )
 
@@ -37,11 +39,13 @@ func runtimeSurface(t *testing.T) []string {
 	root := filepath.Join(home, ".ytrack", "scripts")
 	require.NoError(t, os.MkdirAll(root, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(root, "survey.js"), []byte(surveying), 0o644))
-	catalog := script.Load(nil, script.Places{Home: home})
-	at := slices.IndexFunc(catalog.Commands, func(c *script.Command) bool { return slices.Equal(c.Path, []string{"survey"}) })
+	commands := script.Load(nil, script.Places{Home: home}).Scripts.Commands
+	at := slices.IndexFunc(commands, func(c *cliche.Command) bool { return slices.Equal(c.Path, []string{"survey"}) })
 	require.GreaterOrEqual(t, at, 0)
 
-	answer, _, fault := script.Run(t.Context(), catalog.Commands[at], script.Input{}, script.Host{})
+	// address is a getter, and reading its descriptor reads it: the host answers it without a login.
+	host := script.Host{Address: func() (string, *diag.Fault) { return "https://youtrack.test", nil }}
+	answer, _, fault := script.Run(t.Context(), commands[at], cliche.Input{}, host)
 	require.Nil(t, fault)
 
 	listed, found := answer.Lookup("names")
