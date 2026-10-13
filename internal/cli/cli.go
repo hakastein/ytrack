@@ -10,6 +10,7 @@ import (
 	"runtime/debug"
 	"strconv"
 
+	"github.com/hakastein/cliche"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
@@ -35,7 +36,12 @@ func Run(ctx context.Context, argv, env []string, build *debug.BuildInfo, stdin 
 		return 0
 	}
 	var fault *diag.Fault
-	if !errors.As(err, &fault) {
+	var usage *cliche.UsageError
+	switch {
+	case errors.As(err, &fault):
+	case errors.As(err, &usage) && usage.Cause != nil:
+		fault = &diag.Fault{Code: youtrack.CodeBadUsage, Message: flagMessage(usage.Cause)}
+	default:
 		fault = script.FaultOf(err)
 	}
 	if fault == nil {

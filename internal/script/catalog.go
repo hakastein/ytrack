@@ -102,9 +102,9 @@ func restrict(word cliche.Word) ([]*cliche.Command, []cliche.Broken) {
 	var commands []*cliche.Command
 	broken := slices.Clone(word.Broken)
 	for _, command := range word.Commands {
-		if reason := refusal(command); reason != "" {
-			broken = append(broken, cliche.Broken{Path: command.Path,
-				Err: &cliche.ScriptError{Message: "exports.definition " + reason, File: command.File()}})
+		if reason, line, column := refusal(command); reason != "" {
+			broken = append(broken, cliche.Broken{Path: command.Path, Err: &cliche.ScriptError{
+				Message: "exports.definition " + reason, File: command.File(), Line: line, Column: column}})
 			continue
 		}
 		commands = append(commands, command)
@@ -112,31 +112,32 @@ func restrict(word cliche.Word) ([]*cliche.Command, []cliche.Broken) {
 	return commands, broken
 }
 
-func refusal(command *cliche.Command) string {
+// refusal names what ytrack does not take and where the declaration writes it.
+func refusal(command *cliche.Command) (reason string, line, column int) {
 	for _, arg := range command.Args {
 		switch {
 		case arg.Group != nil:
-			return fmt.Sprintf("gives argument %s a group, and an argument is one value", render.Quote(arg.Name))
+			return fmt.Sprintf("gives argument %s a group, and an argument is one value", render.Quote(arg.Name)), arg.Line, arg.Column
 		case arg.Optional, arg.Multiple:
 			return fmt.Sprintf("makes argument %s optional or multiple, and every argument is given once",
-				render.Quote(arg.Name))
+				render.Quote(arg.Name)), arg.Line, arg.Column
 		case !slices.Contains(argTypes, arg.Type):
 			return fmt.Sprintf("gives argument %s the type %s, which is none of %s", render.Quote(arg.Name),
-				render.Quote(arg.Type), strings.Join(argTypes, ", "))
+				render.Quote(arg.Type), strings.Join(argTypes, ", ")), arg.Line, arg.Column
 		}
 	}
 	for _, flag := range command.Flags {
 		switch {
 		case !slices.Contains(flagTypes, flag.Type):
 			return fmt.Sprintf("gives --%s the type %s, which is none of %s", flag.Name, render.Quote(flag.Type),
-				strings.Join(flagTypes, ", "))
+				strings.Join(flagTypes, ", ")), flag.Line, flag.Column
 		case flag.Type == fieldsType:
 			if text, isText := flag.Default.(string); !isText || strings.TrimSpace(text) == "" {
-				return fmt.Sprintf("gives --%s a default that is no fields expression", flag.Name)
+				return fmt.Sprintf("gives --%s a default that is no fields expression", flag.Name), flag.Line, flag.Column
 			}
 		}
 	}
-	return ""
+	return "", 0, 0
 }
 
 func (c *Catalog) Warnings(under []string) []*youtrack.Warning {

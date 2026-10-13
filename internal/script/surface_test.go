@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/hakastein/ytrack/internal/diag"
 	"github.com/hakastein/ytrack/internal/script"
 )
 
@@ -43,9 +42,7 @@ func runtimeSurface(t *testing.T) []string {
 	at := slices.IndexFunc(commands, func(c *cliche.Command) bool { return slices.Equal(c.Path, []string{"survey"}) })
 	require.GreaterOrEqual(t, at, 0)
 
-	// address is a getter, and reading its descriptor reads it: the host answers it without a login.
-	host := script.Host{Address: func() (string, *diag.Fault) { return "https://youtrack.test", nil }}
-	answer, _, fault := script.Run(t.Context(), commands[at], cliche.Input{}, host)
+	answer, _, fault := script.Run(t.Context(), commands[at], cliche.Input{}, script.Host{})
 	require.Nil(t, fault)
 
 	listed, found := answer.Lookup("names")
