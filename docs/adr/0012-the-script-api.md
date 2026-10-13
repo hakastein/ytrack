@@ -24,7 +24,7 @@ status: accepted, partly implemented
 - **Лишний ключ, значение не того типа и пропущенный обязательный ключ дают `script_failed`.** Обязательно то, что
   обязательно у SDK: цель вызова, данные создания и `fields`.
 - **`fields` — всё выражение ответа, своих полей по умолчанию у функции нет,** как и у SDK v0.5.0. Пустое и
-  начинающееся с `+` дают `script_failed`. `+` у флага `--fields` раскрывает движок по `default` объявления
+  начинающееся с `+` дают `script_failed`. `+` у флага `--fields` раскрывает тип `fields` по `default` объявления
   ([ADR-0011](0011-a-command-is-a-script.md)), и функция получает готовое выражение. Поэтому ответ функции не
   меняется, когда ytrack меняет поля по умолчанию своих команд.
 - **Страница — `limit` и `skip`;** `limit`, которого нет, — страница SDK по умолчанию, а меньше 1 — `bad_usage`.
@@ -42,15 +42,16 @@ status: accepted, partly implemented
   ([ADR-0005](0005-an-error-is-a-document.md)).
 - **`address` — адрес входа в написании [ADR-0008](0008-a-login-is-an-address-and-a-token.md) с замаскированным
   паролем,** потому что скрипт строит из него ссылки в свой вывод.
-- **Модули исполняются в строгом режиме,** поэтому запись в ответ бросает `TypeError`, и непойманная становится
-  `script_failed`.
+- **Модули исполняются в строгом режиме** ([ADR-0001 cliche](https://github.com/hakastein/cliche/blob/main/docs/adr/0001-the-framework-is-mechanisms.md)), поэтому запись в ответ бросает `TypeError`, и непойманная
+  становится `script_failed`.
 - **Скрипт не добавляет кодов,** потому что агент, который читает `code`, знает все значения заранее. Код не из
   словаря [ADR-0005](0005-an-error-is-a-document.md) в `fail` и `warn` даёт `script_failed`, и сам `script_failed`
   тоже: его даёт только ytrack. Детали `fail` и `warn` не содержат `code` и `message`: они у ошибки уже есть.
 
 ## Ответ
 
-- **Документ функции помнит свои узлы.** Отображение и список — объект и массив только для чтения в порядке узла.
+- **Документ функции помнит свои узлы:** ytrack даёт узел мосту cliche как `Map` и `List`, и вернувшийся из скрипта
+  `Map` или `List` — тот же узел. Отображение и список — объект и массив только для чтения в порядке узла.
   Число — `number`, если double представляет его точно, иначе `BigInt`. Отсутствующий ключ — `undefined`.
 - **Значение из узла печатается как этот узел,** и когда его вернули из `exports.command`, и когда вложили в
   возвращённое.
@@ -72,40 +73,18 @@ status: accepted, partly implemented
 
 ## Подмножество Node
 
-- **Файлы, байты и HTTP — это API Node, а не ytrack:** `require("fs")` (и `"node:fs"`), глобальный `Buffer` (и
-  `require("buffer")`) и глобальный `fetch`. Их знают и агент, и автор скрипта, а своя форма была бы вторым API,
-  который надо учить. Имена, аргументы и ошибки — как в Node, поэтому подмножество вне версий `ytrack/v<N>`: оно
-  только расширяется.
-- **Всё синхронно,** как остальной скрипт: `fs` — только функции `*Sync`, а `fetch` возвращает ответ, а не `Promise`.
-- **Опция Node, которой ytrack не знает, — `TypeError`,** а не пропуск: пропущенная опция молча сделала бы не то, что
-  просил скрипт. Неверный вызов — тоже `TypeError`, и непойманный он становится `script_failed`.
-- **`fs`:** `readFileSync(path[, encoding | { encoding }])`, `writeFileSync(path, data[, encoding | { encoding }])`,
-  `mkdirSync(path[, { recursive }])`, `existsSync(path)`, `readdirSync(path[, "utf8"])` и
-  `statSync(path[, { throwIfNoEntry }])` со `size`, `mtimeMs`, `mtime`, `isFile()`, `isDirectory()` и
-  `isSymbolicLink()`. Путь — по правилам
-  [ADR-0006](0006-packages-and-the-entry-point.md): существующий путь не к обычному файлу читается и пишется ошибкой
-  (`EISDIR` для каталога, `EINVAL` для остального), потому что именованный канал ждал бы вечно. Место записи не
-  ограничено. Ошибка бросается, как в Node, с `code`, `syscall` и `path`; **непойманная — `bad_usage` с `path`:**
-  не удался путь, который скрипту дали.
-- **`Buffer` — из [goja_nodejs](https://github.com/dop251/goja_nodejs)** с кодировками `utf8`, `hex` и `base64`;
-  ytrack добавляет `Buffer.isBuffer`, которого там нет. Байты — `Buffer`, `Uint8Array` или `ArrayBuffer`, и в
-  документ ответа они не попадают ([ADR-0003](0003-output-is-one-yaml-document.md)). `writeFileSync`, как в Node,
-  `ArrayBuffer` не берёт.
-- **Декларации подмножества — [`node.d.ts`](../../skills/ytrack-scripts/node.d.ts), а не `@types/node`,** потому что
-  там `fetch` возвращает `Promise`.
-- **`fetch(url, { timeout, maxBytes, redirect })`** — только `GET` (`method` можно назвать только `"GET"`), без своих
-  заголовков, только `http` и `https`. `timeout` в миллисекундах, `maxBytes` и `redirect` обязательны: у запроса
-  наружу нет разумного предела по умолчанию. `redirect` — `"follow"`, не дальше 10 редиректов, или `"manual"`.
-- **Статус вне `2xx` — ответ, а не ошибка.** Сбой транспорта, таймаут, лишний редирект и тело длиннее `maxBytes`
-  бросают `upstream_failed` с `url`.
-- **Ответ — в форме `Response`:** `status`, `ok`, `statusText`, `url`, `redirected`, `headers` (`get`, `has`,
-  `forEach`, `keys`, `values`, `entries`, `getSetCookie`), `text()`, `json()` и `arrayBuffer()`. Тело прочитано
-  целиком, поэтому методы можно звать несколько раз. `text()` декодирует UTF-8, как `fetch`: неверная
-  последовательность становится U+FFFD, BOM отбрасывается.
-- **Токен инстанса в `fetch` не уходит никогда,** даже на адрес входа. Куки и прокси из окружения не используются,
-  запрос не повторяется.
+- **Файлы, байты и HTTP — это API Node, а не ytrack:** `require("fs")`, `Buffer` и `fetch` подмножества Node cliche
+  ([ADR-0001 cliche](https://github.com/hakastein/cliche/blob/main/docs/adr/0001-the-framework-is-mechanisms.md)), которое ytrack включает целиком. Их знают и агент, и автор скрипта, а своя форма была бы вторым API, который
+  надо учить. Подмножество вне версий `ytrack/v<N>`: оно только расширяется. Что в нём есть, описывает
+  [`node.d.ts`](../../skills/ytrack-scripts/node.d.ts), а не `@types/node`, потому что там `fetch` возвращает
+  `Promise`.
+- **Непойманная ошибка `fs` — `bad_usage` с `path`:** не удался путь, который скрипту дали.
+- **Сбой `fetch` — сбой транспорта, таймаут, лишний редирект, тело длиннее `maxBytes` — бросается `upstream_failed` с
+  `url`,** и пойманный, и непойманный. Статус вне `2xx` — ответ, а не ошибка.
+- **Токен инстанса в `fetch` не уходит никогда,** даже на адрес входа.
 - **`attachments.create` берёт либо `path`, либо `content` с `name`:** `content` — строка в UTF-8 или байты, так что
-  скачанное `fetch` прикладывается без файла. `name` идёт только с `content`.
+  скачанное `fetch` прикладывается без файла. `name` идёт только с `content`. Байты в документ ответа не попадают
+  ([ADR-0003](0003-output-is-one-yaml-document.md)).
 
 ## Версии
 
@@ -122,7 +101,7 @@ status: accepted, partly implemented
 - **У каждой поддерживаемой версии есть корпус скриптов через `Run`,** который хотя бы раз использует каждую функцию
   и каждый собственный ключ версии.
 - **Декларации `v<N>.d.ts` сверяются юнит-тестом `internal/script`**, потому что отставание деклараций через `Run`
-  не видно. Остальные тесты движка раскладываются по слоям [ADR-0006](0006-packages-and-the-entry-point.md).
+  не видно. Остальные тесты API раскладываются по слоям [ADR-0006](0006-packages-and-the-entry-point.md).
 
 ## Отвергнуто
 

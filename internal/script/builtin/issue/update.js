@@ -13,6 +13,7 @@ exports.definition = {
     { name: "description", type: "string", usage: "`text` of the description" },
     { name: "field", type: "pair", multiple: true, usage: "custom field `Name=value`; repeatable" },
     { name: "clear", type: "string", multiple: true, usage: "empty a custom field or description by `name`" },
+    { name: "star", type: "bool", usage: "star the issue, or with =false take the star off" },
     {
       name: "fields",
       type: "fields",
@@ -33,5 +34,5 @@ exports.command = (id, flags) => {
       customFields[name] = null;
     }
   }
-  return issues.update({ id, summary: flags.summary, description, customFields, fields: flags.fields });
+  return issues.update({ id, summary: flags.summary, description, customFields, star: flags.star, fields: flags.fields });
 };

@@ -5,8 +5,6 @@ import (
 
 	"fmt"
 	"io"
-	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -82,10 +80,14 @@ func newCompletion(stdout io.Writer) *cobra.Command {
 	return completion
 }
 
-const completesPathAt = "ytrack.completesPathAt"
-
-func takesPathAt(cmd *cobra.Command, number int) bool {
-	return slices.Contains(strings.Split(cmd.Annotations[completesPathAt], ","), strconv.Itoa(number))
+// pathAt tells whether the shell offers file names for the argument after the ones written: a script command says
+// so through the completion function cliche gives it.
+func pathAt(cmd *cobra.Command, written int) bool {
+	if cmd.ValidArgsFunction == nil {
+		return false
+	}
+	_, directive := cmd.ValidArgsFunction(cmd, make([]string, written), "")
+	return directive == shellOffersFileNames
 }
 
 const (
@@ -109,10 +111,10 @@ func complete(root *cobra.Command, stdout io.Writer, calledAs string, words []st
 		case strings.HasPrefix(completing, "-"):
 			suggestions = append(flagsOf(cmd), joinedValues(cmd, completing)...)
 		case written.flagValue:
-			suggestions = closedSetOf(written.valueOf)
+			suggestions = closedSetOf(cmd, written.valueOf)
 		default:
 			suggestions = argumentsOf(cmd, written)
-			if takesPathAt(cmd, written.arguments+1) {
+			if pathAt(cmd, written.arguments) {
 				directive = shellOffersFileNames
 			}
 		}
@@ -174,20 +176,17 @@ func parseFlagWord(cmd *cobra.Command, word string) (isFlag bool, flag *pflag.Fl
 	return false, nil, false
 }
 
-const completesClosedSet = "ytrack.completesClosedSet"
-
-func closedSet(flag *pflag.Flag, values []string) {
-	if flag.Annotations == nil {
-		flag.Annotations = map[string][]string{}
-	}
-	flag.Annotations[completesClosedSet] = values
-}
-
-func closedSetOf(flag *pflag.Flag) []string {
+// closedSetOf is the set of values a flag takes, as the completion function cliche gives it names them.
+func closedSetOf(cmd *cobra.Command, flag *pflag.Flag) []string {
 	if flag == nil {
 		return nil
 	}
-	return flag.Annotations[completesClosedSet]
+	complete, found := cmd.GetFlagCompletionFunc(flag.Name)
+	if !found {
+		return nil
+	}
+	values, _ := complete(cmd, nil, "")
+	return values
 }
 
 func joinedValues(cmd *cobra.Command, completing string) []string {
@@ -196,7 +195,7 @@ func joinedValues(cmd *cobra.Command, completing string) []string {
 		return nil
 	}
 	var suggestions []string
-	for _, value := range closedSetOf(cmd.Flags().Lookup(name)) {
+	for _, value := range closedSetOf(cmd, cmd.Flags().Lookup(name)) {
 		suggestions = append(suggestions, "--"+name+"="+value)
 	}
 	return suggestions

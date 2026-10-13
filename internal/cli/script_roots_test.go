@@ -310,3 +310,15 @@ func TestDeclarationThatIsNoPureLiteralIsUnreadable(t *testing.T) {
 		})
 	}
 }
+
+func TestDeclarationWiderThanYtrackFailsTheCallAtTheArgument(t *testing.T) {
+	t.Parallel()
+	home := scriptsHome(t, map[string]string{"bad.js": lines(
+		`exports.definition = { short: "Bad", long: "Bad.",`,
+		`  args: [{ name: "n", type: "int", usage: "n" }] };`,
+	)})
+
+	got := runWith(t, atHome(fake.ServeNothing(t), home), "bad")
+
+	assert.Equal(t, scriptFailedIn(home, "bad.js", detail{"line", 2}, detail{"column", 10}), requireFault(t, got))
+}

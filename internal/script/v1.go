@@ -5,42 +5,40 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"math"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/dop251/goja"
-
+	"github.com/hakastein/cliche"
 	"github.com/hakastein/go-youtrack"
 
 	"github.com/hakastein/ytrack/internal/diag"
 )
 
-func v1(e *engine) *goja.Object {
-	api := e.vm.NewObject()
+func (r *run) v1() *cliche.Object {
 	services := map[string]map[string]function{
 		"activities":   activities(),
 		"articles":     articles(),
 		"attachments":  attachments(),
 		"comments":     comments(),
 		"customFields": customFields(),
-		"issues":       issues(e.host.Warn),
+		"issues":       issues(r.host.Warn),
 		"links":        links(),
 		"projects":     projects(),
 		"tags":         tags(),
 		"users":        users(),
 		"workItems":    workItems(),
 	}
-	for _, name := range slices.Sorted(maps.Keys(services)) {
-		e.define(api, name, e.service(name, services[name]))
+	names := slices.Sorted(maps.Keys(services))
+	values := make([]any, 0, len(names)+3)
+	for _, name := range names {
+		values = append(values, r.service(name, services[name]))
 	}
-	e.define(api, "fail", e.vm.ToValue(e.fail))
-	e.define(api, "warn", e.vm.ToValue(e.warn))
-	if err := api.DefineAccessorProperty("address", e.vm.ToValue(e.address), nil, goja.FLAG_FALSE, goja.FLAG_TRUE); err != nil {
-		panic(err)
-	}
-	return api
+	names = append(names, "fail", "warn", "address")
+	values = append(values, cliche.Func(r.fail), cliche.Func(r.warn), cliche.Getter(r.address))
+	return cliche.NewObject(names, values)
 }
 
 func required(name string, kind paramKind) param {
@@ -220,21 +218,25 @@ func issues(warn func(*youtrack.Warning)) map[string]function {
 		},
 		"create": {
 			params: []param{required("project", textParam), required("summary", textParam),
-				optional("description", textParam), optional("customFields", fieldValuesParam), fieldsParam()},
+				optional("description", textParam), optional("customFields", fieldValuesParam), optional("tags", textsParam),
+				optional("star", boolParam), fieldsParam()},
 			writes: true,
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
 				in := &youtrack.IssueInput{Summary: opts.string("summary"), Description: opts.string("description"),
-					Fields: opts.fieldWrites("customFields")}
+					Fields: opts.fieldWrites("customFields"), Tags: tagRefs(opts.strings("tags")),
+					Star: opts.optionalBool("star")}
 				return c.Issues.Create(ctx, opts.string("project"), in, written(opts))
 			}),
 		},
 		"update": {
 			params: []param{required("id", textParam), optional("summary", textParam),
-				optional("description", clearableParam), optional("customFields", fieldValuesParam), fieldsParam()},
+				optional("description", clearableParam), optional("customFields", fieldValuesParam),
+				optional("star", boolParam), fieldsParam()},
 			writes: true,
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
 				in := &youtrack.IssueUpdate{Summary: opts.optional("summary"), Description: opts.optional("description"),
-					ClearDescription: opts.cleared("description"), Fields: opts.fieldWrites("customFields")}
+					ClearDescription: opts.cleared("description"), Fields: opts.fieldWrites("customFields"),
+					Star: opts.optionalBool("star")}
 				return c.Issues.Update(ctx, opts.issue("id"), in, written(opts))
 			}),
 		},
@@ -451,6 +453,14 @@ func links() map[string]function {
 	}
 }
 
+func tagRefs(names []string) []youtrack.TagRef {
+	refs := make([]youtrack.TagRef, 0, len(names))
+	for _, name := range names {
+		refs = append(refs, youtrack.TagRef{Name: name})
+	}
+	return refs
+}
+
 func tags() map[string]function {
 	byName := func(own ...param) []param {
 		return append(own, required("name", textParam), optional("ownedBy", textParam))
@@ -558,6 +568,9 @@ func workItems() map[string]function {
 		},
 	}
 }
+
+// A work item is whole minutes, and time.Duration holds fewer of them than the int32 YouTrack keeps.
+const longestWorkItem = math.MaxInt64 / int64(time.Minute)
 
 func minutesOf(minutes int) (time.Duration, *diag.Fault) {
 	if minutes < 0 || int64(minutes) > longestWorkItem {

@@ -76,3 +76,11 @@ func describeFileMode(mode fs.FileMode) string {
 	}
 	return "no regular file"
 }
+
+func unwrapPath(err error) error {
+	var failed *fs.PathError
+	if errors.As(err, &failed) {
+		return failed.Err
+	}
+	return err
+}

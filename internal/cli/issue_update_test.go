@@ -68,3 +68,14 @@ func TestIssueUpdateWritesTheIssue(t *testing.T) {
 	assert.Equal(t, http.MethodPost, sent.Method)
 	assert.Equal(t, "/api/issues/DEV-1", sent.URL.Path)
 }
+
+func TestIssueUpdateWritesTheStar(t *testing.T) {
+	t.Parallel()
+	server := updating(t, fake.JSON(http.StatusOK, issueToUpdate("DEV-7", projectRequiringNothing())),
+		fake.JSON(http.StatusOK, starredIssue("false")))
+
+	got := runWith(t, envOf(server), "issue", "update", "DEV-7", "--star=false", "--fields", "idReadable")
+
+	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-7\"\n"}, got)
+	assert.JSONEq(t, `{"watchers":{"hasStar":false}}`, server.Last(t).Body)
+}

@@ -16,6 +16,8 @@ func takingATagOff(t *testing.T, owner, catalogue, removal http.HandlerFunc) *fa
 			removal(w, r)
 		case r.URL.Path == tagsCollection:
 			catalogue(w, r)
+		case r.URL.Path == starProfile:
+			noStarOfTheTags()(w, r)
 		default:
 			owner(w, r)
 		}

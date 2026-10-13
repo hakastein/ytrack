@@ -13,6 +13,10 @@ CLI для YouTrack, рассчитанный на агента. Задачи и
   [`github.com/hakastein/go-youtrack`](https://github.com/hakastein/go-youtrack)
   ([ADR-0006](docs/adr/0006-packages-and-the-entry-point.md)). ytrack зовёт его сервисы напрямую и держит только
   вход, грамматику флагов, печать и коды возврата. SDK меняют релизом модуля, а ytrack поднимает его версию в `go.mod`
+- Движок скриптов команд — объявление, корни, разбор вызова, goja, мост значений, `fs`, `Buffer`, `fetch` — живёт во
+  фреймворке [`github.com/hakastein/cliche`](https://github.com/hakastein/cliche); в `internal/script` остаются API
+  `ytrack/v1`, адаптер `youtrack.Node`, тип `fields` и правило корней. cliche меняют релизом и поднимают его версию в
+  `go.mod`, как SDK; `replace` и `go.work` не коммитят
 - Перед правкой того, как находятся адрес и токен (`internal/cli/credentials.go`,
   `loginstore.go`, `terminal.go`, `auth.go`) —
   [ADR-0008](docs/adr/0008-a-login-is-an-address-and-a-token.md):

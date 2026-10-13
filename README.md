@@ -282,8 +282,8 @@ make go         # gofmt, go vet, тесты
 ```
 
 Всё знание о YouTrack — запросы, ответы, кастом-поля, ошибки, фейковый сервер — ytrack берёт из Go SDK
-[`github.com/hakastein/go-youtrack`](https://github.com/hakastein/go-youtrack), а сам держит вход, печать и движок
-скриптов на [goja](https://github.com/dop251/goja) с API `ytrack/v1` поверх SDK. Встроенные команды — такие же скрипты,
+[`github.com/hakastein/go-youtrack`](https://github.com/hakastein/go-youtrack), а сам держит вход, печать и API
+скриптов `ytrack/v1` поверх SDK; скрипты команд исполняет фреймворк [cliche](https://github.com/hakastein/cliche). Встроенные команды — такие же скрипты,
 вшитые в бинарник: [`internal/script/builtin/`](internal/script/builtin/).
 Тесты идут против фейкового сервера и живого YouTrack не требуют. Локальный YouTrack — дев-инстанс с проектом `DEV`,
 на котором заведены кастом-поля всех типов: с него `make openapi` SDK снимает спеку, на нём проверяют руками и измеряют факты о сервере для ADR. Сервер — общий локальный YouTrack машины на

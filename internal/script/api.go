@@ -6,24 +6,16 @@ import (
 	"fmt"
 	"maps"
 	"math"
-	"reflect"
+	"math/big"
 	"slices"
-	"strconv"
 	"strings"
 
-	"github.com/dop251/goja"
-
+	"github.com/hakastein/cliche"
 	"github.com/hakastein/go-youtrack"
 
 	"github.com/hakastein/ytrack/internal/diag"
 	"github.com/hakastein/ytrack/internal/render"
 )
-
-const currentVersion = 1
-
-var versions = map[int]func(e *engine) *goja.Object{
-	1: v1,
-}
 
 type paramKind int
 
@@ -41,6 +33,7 @@ const (
 	commentsParam
 	// A string, written in UTF-8, or the bytes of a Buffer, a Uint8Array or an ArrayBuffer.
 	bytesParam
+	boolParam
 )
 
 type param struct {
@@ -80,6 +73,14 @@ func (o options) cleared(name string) bool {
 func (o options) string(name string) string {
 	text, _ := o[name].(string)
 	return text
+}
+
+func (o options) optionalBool(name string) *bool {
+	set, given := o[name].(bool)
+	if !given {
+		return nil
+	}
+	return &set
 }
 
 func (o options) optional(name string) *string {
@@ -146,31 +147,36 @@ func (o options) comments(name string) youtrack.Comments {
 	return comments
 }
 
-func (e *engine) service(name string, functions map[string]function) *goja.Object {
-	service := e.vm.NewObject()
-	for _, method := range slices.Sorted(maps.Keys(functions)) {
-		e.define(service, method, e.vm.ToValue(e.function(name+"."+method, functions[method])))
+func (r *run) service(name string, functions map[string]function) *cliche.Object {
+	methods := slices.Sorted(maps.Keys(functions))
+	values := make([]any, 0, len(methods))
+	for _, method := range methods {
+		values = append(values, r.function(name+"."+method, functions[method]))
 	}
-	return service
+	return cliche.NewObject(methods, values)
 }
 
-func (e *engine) function(name string, f function) func(goja.FunctionCall) goja.Value {
-	return func(given goja.FunctionCall) goja.Value {
-		bound, fault := f.bind(e.options(name, f, given.Arguments))
-		if fault != nil {
-			panic(e.throw(fault))
+func (r *run) function(name string, f function) cliche.Func {
+	return func(ctx context.Context, args ...any) (any, error) {
+		opts, err := readOptions(ctx, name, f, args)
+		if err != nil {
+			return nil, err
 		}
-		node, fault := e.host.Call(e.ctx, bound)
+		bound, fault := f.bind(opts)
+		if fault != nil {
+			return nil, thrown{fault: fault}
+		}
+		node, fault := r.host.Call(ctx, bound)
 		if fault != nil {
 			if fault.MayHaveWritten() {
-				e.wrote = true
+				r.wrote = true
 			}
-			panic(e.throw(fault))
+			return nil, thrown{fault: fault}
 		}
 		if f.writes {
-			e.wrote = true
+			r.wrote = true
 		}
-		return e.value(node)
+		return valueOf(node), nil
 	}
 }
 
@@ -189,63 +195,65 @@ func signature(f function) string {
 	return "{ " + strings.Join(names, ", ") + " }"
 }
 
-func (e *engine) options(name string, f function, given []goja.Value) options {
+func readOptions(ctx context.Context, name string, f function, given []any) (options, error) {
 	takes := min(len(f.params), 1)
 	if len(given) != takes {
-		panic(e.throw(e.callerFault(fmt.Sprintf("%s takes %s, and it was given %d arguments", name, signature(f),
-			len(given)))))
+		return nil, callerFault(ctx, fmt.Sprintf("%s takes %s, and it was given %d arguments", name, signature(f),
+			len(given)))
 	}
 	opts := options{}
 	if takes == 0 {
-		return opts
+		return opts, nil
 	}
-	object, isObject := given[0].(*goja.Object)
-	if !isObject || object.ClassName() != "Object" {
-		panic(e.throw(e.callerFault(fmt.Sprintf("%s takes an object: %s", name, signature(f)))))
+	object, isObject := given[0].(cliche.Map)
+	if !isObject {
+		return nil, callerFault(ctx, fmt.Sprintf("%s takes an object: %s", name, signature(f)))
 	}
 	for _, key := range object.Keys() {
 		at := slices.IndexFunc(f.params, func(p param) bool { return p.name == key })
 		if at < 0 {
-			panic(e.throw(e.callerFault(fmt.Sprintf("%s takes no %s: it takes %s", name, render.Quote(key),
-				signature(f)))))
+			return nil, callerFault(ctx, fmt.Sprintf("%s takes no %s: it takes %s", name, render.Quote(key),
+				signature(f)))
 		}
-		value := object.Get(key)
-		if goja.IsUndefined(value) {
-			continue
-		}
+		value, _ := object.Get(key)
 		p := f.params[at]
 		read, reason := readParam(p.kind, value)
 		if reason == "" && p.refuse != nil {
 			reason = p.refuse(read)
 		}
 		if reason != "" {
-			panic(e.throw(e.callerFault(fmt.Sprintf("%s: %s %s", name, key, reason))))
+			return nil, callerFault(ctx, fmt.Sprintf("%s: %s %s", name, key, reason))
 		}
 		opts[key] = read
 	}
 	for _, p := range f.params {
 		if p.required && !opts.given(p.name) {
-			panic(e.throw(e.callerFault(fmt.Sprintf("%s was not given %s, which it takes: %s", name, p.name,
-				signature(f)))))
+			return nil, callerFault(ctx, fmt.Sprintf("%s was not given %s, which it takes: %s", name, p.name,
+				signature(f)))
 		}
 	}
 	if f.refuse != nil {
 		if reason := f.refuse(opts); reason != "" {
-			panic(e.throw(e.callerFault(fmt.Sprintf("%s: %s", name, reason))))
+			return nil, callerFault(ctx, fmt.Sprintf("%s: %s", name, reason))
 		}
 	}
-	return opts
+	return opts, nil
 }
 
-func readParam(kind paramKind, value goja.Value) (any, string) {
+func readParam(kind paramKind, value any) (any, string) {
 	switch kind {
 	case clearableParam:
-		if goja.IsNull(value) {
+		if value == nil {
 			return cleared{}, ""
 		}
 		return readText(value, "is neither a string nor null")
 	case wholeParam:
 		return readWhole(value)
+	case boolParam:
+		if set, isBool := value.(bool); isBool {
+			return set, ""
+		}
+		return nil, "is no boolean"
 	case textsParam:
 		return readTexts(value)
 	case fieldValuesParam:
@@ -253,18 +261,15 @@ func readParam(kind paramKind, value goja.Value) (any, string) {
 	case attributesParam:
 		return readAttributes(value)
 	case bytesParam:
-		if goja.IsString(value) {
-			return []byte(value.String()), ""
-		}
-		if content, isBytes := byteArray(value); isBytes {
-			return content, ""
-		}
-		if buffer, isArrayBuffer := value.Export().(goja.ArrayBuffer); isArrayBuffer {
-			return slices.Clone(buffer.Bytes()), ""
+		switch v := value.(type) {
+		case string:
+			return []byte(v), ""
+		case []byte:
+			return v, ""
 		}
 		return nil, "is neither a string nor a Buffer, a Uint8Array or an ArrayBuffer"
 	case commentsParam:
-		if goja.IsString(value) && value.String() == everyComment {
+		if value == everyComment {
 			return youtrack.AllComments(), ""
 		}
 		last, reason := readWhole(value)
@@ -278,75 +283,76 @@ func readParam(kind paramKind, value goja.Value) (any, string) {
 
 const everyComment = "all"
 
-func readText(value goja.Value, reason string) (any, string) {
-	if !goja.IsString(value) {
+func readText(value any, reason string) (any, string) {
+	text, isText := value.(string)
+	if !isText {
 		return nil, reason
 	}
-	return value.String(), ""
+	return text, ""
 }
 
 // An int is 32 bits, as the int flag of a declaration is, so whatever the command line gives a function takes.
-func readWhole(value goja.Value) (any, string) {
-	if !goja.IsNumber(value) {
+func readWhole(value any) (any, string) {
+	const notWhole = "is no whole number of 32 bits"
+	switch v := value.(type) {
+	case int64:
+		if v < math.MinInt32 || v > math.MaxInt32 {
+			return nil, notWhole
+		}
+		return int(v), ""
+	case float64:
+		return nil, notWhole
+	case *big.Int:
 		return nil, "is no number"
 	}
-	number := value.ToFloat()
-	if number != math.Trunc(number) || number < math.MinInt32 || number > math.MaxInt32 {
-		return nil, "is no whole number of 32 bits"
-	}
-	return int(number), ""
+	return nil, "is no number"
 }
 
-func readTexts(value goja.Value) (any, string) {
-	items, isArray := arrayItems(value)
+// items reads an array a script built or a list of an answer.
+func items(value any) ([]any, bool) {
+	switch v := value.(type) {
+	case []any:
+		return v, true
+	case cliche.List:
+		held := make([]any, 0, v.Len())
+		for i := range v.Len() {
+			held = append(held, v.Index(i))
+		}
+		return held, true
+	}
+	return nil, false
+}
+
+func readTexts(value any) (any, string) {
+	listed, isArray := items(value)
 	if !isArray {
 		return nil, "is no array of strings"
 	}
-	texts := make([]string, 0, len(items))
-	for _, item := range items {
-		if !goja.IsString(item) {
+	texts := make([]string, 0, len(listed))
+	for _, item := range listed {
+		text, isText := item.(string)
+		if !isText {
 			return nil, "is no array of strings"
 		}
-		texts = append(texts, item.String())
+		texts = append(texts, text)
 	}
 	return texts, ""
 }
 
-func arrayItems(value goja.Value) ([]goja.Value, bool) {
-	list, isObject := value.(*goja.Object)
-	if !isObject || list.ClassName() != "Array" {
-		return nil, false
-	}
-	items := []goja.Value{}
-	for index := range list.Get("length").ToInteger() {
-		items = append(items, list.Get(strconv.FormatInt(index, 10)))
-	}
-	return items, true
-}
-
-func plainEntries(value goja.Value) ([]string, *goja.Object, bool) {
-	object, isObject := value.(*goja.Object)
-	if !isObject || object.ClassName() != "Object" {
-		return nil, nil, false
-	}
-	return object.Keys(), object, true
-}
-
-func readFieldValues(value goja.Value) (any, string) {
+func readFieldValues(value any) (any, string) {
 	const reason = "is no object of custom fields, each a string, an array of strings or null"
-	names, object, isObject := plainEntries(value)
+	object, isObject := value.(cliche.Map)
 	if !isObject {
 		return nil, reason
 	}
-	writes := make([]youtrack.FieldWrite, 0, len(names))
-	for _, name := range names {
-		held := object.Get(name)
-		switch {
-		case goja.IsUndefined(held):
-		case goja.IsNull(held):
+	writes := []youtrack.FieldWrite{}
+	for _, name := range object.Keys() {
+		held, _ := object.Get(name)
+		switch v := held.(type) {
+		case nil:
 			writes = append(writes, youtrack.FieldWrite{Name: name, Clear: true})
-		case goja.IsString(held):
-			writes = append(writes, youtrack.FieldWrite{Name: name, Values: []string{held.String()}})
+		case string:
+			writes = append(writes, youtrack.FieldWrite{Name: name, Values: []string{v}})
 		default:
 			texts, failed := readTexts(held)
 			if failed != "" {
@@ -358,21 +364,20 @@ func readFieldValues(value goja.Value) (any, string) {
 	return writes, ""
 }
 
-func readAttributes(value goja.Value) (any, string) {
+func readAttributes(value any) (any, string) {
 	const reason = "is no object of attributes, each a string or null"
-	names, object, isObject := plainEntries(value)
+	object, isObject := value.(cliche.Map)
 	if !isObject {
 		return nil, reason
 	}
-	writes := make([]youtrack.AttributeWrite, 0, len(names))
-	for _, name := range names {
-		held := object.Get(name)
-		switch {
-		case goja.IsUndefined(held):
-		case goja.IsNull(held):
+	writes := []youtrack.AttributeWrite{}
+	for _, name := range object.Keys() {
+		held, _ := object.Get(name)
+		switch v := held.(type) {
+		case nil:
 			writes = append(writes, youtrack.AttributeWrite{Name: name, Clear: true})
-		case goja.IsString(held):
-			writes = append(writes, youtrack.AttributeWrite{Name: name, Value: held.String()})
+		case string:
+			writes = append(writes, youtrack.AttributeWrite{Name: name, Value: v})
 		default:
 			return nil, reason
 		}
@@ -380,58 +385,21 @@ func readAttributes(value goja.Value) (any, string) {
 	return writes, ""
 }
 
-type faultValue struct {
-	engine  *engine
-	fault   *diag.Fault
-	details goja.Value
-}
-
-func (f *faultValue) Get(key string) goja.Value {
-	switch key {
-	case "code":
-		return f.engine.vm.ToValue(string(f.fault.Code))
-	case "message":
-		return f.engine.vm.ToValue(f.fault.Message)
-	case "details":
-		return f.details
-	case "wrote":
-		return f.engine.vm.ToValue(f.fault.MayHaveWritten())
+func (r *run) fail(ctx context.Context, args ...any) (any, error) {
+	fault, err := faultArguments(ctx, "fail", args)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	return nil, thrown{fault: fault}
 }
 
-func (f *faultValue) Has(key string) bool {
-	return slices.Contains(f.Keys(), key)
-}
-
-func (f *faultValue) Set(string, goja.Value) bool {
-	return false
-}
-
-func (f *faultValue) Delete(key string) bool {
-	return !f.Has(key)
-}
-
-func (f *faultValue) Keys() []string {
-	return []string{"code", "message", "details", "wrote"}
-}
-
-func (e *engine) throw(fault *diag.Fault) *goja.Object {
-	thrown := e.vm.NewDynamicObject(&faultValue{engine: e, fault: fault, details: e.value(youtrack.NewMap(fault.Details...))})
-	if err := thrown.SetPrototype(e.errorPrototype); err != nil {
-		panic(err)
+func (r *run) warn(ctx context.Context, args ...any) (any, error) {
+	fault, err := faultArguments(ctx, "warn", args)
+	if err != nil {
+		return nil, err
 	}
-	e.thrown[thrown] = fault
-	return thrown
-}
-
-func (e *engine) fail(call goja.FunctionCall) goja.Value {
-	panic(e.throw(e.faultArguments("fail", call)))
-}
-
-func (e *engine) warn(call goja.FunctionCall) goja.Value {
-	e.host.Warn(e.faultArguments("warn", call).Warning())
-	return goja.Undefined()
+	r.host.Warn(fault.Warning())
+	return cliche.Undefined{}, nil
 }
 
 // script_failed is missing: only ytrack says a script failed, so its place in a script cannot be forged.
@@ -439,31 +407,32 @@ var scriptCodes = []youtrack.Code{youtrack.CodeBadUsage, youtrack.CodeUnknownNam
 	youtrack.CodeNotFound, youtrack.CodeDenied, youtrack.CodeRejected, youtrack.CodeUpstreamFailed,
 	youtrack.CodeUpstreamInvalid, youtrack.CodeWriteUncertain}
 
-func (e *engine) faultArguments(name string, call goja.FunctionCall) *diag.Fault {
-	if len(call.Arguments) < 2 || len(call.Arguments) > 3 {
-		panic(e.throw(e.callerFault(name + " takes a code, a message and, if the fault has them, its details")))
+func faultArguments(ctx context.Context, name string, args []any) (*diag.Fault, error) {
+	if len(args) < 2 || len(args) > 3 {
+		return nil, callerFault(ctx, name+" takes a code, a message and, if the fault has them, its details")
 	}
-	var code youtrack.Code
-	if goja.IsString(call.Argument(0)) {
-		code = youtrack.Code(call.Argument(0).String())
-	}
+	text, _ := args[0].(string)
+	code := youtrack.Code(text)
 	if !slices.Contains(scriptCodes, code) {
 		codes := make([]string, 0, len(scriptCodes))
 		for _, known := range scriptCodes {
 			codes = append(codes, string(known))
 		}
-		panic(e.throw(e.callerFault(fmt.Sprintf("%s takes a string code of the dictionary: %s", name,
-			strings.Join(codes, ", ")))))
+		return nil, callerFault(ctx, fmt.Sprintf("%s takes a string code of the dictionary: %s", name,
+			strings.Join(codes, ", ")))
 	}
-	if !goja.IsString(call.Argument(1)) {
-		panic(e.throw(e.callerFault(name + " takes its message as a string")))
+	message, isText := args[1].(string)
+	if !isText {
+		return nil, callerFault(ctx, name+" takes its message as a string")
 	}
-	fault := &diag.Fault{Code: code, Message: call.Argument(1).String()}
-	details := call.Argument(2)
-	if goja.IsUndefined(details) {
-		return fault
+	fault := &diag.Fault{Code: code, Message: message}
+	if len(args) < 3 {
+		return fault, nil
 	}
-	node, err := e.node(details, 0)
+	if _, undefined := args[2].(cliche.Undefined); undefined {
+		return fault, nil
+	}
+	node, err := toNode(args[2])
 	if err == nil && node.Kind() != youtrack.MapNode {
 		err = errors.New("is no object")
 	}
@@ -473,25 +442,16 @@ func (e *engine) faultArguments(name string, call goja.FunctionCall) *diag.Fault
 		err = errors.New("hold code or message, which the fault has already")
 	}
 	if err != nil {
-		panic(e.throw(e.callerFault(name + ": the details " + err.Error())))
+		return nil, callerFault(ctx, name+": the details "+err.Error())
 	}
 	fault.Details = node.Pairs()
-	return fault
+	return fault, nil
 }
 
-func (e *engine) address(goja.FunctionCall) goja.Value {
-	address, fault := e.host.Address()
+func (r *run) address(context.Context) (any, error) {
+	address, fault := r.host.Address()
 	if fault != nil {
-		panic(e.throw(fault))
+		return nil, thrown{fault: fault}
 	}
-	return e.vm.ToValue(address)
-}
-
-// A Buffer is a Uint8Array, and both export as a byte slice.
-func byteArray(value goja.Value) ([]byte, bool) {
-	object, isObject := value.(*goja.Object)
-	if !isObject || object.ExportType() != reflect.TypeOf([]byte(nil)) {
-		return nil, false
-	}
-	return slices.Clone(object.Export().([]byte)), true
+	return address, nil
 }
