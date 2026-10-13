@@ -24,6 +24,8 @@ github.com/google/pprof v0.0.0-20240727154555-813a5fbdbec8 h1:FKHo8hFI3A+7w0aUQu
 github.com/google/pprof v0.0.0-20240727154555-813a5fbdbec8/go.mod h1:K1liHPHnj73Fdn/EKuT8nrFqBihUSKXoLYU0BuatOYo=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
+github.com/hakastein/cliche v0.1.0 h1:vR+S3uCsLbUzWGIpumN4X1D8phDroT9Cf6N6FgF6YoU=
+github.com/hakastein/cliche v0.1.0/go.mod h1:sGnOHJcqqpcdr8lAYdxhoJxzJ1Ohpitpz3nBRRHo9dU=
 github.com/hakastein/go-youtrack v0.10.0 h1:ElEyiV4CbGhzM9Udg8s97ZmTnKNRej0VrVDbLTQT/U4=
 github.com/hakastein/go-youtrack v0.10.0/go.mod h1:wkg3/H+VPca95qpJ5kx14TOhI05i1cD+MXKXCIKidfE=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=

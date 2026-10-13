@@ -2,12 +2,11 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"slices"
-	"strconv"
 	"strings"
 
+	"github.com/hakastein/cliche"
 	"github.com/spf13/cobra"
 
 	"github.com/hakastein/go-youtrack"
@@ -31,24 +30,20 @@ func loadScripts(root *cobra.Command, env []string) *script.Catalog {
 func addScripts(root *cobra.Command, catalog *script.Catalog, env []string, stdout io.Writer, renderer render.Renderer,
 	stream *diag.Stream,
 ) {
-	groups := map[string]*script.Root{}
-	for _, command := range catalog.Commands {
-		parent := groupOf(root, command.Path[:len(command.Path)-1], false)
-		parent.AddCommand(newScriptCommand(command, env, stdout, renderer, stream))
-		groups[command.Path[0]] = command.Root()
-	}
-	for _, broken := range catalog.Broken {
-		if len(broken.Path) == 0 {
-			continue
+	catalog.Scripts.AddTo(root, func(cmd *cobra.Command, command *cliche.Command, in cliche.Input) error {
+		answer, wrote, fault := script.Run(cmd.Context(), command, in, scriptHost(env, stream))
+		if fault == nil {
+			fault = printNode(stdout, renderer, answer)
 		}
-		placeholder := newCommand(broken.Path[len(broken.Path)-1], func(*cobra.Command, []string) *diag.Fault {
-			return broken.Fault
-		})
-		placeholder.Hidden = true
-		placeholder.DisableFlagParsing = true
-		groupOf(root, broken.Path[:len(broken.Path)-1], true).AddCommand(placeholder)
-	}
-	groupRoots(root, groups)
+		if fault == nil {
+			return nil
+		}
+		if wrote {
+			fault.AfterWrite = true
+		}
+		return fault
+	})
+	groupRoots(root, catalog.Roots)
 	shown := root.HelpFunc()
 	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
 		for _, warning := range catalog.Warnings(strings.Fields(cmd.CommandPath())[1:]) {
@@ -72,146 +67,26 @@ func warnHidden(root *cobra.Command, catalog *script.Catalog, argv []string, str
 	}
 }
 
-// A directory with no command under it is no command either, so a group made for a broken path alone stays hidden.
-func groupOf(root *cobra.Command, path []string, hidden bool) *cobra.Command {
-	parent := root
-	for _, word := range path {
-		i := slices.IndexFunc(parent.Commands(), func(child *cobra.Command) bool { return child.Name() == word })
-		if i >= 0 {
-			parent = parent.Commands()[i]
-			continue
-		}
-		group := newCommand(word, requireSubcommand)
-		group.Short = "Run the " + word + " commands"
-		group.Hidden = hidden
-		parent.AddCommand(group)
-		parent = group
-	}
-	return parent
-}
-
-func groupRoots(root *cobra.Command, roots map[string]*script.Root) {
+// roots names the directory of the root of each first word a script of a project or of the user holds.
+func groupRoots(root *cobra.Command, roots map[string]string) {
 	if !slices.ContainsFunc(root.Commands(), func(child *cobra.Command) bool {
-		held, isScript := roots[child.Name()]
-		return isScript && !held.Builtin()
+		_, isScript := roots[child.Name()]
+		return isScript
 	}) {
 		return
 	}
 	root.AddGroup(&cobra.Group{ID: builtinGroup, Title: "Commands:"})
 	for _, child := range root.Commands() {
-		held, isScript := roots[child.Name()]
-		if !isScript || held.Builtin() {
+		dir, isScript := roots[child.Name()]
+		if !isScript {
 			child.GroupID = builtinGroup
 			continue
 		}
-		if !root.ContainsGroup(held.Dir) {
-			root.AddGroup(&cobra.Group{ID: held.Dir, Title: "Commands of " + held.Dir + ":"})
+		if !root.ContainsGroup(dir) {
+			root.AddGroup(&cobra.Group{ID: dir, Title: "Commands of " + dir + ":"})
 		}
-		child.GroupID = held.Dir
+		child.GroupID = dir
 	}
-}
-
-func newScriptCommand(command *script.Command, env []string, stdout io.Writer, renderer render.Renderer,
-	stream *diag.Stream,
-) *cobra.Command {
-	use := command.Path[len(command.Path)-1]
-	var paths []string
-	for i, arg := range command.Args {
-		use += " <" + arg.Name + ">"
-		if arg.Type == script.PathArg {
-			paths = append(paths, strconv.Itoa(i+1))
-		}
-	}
-	values := map[string]func() any{}
-	cmd := newCommand(use, func(cmd *cobra.Command, args []string) *diag.Fault {
-		input := script.Input{Flags: map[string]any{}}
-		for i, text := range args {
-			value, err := command.Args[i].Parse(text)
-			if err != nil {
-				message := fmt.Sprintf("invalid argument %s for <%s>: %v", render.Quote(text), command.Args[i].Name, err)
-				return &diag.Fault{Code: youtrack.CodeBadUsage, Message: message}
-			}
-			input.Args = append(input.Args, value)
-		}
-		for name, value := range values {
-			if cmd.Flags().Changed(name) {
-				input.Flags[name] = value()
-			}
-		}
-		answer, wrote, fault := script.Run(cmd.Context(), command, input, scriptHost(env, stream))
-		if fault == nil {
-			fault = printNode(stdout, renderer, answer)
-		}
-		if fault != nil && wrote {
-			fault.AfterWrite = true
-		}
-		return fault
-	})
-	cmd.Args = cobra.ExactArgs(len(command.Args))
-	cmd.Annotations = map[string]string{completesPathAt: strings.Join(paths, ",")}
-	cmd.Short = command.Short
-	cmd.Long = command.Long
-	if len(command.Args) > 0 {
-		cmd.Long += "\n\nArguments:"
-		for _, arg := range command.Args {
-			cmd.Long += fmt.Sprintf("\n  <%s>  %s", arg.Name, arg.Usage)
-		}
-	}
-	for _, flag := range command.Flags {
-		values[flag.Name] = declareFlag(cmd, flag)
-	}
-	return cmd
-}
-
-// An int wider than the int parameter of a function would fail the script instead of the call.
-func declareFlag(cmd *cobra.Command, flag script.Flag) func() any {
-	flags := cmd.Flags()
-	var read func() any
-	switch flag.Type {
-	case script.IntFlag:
-		number := flags.Int32(flag.Name, 0, flag.Usage)
-		read = func() any { return *number }
-	case script.BoolFlag:
-		set := flags.Bool(flag.Name, false, flag.Usage)
-		read = func() any { return *set }
-	default:
-		given := &declaredValue{flag: flag}
-		flags.Var(given, flag.Name, flag.Usage)
-		read = func() any { return flag.Value(given.parsed) }
-	}
-	declared := flags.Lookup(flag.Name)
-	if flag.Default != nil {
-		declared.DefValue = fmt.Sprint(flag.Default)
-	}
-	if !flag.Multiple {
-		rejectRepeat(declared)
-	}
-	closedSet(declared, flag.Choices)
-	return read
-}
-
-type declaredValue struct {
-	flag   script.Flag
-	texts  []string
-	parsed []any
-}
-
-func (v *declaredValue) String() string {
-	return strings.Join(v.texts, ",")
-}
-
-func (v *declaredValue) Set(text string) error {
-	parsed, err := v.flag.Parse(text)
-	if err != nil {
-		return err
-	}
-	v.texts = append(v.texts, text)
-	v.parsed = append(v.parsed, parsed)
-	return nil
-}
-
-func (v *declaredValue) Type() string {
-	return string(v.flag.Type)
 }
 
 func scriptHost(env []string, stream *diag.Stream) script.Host {

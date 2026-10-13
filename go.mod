@@ -4,8 +4,7 @@ go 1.26
 
 require (
 	github.com/creack/pty v1.1.24
-	github.com/dop251/goja v0.0.0-20260925200140-d00dd0475abd
-	github.com/dop251/goja_nodejs v0.0.0-20260918173711-b481721df8a2
+	github.com/hakastein/cliche v0.1.0
 	github.com/hakastein/go-youtrack v0.10.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.9
@@ -19,6 +18,8 @@ require (
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
 	github.com/dlclark/regexp2/v2 v2.5.2 // indirect
 	github.com/dop251/base64dec v0.0.0-20231022112746-c6c9f9a96217 // indirect
+	github.com/dop251/goja v0.0.0-20260925200140-d00dd0475abd // indirect
+	github.com/dop251/goja_nodejs v0.0.0-20260918173711-b481721df8a2 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.4+incompatible // indirect
 	github.com/google/pprof v0.0.0-20240727154555-813a5fbdbec8 // indirect
 	github.com/google/uuid v1.6.0 // indirect

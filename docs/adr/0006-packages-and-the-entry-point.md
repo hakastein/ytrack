@@ -14,7 +14,7 @@ status: accepted, partly implemented
   ```
   cmd/ytrack             процесс: вызов, сигналы, штамп бинарника, os.Exit
   internal/cli           cobra, Run, вход, auth, completion, протокол автодополнения
-  internal/script        движок скриптов команд, объявление, корни, API скриптов, грамматика флагов
+  internal/script        API скриптов ytrack/v1, адаптер youtrack.Node к мосту cliche, тип fields, правило корней
   internal/render        Renderer и YAML документа youtrack.Node
   internal/diag          Fault, перевод ошибки SDK, поток stderr
   ```
@@ -23,13 +23,18 @@ status: accepted, partly implemented
   кастом-поля, запись, страницы, ошибка с кодом, транспорт, кэш метаданных и фейковый сервер `fake`
   ([ADR-0001 SDK](https://github.com/hakastein/go-youtrack/blob/main/docs/adr/0001-operations-are-methods-of-services.md)).
   Он нужен и kraken, и TMS. Правка SDK — его релиз, а ytrack поднимает версию в `go.mod`.
+- **Механизм скриптов команд — фреймворк [`github.com/hakastein/cliche`](https://github.com/hakastein/cliche):**
+  источники и каталог скриптов, чтение объявления, команды cobra из него, движок goja, мост значений и ошибок,
+  подмножество Node ([ADR-0001 cliche](https://github.com/hakastein/cliche/blob/main/docs/adr/0001-the-framework-is-mechanisms.md)). ytrack держит в `internal/script` то, что предметно: модуль `ytrack/v1`, перевод
+  `*youtrack.Node` в `Map` и `List` моста и обратно, тип флага `fields`, перевод ошибок cliche в `Fault` и правило
+  корней. Правка cliche — его релиз, а ytrack поднимает версию в `go.mod`, как у SDK.
 - **ytrack зовёт сервисы клиента напрямую** (`c.Issues.Show`, `c.Tags.Add`, `c.Users.Me`) и не видит ни
   сгенерированного клиента `ytapi`, ни `Client.API()`. Клиент строится на вызов:
   `youtrack.NewClient(адрес, токен, youtrack.WithMetadataCache(каталог))`.
-- **Импорты:** `cmd/ytrack → cli → script → youtrack, render, diag`; `cli → youtrack, render, diag`;
+- **Импорты:** `cmd/ytrack → cli → script → cliche, youtrack, render, diag`; `cli → cliche, youtrack, render, diag`;
   `diag → render, youtrack`; `render → youtrack`. `fake` SDK импортируют только тесты `cli`.
 - **ytrack держит только грамматику флагов.** Типизированные значения (`Name=value` у `--field` и `--attribute`,
-  период `PT1H30M`, выражение полей) разбирает объявление (`internal/script/flagvalue.go`), а слова `--clear`,
+  период `PT1H30M`) разбирает объявление по типам cliche, выражение полей — тип `fields` (`internal/script/fields.go`), а слова `--clear`,
   `--comments` и отказ на пустом флаге, который SDK прочёл бы как «не дан», — встроенные скрипты
   ([ADR-0002](0002-field-metadata-is-a-struct.md), [ADR-0010](0010-a-list-page.md), [ADR-0011](0011-a-command-is-a-script.md)).
   Остальные аргументы уходят в SDK как написаны.
@@ -83,7 +88,7 @@ func Run(ctx context.Context, argv, env []string, build *debug.BuildInfo, stdin 
   - `internal/diag` — перевод `*youtrack.Error` в `Fault`, код возврата, поток stderr, в том числе запасной путь
     `render_error` ([ADR-0005](0005-an-error-is-a-document.md)) через `NewStream` с `Renderer`, который возвращает
     ошибку;
-  - `internal/script` — сверка `v<N>.d.ts` с движком ([ADR-0012](0012-the-script-api.md)).
+  - `internal/script` — сверка `v<N>.d.ts` с тем, что экспортирует модуль `ytrack/v<N>` ([ADR-0012](0012-the-script-api.md)).
 - **Ради теста экспорт не заводится.**
 - **Интеграционный слой через `Run` проверяет только принадлежащее CLI:** грамматику флагов и её отказ до сети (код 1,
   запросов 0); вход ([ADR-0008](0008-a-login-is-an-address-and-a-token.md)); склейку argv в вызов SDK — один успешный
