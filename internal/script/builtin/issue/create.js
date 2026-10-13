@@ -2,7 +2,10 @@ const { issues, fail } = require("ytrack/v1");
 
 exports.definition = {
   short: "Create an issue",
-  long: "Create an issue in a project.",
+  long:
+    "Create an issue in a project. --tag hangs only a tag that exists; a name of tags of several owners is hung " +
+    "after creation with tag add --owned-by. The star is no tag: --star puts it on, --star=false takes off the " +
+    "star the profile of the user puts on each new issue, by a second write.",
   args: [
     { name: "project", type: "string", usage: "short name of the project, such as DEV" },
   ],
@@ -10,6 +13,8 @@ exports.definition = {
     { name: "summary", type: "string", usage: "`title`" },
     { name: "description", type: "string", usage: "`text` of the description" },
     { name: "field", type: "pair", multiple: true, usage: "custom field `Name=value`; repeatable" },
+    { name: "tag", type: "string", multiple: true, usage: "`name` of an existing tag; repeatable" },
+    { name: "star", type: "bool", usage: "star the issue, or with =false leave it unstarred" },
     {
       name: "fields",
       type: "fields",
@@ -32,6 +37,8 @@ exports.command = (project, flags) => {
     summary: flags.summary,
     description: flags.description,
     customFields: flags.field,
+    tags: flags.tag,
+    star: flags.star,
     fields: flags.fields,
   });
 };

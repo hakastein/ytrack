@@ -107,3 +107,62 @@ func TestIssueCreateFilesTheIssue(t *testing.T) {
 	assert.Equal(t, http.MethodPost, sent.Method)
 	assert.Equal(t, "/api/issues", sent.URL.Path)
 }
+
+func TestIssueCreateHangsTheTagsInTheWriteThatFilesTheIssue(t *testing.T) {
+	t.Parallel()
+	server := fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost:
+			fake.JSON(http.StatusOK, `{"$type":"Issue","idReadable":"DEV-7","summary":"First","tags":[`+catalogueTag("10-5", "Ready", "first")+
+				`,`+catalogueTag("10-8", "Done", "second")+`]}`)(w, r)
+		case r.URL.Path == tagsCollection:
+			fake.JSON(http.StatusOK, "["+catalogueTag("10-5", "Ready", "first")+","+catalogueTag("10-8", "Done", "second")+"]")(w, r)
+		case r.URL.Path == starProfile:
+			noStarOfTheTags()(w, r)
+		default:
+			fake.JSON(http.StatusOK, projectRequiringNothing())(w, r)
+		}
+	})
+
+	got := runWith(t, envOf(server), "issue", "create", "DEV", "--summary", "First", "--tag", "done", "--tag", "Ready",
+		"--fields", "idReadable")
+
+	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-7\"\n"}, got)
+	assert.Equal(t, "/api/issues", server.Last(t).URL.Path)
+	assert.Contains(t, server.Last(t).Body, `"tags":[{"id":"10-8"},{"id":"10-5"}]`)
+}
+
+func starredIssue(star string) string {
+	return `{"$type":"Issue","idReadable":"DEV-7","summary":"First","watchers":{"$type":"IssueWatchers","hasStar":` + star + `}}`
+}
+
+func TestIssueCreateTakesOffTheStarTheProfilePutOn(t *testing.T) {
+	t.Parallel()
+	server := fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues":
+			fake.JSON(http.StatusOK, starredIssue("true"))(w, r)
+		case r.Method == http.MethodPost:
+			fake.JSON(http.StatusOK, starredIssue("false"))(w, r)
+		default:
+			fake.JSON(http.StatusOK, projectRequiringNothing())(w, r)
+		}
+	})
+
+	got := runWith(t, envOf(server), "issue", "create", "DEV", "--summary", "First", "--star=false", "--fields", "idReadable")
+
+	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-7\"\n"}, got)
+	assert.Equal(t, "/api/issues/DEV-7", server.Last(t).URL.Path)
+	assert.JSONEq(t, `{"watchers":{"hasStar":false}}`, server.Last(t).Body)
+}
+
+func TestIssueCreateLeavesTheStarToTheProfileWithoutTheFlag(t *testing.T) {
+	t.Parallel()
+	server := creating(t, fake.JSON(http.StatusOK, projectRequiringNothing()),
+		fake.JSON(http.StatusOK, starredIssue("true")))
+
+	got := runWith(t, envOf(server), "issue", "create", "DEV", "--summary", "First", "--fields", "idReadable")
+
+	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-7\"\n"}, got)
+	assert.NotContains(t, server.Last(t).Body, "watchers")
+}
