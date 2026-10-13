@@ -93,6 +93,8 @@ declare module "ytrack/v1" {
       summary: string;
       description?: string;
       customFields?: CustomFields;
+      // tags names tags that exist, hung in the same write that files the issue.
+      tags?: string[];
       fields: string;
     }): Answer;
     update(call: {

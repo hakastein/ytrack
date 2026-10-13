@@ -107,3 +107,25 @@ func TestIssueCreateFilesTheIssue(t *testing.T) {
 	assert.Equal(t, http.MethodPost, sent.Method)
 	assert.Equal(t, "/api/issues", sent.URL.Path)
 }
+
+func TestIssueCreateHangsTheTagsInTheWriteThatFilesTheIssue(t *testing.T) {
+	t.Parallel()
+	server := fake.Serve(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost:
+			fake.JSON(http.StatusOK, `{"$type":"Issue","idReadable":"DEV-7","summary":"First","tags":[`+catalogueTag("10-5", "Ready", "first")+
+				`,`+catalogueTag("10-8", "Done", "second")+`]}`)(w, r)
+		case r.URL.Path == tagsCollection:
+			fake.JSON(http.StatusOK, "["+catalogueTag("10-5", "Ready", "first")+","+catalogueTag("10-8", "Done", "second")+"]")(w, r)
+		default:
+			fake.JSON(http.StatusOK, projectRequiringNothing())(w, r)
+		}
+	})
+
+	got := runWith(t, envOf(server), "issue", "create", "DEV", "--summary", "First", "--tag", "done", "--tag", "Ready",
+		"--fields", "idReadable")
+
+	assert.Equal(t, outcome{stdout: "idReadable: \"DEV-7\"\n"}, got)
+	assert.Equal(t, "/api/issues", server.Last(t).URL.Path)
+	assert.Contains(t, server.Last(t).Body, `"tags":[{"id":"10-8"},{"id":"10-5"}]`)
+}
