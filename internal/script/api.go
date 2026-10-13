@@ -41,6 +41,7 @@ const (
 	commentsParam
 	// A string, written in UTF-8, or the bytes of a Buffer, a Uint8Array or an ArrayBuffer.
 	bytesParam
+	boolParam
 )
 
 type param struct {
@@ -80,6 +81,14 @@ func (o options) cleared(name string) bool {
 func (o options) string(name string) string {
 	text, _ := o[name].(string)
 	return text
+}
+
+func (o options) optionalBool(name string) *bool {
+	set, given := o[name].(bool)
+	if !given {
+		return nil
+	}
+	return &set
 }
 
 func (o options) optional(name string) *string {
@@ -246,6 +255,11 @@ func readParam(kind paramKind, value goja.Value) (any, string) {
 		return readText(value, "is neither a string nor null")
 	case wholeParam:
 		return readWhole(value)
+	case boolParam:
+		if set, isBool := value.Export().(bool); isBool {
+			return set, ""
+		}
+		return nil, "is no boolean"
 	case textsParam:
 		return readTexts(value)
 	case fieldValuesParam:

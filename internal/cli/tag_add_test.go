@@ -8,7 +8,15 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const tagsCollection = "/api/tags"
+const (
+	tagsCollection = "/api/tags"
+	starProfile    = "/api/users/me/profiles/general"
+)
+
+// noStarOfTheTags answers the profile of the user with a star that is none of the tags of the catalogues here.
+func noStarOfTheTags() http.HandlerFunc {
+	return fake.JSON(http.StatusOK, `{"$type":"GeneralUserProfile","star":{"$type":"Tag","id":"10-99"}}`)
+}
 
 func addingATag(t *testing.T, owner, catalogue, tagging http.HandlerFunc) *fake.Server {
 	t.Helper()
@@ -18,6 +26,8 @@ func addingATag(t *testing.T, owner, catalogue, tagging http.HandlerFunc) *fake.
 			tagging(w, r)
 		case r.URL.Path == tagsCollection:
 			catalogue(w, r)
+		case r.URL.Path == starProfile:
+			noStarOfTheTags()(w, r)
 		default:
 			owner(w, r)
 		}

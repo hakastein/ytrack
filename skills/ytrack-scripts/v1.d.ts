@@ -93,8 +93,10 @@ declare module "ytrack/v1" {
       summary: string;
       description?: string;
       customFields?: CustomFields;
-      // tags names tags that exist, hung in the same write that files the issue.
+      // tags names tags that exist, hung in the same write that files the issue; the star of the user is no tag.
       tags?: string[];
+      // Absent, the profile of the user decides; false takes off a star the profile put on, by a second write.
+      star?: boolean;
       fields: string;
     }): Answer;
     update(call: {
@@ -102,6 +104,7 @@ declare module "ytrack/v1" {
       summary?: string;
       description?: string | null;
       customFields?: CustomFields;
+      star?: boolean;
       fields: string;
     }): Answer;
     delete(call: { id: string }): Answer;

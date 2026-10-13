@@ -221,21 +221,24 @@ func issues(warn func(*youtrack.Warning)) map[string]function {
 		"create": {
 			params: []param{required("project", textParam), required("summary", textParam),
 				optional("description", textParam), optional("customFields", fieldValuesParam), optional("tags", textsParam),
-				fieldsParam()},
+				optional("star", boolParam), fieldsParam()},
 			writes: true,
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
 				in := &youtrack.IssueInput{Summary: opts.string("summary"), Description: opts.string("description"),
-					Fields: opts.fieldWrites("customFields"), Tags: tagRefs(opts.strings("tags"))}
+					Fields: opts.fieldWrites("customFields"), Tags: tagRefs(opts.strings("tags")),
+					Star: opts.optionalBool("star")}
 				return c.Issues.Create(ctx, opts.string("project"), in, written(opts))
 			}),
 		},
 		"update": {
 			params: []param{required("id", textParam), optional("summary", textParam),
-				optional("description", clearableParam), optional("customFields", fieldValuesParam), fieldsParam()},
+				optional("description", clearableParam), optional("customFields", fieldValuesParam),
+				optional("star", boolParam), fieldsParam()},
 			writes: true,
 			bind: reply(func(ctx context.Context, c *youtrack.Client, opts options) (*youtrack.Node, error) {
 				in := &youtrack.IssueUpdate{Summary: opts.optional("summary"), Description: opts.optional("description"),
-					ClearDescription: opts.cleared("description"), Fields: opts.fieldWrites("customFields")}
+					ClearDescription: opts.cleared("description"), Fields: opts.fieldWrites("customFields"),
+					Star: opts.optionalBool("star")}
 				return c.Issues.Update(ctx, opts.issue("id"), in, written(opts))
 			}),
 		},
