@@ -52,7 +52,7 @@ func (e *engine) optionsArgument(value goja.Value, takes ...string) *goja.Object
 	}
 	for _, key := range options.Keys() {
 		if !slices.Contains(takes, key) {
-			panic(e.vm.NewTypeError(fmt.Sprintf("the option %q is not one fs of ytrack takes: it takes %v", key, takes)))
+			panic(e.vm.NewTypeError(fmt.Sprintf("the option `%s` is not one fs of ytrack takes: it takes %v", key, takes)))
 		}
 	}
 	return options
@@ -77,7 +77,7 @@ func (e *engine) checkedEncoding(encoding goja.Value) goja.Value {
 		return goja.Undefined()
 	}
 	if buffer.StringCodecByName(encoding.String()) == nil {
-		panic(e.vm.NewTypeError(fmt.Sprintf("The argument 'encoding' is invalid encoding. Received %q", encoding.String())))
+		panic(e.vm.NewTypeError(fmt.Sprintf("The argument 'encoding' is invalid encoding. Received '%s'", encoding.String())))
 	}
 	return encoding
 }

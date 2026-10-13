@@ -34,7 +34,7 @@ func (e *engine) fetch(call goja.FunctionCall) goja.Value {
 	}
 	target, err := url.Parse(call.Argument(0).String())
 	if err != nil || (target.Scheme != "http" && target.Scheme != "https") || target.Host == "" {
-		panic(e.vm.NewTypeError(fmt.Sprintf("fetch takes an absolute http or https url, not %q", call.Argument(0).String())))
+		panic(e.vm.NewTypeError(fmt.Sprintf("fetch takes an absolute http or https url, not `%s`", call.Argument(0).String())))
 	}
 	options := e.fetchOptions(call.Argument(1))
 	ctx, cancel := context.WithTimeout(e.ctx, options.timeout)
@@ -79,7 +79,7 @@ func (e *engine) fetchOptions(value goja.Value) fetchOptions {
 	}
 	for _, key := range given.Keys() {
 		if !slices.Contains([]string{"timeout", "maxBytes", "redirect", "method"}, key) {
-			panic(e.vm.NewTypeError(fmt.Sprintf("fetch of ytrack takes no option %q: it takes %s", key, takes)))
+			panic(e.vm.NewTypeError(fmt.Sprintf("fetch of ytrack takes no option `%s`: it takes %s", key, takes)))
 		}
 	}
 	if method := given.Get("method"); method != nil && !goja.IsUndefined(method) &&
