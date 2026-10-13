@@ -15,8 +15,9 @@ import { Api, ApiError, type Tree } from "./youtrack.ts";
 
 const BASE_URL = process.env.YOUTRACK_URL!.replace(/\/+$/, "");
 const TOKEN_FILE = process.env.YOUTRACK_TOKEN_FILE ?? "/state/admin-token";
-const LIMITED_TOKEN_FILE = join(dirname(TOKEN_FILE), "limited-token");
-const MEMBER_TOKEN_FILE = join(dirname(TOKEN_FILE), "member-token");
+const STATE_DIR = process.env.YOUTRACK_STATE_DIR ?? dirname(TOKEN_FILE);
+const LIMITED_TOKEN_FILE = join(STATE_DIR, "limited-token");
+const MEMBER_TOKEN_FILE = join(STATE_DIR, "member-token");
 
 type DevInstanceProject = { key: string; name: string; fields: Field[]; order: string[]; workflows: string[] };
 const DEV_PROJECT: DevInstanceProject = {
@@ -1248,7 +1249,7 @@ async function main(): Promise<void> {
   checkHistoryTable();
   checkValueTable();
   checkFieldOrder();
-  if (!existsSync(TOKEN_FILE)) fail("token_missing", `нет ${TOKEN_FILE}: сначала \`make wizard\``);
+  if (!existsSync(TOKEN_FILE)) fail("token_missing", `нет ${TOKEN_FILE}: сначала \`make install\` общего YouTrack`);
   const api = new Api(BASE_URL, readFileSync(TOKEN_FILE, "utf8").trim());
 
   await checkCoverage(api);

@@ -1,45 +1,23 @@
 name: ytrack-dev
 
 services:
-  youtrack:
-    image: jetbrains/youtrack:${YOUTRACK_VERSION}
-    restart: unless-stopped
-    environment:
-      TZ: ${TZ:-Europe/Moscow}
-    ports:
-      - "127.0.0.1:${YOUTRACK_PORT}:8080"
-    volumes:
-      - data:/opt/youtrack/data
-      - conf:/opt/youtrack/conf
-      - logs:/opt/youtrack/logs
-      - backups:/opt/youtrack/backups
-    healthcheck:
-      # Без -f: мастер настройки и настроенный инстанс отвечают на /api/config разными кодами
-      test: ["CMD-SHELL", "curl -sS -o /dev/null http://127.0.0.1:8080/api/config"]
-      interval: 10s
-      timeout: 10s
-      retries: 60
-      start_period: 30s
-
   tools:
     build: ./tools
-    # Мастер настройки редиректит на base URL инстанса, а localhost хоста виден только из сети хоста
+    # Сид ходит в общий YouTrack машины по его адресу на хосте
     network_mode: host
     user: "${UID:-1000}:${GID:-1000}"
+    env_file:
+      # YOUTRACK_ADMIN_LOGIN общего YouTrack
+      - path: ${YOUTRACK_DEV:?YOUTRACK_DEV — каталог общего YouTrack, см. .env.example}/.env
     environment:
-      # У голого uid нет домашнего каталога, а Playwright пишет профиль браузера
+      # У голого uid нет домашнего каталога
       HOME: /tmp
-      YOUTRACK_URL: http://localhost:${YOUTRACK_PORT}
-      WIZARD_TOKEN: ${WIZARD_TOKEN:-}
-      YOUTRACK_ADMIN_LOGIN: ${YOUTRACK_ADMIN_LOGIN}
-      YOUTRACK_ADMIN_PASSWORD: ${YOUTRACK_ADMIN_PASSWORD}
+      # Адрес не подставляется из окружения: YOUTRACK_URL хоста может вести в рабочий YouTrack
+      YOUTRACK_URL: http://localhost:8091
+      YOUTRACK_TOKEN_FILE: /admin/admin-token
+      YOUTRACK_STATE_DIR: /state
     volumes:
       - ./tools/src:/work/src:ro
+      - ${YOUTRACK_DEV}/.state:/admin:ro
       - ./.state:/state
     working_dir: /work
-
-volumes:
-  data:
-  conf:
-  logs:
-  backups:
