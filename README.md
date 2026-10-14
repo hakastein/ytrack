@@ -285,9 +285,9 @@ make go         # gofmt, go vet, тесты
 [`github.com/hakastein/go-youtrack`](https://github.com/hakastein/go-youtrack), а сам держит вход, печать и API
 скриптов `ytrack/v1` поверх SDK; скрипты команд исполняет фреймворк [cliche](https://github.com/hakastein/cliche). Встроенные команды — такие же скрипты,
 вшитые в бинарник: [`internal/script/builtin/`](internal/script/builtin/).
-Тесты идут против фейкового сервера и живого YouTrack не требуют. Локальный YouTrack — дев-инстанс с проектом `DEV`,
-на котором заведены кастом-поля всех типов: с него `make openapi` SDK снимает спеку, на нём проверяют руками и измеряют факты о сервере для ADR. Поднимается он из `dev/` одной командой, из зависимостей
-нужен только docker — см. [`dev/README.md`](dev/README.md).
+Тесты идут против фейкового сервера и живого YouTrack не требуют. Для ручных проверок и измерений фактов о сервере
+разработчик поднимает свой YouTrack — где угодно — и указывает его так же, как любой другой: `YTRACK_URL` и
+`YTRACK_TOKEN` или `ytrack auth login`.
 
 Документация для разработчиков:
 
