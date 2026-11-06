@@ -31,6 +31,11 @@ func Run(ctx context.Context, argv, env []string, build *debug.BuildInfo, stdin 
 	root := newRoot(env, build, stdin, stdout, renderer)
 	catalog := loadScripts(root, env)
 	addScripts(root, catalog, env, stdout, renderer, stream)
+	if fault := limitCommands(root, env, argv); fault != nil {
+		stream.Fail(fault)
+		return fault.ExitCode()
+	}
+	groupRoots(root, catalog.Roots)
 	err := execute(ctx, root, catalog, argv, stdout, stream)
 	if err == nil {
 		return 0

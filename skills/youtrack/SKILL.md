@@ -7,7 +7,8 @@ YouTrack is reached through the `ytrack` CLI: `ytrack <command> <subcommand>`, c
 `issue`, `activity`, `comment`, `link`, `tag`, `field`, `time`, `attachment`,
 `article`, `project`, `user`, `auth`. A repository may add commands of its own in
 `.ytrack/scripts`, and the user in `~/.ytrack/scripts`: `ytrack --help` lists them
-under the directory they come from, and they print and fail the same way.
+under the directory they come from, and they print and fail the same way. A saved login
+may allow only some commands: `ytrack --help` lists the ones there are.
 
 - An answer is one YAML document on stdout; an error is one on stderr, `code` first.
 - An answer holds only the fields asked for — the command's default set or `--fields`.

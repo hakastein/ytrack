@@ -215,6 +215,47 @@ func TestAuthLoginReplacesTheLoginSavedForTheSameDirectory(t *testing.T) {
 	assert.Equal(t, savedFile(everywhere, scopedRecord(scope, server.URL, typedToken)), fileBytes(t, path))
 }
 
+func TestAuthLoginKeepsTheCommandsGiven(t *testing.T) {
+	t.Parallel()
+	scope := here(t)
+	server := serveUserOfTheToken(t, map[string]string{typedToken: typedUser})
+	everywhere := withCommands(unscopedRecord("http://elsewhere.example", everywhereToken), "issue list")
+	held := withCommands(scopedRecord(scope, "http://was.example", hereToken), "issue show")
+	home, path := homeWith(t, recordFile(held, everywhere))
+
+	got, _ := runOnATerminal(t, []string{"HOME=" + home}, typeAnswers(server.URL, typedToken),
+		"auth", "login", "--command", "article show", "--command", "issue")
+
+	assert.Equal(t, 0, got.code)
+	kept := withCommands(scopedRecord(scope, server.URL, typedToken), "article show", "issue")
+	assert.Equal(t, savedFile(everywhere, kept), fileBytes(t, path))
+}
+
+func TestAuthLoginRefusesCommandsItCannotKeepBeforeAskingAnything(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		flags []string
+	}{
+		{name: "a path that names no command", flags: []string{"--command", "issue close"}},
+		{name: "a path spelled with two spaces", flags: []string{"--command", "issue  show"}},
+		{name: "a command given twice", flags: []string{"--command", "issue show", "--command", "issue show"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			held := recordFile(scopedRecord(here(t), "http://was.example", hereToken))
+			home, path := homeWith(t, held)
+
+			got, said := runOnATerminal(t, []string{"HOME=" + home}, typingTheEndOfInput, append([]string{"auth", "login"}, tc.flags...)...)
+
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+			assert.Empty(t, said.shown, "the terminal was asked something for a login that cannot be kept")
+			assert.Equal(t, held, fileBytes(t, path))
+		})
+	}
+}
+
 func TestAuthLoginKeepsNoLoginTheServerRefuses(t *testing.T) {
 	t.Parallel()
 	scope := here(t)

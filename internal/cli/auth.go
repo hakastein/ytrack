@@ -28,13 +28,16 @@ func newAuth(env []string, stdin *os.File, stdout io.Writer, renderer render.Ren
 	status.Long = "Show the address, the user, and whether the login comes from the environment or from the settings."
 
 	var loginGlobal bool
+	var loginCommands []string
 	login := newCommand("login", func(cmd *cobra.Command, _ []string) *diag.Fault {
-		return login(cmd.Context(), env, stdin, stdout, renderer, loginGlobal)
+		return login(cmd.Context(), cmd.Root(), env, stdin, stdout, renderer, loginGlobal, loginCommands)
 	})
 	login.Args = cobra.ExactArgs(0)
 	login.Short = "Log in"
 	login.Long = "Log in for this directory and below."
 	login.Flags().BoolVar(&loginGlobal, "global", false, "log in everywhere")
+	login.Flags().StringArrayVar(&loginCommands, "command", nil,
+		"allow only this command, by its path such as \"issue show\", and auth; repeat for more")
 
 	var logoutGlobal bool
 	logout := newCommand("logout", func(_ *cobra.Command, _ []string) *diag.Fault {
@@ -51,7 +54,12 @@ func newAuth(env []string, stdin *os.File, stdout io.Writer, renderer render.Ren
 	return auth
 }
 
-func login(ctx context.Context, env []string, stdin *os.File, stdout io.Writer, renderer render.Renderer, global bool) *diag.Fault {
+func login(ctx context.Context, root *cobra.Command, env []string, stdin *os.File, stdout io.Writer,
+	renderer render.Renderer, global bool, commands []string,
+) *diag.Fault {
+	if fault := checkCommands(root, commands); fault != nil {
+		return fault
+	}
 	tty, fault := terminal(stdin)
 	if fault != nil {
 		return fault
@@ -85,7 +93,7 @@ func login(ctx context.Context, env []string, stdin *os.File, stdout io.Writer, 
 	if err != nil {
 		return diag.FromError(err)
 	}
-	if fault := saveRecords(path, upsertRecord(records, kept, address, secret)); fault != nil {
+	if fault := saveRecords(path, upsertRecord(records, kept, address, secret, commands)); fault != nil {
 		return fault
 	}
 	return printNode(stdout, renderer, youtrack.NewMap(

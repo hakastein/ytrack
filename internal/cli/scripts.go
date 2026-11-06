@@ -43,7 +43,6 @@ func addScripts(root *cobra.Command, catalog *script.Catalog, env []string, stdo
 		}
 		return fault
 	})
-	groupRoots(root, catalog.Roots)
 	shown := root.HelpFunc()
 	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
 		for _, warning := range catalog.Warnings(strings.Fields(cmd.CommandPath())[1:]) {

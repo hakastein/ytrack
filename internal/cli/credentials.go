@@ -67,27 +67,36 @@ func fromEnvironmentVariables(env []string, raw, token string) (connection, *dia
 
 func fromSavedLogin(env []string) (connection, *diag.Fault) {
 	home := lookup(env, homeVariable)
-	path := recordsPath(home)
-	if path == "" {
+	held, found, fault := savedLogin(home)
+	switch {
+	case fault != nil:
+		return connection{}, fault
+	case !found && recordsPath(home) == "":
 		return connection{}, noLoginFoundFault(noLoginFound + ", and the saved logins were not read: " + homeReason(home))
-	}
-	records, fault := readRecords(path)
-	if fault != nil {
-		return connection{}, fault
-	}
-	chain, fault := recordsForWorkingDir(records)
-	if fault != nil {
-		return connection{}, fault
-	}
-	if len(chain) == 0 {
+	case !found:
 		return connection{}, noLoginFoundFault(noLoginFound, string(fromSettings))
 	}
-	held := chain[0]
 	client, err := youtrack.NewClient(held.address.String(), held.token, youtrack.WithMetadataCache(cacheDirectory(home)))
 	if err != nil {
 		return connection{}, diag.FromError(err)
 	}
 	return connection{client: client, address: held.address, from: fromSettings}, nil
+}
+
+func savedLogin(home string) (held record, found bool, fault *diag.Fault) {
+	path := recordsPath(home)
+	if path == "" {
+		return record{}, false, nil
+	}
+	records, fault := readRecords(path)
+	if fault != nil {
+		return record{}, false, fault
+	}
+	chain, fault := recordsForWorkingDir(records)
+	if fault != nil || len(chain) == 0 {
+		return record{}, false, fault
+	}
+	return chain[0], true, nil
 }
 
 func (c connection) withLoginSource(fault *diag.Fault) *diag.Fault {
