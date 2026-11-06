@@ -59,7 +59,9 @@ func checkCommands(root *cobra.Command, paths []string) *diag.Fault {
 		return &diag.Fault{Code: youtrack.CodeBadUsage, Message: "the login lists " + render.Quote(path) + " twice"}
 	}
 	for _, path := range paths {
-		if command := commandAt(root, path); command == nil || command.HasAvailableSubCommands() {
+		// A path under auth gives nothing: auth status is always there, the rest of auth never is.
+		command := commandAt(root, path)
+		if command == nil || command.HasAvailableSubCommands() || strings.HasPrefix(path, authCommand+" ") {
 			message := "the login lists " + render.Quote(path) + ", which is no command ytrack runs here"
 			return &diag.Fault{Code: youtrack.CodeBadUsage, Message: message}
 		}

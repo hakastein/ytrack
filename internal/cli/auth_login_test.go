@@ -238,6 +238,7 @@ func TestAuthLoginRefusesCommandsItCannotKeepBeforeAskingAnything(t *testing.T) 
 	}{
 		{name: "a path that names no command", flags: []string{"--command", "issue close"}},
 		{name: "a command with subcommands", flags: []string{"--command", "issue"}},
+		{name: "a command of auth", flags: []string{"--command", "auth logout"}},
 		{name: "a path spelled with two spaces", flags: []string{"--command", "issue  show"}},
 		{name: "a command given twice", flags: []string{"--command", "issue show", "--command", "issue show"}},
 	}
