@@ -20,10 +20,12 @@ func withCommands(record string, commands ...string) string {
 	return strings.TrimSuffix(record, "}") + `,"commands":` + string(listed) + "}"
 }
 
-// homeOfALogin holds the global login given and four scripts of the user: hello, greet, authors and team hello.
+// homeOfALogin holds the global login given and the scripts of the user hello, greet, authors, team hello and a broken
+// evil.
 func homeOfALogin(t *testing.T, record string) string {
 	t.Helper()
-	home := scriptsHome(t, map[string]string{"hello.js": greeting, "greet.js": greeting, "authors.js": greeting, "team/hello.js": greeting})
+	home := scriptsHome(t, map[string]string{"hello.js": greeting, "greet.js": greeting, "authors.js": greeting, "team/hello.js": greeting,
+		"evil.js": `exports.definition = 1;`})
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".ytrack", "auth.json"), []byte(recordFile(record)), 0o600))
 	return home
 }
@@ -43,6 +45,7 @@ func TestLimitedLoginHasNoCommandOutsideItsList(t *testing.T) {
 		{name: "a builtin command under another word", argv: []string{"article", "show", "DEV-A-1"}},
 		{name: "a script of the user", argv: []string{"greet"}},
 		{name: "the completion command", argv: []string{"completion", "bash"}},
+		{name: "a broken script of the user", argv: []string{"evil"}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -54,7 +57,7 @@ func TestLimitedLoginHasNoCommandOutsideItsList(t *testing.T) {
 	}
 }
 
-func TestLimitedLoginOffersOnlyTheListedCommandsAndAuth(t *testing.T) {
+func TestLimitedLoginOffersOnlyTheListedCommandsAndAuthStatus(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
@@ -63,7 +66,7 @@ func TestLimitedLoginOffersOnlyTheListedCommandsAndAuth(t *testing.T) {
 	}{
 		{name: "the root", words: []string{""}, names: []string{"auth", "hello", "issue"}},
 		{name: "a command listed by a path under it", words: []string{"issue", ""}, names: []string{"show"}},
-		{name: "auth", words: []string{"auth", ""}, names: []string{"login", "logout", "status"}},
+		{name: "auth", words: []string{"auth", ""}, names: []string{"status"}},
 		{name: "a word typed as far as auth", words: []string{"auth"}, names: []string{"auth"}},
 	}
 	for _, tc := range tests {
@@ -76,13 +79,42 @@ func TestLimitedLoginOffersOnlyTheListedCommandsAndAuth(t *testing.T) {
 	}
 }
 
-func TestLimitedLoginHelpListsNoScriptOutsideTheList(t *testing.T) {
+func TestLimitedLoginHelpWarnsOfNoScriptOutsideTheList(t *testing.T) {
 	t.Parallel()
 	got := runWith(t, limitedTo(t, fake.ServeNothing(t), "hello"), "--help")
 
 	assert.Equal(t, 0, got.code)
-	assert.Contains(t, got.stdout, "hello")
-	assert.NotContains(t, got.stdout, "greet")
+	assert.Equal(t, []string{}, stderrCodes(t, got))
+}
+
+func TestLimitedLoginHoldsBesideHalfOfTheEnvironment(t *testing.T) {
+	t.Parallel()
+	env := append([]string{"YTRACK_TOKEN=" + limitedToken}, limitedTo(t, fake.ServeNothing(t), "hello")...)
+
+	got := runWith(t, env, "greet")
+
+	assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+}
+
+func TestBrokenFileOfLoginRecordsFailsTheCallBeforeItIsParsed(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		argv []string
+	}{
+		{name: "help", argv: []string{"--help"}},
+		{name: "a command", argv: []string{"issue", "show", "DEV-1"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			home, path := homeWith(t, `[{"url":`)
+
+			got := runWith(t, []string{"HOME=" + home}, tc.argv...)
+
+			assert.Equal(t, faultDocument{code: "bad_usage", details: []detail{fileDetail(path)}}, requireFault(t, got))
+		})
+	}
 }
 
 func TestLimitedLoginRunsAListedCommand(t *testing.T) {
@@ -188,10 +220,37 @@ func TestLimitedLoginListingACommandWithSubcommandsIsRefused(t *testing.T) {
 	}
 }
 
+func TestLimitedLoginLeavesTheRecordsAsTheyAre(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		argv []string
+	}{
+		{name: "auth logout", argv: []string{"auth", "logout"}},
+		{name: "auth logout of the global login", argv: []string{"auth", "logout", "--global"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := fake.ServeNothing(t)
+			held := recordFile(withCommands(scopedRecord(here(t), server.URL, hereToken), "issue show"),
+				unscopedRecord(server.URL, everywhereToken))
+			home, path := homeWith(t, held)
+
+			got := runWith(t, []string{"HOME=" + home}, tc.argv...)
+			afterwards := runWith(t, []string{"HOME=" + home}, "issue", "list")
+
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+			assert.Equal(t, held, fileBytes(t, path))
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, afterwards))
+		})
+	}
+}
+
 func TestAuthLogoutKeepsTheCommandsOfTheRecordsLeft(t *testing.T) {
 	t.Parallel()
 	server := fake.ServeNothing(t)
-	limited := withCommands(scopedRecord(here(t), server.URL, hereToken), "issue show")
+	limited := withCommands(scopedRecord(physical(t, t.TempDir()), server.URL, hereToken), "issue show")
 	home, path := homeWith(t, recordFile(limited, unscopedRecord(server.URL, everywhereToken)))
 
 	got := runWith(t, []string{"HOME=" + home}, "auth", "logout", "--global")

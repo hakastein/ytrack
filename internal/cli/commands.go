@@ -4,31 +4,43 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/hakastein/cliche"
 	"github.com/spf13/cobra"
 
 	"github.com/hakastein/go-youtrack"
 
 	"github.com/hakastein/ytrack/internal/diag"
 	"github.com/hakastein/ytrack/internal/render"
+	"github.com/hakastein/ytrack/internal/script"
 )
 
-const authCommand = "auth"
+const (
+	authCommand = "auth"
+	authStatus  = authCommand + " status"
+)
 
-// limitCommands leaves in the tree only what the saved login lists, and auth. A call of auth sees the whole tree:
-// auth login checks --command against it, and auth stays usable while the record names no command.
-func limitCommands(root *cobra.Command, env, argv []string) *diag.Fault {
-	// Half of the environment is refused by connect, so the record never applies when either variable is set.
-	if lookup(env, urlVariable) != "" || lookup(env, tokenVariable) != "" || callsAuth(root, argv) {
+// limitCommands leaves in the tree only what the saved login lists, and auth status. A call of auth is not refused for
+// the record: auth status shows the login whose record lists a command that is gone.
+func limitCommands(root *cobra.Command, catalog *script.Catalog, env, argv []string) *diag.Fault {
+	if loginInEnvironment(env) {
 		return nil
 	}
-	held, found, fault := savedLogin(lookup(env, homeVariable))
-	if fault != nil || !found || held.commands == nil {
+	held, found, _, fault := savedLogin(lookup(env, homeVariable))
+	auth := callsAuth(root, argv)
+	switch {
+	case fault != nil && !auth:
 		return fault
+	case fault != nil || !found || held.commands == nil:
+		return nil
 	}
-	if fault := checkCommands(root, held.commands); fault != nil {
-		return fault
+	if !auth {
+		if fault := checkCommands(root, held.commands); fault != nil {
+			return fault
+		}
 	}
 	prune(root, held.commands)
+	// --help warns of the broken paths of the catalog, and their stubs are out of the tree now.
+	catalog.Scripts.Broken = slices.DeleteFunc(catalog.Scripts.Broken, func(broken cliche.Broken) bool { return len(broken.Path) > 0 })
 	return nil
 }
 
@@ -76,12 +88,15 @@ func commandAt(root *cobra.Command, path string) *cobra.Command {
 	return at
 }
 
-// prune keeps a listed command, the commands on the way to it, auth and hidden ones.
+// Hidden commands go too: cobra adds the help command back in ExecuteC, and completion offers no hidden one.
 func prune(parent *cobra.Command, paths []string) {
 	for _, child := range parent.Commands() {
 		path := commandPath(child)
 		switch {
-		case child.Hidden || path == authCommand || slices.Contains(paths, path):
+		case path == authCommand:
+			// A limited login must not change the record that limits it.
+			prune(child, []string{authStatus})
+		case slices.Contains(paths, path):
 		case slices.ContainsFunc(paths, func(listed string) bool { return strings.HasPrefix(listed, path+" ") }):
 			prune(child, paths)
 		default:

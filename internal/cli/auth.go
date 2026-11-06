@@ -37,7 +37,7 @@ func newAuth(env []string, stdin *os.File, stdout io.Writer, renderer render.Ren
 	login.Long = "Log in for this directory and below."
 	login.Flags().BoolVar(&loginGlobal, "global", false, "log in everywhere")
 	login.Flags().StringArrayVar(&loginCommands, "command", nil,
-		"allow only this command, by its path such as \"issue show\", and auth; repeat for more")
+		"allow only this command, by its path such as \"issue show\", and auth status; repeat for more")
 
 	var logoutGlobal bool
 	logout := newCommand("logout", func(_ *cobra.Command, _ []string) *diag.Fault {

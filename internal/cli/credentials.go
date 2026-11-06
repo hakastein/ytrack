@@ -38,7 +38,7 @@ const (
 func connect(env []string) (connection, *diag.Fault) {
 	raw, token := lookup(env, urlVariable), lookup(env, tokenVariable)
 	switch {
-	case raw != "" && token != "":
+	case loginInEnvironment(env):
 		return fromEnvironmentVariables(env, raw, token)
 	case raw != "":
 		return connection{}, partialEnvFault(urlVariable, tokenVariable)
@@ -46,6 +46,10 @@ func connect(env []string) (connection, *diag.Fault) {
 		return connection{}, partialEnvFault(tokenVariable, urlVariable)
 	}
 	return fromSavedLogin(env)
+}
+
+func loginInEnvironment(env []string) bool {
+	return lookup(env, urlVariable) != "" && lookup(env, tokenVariable) != ""
 }
 
 func partialEnvFault(set, unset string) *diag.Fault {
@@ -67,11 +71,11 @@ func fromEnvironmentVariables(env []string, raw, token string) (connection, *dia
 
 func fromSavedLogin(env []string) (connection, *diag.Fault) {
 	home := lookup(env, homeVariable)
-	held, found, fault := savedLogin(home)
+	held, found, read, fault := savedLogin(home)
 	switch {
 	case fault != nil:
 		return connection{}, fault
-	case !found && recordsPath(home) == "":
+	case !read:
 		return connection{}, noLoginFoundFault(noLoginFound + ", and the saved logins were not read: " + homeReason(home))
 	case !found:
 		return connection{}, noLoginFoundFault(noLoginFound, string(fromSettings))
@@ -83,20 +87,20 @@ func fromSavedLogin(env []string) (connection, *diag.Fault) {
 	return connection{client: client, address: held.address, from: fromSettings}, nil
 }
 
-func savedLogin(home string) (held record, found bool, fault *diag.Fault) {
+func savedLogin(home string) (held record, found, read bool, fault *diag.Fault) {
 	path := recordsPath(home)
 	if path == "" {
-		return record{}, false, nil
+		return record{}, false, false, nil
 	}
 	records, fault := readRecords(path)
 	if fault != nil {
-		return record{}, false, fault
+		return record{}, false, true, fault
 	}
 	chain, fault := recordsForWorkingDir(records)
 	if fault != nil || len(chain) == 0 {
-		return record{}, false, fault
+		return record{}, false, true, fault
 	}
-	return chain[0], true, nil
+	return chain[0], true, true, nil
 }
 
 func (c connection) withLoginSource(fault *diag.Fault) *diag.Fault {

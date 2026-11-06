@@ -220,8 +220,7 @@ func TestAuthLoginKeepsTheCommandsGiven(t *testing.T) {
 	scope := here(t)
 	server := serveUserOfTheToken(t, map[string]string{typedToken: typedUser})
 	everywhere := withCommands(unscopedRecord("http://elsewhere.example", everywhereToken), "issue list")
-	held := withCommands(scopedRecord(scope, "http://was.example", hereToken), "issue show")
-	home, path := homeWith(t, recordFile(held, everywhere))
+	home, path := homeWith(t, recordFile(scopedRecord(scope, "http://was.example", hereToken), everywhere))
 
 	got, _ := runOnATerminal(t, []string{"HOME=" + home}, typeAnswers(server.URL, typedToken),
 		"auth", "login", "--command", "article show", "--command", "comment list")
