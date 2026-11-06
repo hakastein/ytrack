@@ -224,10 +224,10 @@ func TestAuthLoginKeepsTheCommandsGiven(t *testing.T) {
 	home, path := homeWith(t, recordFile(held, everywhere))
 
 	got, _ := runOnATerminal(t, []string{"HOME=" + home}, typeAnswers(server.URL, typedToken),
-		"auth", "login", "--command", "article show", "--command", "issue")
+		"auth", "login", "--command", "article show", "--command", "comment list")
 
 	assert.Equal(t, 0, got.code)
-	kept := withCommands(scopedRecord(scope, server.URL, typedToken), "article show", "issue")
+	kept := withCommands(scopedRecord(scope, server.URL, typedToken), "article show", "comment list")
 	assert.Equal(t, savedFile(everywhere, kept), fileBytes(t, path))
 }
 
@@ -238,6 +238,7 @@ func TestAuthLoginRefusesCommandsItCannotKeepBeforeAskingAnything(t *testing.T) 
 		flags []string
 	}{
 		{name: "a path that names no command", flags: []string{"--command", "issue close"}},
+		{name: "a command with subcommands", flags: []string{"--command", "issue"}},
 		{name: "a path spelled with two spaces", flags: []string{"--command", "issue  show"}},
 		{name: "a command given twice", flags: []string{"--command", "issue show", "--command", "issue show"}},
 	}

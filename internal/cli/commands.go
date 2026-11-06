@@ -47,8 +47,8 @@ func checkCommands(root *cobra.Command, paths []string) *diag.Fault {
 		return &diag.Fault{Code: youtrack.CodeBadUsage, Message: "the login lists " + render.Quote(path) + " twice"}
 	}
 	for _, path := range paths {
-		if commandAt(root, path) == nil {
-			message := "the login lists " + render.Quote(path) + ", which is no command of ytrack here"
+		if command := commandAt(root, path); command == nil || command.HasAvailableSubCommands() {
+			message := "the login lists " + render.Quote(path) + ", which is no command ytrack runs here"
 			return &diag.Fault{Code: youtrack.CodeBadUsage, Message: message}
 		}
 	}
@@ -76,7 +76,7 @@ func commandAt(root *cobra.Command, path string) *cobra.Command {
 	return at
 }
 
-// prune keeps a listed command with everything under it, the commands on the way to it, auth and hidden ones.
+// prune keeps a listed command, the commands on the way to it, auth and hidden ones.
 func prune(parent *cobra.Command, paths []string) {
 	for _, child := range parent.Commands() {
 		path := commandPath(child)

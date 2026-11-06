@@ -20,10 +20,10 @@ func withCommands(record string, commands ...string) string {
 	return strings.TrimSuffix(record, "}") + `,"commands":` + string(listed) + "}"
 }
 
-// homeOfALogin holds the global login given and three scripts of the user: hello, greet and authors.
+// homeOfALogin holds the global login given and four scripts of the user: hello, greet, authors and team hello.
 func homeOfALogin(t *testing.T, record string) string {
 	t.Helper()
-	home := scriptsHome(t, map[string]string{"hello.js": greeting, "greet.js": greeting, "authors.js": greeting})
+	home := scriptsHome(t, map[string]string{"hello.js": greeting, "greet.js": greeting, "authors.js": greeting, "team/hello.js": greeting})
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".ytrack", "auth.json"), []byte(recordFile(record)), 0o600))
 	return home
 }
@@ -85,26 +85,14 @@ func TestLimitedLoginHelpListsNoScriptOutsideTheList(t *testing.T) {
 	assert.NotContains(t, got.stdout, "greet")
 }
 
-func TestLimitedLoginRunsTheListedCommands(t *testing.T) {
+func TestLimitedLoginRunsAListedCommand(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name     string
-		commands []string
-	}{
-		{name: "the path of the command", commands: []string{"issue show"}},
-		{name: "the path of the command above it", commands: []string{"issue"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.Serve(t, fake.JSON(http.StatusOK, `{"$type":"Issue","idReadable":"DEV-1","comments":[]}`))
+	server := fake.Serve(t, fake.JSON(http.StatusOK, `{"$type":"Issue","idReadable":"DEV-1","comments":[]}`))
 
-			got := runWith(t, limitedTo(t, server, tc.commands...), "issue", "show", "DEV-1", "--fields", "idReadable")
+	got := runWith(t, limitedTo(t, server, "issue show"), "issue", "show", "DEV-1", "--fields", "idReadable")
 
-			assert.Equal(t, 0, got.code)
-			assert.Equal(t, bearing(limitedToken), server.Last(t).Header.Get("Authorization"))
-		})
-	}
+	assert.Equal(t, 0, got.code)
+	assert.Equal(t, bearing(limitedToken), server.Last(t).Header.Get("Authorization"))
 }
 
 func TestLimitedLoginRunsAListedScript(t *testing.T) {
@@ -174,6 +162,26 @@ func TestLimitedLoginNamingNoCommandIsRefusedBeforeTheNetwork(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := runWith(t, limitedTo(t, fake.ServeNothing(t), "issue show", "issue close"), tc.argv...)
+
+			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
+		})
+	}
+}
+
+func TestLimitedLoginListingACommandWithSubcommandsIsRefused(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		listed  string
+		calling []string
+	}{
+		{name: "a builtin command", listed: "issue", calling: []string{"issue", "show", "DEV-1"}},
+		{name: "a directory of scripts", listed: "team", calling: []string{"team", "hello"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := runWith(t, limitedTo(t, fake.ServeNothing(t), "hello", tc.listed), tc.calling...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
 		})
