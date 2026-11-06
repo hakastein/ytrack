@@ -57,7 +57,7 @@ func TestLimitedLoginHasNoCommandOutsideItsList(t *testing.T) {
 	}
 }
 
-func TestLimitedLoginOffersOnlyTheListedCommandsAndAuthStatus(t *testing.T) {
+func TestLimitedLoginOffersOnlyTheListedCommandsAndAuth(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
@@ -66,7 +66,6 @@ func TestLimitedLoginOffersOnlyTheListedCommandsAndAuthStatus(t *testing.T) {
 	}{
 		{name: "the root", words: []string{""}, names: []string{"auth", "hello", "issue"}},
 		{name: "a command listed by a path under it", words: []string{"issue", ""}, names: []string{"show"}},
-		{name: "auth", words: []string{"auth", ""}, names: []string{"status"}},
 		{name: "a word typed as far as auth", words: []string{"auth"}, names: []string{"auth"}},
 	}
 	for _, tc := range tests {
@@ -77,6 +76,13 @@ func TestLimitedLoginOffersOnlyTheListedCommandsAndAuthStatus(t *testing.T) {
 			assert.Equal(t, tc.names, got.names())
 		})
 	}
+}
+
+func TestLimitedLoginOffersAuthLogin(t *testing.T) {
+	t.Parallel()
+	got := completingWith(t, limitedTo(t, fake.ServeNothing(t), "issue show"), "auth", "")
+
+	assert.Contains(t, got.names(), "login")
 }
 
 func TestLimitedLoginHelpWarnsOfNoScriptOutsideTheList(t *testing.T) {
@@ -216,33 +222,6 @@ func TestLimitedLoginListingACommandWithSubcommandsIsRefused(t *testing.T) {
 			got := runWith(t, limitedTo(t, fake.ServeNothing(t), "hello", tc.listed), tc.calling...)
 
 			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-		})
-	}
-}
-
-func TestLimitedLoginLeavesTheRecordsAsTheyAre(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		argv []string
-	}{
-		{name: "auth logout", argv: []string{"auth", "logout"}},
-		{name: "auth logout of the global login", argv: []string{"auth", "logout", "--global"}},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			server := fake.ServeNothing(t)
-			held := recordFile(withCommands(scopedRecord(here(t), server.URL, hereToken), "issue show"),
-				unscopedRecord(server.URL, everywhereToken))
-			home, path := homeWith(t, held)
-
-			got := runWith(t, []string{"HOME=" + home}, tc.argv...)
-			afterwards := runWith(t, []string{"HOME=" + home}, "issue", "list")
-
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, got))
-			assert.Equal(t, held, fileBytes(t, path))
-			assert.Equal(t, faultDocument{code: "bad_usage"}, requireFault(t, afterwards))
 		})
 	}
 }

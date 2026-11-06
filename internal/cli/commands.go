@@ -14,29 +14,20 @@ import (
 	"github.com/hakastein/ytrack/internal/script"
 )
 
-const (
-	authCommand = "auth"
-	authStatus  = authCommand + " status"
-)
+const authCommand = "auth"
 
-// limitCommands leaves in the tree only what the saved login lists, and auth status. A call of auth is not refused for
-// the record: auth status shows the login whose record lists a command that is gone.
+// limitCommands leaves in the tree only what the saved login lists, and auth. A call of auth sees the whole tree:
+// auth login checks --command against it, and auth stays usable while the record lists a command that is gone.
 func limitCommands(root *cobra.Command, catalog *script.Catalog, env, argv []string) *diag.Fault {
-	if loginInEnvironment(env) {
+	if loginInEnvironment(env) || callsAuth(root, argv) {
 		return nil
 	}
 	held, found, _, fault := savedLogin(lookup(env, homeVariable))
-	auth := callsAuth(root, argv)
-	switch {
-	case fault != nil && !auth:
+	if fault != nil || !found || held.commands == nil {
 		return fault
-	case fault != nil || !found || held.commands == nil:
-		return nil
 	}
-	if !auth {
-		if fault := checkCommands(root, held.commands); fault != nil {
-			return fault
-		}
+	if fault := checkCommands(root, held.commands); fault != nil {
+		return fault
 	}
 	prune(root, held.commands)
 	// --help warns of the broken paths of the catalog, and their stubs are out of the tree now.
@@ -59,7 +50,7 @@ func checkCommands(root *cobra.Command, paths []string) *diag.Fault {
 		return &diag.Fault{Code: youtrack.CodeBadUsage, Message: "the login lists " + render.Quote(path) + " twice"}
 	}
 	for _, path := range paths {
-		// A path under auth gives nothing: auth status is always there, the rest of auth never is.
+		// A path under auth gives nothing: auth is always there whole.
 		command := commandAt(root, path)
 		if command == nil || command.HasAvailableSubCommands() || strings.HasPrefix(path, authCommand+" ") {
 			message := "the login lists " + render.Quote(path) + ", which is no command ytrack runs here"
@@ -95,10 +86,7 @@ func prune(parent *cobra.Command, paths []string) {
 	for _, child := range parent.Commands() {
 		path := commandPath(child)
 		switch {
-		case path == authCommand:
-			// A limited login must not change the record that limits it.
-			prune(child, []string{authStatus})
-		case slices.Contains(paths, path):
+		case path == authCommand, slices.Contains(paths, path):
 		case slices.ContainsFunc(paths, func(listed string) bool { return strings.HasPrefix(listed, path+" ") }):
 			prune(child, paths)
 		default:
