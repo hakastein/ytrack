@@ -142,6 +142,8 @@ func TestNoCommandUsesAFileOfLoginRecordsItCannotRead(t *testing.T) {
 		{name: "an empty token", records: `[{"url":"http://h","token":""}]`},
 		{name: "a url of another scheme", records: `[{"url":"ftp://h","token":"perm-x"}]`},
 		{name: "a token with a line ending", records: globalRecord("http://h", "perm-x\r")},
+		{name: "an empty list of commands", records: `[{"url":"http://h","token":"perm-x","commands":[]}]`},
+		{name: "a command listed twice", records: recordFile(withCommands(unscopedRecord("http://h", "perm-x"), "issue show", "issue show"))},
 		{
 			name:    "two records without a scope",
 			records: `[{"url":"http://h","token":"perm-x"},{"url":"http://g","token":"perm-y"}]`,

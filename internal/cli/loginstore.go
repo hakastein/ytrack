@@ -29,10 +29,11 @@ const (
 )
 
 type record struct {
-	scope   scope
-	address *url.URL
-	token   string
-	savedAs json.RawMessage
+	scope    scope
+	address  *url.URL
+	token    string
+	commands []string
+	savedAs  json.RawMessage
 }
 
 type scope struct {
@@ -64,9 +65,10 @@ func (s scope) covers(dir string) bool {
 }
 
 type recordJSON struct {
-	Scope *string `json:"scope,omitempty"`
-	URL   string  `json:"url"`
-	Token string  `json:"token"`
+	Scope    *string  `json:"scope,omitempty"`
+	URL      string   `json:"url"`
+	Token    string   `json:"token"`
+	Commands []string `json:"commands,omitempty"`
 }
 
 func recordsPath(home string) string {
@@ -129,11 +131,15 @@ func readRecord(item json.RawMessage) (record, bool) {
 	if err := decoder.Decode(&held); err != nil || held.URL == "" || held.Token == "" {
 		return record{}, false
 	}
+	// auth login writes no empty list and no path twice.
+	if held.Commands != nil && (len(held.Commands) == 0 || repeated(held.Commands) != "") {
+		return record{}, false
+	}
 	address, reason := parseAddress(held.URL, "")
 	if reason != "" || youtrack.CheckToken(held.Token) != nil {
 		return record{}, false
 	}
-	read := record{address: address, token: held.Token, savedAs: item}
+	read := record{address: address, token: held.Token, commands: held.Commands, savedAs: item}
 	if held.Scope == nil {
 		return read, true
 	}
@@ -210,13 +216,13 @@ func removeRecord(records []record, wanted scope) (record, []record, bool) {
 	return record{}, nil, false
 }
 
-func upsertRecord(records []record, wanted scope, address *url.URL, token string) []record {
-	held := recordJSON{URL: address.String(), Token: token}
+func upsertRecord(records []record, wanted scope, address *url.URL, token string, commands []string) []record {
+	held := recordJSON{URL: address.String(), Token: token, Commands: commands}
 	if !wanted.isGlobal() {
 		directory := wanted.directory
 		held.Scope = &directory
 	}
-	fresh := record{scope: wanted, address: address, token: token}
+	fresh := record{scope: wanted, address: address, token: token, commands: commands}
 	fresh.savedAs, _ = json.Marshal(held)
 	if _, kept, found := removeRecord(records, wanted); found {
 		return append(kept, fresh)
